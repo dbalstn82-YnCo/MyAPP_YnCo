@@ -1,0 +1,24 @@
+# 아이디어 3 (2026-10-16) — CUBRID·GOLDILOCKS 판정 중 기존 절차가 그대로 맞는 것을 '이 판정 전용'으로 잇는다(절차 파일은 고치지 않음)
+# 맞지 않는 판정은 r6_dbc_procedures.yaml 의 전용 절차(CUB-PROC-R6-* · GD-PROC-R6-*)로 옮겼다.
+links:
+- procedure: CUB-PROC-STORAGE
+  match: ["-9", "-24", "-36"]
+  reviewed: "2026-10-16 판정 적합성 확인 — 볼륨 공간 부족 계열: 1차 spacedb·df(데이터 경로)로 여유 확인, 2차 addvoldb 볼륨 추가(실패 시 디스크 여유 확보)가 매뉴얼 조치와 일치. 2차의 restoredb 단계는 -96 전용이라 이 코드들에는 쓰지 않는다"
+- procedure: CUB-PROC-R5-MEMORY
+  match: ["-3"]
+  reviewed: "2026-10-16 판정 적합성 확인 — -3 ER_OUT_OF_VIRTUAL_MEMORY(error_code.h): free·ps·OOM 이력 확인과 data_buffer_size 등 메모리 파라미터 재산정이 그대로 맞음"
+- procedure: CUB-PROC-LOCK
+  match: ["-72"]
+  reviewed: "2026-10-16 판정 적합성 확인 — -72 는 교착 해소를 위한 시스템 강제 취소: lockdb·tranlist 로 대기·장시간 트랜잭션 확인, 승인 후 killtran·lock_timeout 조정이 맞음"
+- procedure: CUB-PROC-R5-CONNECTION
+  match: ["-191", "-195"]
+  reviewed: "2026-10-16 판정 적합성 확인 — 서버 접속 불가·통신 오류: 서버·브로커·마스터 상태, 포트 도달·master.err 확인 후 server start·broker reset 이 코드 조치와 일치"
+- procedure: GD-PROC-R5-CONNECTION
+  match: [ERR-13040, ERR-13042]
+  reviewed: "2026-10-16 판정 적합성 확인 — 통신 링크 실패(08S01)·서버 연결 거부: 포트 도달·프로세스·system.trc 의 종료/신호 기록 확인 후 재연결이 매뉴얼 조치(접속 설정 확인·클라이언트 재시작 후 재시도)와 맞음"
+- procedure: GD-PROC-R5-THREAD
+  match: [ERR-44004]
+  reviewed: "2026-10-16 판정 적합성 확인 — gmaster 시스템 스레드 생성 실패: 스레드 수·ulimit -u/-s·threads-max·메모리 확인과 nproc 한도 조정이 매뉴얼 조치(원인 해소 후 재기동)와 맞음"
+- procedure: GD-PROC-R5-UPSTREAM
+  match: [ERR-56005]
+  reviewed: "2026-10-16 판정 적합성 확인 — 일부 클러스터 멤버 연결 끊김: V$CLUSTER_MEMBER·V$CLUSTER_LOCATION·멤버 도달·trc 단절 시각 확인과 멤버 복구·3차 의뢰가 맞음"

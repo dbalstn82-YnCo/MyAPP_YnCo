@@ -1,0 +1,931 @@
+product: apache
+layer: web
+note: GPT 협업 수집분 — 벤더 공식 문서와 대조 후 확정
+codes:
+- code: AH00016
+  severity: critical
+  category: internal
+  title: 설정 오류로 기동 실패
+  immediate:
+  - '`apachectl -t` 로 구문 시험(읽기 전용) — Syntax error 줄의 파일·줄번호가 원인 위치'
+  - '`grep -n -B5 "AH00016" <error_log> | tail -20` 로 직전 오류 줄 확인 (<error_log> 는 `apachectl -S` 의 Main ErrorLog)'
+  short:
+  - '(2차·승인 후, 롤백: 백업한 설정 복원) 오류 줄 수정 또는 직전 정상 설정 복원 후 `apachectl -t` 의 Syntax OK 확인 뒤 기동'
+  mid:
+  - '설정 변경 전 `apachectl -t` 시험과 설정 파일 버전 관리 의무화'
+  long:
+  - '설정 변경 이력·시험 결과를 변경 요청 번호와 함께 기록'
+  source: GPT 수집·벤더 문서 대조 완료(https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors)
+  vendor_cause: 'AH00016 — 기동 시 서버 구성 처리 단계가 실패 상태로 끝나 httpd 가 시작되지 않았다. 바로 앞 줄의 구문 오류(AH00526)·모듈 로드 실패·인증서 오류가 실제 원인인 경우가 대부분이다.'
+  vendor_action: ''
+  vendor_url: https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors
+  versions:
+  - Apache 2.4
+  version_note: AH 코드는 Apache 2.4 에서 도입 — 2.2 이하 로그에는 나타나지 않음(문구 기반 룰로 보완)
+- code: AH00020
+  severity: critical
+  category: internal
+  title: 설정 실패로 프로세스 종료
+  immediate:
+  - '`grep -n -B10 "AH00020" <error_log> | tail -30` 로 종료 직전 오류(모듈·인증서·Listen) 확인'
+  - '`apachectl -t` 와 `apachectl -M` 으로 구문·모듈 로드 상태 확인(읽기 전용)'
+  short:
+  - '(2차·승인 후, 롤백: 설정 원복) 직전 오류 원인을 수정하고 `apachectl -t` Syntax OK 확인 후 기동'
+  mid:
+  - '모듈 추가·인증서 교체 같은 구성 변경 시 시험 서버 검증 절차'
+  long:
+  - 'httpd 기동 실패 즉시 경보'
+  source: GPT 수집·벤더 문서 대조 완료(https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors)
+  note: 공식 메시지는 Configuration Failed, exiting으로 초기화 오류 일반이 아니라 설정 실패 종료임
+  vendor_cause: 서버 구성 처리에 실패해 프로세스가 종료됨
+  vendor_action: ''
+  vendor_url: https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors
+  versions:
+  - Apache 2.4
+  version_note: AH 코드는 Apache 2.4 에서 도입 — 2.2 이하 로그에는 나타나지 않음(문구 기반 룰로 보완)
+- code: AH00051
+  severity: error
+  category: internal
+  title: 자식 프로세스 시그널 종료
+  immediate:
+  - '`grep -n "AH00051\|AH00052" <error_log> | tail -20` 로 종료 시그널(Segmentation fault 등)·빈도 확인'
+  - '`apachectl -M` 과 `httpd -V` 로 로드 모듈·MPM 기록, `ls -l <CoreDumpDirectory>` 로 코어 파일 생성 여부 확인(설정 시)'
+  short:
+  - '(2차·승인 후, 롤백: 설정 원복) CoreDumpDirectory 를 설정해 코어 확보 후 gdb 역추적을 제품 지원에 의뢰, 최근 추가 모듈 제외 시험'
+  mid:
+  - '서드파티 모듈(mod_php 등) 갱신·제거와 httpd 보안 패치 적용'
+  long:
+  - '자식 프로세스 시그널 종료 건수 경보'
+  source: GPT 수집·벤더 문서 대조 완료(https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors)
+  note: 세그폴트에 한정되지 않고 자식 프로세스가 시그널로 종료된 메시지이며 단일 자식 장애는 error가 타당함
+  vendor_cause: 자식 프로세스가 시그널로 종료됐고 코어덤프가 생성됐을 수 있음
+  vendor_action: ''
+  vendor_url: https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors
+  versions:
+  - Apache 2.4
+  version_note: AH 코드는 Apache 2.4 에서 도입 — 2.2 이하 로그에는 나타나지 않음(문구 기반 룰로 보완)
+- code: AH00052
+  severity: error
+  category: internal
+  title: 자식 프로세스 시그널 종료
+  immediate:
+  - '`grep -n "AH00052\|exit signal" <error_log> | tail -20` 로 시그널 종류·빈도 확인 — Segmentation fault 반복이면 모듈 결함'
+  - '`dmesg -T | grep -i -E "httpd|segfault" | tail -10` 로 커널 기록 확인'
+  short:
+  - '(2차·승인 후, 롤백: 설정 원복) CoreDumpDirectory 설정으로 코어 확보, 충돌 모듈 특정 후 갱신 또는 비활성화'
+  mid:
+  - '모듈 갱신·httpd 버전 패치'
+  long:
+  - '시그널 종료 건수 감시'
+  source: GPT 수집·벤더 문서 대조 완료(https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors)
+  note: 자식 프로세스 시그널 종료 메시지이며 단일 자식 장애는 서비스 전체 중단이 아니므로 error로 조정
+  vendor_cause: 자식 프로세스가 시그널을 받아 종료됨
+  vendor_action: ''
+  vendor_url: https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors
+  versions:
+  - Apache 2.0~2.2 (메시지 별칭)
+  - Apache 2.4
+  version_note: AH 코드는 2.4 도입(2.2 이하는 코드 없음) — 2.2 형식 로그의 같은 의미 문구를 별칭으로 이 코드에 대응
+- code: AH00060
+  severity: critical
+  category: internal
+  title: 부모 프로세스 치명적 오류
+  immediate:
+  - '`grep -n -B5 "AH00060" <error_log> | tail -20` 로 부모 프로세스 치명 오류 직전 기록 확인'
+  - '`ps -ef | grep -E "[h]ttpd|[a]pache2"` 로 부모·자식 프로세스 생존 확인, `dmesg -T | tail -20` 로 커널 기록 확인'
+  short:
+  - '(2차·승인 후) 서비스 중단 상태면 기동 후 CoreDumpDirectory 로 코어 확보, 재발 시 제품 지원에 코어·모듈 목록 전달'
+  mid:
+  - '부모 프로세스에 영향을 주는 모듈(초기화 훅) 점검·갱신'
+  long:
+  - '부모 프로세스 생존 감시(프로세스 감시 도구)'
+  source: GPT 수집·벤더 문서 대조 완료(https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors)
+  note: SIGTERM 무응답이 아니라 부모 프로세스에서 세그폴트 등 치명적 오류가 감지된 메시지임
+  vendor_cause: 부모 프로세스에서 세그멘테이션 폴트 또는 유사한 치명 오류가 감지됨
+  vendor_action: ''
+  vendor_url: https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors
+  versions:
+  - Apache 2.4
+  version_note: AH 코드는 Apache 2.4 에서 도입 — 2.2 이하 로그에는 나타나지 않음(문구 기반 룰로 보완)
+- code: AH00073
+  severity: error
+  category: connection
+  title: 소켓 리스너 생성 실패
+  immediate:
+  - '`grep -n "AH00073\|AH00072" <error_log> | tail -10` 로 대상 주소·errno 확인'
+  - '`ss -ltnp | grep ":<port> "` 로 포트 점유 프로세스 확인, `apachectl -S` 로 Listen 설정 확인'
+  short:
+  - '(2차·승인 후, 롤백: 설정 원복) 점유 프로세스 정리 협의 또는 Listen 주소·포트 수정 후 `apachectl -t`·기동'
+  mid:
+  - '서버 포트 대장·Listen 중복 방지 기준'
+  long:
+  - 'httpd 기동 실패·포트 점유 감시'
+  source: GPT 수집·벤더 문서 대조 완료(https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors)
+  vendor_cause: 지정된 주소의 리스닝 소켓에서 listen 호출이 실패함
+  vendor_action: ''
+  vendor_url: https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors
+  versions:
+  - Apache 2.4
+  version_note: AH 코드는 Apache 2.4 에서 도입 — 2.2 이하 로그에는 나타나지 않음(문구 기반 룰로 보완)
+- code: AH00082
+  severity: error
+  category: internal
+  title: 알 수 없는 필터 추가 실패
+  immediate:
+  - '`grep -n "AH00082" <error_log> | tail -10` 로 추가하지 못한 필터 이름 확인'
+  - '`apachectl -M` 으로 해당 필터를 제공하는 모듈(예 deflate_module·filter_module) 로드 여부 확인, `grep -rn "<필터이름>" /etc/httpd/` 로 사용 위치 확인'
+  short:
+  - '(2차·승인 후, 롤백: 설정 원복) 필요한 모듈 LoadModule 추가 또는 오타 난 필터 이름(SetOutputFilter·AddOutputFilter) 수정 후 `apachectl -t`·graceful'
+  mid:
+  - '필터·모듈 사용 목록 표준화'
+  long:
+  - '설정 시험 자동화에 필터 경고 확인 포함'
+  source: GPT 수집·벤더 문서 대조 완료(https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors)
+  note: graceful 재시작 시간초과가 아니라 알 수 없는 필터를 추가하지 못한 오류임
+  vendor_cause: 등록되지 않은 이름의 출력 필터를 추가하려 해 필터가 추가되지 않음
+  vendor_action: ''
+  vendor_url: https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors
+  versions:
+  - Apache 2.4
+  version_note: AH 코드는 Apache 2.4 에서 도입 — 2.2 이하 로그에는 나타나지 않음(문구 기반 룰로 보완)
+- code: AH00104
+  severity: error
+  category: internal
+  title: 파이프 로그 프로그램 시작 실패
+  immediate:
+  - '`grep -n "AH00104" <error_log> | tail -10` 로 시작 실패한 파이프 로그 프로그램 확인'
+  - '`grep -rn "CustomLog\|ErrorLog" /etc/httpd/conf* | grep "|"` 로 파이프 로그 명령(rotatelogs 등) 경로 확인 후 `ls -l <프로그램경로>` 로 존재·실행 권한 확인'
+  short:
+  - '(2차·승인 후, 롤백: 설정 원복) 파이프 프로그램 경로·옵션 수정(예 rotatelogs 절대 경로) 후 `apachectl -t`·graceful'
+  mid:
+  - '로그 순환 방식(rotatelogs 또는 logrotate) 표준화'
+  long:
+  - '로그 기록 누락 감시(로그 파일 갱신 시각 점검)'
+  source: GPT 수집·벤더 문서 대조 완료(https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors)
+  note: 자식 프로세스 accept 오류가 아니라 piped log 프로그램 시작 실패임
+  vendor_cause: 설정된 piped log 프로그램 프로세스를 시작하지 못함
+  vendor_action: ''
+  vendor_url: https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors
+  versions:
+  - Apache 2.4
+  version_note: AH 코드는 Apache 2.4 에서 도입 — 2.2 이하 로그에는 나타나지 않음(문구 기반 룰로 보완)
+- code: AH00161
+  severity: critical
+  category: capacity
+  title: 서버 한도 도달(MaxRequestWorkers)
+  immediate:
+  - '`curl -s "http://localhost/server-status?auto" | egrep "BusyWorkers|IdleWorkers"` 로 워커 사용량 확인(mod_status 허용 시)'
+  - '`grep -c "AH00161" <error_log>` 와 `apachectl -V | grep -i mpm` 로 발생 빈도·MPM 확인, 접근 로그 IP 상위로 폭주 출처 확인'
+  short:
+  - '(2차·승인 후, 롤백: 설정 원복) 백엔드 지연이 아니면 MaxRequestWorkers(·ServerLimit) 상향 후 `apachectl -t`·graceful — 메모리 = 프로세스당 RSS×워커 수 이내'
+  mid:
+  - 'MPM(event) 전환·KeepAliveTimeout 단축·워커 한도 재산정'
+  long:
+  - 'BusyWorkers/MaxRequestWorkers 80% 경보'
+  source: GPT 수집·벤더 문서 대조 완료(https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors)
+  vendor_cause: 동시 요청 수가 설정된 MaxRequestWorkers 한도에 도달함
+  vendor_action: MaxRequestWorkers 값을 높이는 것을 고려
+  vendor_url: https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors
+  versions:
+  - Apache 2.0~2.2 (메시지 별칭)
+  - Apache 2.4
+  version_note: AH 코드는 2.4 도입(2.2 이하는 코드 없음) — 2.2 형식 로그의 같은 의미 문구를 별칭으로 이 코드에 대응
+- code: AH00169
+  severity: info
+  category: internal
+  title: SIGTERM 수신 서버 종료
+  immediate:
+  - '`grep -n "AH00169\|AH00170\|AH00171" <error_log> | tail -10` 로 종료 시각 확인 후 `last -x | head` 와 `journalctl -u httpd --since "-2h" | tail -20` 로 계획 작업·운영자 조작 여부 확인'
+  - '예정에 없던 종료면 `ps -ef | grep -E "[h]ttpd|[a]pache2"` 로 현재 기동 여부 확인'
+  short:
+  - '(2차·승인 후) 비계획 종료면 원인(감시 도구·패키지 갱신·OOM) 확인 후 기동, 기동은 `apachectl -t` 확인 뒤'
+  mid:
+  - '운영 중 종료 작업 변경 관리 절차 적용'
+  long:
+  - 'httpd 종료·기동 이벤트 감시'
+  source: GPT 수집·벤더 문서 대조 완료(https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors)
+  note: graceful 재시작이 아니라 SIGTERM을 받아 서버가 종료되는 수명주기 메시지임
+  vendor_cause: 부모 프로세스가 SIGTERM을 수신해 서버 종료 절차를 시작함
+  vendor_action: ''
+  vendor_url: https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors
+  versions:
+  - Apache 2.0~2.2 (메시지 별칭)
+  - Apache 2.4
+  version_note: AH 코드는 2.4 도입(2.2 이하는 코드 없음) — 2.2 형식 로그의 같은 의미 문구를 별칭으로 이 코드에 대응
+- code: AH00170
+  severity: info
+  category: internal
+  title: graceful-stop 서버 종료
+  immediate:
+  - '`grep -n "AH00170" <error_log> | tail -5` 로 graceful-stop 시각 확인 후 `journalctl -u httpd --since "-2h" | tail -20` 로 요청 주체(운영자·스크립트) 확인'
+  - '현재 서비스 상태 `ps -ef | grep -E "[h]ttpd|[a]pache2"` 확인 — 프로세스가 없으면 서비스 중단 상태'
+  short:
+  - '(2차·승인 후) 비계획 종료면 작업 주체 확인 뒤 `apachectl -t`·기동'
+  mid:
+  - '서비스 종료 작업 일정·승인 절차 관리'
+  long:
+  - '종료 이벤트와 변경 요청 대조 감시'
+  source: GPT 수집·벤더 문서 대조 완료(https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors)
+  note: graceful 재시작 요청이 아니라 graceful-stop 신호를 받아 정상 종료하는 메시지임
+  vendor_cause: graceful-stop 신호를 수신해 정상적 단계 종료를 시작함
+  vendor_action: ''
+  vendor_url: https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors
+  versions:
+  - Apache 2.4
+  version_note: AH 코드는 Apache 2.4 에서 도입 — 2.2 이하 로그에는 나타나지 않음(문구 기반 룰로 보완)
+- code: AH00171
+  severity: info
+  category: internal
+  title: graceful 재시작 수행
+  immediate:
+  - '`grep -n "AH00171\|AH00489\|AH00094" <error_log> | tail -10` 로 graceful 시각·직후 정상 기동 문구(AH00489) 확인'
+  - 'graceful 시각과 logrotate 후처리·배포 작업 시각 대조(`grep -rn "graceful\|reload" /etc/logrotate.d/`)'
+  short:
+  - '(2차) 예정에 없던 graceful 이면 설정 변경 주체·내용을 변경 기록과 대조'
+  mid:
+  - '설정 변경 감사(버전 관리) 적용'
+  long:
+  - 'graceful 이벤트와 변경 요청 번호 대조'
+  source: GPT 수집·벤더 문서 대조 완료(https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors)
+  note: 의미는 맞지만 정상적인 graceful restart 수명주기 메시지이므로 info가 타당함
+  vendor_cause: graceful restart 요청을 받아 서버가 재시작 절차를 수행함
+  vendor_action: ''
+  vendor_url: https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors
+  versions:
+  - Apache 2.4
+  version_note: AH 코드는 Apache 2.4 에서 도입 — 2.2 이하 로그에는 나타나지 않음(문구 기반 룰로 보완)
+- code: AH00287
+  severity: warn
+  category: capacity
+  title: MaxRequestWorkers 한도 근접
+  immediate:
+  - '`curl -s "http://localhost/server-status?auto" | egrep "BusyWorkers|IdleWorkers"` 로 유휴 스레드 수 확인'
+  - '`apachectl -V | grep -i mpm` 와 설정의 MaxRequestWorkers·MinSpareThreads·ThreadsPerChild 값 확인(`grep -rn "MaxRequestWorkers\|MinSpareThreads" /etc/httpd/`)'
+  short:
+  - '(2차·승인 후, 롤백: 설정 원복) 정상 부하 증가면 MaxRequestWorkers·ServerLimit 상향 후 graceful, 백엔드 지연이면 백엔드 우선'
+  mid:
+  - '워커 한도·KeepAlive 설정 재산정'
+  long:
+  - 'server-status IdleWorkers 가 MinSpareThreads 이하로 떨어지면 경보'
+  source: GPT 수집·벤더 문서 대조 완료(https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors)
+  note: 스레드 생성 실패가 아니라 MinSpareThreads 범위까지 MaxRequestWorkers 한도에 근접한 경고임
+  vendor_cause: 활성 스레드 수가 MaxRequestWorkers 한도에 MinSpareThreads만큼 근접함
+  vendor_action: MaxRequestWorkers 값을 높이는 것을 고려
+  vendor_url: https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors
+  versions:
+  - Apache 2.4
+  version_note: AH 코드는 Apache 2.4 에서 도입 — 2.2 이하 로그에는 나타나지 않음(문구 기반 룰로 보완)
+- code: AH00288
+  severity: warn
+  category: capacity
+  title: 스코어보드 가득참
+  immediate:
+  - '`curl -s "http://localhost/server-status?auto" | egrep "BusyWorkers|IdleWorkers|Scoreboard"` 로 스코어보드 상태(G=종료 대기) 확인'
+  - '`grep -n "AH00288\|AH00287" <error_log> | tail -10` 로 발생 빈도 확인 — graceful 직후 G 상태 다수면 종료 대기 슬롯이 원인'
+  short:
+  - '(2차·승인 후, 롤백: 설정 원복) ServerLimit 을 여유 있게 상향(재시작 필요)하거나 graceful 빈도를 줄임'
+  mid:
+  - 'MPM ServerLimit·ThreadsPerChild·MaxConnectionsPerChild 재산정'
+  long:
+  - '스코어보드 슬롯 사용률 감시'
+  source: GPT 수집·벤더 문서 대조 완료(https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors)
+  note: MaxSpareThreads 경고가 아니라 MaxRequestWorkers 도달 전 scoreboard가 가득 찬 상태임
+  vendor_cause: MaxRequestWorkers에는 미달했지만 worker MPM scoreboard 슬롯이 가득 참
+  vendor_action: ''
+  vendor_url: https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors
+  versions:
+  - Apache 2.4
+  version_note: AH 코드는 Apache 2.4 에서 도입 — 2.2 이하 로그에는 나타나지 않음(문구 기반 룰로 보완)
+- code: AH00341
+  severity: error
+  category: connection
+  title: Windows AcceptEx 비동기 실패
+  immediate:
+  - '`grep -n "AH00341" <error_log> | tail -10` 로 발생 시각·오류 코드 확인(Windows mpm_winnt)'
+  - '같은 시각 Windows System 이벤트(Tcpip·Afd)와 백신·보안 제품의 소켓 후킹 여부 확인 — `Get-WinEvent -LogName System -MaxEvents 50`'
+  short:
+  - '(2차·승인 후, 롤백: 설정 원복) 소켓 후킹 제품과 충돌 시 httpd.conf 에 AcceptFilter http none / AcceptFilter https none 적용 검토'
+  mid:
+  - 'Windows httpd 와 보안 제품 예외 정책 정비'
+  long:
+  - 'AH00341 건수 감시'
+  source: GPT 수집·벤더 문서 대조 완료(https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors)
+  note: 동적 모듈 로드 경고가 아니라 Windows MPM의 비동기 AcceptEx 수락 실패임
+  vendor_cause: Windows에서 비동기 AcceptEx 호출이 실패함
+  vendor_action: ''
+  vendor_url: https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors
+  versions:
+  - Apache 2.4
+  version_note: AH 코드는 Apache 2.4 에서 도입 — 2.2 이하 로그에는 나타나지 않음(문구 기반 룰로 보완)
+- code: AH00558
+  severity: warn
+  category: internal
+  title: ServerName 미설정
+  immediate:
+  - '`apachectl -S 2>&1 | head -20` 로 ServerName 미설정 경고와 가상호스트 목록 확인'
+  - '`hostname -f` 로 OS FQDN 확인 — 경고만이면 서비스 영향 없음'
+  short:
+  - '(2차·승인 후, 롤백: 설정 원복) 전역 ServerName <FQDN>:<port> 지시어 추가 후 `apachectl -t`·graceful'
+  mid:
+  - '설정 템플릿에 ServerName 기본 포함'
+  long:
+  - '설정 시험 경고 0건 기준 관리'
+  source: GPT 수집·벤더 문서 대조 완료(https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors)
+  vendor_cause: 서버의 정규화된 도메인 이름을 신뢰성 있게 결정하지 못함
+  vendor_action: 전역 ServerName 지시어를 설정해 메시지를 억제
+  vendor_url: https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors
+  versions:
+  - Apache 2.0~2.2 (메시지 별칭)
+  - Apache 2.4
+  version_note: AH 코드는 2.4 도입(2.2 이하는 코드 없음) — 2.2 형식 로그의 같은 의미 문구를 별칭으로 이 코드에 대응
+- code: AH00646
+  severity: error
+  category: disk
+  title: 로그 대상 쓰기 실패
+  immediate:
+  - '`grep -n "AH00646" <error_log> | tail -10` 로 대상 로그 확인 후 `df -h <로그경로>` 와 `df -i <로그경로>` 로 공간·inode 확인'
+  - '파이프 로그면 대상 프로그램 생존 `ps -ef | grep [r]otatelogs` 확인'
+  short:
+  - '(2차·승인 후, 롤백: 옮긴 파일 원위치) 오래된 압축 로그를 다른 볼륨으로 이동해 공간 확보, 파이프 프로그램 종료면 graceful 로 재생성'
+  mid:
+  - '로그 순환 보관 기간·로그 전용 볼륨 정책'
+  long:
+  - '로그 볼륨 사용률 85%/95% 경보'
+  source: GPT 수집·벤더 문서 대조 완료(https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors)
+  note: 파일에 한정되지 않고 mod_log_config가 설정된 로그 대상에 쓰지 못한 오류임
+  vendor_cause: mod_log_config가 설정된 로그 대상에 데이터를 쓰지 못함
+  vendor_action: ''
+  vendor_url: https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors
+  versions:
+  - Apache 2.0~2.2 (메시지 별칭)
+  - Apache 2.4
+  version_note: AH 코드는 2.4 도입(2.2 이하는 코드 없음) — 2.2 형식 로그의 같은 의미 문구를 별칭으로 이 코드에 대응
+- code: AH00687
+  severity: error
+  category: internal
+  title: 콘텐츠 협상 대상 선택 실패
+  immediate:
+  - '`grep -n "AH00687" <error_log> | tail -10` 로 요청 경로 확인'
+  - '`apachectl -M | grep negotiation` 와 해당 디렉터리 Options MultiViews 설정 확인, `ls <디렉터리>` 로 같은 이름의 변형 파일(.html.ko 등) 확인'
+  short:
+  - '(2차·승인 후, 롤백: 설정 원복) 의도하지 않은 MultiViews 면 해당 Directory 에서 Options -MultiViews, 필요한 변형 파일 추가'
+  mid:
+  - '콘텐츠 협상 사용 여부 표준화'
+  long:
+  - '406 응답·AH00687 건수 감시'
+  source: GPT 수집·벤더 문서 대조 완료(https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors)
+  note: 요청 헤더 크기 오류가 아니라 일치 파일 중 협상 가능한 변형을 선택하지 못한 오류임
+  vendor_cause: 요청과 이름이 일치하는 파일은 발견했지만 콘텐츠 협상으로 선택 가능한 변형이 없음
+  vendor_action: ''
+  vendor_url: https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors
+  versions:
+  - Apache 2.4
+  version_note: AH 코드는 Apache 2.4 에서 도입 — 2.2 이하 로그에는 나타나지 않음(문구 기반 룰로 보완)
+- code: AH01067
+  severity: error
+  category: upstream
+  title: FastCGI 응답 실패
+  immediate:
+  - '`grep -n "AH01067" <error_log> | tail -10` 로 백엔드 주소·요청 URL 확인'
+  - '`systemctl status php-fpm` (서비스명은 환경별) 와 백엔드 로그로 해당 시각 프로세스 종료·시간 초과 확인'
+  short:
+  - '(2차·승인 후, 롤백: 설정 원복) 백엔드 풀(pm.max_children)·request_terminate_timeout 조정 또는 백엔드 재기동 일정 협의'
+  mid:
+  - 'FastCGI 백엔드 풀 크기·타임아웃 재산정'
+  long:
+  - 'FastCGI 오류 건수 감시'
+  source: GPT 수집·벤더 문서 대조 완료(https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors)
+  vendor_cause: FastCGI 백엔드에서 필요한 크기만큼 응답 헤더를 모두 읽지 못함
+  vendor_action: ''
+  vendor_url: https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors
+  versions:
+  - Apache 2.4
+  version_note: AH 코드는 Apache 2.4 에서 도입 — 2.2 이하 로그에는 나타나지 않음(문구 기반 룰로 보완)
+- code: AH01071
+  severity: error
+  category: upstream
+  title: FastCGI 스크립트 오류
+  immediate:
+  - '`grep -n "AH01071" <error_log> | tail -20` 로 따옴표 안 백엔드 오류 문자열(PHP Fatal error·Primary script unknown 등)과 URL 확인'
+  - 'Primary script unknown 이면 `grep -rn "ProxyPassMatch\|SetHandler.*fcgi" /etc/httpd/` 로 스크립트 경로 전달 설정 확인'
+  short:
+  - '(2차) 애플리케이션 오류는 개발 담당에 문자열·URL 전달, 경로 설정 오류는 승인 후 수정(롤백: 설정 원복)'
+  mid:
+  - '애플리케이션 오류 처리 보강'
+  long:
+  - 'AH01071 유형별 주간 집계'
+  source: GPT 수집·벤더 문서 대조 완료(https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors)
+  vendor_cause: FastCGI 백엔드가 FCGI_STDERR 레코드로 오류 문자열을 반환함
+  vendor_action: ''
+  vendor_url: https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors
+  versions:
+  - Apache 2.0~2.2 (메시지 별칭)
+  - Apache 2.4
+  version_note: AH 코드는 2.4 도입(2.2 이하는 코드 없음) — 2.2 형식 로그의 같은 의미 문구를 별칭으로 이 코드에 대응
+- code: AH01097
+  severity: error
+  category: upstream
+  title: 백엔드로 요청 본문 전달 실패
+  immediate:
+  - '`grep -n "AH01097" <error_log> | tail -10` 로 백엔드·URL 확인'
+  - '`nc -zvw3 <backend_ip> <port>` 로 백엔드 도달 확인, 같은 시각 백엔드 로그에서 요청 본문 수신 중단 흔적 확인'
+  short:
+  - '(2차) 대용량 업로드 중단이면 백엔드 수신 한도·타임아웃 확인을 백엔드 담당과 진행'
+  mid:
+  - '업로드 경로 ProxyTimeout·백엔드 한도 정렬'
+  long:
+  - '프록시 본문 전달 실패 건수 감시'
+  source: GPT 수집·벤더 문서 대조 완료(https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors)
+  note: 백엔드 연결 실패 자체가 아니라 mod_proxy_http가 요청 본문 전달에 실패한 오류임
+  vendor_cause: mod_proxy_http가 클라이언트 요청 본문을 백엔드에 전달하지 못함
+  vendor_action: ''
+  vendor_url: https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors
+  versions:
+  - Apache 2.4
+  version_note: AH 코드는 Apache 2.4 에서 도입 — 2.2 이하 로그에는 나타나지 않음(문구 기반 룰로 보완)
+- code: AH01114
+  severity: error
+  category: upstream
+  title: HTTP 백엔드 연결 생성 실패
+  immediate:
+  - '`grep -n "AH01114\|AH00957" <error_log> | tail -10` 로 백엔드 주소·errno 확인'
+  - '`nc -zvw3 <backend_ip> <port>` 로 도달 확인 — 거부면 백엔드 미기동, 시간 초과면 방화벽·과부하'
+  short:
+  - '(2차) 백엔드 담당에 기동·복구 요청, 방화벽이면 네트워크 담당 해제 요청 — 밸런서 멤버 제외는 승인 후(롤백: 재투입)'
+  mid:
+  - '백엔드 이중화·ProxyPass retry/connectiontimeout 정비'
+  long:
+  - '백엔드 연결 실패율 감시'
+  source: GPT 수집·벤더 문서 대조 완료(https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors)
+  note: 연결 거부로 한정되지 않고 HTTP 백엔드 연결을 생성하지 못한 오류임
+  vendor_cause: mod_proxy_http가 지정된 HTTP 백엔드에 연결하지 못함
+  vendor_action: ''
+  vendor_url: https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors
+  versions:
+  - Apache 2.0~2.2 (메시지 별칭)
+  - Apache 2.4
+  version_note: AH 코드는 2.4 도입(2.2 이하는 코드 없음) — 2.2 형식 로그의 같은 의미 문구를 별칭으로 이 코드에 대응
+- code: AH01302
+  severity: info
+  category: internal
+  title: LDAP 연산 캐시 크기 설정
+  immediate:
+  - '`grep -n "AH01302" <error_log> | tail -5` 로 기동 시점 기록인지 확인 — 기동 직후 1회면 정보성(조치 불필요)'
+  - '`apachectl -M | grep ldap` 로 mod_ldap 사용 여부와 LDAPOpCacheEntries 설정 확인'
+  short:
+  - '(2차) LDAP 인증 지연이 함께 보고될 때만 LDAPOpCacheEntries·LDAPOpCacheTTL 값 조정을 승인 후 검토'
+  mid:
+  - 'LDAP 캐시 설정 표준화'
+  long:
+  - '정보성 메시지로 분류해 경보 대상에서 제외'
+  source: GPT 수집·벤더 문서 대조 완료(https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors)
+  note: 큰 요청 본문 거부가 아니라 LDAP operation cache 크기를 설정했다는 정보성 메시지임
+  vendor_cause: LDAP operation cache 초기화 시 설정된 캐시 크기를 기록함
+  vendor_action: ''
+  vendor_url: https://httpd.apache.org/docs/2.4/mod/mod_ldap.html
+  versions:
+  - Apache 2.4
+  version_note: AH 코드는 Apache 2.4 에서 도입 — 2.2 이하 로그에는 나타나지 않음(문구 기반 룰로 보완)
+- code: AH01630
+  severity: warn
+  category: security
+  title: 클라이언트 접근 거부(설정)
+  immediate:
+  - '`grep -n "AH01630" <error_log> | tail -20` 로 거부 경로·client IP 확인'
+  - '`grep -rn -B3 -A3 "Require" /etc/httpd/conf* | grep -A3 "<Directory\|<Location"` 로 해당 경로 Require 규칙 확인(읽기 전용)'
+  short:
+  - '(2차·승인 후, 롤백: 설정 원복) 정상 사용자면 Require ip/host 규칙에 대상 추가 후 `apachectl -t`·graceful, 외부 탐색이면 유지'
+  mid:
+  - '접근 제어 규칙을 2.4 Require 방식으로 일원화'
+  long:
+  - '403 거부 건수·출처 감시'
+  source: GPT 수집·벤더 문서 대조 완료(https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors)
+  vendor_cause: mod_authz_core의 Require 권한 검사 결과 서버 설정에 의해 클라이언트 접근이 거부됨
+  vendor_action: 허용이 필요한 경우 해당 리소스의 Require 권한 규칙을 검토
+  vendor_url: https://httpd.apache.org/docs/2.4/mod/mod_authz_core.html
+  versions:
+  - Apache 2.0~2.2 (메시지 별칭)
+  - Apache 2.4
+  version_note: AH 코드는 2.4 도입(2.2 이하는 코드 없음) — 2.2 형식 로그의 같은 의미 문구를 별칭으로 이 코드에 대응
+- code: AH01797
+  severity: warn
+  category: security
+  title: 접근 거부
+  immediate:
+  - '`grep -n "AH01797" <error_log> | tail -20` 로 거부 경로·client IP 확인'
+  - '`grep -rn "Order\|Allow from\|Deny from" /etc/httpd/conf*` 로 구 방식(mod_access_compat) 규칙 위치 확인'
+  short:
+  - '(2차·승인 후, 롤백: 설정 원복) 정상 사용자면 규칙 수정, 구·신 방식 혼용이면 Require 방식으로 일괄 전환'
+  mid:
+  - '2.2 형식 접근 제어 제거(mod_access_compat 의존 해소)'
+  long:
+  - '403 거부 건수 감시'
+  source: GPT 수집·벤더 문서 대조 완료(https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors)
+  vendor_cause: mod_access_compat의 Order/Allow/Deny 규칙에 의해 클라이언트 접근이 거부됨
+  vendor_action: 구·신 접근제어 지시어 혼용을 피하고 한 방식으로 일괄 마이그레이션
+  vendor_url: https://httpd.apache.org/docs/current/upgrading.html
+  versions:
+  - Apache 2.4
+  version_note: AH 코드는 Apache 2.4 에서 도입 — 2.2 이하 로그에는 나타나지 않음(문구 기반 룰로 보완)
+- code: AH01909
+  severity: warn
+  category: security
+  title: SSL ServerName 불일치
+  immediate:
+  - '`apachectl -S` 로 해당 가상호스트 ServerName 확인 후 `openssl x509 -in <인증서> -noout -subject -ext subjectAltName` 로 CN·SAN 대조(OpenSSL 1.1.1+)'
+  - 'SAN 에 ServerName 이 없으면 확정 — 접속 브라우저에 인증서 경고가 날 수 있음'
+  short:
+  - '(2차·승인 후, 롤백: 이전 인증서 복원) ServerName 을 포함한 인증서로 교체하거나 ServerName 을 인증서 이름에 맞춤'
+  mid:
+  - '인증서 발급 시 SAN 목록을 가상호스트 목록과 대조'
+  long:
+  - '인증서·가상호스트 대장 관리'
+  source: GPT 수집·벤더 문서 대조 완료(https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors)
+  vendor_cause: 설정한 서버 인증서에 ServerName과 일치하는 인증서 ID가 포함되지 않음
+  vendor_action: ServerName에 맞는 서버 인증서를 구성
+  vendor_url: https://raw.githubusercontent.com/apache/httpd/2.4.x/modules/ssl/ssl_engine_init.c
+  versions:
+  - Apache 2.0~2.2 (메시지 별칭)
+  - Apache 2.4
+  version_note: AH 코드는 2.4 도입(2.2 이하는 코드 없음) — 2.2 형식 로그의 같은 의미 문구를 별칭으로 이 코드에 대응
+- code: AH01977
+  severity: error
+  category: upstream
+  title: OCSP 서버 응답 행 읽기 실패
+  immediate:
+  - '`grep -n "AH01977\|OCSP" <error_log> | tail -10` 로 OCSP 응답자 URL·시각 확인'
+  - '`openssl x509 -in <인증서> -noout -ocsp_uri` 로 OCSP URL 확인 후 서버에서 도달 가능한지(`curl -sI <ocsp_uri>`) 확인 — 폐쇄망이면 접근 불가가 원인'
+  short:
+  - '(2차) 폐쇄망이면 SSLUseStapling off 를 승인 후 적용(롤백: 원복), 외부 가능 망이면 프록시·방화벽 경로 확보'
+  mid:
+  - '망 구성별 OCSP stapling 사용 기준'
+  long:
+  - 'OCSP 오류 건수 감시'
+  source: GPT 수집·벤더 문서 대조 완료(https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors)
+  note: SSL 핸드셰이크 실패가 아니라 OCSP 응답 서버에서 한 줄을 읽지 못한 오류임
+  vendor_cause: OCSP responder에서 HTTP 응답 한 줄을 읽는 작업이 실패함
+  vendor_action: ''
+  vendor_url: https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors
+  versions:
+  - Apache 2.4
+  version_note: AH 코드는 Apache 2.4 에서 도입 — 2.2 이하 로그에는 나타나지 않음(문구 기반 룰로 보완)
+- code: AH01998
+  severity: info
+  category: connection
+  title: SSL 연결 비정상 종료
+  immediate:
+  - '`grep -c "AH01998" <error_log>` 로 빈도 확인 — 평소 수준이면 클라이언트가 close_notify 없이 닫은 정보성 기록 (Apache 2.4)'
+  - '급증 시 `grep "AH01998" <error_log> | grep -oE "client [0-9.]+" | sort | uniq -c | sort -rn | head` 로 출처 IP 상위 확인 — LB 헬스체크 IP 면 정상 패턴(IPv4 기준)'
+  short:
+  - '(2차) 급증이 특정 장비면 해당 장비의 TLS 종료 방식 확인을 담당에 요청'
+  mid:
+  - 'LogLevel ssl:info 이상 메시지 분류 기준 수립'
+  long:
+  - 'AH01998 건수 기준선 감시'
+  source: GPT 수집·벤더 문서 대조 완료(https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors)
+  note: SSL 연결을 abortive shutdown으로 닫았다는 정보 메시지로 일반적인 SSL 종료 오류와 다름
+  vendor_cause: SSL 연결이 abortive 방식으로 종료되어 close-notify 교환 없이 연결을 닫음
+  vendor_action: ''
+  vendor_url: https://raw.githubusercontent.com/apache/httpd/2.4.x/modules/ssl/ssl_engine_io.c
+  versions:
+  - Apache 2.4
+  version_note: AH 코드는 Apache 2.4 에서 도입 — 2.2 이하 로그에는 나타나지 않음(문구 기반 룰로 보완)
+- code: AH02032
+  severity: error
+  category: security
+  title: SNI와 HTTP 호스트 불일치
+  immediate:
+  - '`grep -n "AH02032" <error_log> | tail -10` 로 SNI 호스트명과 Host 헤더 값 확인'
+  - '`apachectl -S` 로 SSL 가상호스트 ServerName·ServerAlias 확인 — 클라이언트가 다른 이름으로 SNI 를 보내면 확정'
+  short:
+  - '(2차·승인 후, 롤백: 설정 원복) 필요한 이름을 ServerAlias 로 추가하거나 클라이언트 접속 주소를 정정, 2.2 형식 만료 문구로 판정된 경우 인증서 만료일(`openssl x509 -enddate`) 확인 후 갱신'
+  mid:
+  - 'SSL 가상호스트 이름·인증서 SAN 정합 관리'
+  long:
+  - '421 응답·AH02032 건수 감시'
+  verify_note: '미검증 — 별칭(_aliases.yaml)이 2.2 형식 ''certificate expired'' 문구를 AH02032 로 연결하는데 AH02032 의 공식 의미(SNI·Host 불일치)와 달라 별칭 재검토 필요'
+  source: GPT 수집·벤더 문서 대조 완료(https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors)
+  note: 인증서 자체 오류가 아니라 TLS SNI 호스트명과 HTTP Host 호스트명이 일치하지 않는 오류임
+  vendor_cause: SNI로 선택된 호스트와 HTTP Host가 현재 SSLVHostSNIPolicy에서 호환되지 않음
+  vendor_action: ''
+  vendor_url: https://raw.githubusercontent.com/apache/httpd/2.4.x/modules/ssl/ssl_engine_kernel.c
+  versions:
+  - Apache 2.0~2.2 (메시지 별칭)
+  - Apache 2.4
+  version_note: AH 코드는 2.4 도입(2.2 이하는 코드 없음) — 2.2 형식 로그의 같은 의미 문구를 별칭으로 이 코드에 대응
+- code: AH02217
+  severity: error
+  category: security
+  title: OCSP Stapling 발급자 인증서 없음
+  immediate:
+  - '`grep -n "AH02217" <error_log> | tail -5` 로 대상 인증서 확인'
+  - '`openssl crl2pkcs7 -nocrl -certfile <SSLCertificateFile> | openssl pkcs7 -print_certs -noout | grep subject` 로 파일 안 체인(서버+중간) 포함 여부 확인'
+  short:
+  - '(2차·승인 후, 롤백: 이전 인증서 파일 복원) 중간 CA 를 SSLCertificateFile 에 서버 인증서 다음 순서로 포함(2.4.8+) 또는 SSLCertificateChainFile 지정 후 graceful'
+  mid:
+  - '인증서 묶음(체인) 파일 작성 기준 표준화'
+  long:
+  - '체인 누락 점검을 인증서 교체 점검표에 포함'
+  source: GPT 수집·벤더 문서 대조 완료(https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors)
+  note: 일반 핸드셰이크 인증서 오류가 아니라 OCSP Stapling 초기화 시 발급자 인증서를 찾지 못한 오류임
+  vendor_cause: OCSP Stapling에 필요한 서버 인증서의 발급자 인증서를 찾지 못함
+  vendor_action: SSLCertificateFile 또는 SSLCertificateChainFile 지침에 따라 인증서 체인을 구성
+  vendor_url: https://httpd.apache.org/docs/2.4/ssl/ssl_howto.html
+  versions:
+  - Apache 2.4
+  version_note: AH 코드는 Apache 2.4 에서 도입 — 2.2 이하 로그에는 나타나지 않음(문구 기반 룰로 보완)
+- code: AH02311
+  severity: critical
+  category: security
+  title: mod_ssl 초기화 치명적 실패
+  immediate:
+  - '`grep -n -B5 "AH02311" <error_log> | tail -20` 로 앞선 SSL 치명 오류(AH02312·AH02565 등) 확인'
+  - '`ls -l <SSLCertificateKeyFile>` 로 키 파일 존재·권한 확인, 암호 걸린 키면 SSLPassPhraseDialog 설정 확인'
+  short:
+  - '(2차·승인 후, 롤백: 이전 키·인증서 복원) 선행 오류 원인(키 경로·암호·형식)을 수정 후 `apachectl -t`·기동'
+  mid:
+  - '개인 키 보관·권한(600, root 소유) 기준'
+  long:
+  - 'SSL 초기화 실패 즉시 경보'
+  source: GPT 수집·벤더 문서 대조 완료(https://github.com/apache/httpd/blob/2.4.x/modules/ssl/ssl_engine_log.c)
+  note: 개인키 로드 실패에 한정되지 않고 mod_ssl 초기화의 치명적 실패 후 종료하는 메시지임
+  vendor_cause: mod_ssl 초기화 과정에서 앞선 치명 오류가 발생해 SSL 초기화를 종료함
+  vendor_action: 메시지에 표시된 ErrorLog에서 선행 SSL 오류를 확인
+  vendor_url: https://raw.githubusercontent.com/apache/httpd/2.4.x/modules/ssl/ssl_engine_log.c
+  versions:
+  - Apache 2.4
+  version_note: AH 코드는 Apache 2.4 에서 도입 — 2.2 이하 로그에는 나타나지 않음(문구 기반 룰로 보완)
+- code: AH02572
+  severity: critical
+  category: security
+  title: SSL 인증서·개인키 구성 실패
+  immediate:
+  - '`apachectl -t` 로 SSL 구성 오류 메시지 확인 후 `openssl x509 -noout -modulus -in <인증서> | openssl md5` 와 `openssl rsa -noout -modulus -in <키> | openssl md5` 비교(RSA 키 기준)'
+  - '값이 다르면 인증서·키 짝 불일치 확정'
+  short:
+  - '(2차·승인 후, 롤백: 이전 인증서·키 복원) 같은 CSR 의 키로 SSLCertificateFile·SSLCertificateKeyFile 쌍을 맞춘 뒤 `apachectl -t`·graceful'
+  mid:
+  - '인증서·키를 한 묶음으로 배포하는 절차'
+  long:
+  - '인증서 교체 작업 기록 관리'
+  source: GPT 수집·벤더 문서 대조 완료(https://github.com/apache/httpd/blob/2.4.x/modules/ssl/ssl_engine_init.c)
+  note: 인증서 미구성에 한정되지 않고 최소 한 쌍의 인증서와 개인키 구성이 실패한 오류임
+  vendor_cause: 설정된 인증서와 개인키 중 하나 이상이 OpenSSL 개인키 검사를 통과하지 못함
+  vendor_action: SSLCertificateFile과 SSLCertificateKeyFile에 올바른 인증서·키 쌍을 구성
+  vendor_url: https://raw.githubusercontent.com/apache/httpd/2.4.x/modules/ssl/ssl_engine_init.c
+  versions:
+  - Apache 2.4
+  version_note: AH 코드는 Apache 2.4 에서 도입 — 2.2 이하 로그에는 나타나지 않음(문구 기반 룰로 보완)
+- code: AH00992
+  severity: error
+  category: upstream
+  title: AJP 응답 수신 실패
+  immediate:
+  - '`grep -n "AH00992\|ajp" <error_log> | tail -20` 로 AJP 백엔드 주소·시각 확인'
+  - '`nc -zvw3 <backend_ip> <ajp_port>` 로 AJP 포트 도달 확인, 같은 시각 WAS(Tomcat·JEUS) AJP 커넥터 로그 확인'
+  short:
+  - '(2차) WAS 담당에 AJP 커넥터 스레드·타임아웃 상태 확인 요청, ProxyPass ajp 의 timeout·ping 값 조정은 승인 후(롤백: 원복)'
+  mid:
+  - 'AJP 커넥터 secret·packetSize·타임아웃 정렬'
+  long:
+  - 'AJP 오류 건수 감시'
+  verify_note: '미검증 — 별칭(_aliases.yaml)이 ''worker already used by another worker'' 문구를 AH00992 로 연결하는데 사전 원인(ajp_ilink_receive 실패)과 달라 별칭 재검토 필요'
+  source: GPT 수집·벤더 문서 대조 완료(https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors)
+  note: 프록시 워커 사용 불가가 아니라 AJP 링크에서 응답 헤더를 수신하지 못한 오류임
+  vendor_cause: AJP 백엔드로부터 응답 헤더 메시지를 수신하는 ajp_ilink_receive 호출이 실패함
+  vendor_action: ''
+  vendor_url: https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors
+  versions:
+  - Apache 2.0~2.2 (메시지 별칭)
+  - Apache 2.4
+  version_note: AH 코드는 2.4 도입(2.2 이하는 코드 없음) — 2.2 형식 로그의 같은 의미 문구를 별칭으로 이 코드에 대응
+- code: AH00959
+  severity: error
+  category: upstream
+  title: 백엔드 연결 실패로 워커 비활성
+  immediate:
+  - '`grep -n "AH00959\|AH00957" <error_log> | tail -10` 로 오류 상태로 표시된 worker·시각 확인'
+  - '`nc -zvw3 <backend_ip> <port>` 로 백엔드 도달 확인, balancer-manager 사용 시 `curl -s "http://localhost/balancer-manager"` 로 멤버 상태 조회'
+  short:
+  - '(2차) 백엔드 복구 요청, 복구 후 retry(기본 60초) 경과 후 자동 재투입 확인 — 수동 재투입은 승인 후'
+  mid:
+  - 'ProxyPass retry·connectiontimeout 과 백엔드 이중화 정비'
+  long:
+  - '워커 오류 상태 전환 경보'
+  source: GPT 수집·벤더 문서 대조 완료(https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors)
+  note: 일반 프록시 요청 실패가 아니라 백엔드 연결 실패 후 해당 worker를 일시 비활성화하는 메시지임
+  vendor_cause: 백엔드 연결 시도가 실패해 proxy worker가 오류 상태로 표시됨
+  vendor_action: ''
+  vendor_url: https://raw.githubusercontent.com/apache/httpd/2.4.x/modules/proxy/proxy_util.c
+  versions:
+  - Apache 2.4
+  version_note: AH 코드는 Apache 2.4 에서 도입 — 2.2 이하 로그에는 나타나지 않음(문구 기반 룰로 보완)
+- code: AH00963
+  severity: error
+  category: upstream
+  title: 프록시 사전 연결 설정 실패
+  immediate:
+  - '`grep -n "AH00963" <error_log> | tail -10` 로 백엔드·시각 확인'
+  - '같은 시각 AH00957·AH00959(연결 실패) 동반 여부와 백엔드 도달(`nc -zvw3 <backend_ip> <port>`) 확인'
+  short:
+  - '(2차) SSL 백엔드(ProxyPass https)면 SSLProxyEngine·백엔드 인증서 설정 확인을 승인 후 정정(롤백: 설정 원복)'
+  mid:
+  - '프록시 백엔드 연결 설정 표준화'
+  long:
+  - 'AH00963 건수 감시'
+  source: GPT 수집·벤더 문서 대조 완료(https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors)
+  note: 응답 없음 오류가 아니라 proxy pre_connection 설정 단계의 실패임
+  vendor_cause: 백엔드 연결 생성 후 pre_connection 훅 설정이 OK 또는 DONE 이외 상태로 실패함
+  vendor_action: ''
+  vendor_url: https://raw.githubusercontent.com/apache/httpd/2.4.x/modules/proxy/proxy_util.c
+  versions:
+  - Apache 2.4
+  version_note: AH 코드는 Apache 2.4 에서 도입 — 2.2 이하 로그에는 나타나지 않음(문구 기반 룰로 보완)
+- code: AH00996
+  severity: error
+  category: upstream
+  title: AJP 데이터 파싱 실패
+  immediate:
+  - '`grep -n "AH00996\|ajp" <error_log> | tail -10` 로 백엔드·시각 확인'
+  - '같은 시각 WAS AJP 커넥터 로그에서 응답 중단·패킷 크기 오류 확인 — 대용량 응답이면 packetSize 불일치 의심'
+  short:
+  - '(2차·승인 후, 롤백: 설정 원복) ProxyIOBufferSize 와 WAS AJP packetSize 를 같은 값으로 정렬'
+  mid:
+  - 'AJP 대신 HTTP 프록시 전환 검토'
+  long:
+  - 'AJP 파싱 오류 건수 감시'
+  source: GPT 수집·벤더 문서 대조 완료(https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors)
+  note: 프록시 오류 전달 메시지가 아니라 AJP 데이터 메시지에서 바이트를 읽지 못한 파싱 오류임
+  vendor_cause: AJP DATA 패킷을 파싱하면서 필요한 바이트를 메시지에서 읽지 못함
+  vendor_action: ''
+  vendor_url: https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors
+  versions:
+  - Apache 2.4
+  version_note: AH 코드는 Apache 2.4 에서 도입 — 2.2 이하 로그에는 나타나지 않음(문구 기반 룰로 보완)
+- code: AH01084
+  severity: error
+  category: upstream
+  title: 백엔드로 요청 본문 전달 실패
+  immediate:
+  - '`grep -n "AH01084" <error_log> | tail -10` 로 백엔드·URL 확인'
+  - '`nc -zvw3 <backend_ip> <port>` 와 백엔드 로그에서 요청 본문 수신 중 연결 종료 흔적 확인'
+  short:
+  - '(2차) 백엔드 수신 한도·타임아웃 확인을 백엔드 담당과 진행, ProxyTimeout 조정은 승인 후(롤백: 원복)'
+  mid:
+  - '업로드 경로 백엔드 한도·타임아웃 정렬'
+  long:
+  - '본문 전달 실패 건수 감시'
+  source: GPT 수집·벤더 문서 대조 완료(https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors)
+  note: 백엔드 응답 대기 시간초과가 아니라 요청 본문을 백엔드로 전달하지 못한 오류임
+  vendor_cause: mod_proxy_http가 요청 본문을 백엔드로 전달하는 과정에서 실패함
+  vendor_action: ''
+  vendor_url: https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors
+  versions:
+  - Apache 2.0~2.2 (메시지 별칭)
+  - Apache 2.4
+  version_note: AH 코드는 2.4 도입(2.2 이하는 코드 없음) — 2.2 형식 로그의 같은 의미 문구를 별칭으로 이 코드에 대응
+- code: AH01110
+  severity: error
+  category: upstream
+  title: 백엔드 응답 읽기 실패
+  immediate:
+  - '`grep -n "AH01110\|AH01102" <error_log> | tail -10` 로 백엔드·URL 확인'
+  - '같은 시각 백엔드 로그에서 응답 중 예외·연결 종료 확인, `curl -sv http://<backend_ip>:<port>/<경로> -o /dev/null 2>&1 | tail -5` 로 응답 확인'
+  short:
+  - '(2차) 백엔드 담당에 응답 중단 시각·URL 전달, ProxyTimeout 은 원인 확인 뒤 조정(승인 후)'
+  mid:
+  - '백엔드 응답 안정화와 타임아웃 계층 정렬'
+  long:
+  - '프록시 응답 오류 건수 감시'
+  source: GPT 수집·벤더 문서 대조 완료(https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors)
+  note: 응답 헤더 오류로 한정되지 않고 백엔드 HTTP 응답을 읽는 과정의 오류임
+  vendor_cause: HTTP 백엔드의 응답 본문을 읽는 과정에서 오류가 발생함
+  vendor_action: ''
+  vendor_url: https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors
+  versions:
+  - Apache 2.4
+  version_note: AH 코드는 Apache 2.4 에서 도입 — 2.2 이하 로그에는 나타나지 않음(문구 기반 룰로 보완)
+- code: AH02429
+  severity: error
+  category: internal
+  title: 응답 헤더 이름 문자 오류
+  immediate:
+  - '`grep -n "AH02429" <error_log> | tail -10` 로 문제 헤더 이름·URL 확인'
+  - '해당 응답을 만드는 백엔드·스크립트 확인(프록시면 `curl -s -D - -o /dev/null http://<backend_ip>:<port>/<경로>`)'
+  short:
+  - '(2차) 헤더를 만드는 애플리케이션 담당에 헤더 이름 수정 요청'
+  mid:
+  - '응답 헤더 규격 검증을 배포 시험에 포함'
+  long:
+  - 'AH02429 건수 감시'
+  source: GPT 수집·벤더 문서 대조 완료(https://github.com/apache/httpd/blob/2.4.x/modules/http/http_filters.c)
+  note: 요청 헤더 줄바꿈 오류가 아니라 응답 헤더 이름에 허용되지 않는 문자가 있어 요청을 중단한 오류임
+  vendor_cause: 응답 헤더 이름에 HTTP 헤더 이름으로 허용되지 않는 문자가 포함됨
+  vendor_action: ''
+  vendor_url: https://raw.githubusercontent.com/apache/httpd/2.4.x/modules/http/http_filters.c
+  versions:
+  - Apache 2.4
+  version_note: AH 코드는 Apache 2.4 에서 도입 — 2.2 이하 로그에는 나타나지 않음(문구 기반 룰로 보완)
+- code: AH00023
+  severity: critical
+  category: lock
+  title: 뮤텍스(잠금) 생성 실패
+  immediate:
+  - '`grep -n "AH00023" <error_log> | tail -20` 로 같은 줄의 OS 오류((28)No space left on device·(13)Permission denied·(95)Operation not supported)와 뮤텍스 이름 기록'
+  - '`apachectl -S` 출력의 Mutex 줄(방식·dir)과 `ls -ld <Mutex dir>` 로 잠금 경로 소유자·권한 확인 (Apache 2.4, Debian 계열은 apache2ctl)'
+  - 'errno 28 이면 `ipcs -s` 로 실행 계정 소유 세마포어 수와 `cat /proc/sys/kernel/sem` 한도(두 번째 값 SEMMNS·네 번째 값 SEMMNI) 비교 — 한도에 닿았으면 세마포어 고갈 확정'
+  short:
+  - errno 28 이면 ipcs -s 로 실행 계정 소유 세마포어 확인 — 정리(ipcrm)는 Apache 를 멈춘 뒤 2차 승인으로
+  - errno 13·95 면 잠금 파일 경로 권한·방식 변경 검토(2차)
+  mid:
+  - 커널 세마포어 한도(kernel.sem)·Mutex 방식 표준화
+  long:
+  - 비정상 종료 뒤 자원이 남지 않게 기동·종료 절차 표준화
+  source: 룰 학습 3차(2026-10-15) — GPT 12차 소스 대조
+  vendor_cause: 뮤텍스 생성 실패 — 원인은 앞 errno 에 따라 다르다(세마포어 한도·파일시스템 공간, 권한, 지원하지 않는 잠금 방식)
+  vendor_action: ''
+  vendor_url: https://github.com/apache/httpd/blob/trunk/server/util_mutex.c
+  versions:
+  - Apache 2.4
+  version_note: util_mutex.c APLOG_EMERG — 세마포어 고갈로 단정하지 않는다
+- code: AH00086
+  severity: critical
+  category: disk
+  title: 오류 로그 파일 열기 실패
+  immediate:
+  - '`apachectl -t` 와 `apachectl -S` 로 ErrorLog 경로 확인 후 `namei -l <로그경로>` 로 디렉터리 존재·권한 확인'
+  - '`df -h <로그디렉터리>` 와 `ls -Z <로그디렉터리>` (SELinux) 로 공간·컨텍스트 확인'
+  short:
+  - '(2차·승인 후, 롤백: 변경 전 권한·경로 기록 후 원복) 디렉터리 생성·권한·SELinux 컨텍스트(httpd_log_t) 정정 후 기동'
+  mid:
+  - 'ErrorLog·CustomLog 경로를 로그 전용 디렉터리로 표준화(권한·SELinux 포함)'
+  long:
+  - '로그 볼륨 사용률 85%/95% 경보와 보관 기간 기반 용량 계획'
+  source: 룰 학습 3차(2026-10-15) — GPT 12차 대조
+  vendor_cause: 'AH00086 — ErrorLog 로 지정한 오류 로그 파일을 열지 못해 httpd 가 기동하지 못했다. 로그 디렉터리 미존재·권한(SELinux 포함) 문제·파일시스템 공간 부족이 흔한 원인.'
+  vendor_action: ''
+  vendor_url: https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors
+  versions:
+  - Apache 2.4
+  version_note: ''
+- code: AH00649
+  severity: error
+  category: disk
+  title: 전송(액세스) 로그 파일 열기 실패
+  immediate:
+  - '`grep -rn "CustomLog\|TransferLog" /etc/httpd/conf*` 로 경로 확인 후 `namei -l <로그경로>` 로 권한 확인'
+  - '`df -h <로그디렉터리>` 와 `ls -Z <로그디렉터리>` 로 공간·SELinux 확인'
+  short:
+  - '(2차·승인 후, 롤백: 원복) 디렉터리·권한·컨텍스트 정정 후 `apachectl -t`·graceful'
+  mid:
+  - 'ErrorLog·CustomLog 경로를 로그 전용 디렉터리로 표준화(권한·SELinux 포함)'
+  long:
+  - '로그 볼륨 사용률 85%/95% 경보와 보관 기간 기반 용량 계획'
+  source: 룰 학습 3차(2026-10-15) — GPT 12차 대조
+  vendor_cause: 'AH00649 — CustomLog/TransferLog 로 지정한 접근(전송) 로그 파일을 열지 못했다. 디렉터리 미존재·권한·SELinux 컨텍스트·공간 부족이 흔한 원인이며 기동 실패 또는 접근 로그 누락으로 이어진다.'
+  vendor_action: ''
+  vendor_url: https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors
+  versions:
+  - Apache 2.4
+  version_note: ''
+- code: AH02297
+  severity: error
+  category: disk
+  title: 로그 파일 디렉터리 접근 불가
+  immediate:
+  - '`apachectl -S` 의 Main ErrorLog 와 `grep -rnE "ErrorLog|CustomLog" <설정 디렉터리>` 로 대상 로그 경로 확인 (Apache 2.4, Debian 계열은 apache2ctl)'
+  - '`namei -l <로그 디렉터리>` 로 경로 각 단계의 존재·소유자·권한 확인 — 디렉터리가 없거나 기동 계정(보통 root)이 들어갈 수 없으면 확정, SELinux 사용 시 `ls -Zd <로그 디렉터리>` 도 확인'
+  short:
+  - 디렉터리 생성·권한 조정(2차)
+  mid:
+  - 로그 경로 표준화
+  long:
+  - 배포 시 디렉터리 점검 자동화
+  source: 룰 학습 3차(2026-10-15) — GPT 12차 대조
+  vendor_cause: 로그 파일용 디렉터리에 접근할 수 없음
+  vendor_action: ''
+  vendor_url: https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors
+  versions:
+  - Apache 2.4
+  version_note: ''
+- code: AH00128
+  severity: info
+  category: internal
+  title: 요청한 파일 없음(404)
+  immediate:
+  - '`grep -oE "File does not exist: [^,]+" <error_log> | sort | uniq -c | sort -rn | head` 로 반복 경로 상위 확인 — 한두 건(favicon 등)은 정상 범위 (2.2 는 코드 없는 같은 문구)'
+  - '`awk ''$9 == 404 {print $1}'' <access_log> | sort | uniq -c | sort -rn | head` 로 404 출처 IP 상위 확인 — 한 IP 가 여러 경로를 훑으면 스캐닝 의심(common/combined 형식 기준)'
+  short:
+  - 배포 누락·링크 오류면 콘텐츠 경로 점검(2차)
+  mid:
+  - 대량 404 가 특정 출처에서 반복되면 스캐닝 여부 확인
+  long:
+  - 콘텐츠 배포 검증 절차
+  source: 룰 학습 3차(2026-10-15) — GPT 대조 요청
+  vendor_cause: 요청한 파일이 DocumentRoot 아래에 없음
+  vendor_action: ''
+  vendor_url: https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors
+  versions:
+  - Apache 2.2(문구)
+  - Apache 2.4
+  version_note: 2.2 는 코드 없이 'File does not exist:' — 별칭으로 AH00128 에 잇는다. 장애가 아니라 정보

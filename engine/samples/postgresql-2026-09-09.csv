@@ -1,0 +1,9 @@
+2026-09-09 14:01:55.101 KST,"app","appdb",2201,"10.0.0.5:51234",68bf0a1b.899,3,"SELECT",2026-09-09 13:50:01 KST,5/1201,0,LOG,00000,"duration: 12345.678 ms  statement: SELECT * FROM orders WHERE status = 'NEW'",,,,,,,,,"psql","client backend",,0
+2026-09-09 14:02:11.532 KST,"app","appdb",2207,"10.0.0.5:51240",68bf0a1c.89f,5,"UPDATE",2026-09-09 13:50:03 KST,7/3302,11234,ERROR,40P01,"deadlock detected","Process 2207 waits for ShareLock on transaction 11230; blocked by process 2201.
+Process 2201 waits for ShareLock on transaction 11234; blocked by process 2207.","See server log for query details.",,,,"UPDATE orders SET status='PAID' WHERE id=1001",,,"JDBC","client backend",,0
+2026-09-09 14:02:31.004 KST,"app","appdb",2250,"10.0.0.5:51300",68bf0a1d.8ca,1,"authentication",2026-09-09 14:02:31 KST,,0,FATAL,53300,"sorry, too many clients already",,,,,,,,,"JDBC","client backend",,0
+2026-09-09 14:02:31.204 KST,"app","appdb",2251,"10.0.0.5:51301",68bf0a1d.8cb,1,"authentication",2026-09-09 14:02:31 KST,,0,FATAL,53300,"sorry, too many clients already",,,,,,,,,"JDBC","client backend",,0
+2026-09-09 14:03:15.777 KST,,,1180,,68bf0900.49c,12,,2026-09-09 13:40:00 KST,,0,LOG,00000,"checkpoint complete: wrote 18234 buffers (11.1%); 0 WAL file(s) added, 3 removed, 0 recycled; write=269.9 s, sync=0.1 s, total=270.2 s",,,,,,,,,"","checkpointer",,0
+2026-09-09 14:03:20.010 KST,,,1181,,68bf0900.49d,4,,2026-09-09 13:40:00 KST,,0,LOG,00000,"archive command failed with exit code 1",,,,,,,,,"","archiver",,0
+2026-09-09 14:03:20.011 KST,,,1181,,68bf0900.49d,5,,2026-09-09 13:40:00 KST,,0,WARNING,01000,"archiving write-ahead log file ""000000010000002A00000031"" failed too many times, will try again later",,,,,,,,,"","archiver",,0
+2026-09-09 14:04:02.500 KST,"app","appdb",2260,"10.0.0.5:51310",68bf0a1e.8d4,2,"INSERT",2026-09-09 14:03:59 KST,9/12,11300,PANIC,53100,"could not write to file ""pg_wal/xlogtemp.2260"": No space left on device",,,,,,,,,"JDBC","client backend",,0

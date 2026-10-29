@@ -1,0 +1,15 @@
+product: hpux
+title: HP-UX 운영 참고 (GPT 수집 — 벤더 문서 대조 필요)
+sections:
+- heading: 로그 위치
+  body: 시스템 syslog 기본 확인 지점은 /var/adm/syslog/syslog.log이며 커널·장치 메시지는 /var/adm/syslog
+    계열과 콘솔 로그를 확인한다. EMS 또는 OnlineDiag 설치 환경은 해당 진단 로그도 함께 본다.
+- heading: 장애 시 수집 방법
+  body: syslog.log, dmesg, ioscan, swapinfo, vmstat, sar, bdf, vgdisplay, pvdisplay
+    결과를 수집하고 Serviceguard 환경이면 패키지·클러스터 로그와 장애 시각을 함께 보존한다.
+- heading: 대표 장애 신호
+  body: swap reservation failure, VxFS full/오류, LVM lost quorum, PVLink/path failure,
+    SCSI asynchronous write/I/O 오류, 메모리 부족, 디스크와 HBA 하드웨어 오류를 우선 확인한다.
+- heading: 1차 확인 명령
+  body: uptime; vmstat 1 5; swapinfo -tam; bdf; ioscan -fnC disk; sar -d 1 5; vgdisplay
+    -v 로 CPU·메모리·swap·파일시스템·디스크·LVM 상태를 확인한다.

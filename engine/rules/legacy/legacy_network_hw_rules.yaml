@@ -1,0 +1,215 @@
+# 기존 'AI 로그분석기 v2.2' 내장 룰에서 변환 반입(tools/import_legacy_rules.py) — 중복(코드·패턴) 제외
+# 심각도 CRITICAL→critical HIGH→error MEDIUM→warn LOW→info · immediate_actions→즉시 · root_actions→중기 · negative_patterns→exclude
+rules:
+- id: LEG-NET-LINK-DOWN
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:LINEPROTO-5-UPDOWN.*line protocol.*down)|(?:LINK-3-UPDOWN.*Interface.*down)|(?:LINK-3-UPDOWN.*changed state to down)|(?:%\w+-LINK-\d+-UPDOWN)|(?:line protocol.*is down)|(?:GigabitEthernet\d[/\d]+.*down)|(?:FastEthernet\d[/\d]+.*down)|(?:TenGigabitEthernet\d[/\d]+.*down)|(?:FortyGigabitEthernet\d[/\d]+.*down)|(?:HundredGigE\d[/\d]+.*down)|(?:Port-channel\d+.*down)|(?:Ethernet\d+/\d+.*down)|(?:Link
+      Down.*ge-\d+/\d+/\d+)|(?:Link Down.*et-\d+/\d+/\d+)|(?:ifIndex.*LINK-DOWN)|(?:carrier lost.*eth\d)|(?:NETDEV WATCHDOG.*timeout)
+  severity: critical
+  category: hardware
+  verdict: 스위치/라우터 포트 링크 다운 — 네트워크 장비 포트 링크 다운. 케이블, SFP, 상대 장비 문제
+  immediate:
+  - '포트 상태·오류 카운터(읽기, Cisco IOS 기준): `show interfaces <if>` — ''line protocol is down''·CRC·input errors 기록'
+  - '다운 시각·반복 여부: `show logging | include <if>` — 짧은 간격 반복이면 플래핑(케이블·SFP 불량)'
+  - '광 모듈 수신 레벨: `show interfaces <if> transceiver detail` — Rx 가 경고 임계 이하면 광 경로 문제'
+  short:
+  - '(2차·승인 후, 롤백: 변경 전 running-config 백업) 케이블·SFP 교체 또는 shutdown/no shutdown 으로 포트 재활성화'
+  - '영향: 해당 포트 연결 장치 네트워크 통신 불가.'
+  mid:
+  - 케이블(패치코드) 교체와 포트 이전 시험
+  - SFP 트랜시버 교체(호환 모델)
+  - 상대 장비 포트 상태 확인
+  long:
+  - 링크 다운 SNMP 트랩 감시와 이중 링크(포트채널·이중화) 구성 확대
+  source_note: 'legacy-analyzer-v2.2 network_hw_rules.json NET-LINK-DOWN (원 출처: builtin)'
+  exclude: (?:WebContainer)
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-NET-BGP
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:BGP-3-NOTIFICATION)|(?:BGP-5-ADJCHANGE.*Down)|(?:BGP-5-ADJCHANGE.*neighbor.*down)|(?:BGP.*session.*failed)|(?:bgp.*adjacency.*down)|(?:BGP.*peer.*lost)|(?:%BGP-\d+-)|(?:neighbor.*BGP.*down)|(?:bgpd.*down)|(?:BGP.*Holdtime
+      expired)|(?:BGP.*Notification received)
+  severity: critical
+  category: security
+  verdict: BGP 세션 다운 — BGP 피어 세션 다운. 링크 장애, 인증 오류, Hold Timer 만료
+  immediate:
+  - 'BGP 세션 상태(읽기): `show ip bgp summary` (IOS) 또는 `show bgp summary` — State/PfxRcd 열이 숫자가 아니면(Idle·Active) 세션 다운'
+  - '다운 원인: `show ip bgp neighbors <peer_ip> | include BGP state|Last reset` — Hold timer expired·인증 실패 등 기록'
+  - '피어 도달(읽기): `ping <peer_ip> source <로컬 인터페이스>`'
+  short:
+  - '(2차·승인 후, 롤백: 변경 전 router bgp 설정 백업) 링크 복구 후 세션 재수립 확인, 인증·타이머 불일치면 피어 측과 합의 후 수정'
+  - '영향: 해당 BGP 경로 소실, 인터넷 트래픽 중단.'
+  mid:
+  - BGP 피어 네트워크 복구
+  - MD5 인증 설정 확인
+  - Keepalive/Hold Timer 조정
+  - ISP 피어 담당자 연락
+  long:
+  - BGP 세션 상태 변화 감시(syslog ADJCHANGE·SNMP)와 피어 연락망·설정 문서 관리
+  source_note: 'legacy-analyzer-v2.2 network_hw_rules.json NET-BGP (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-NET-OSPF
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:OSPF-5-ADJCHG.*Down)|(?:OSPF.*neighbor.*down)|(?:OSPF.*adjacency.*lost)|(?:ospfd.*neighbor.*down)|(?:%OSPF-\d+-ADJCHG)|(?:OSPF.*dead interval.*expired)|(?:OSPF.*state.*ExStart)
+  severity: error
+  category: hardware
+  verdict: OSPF 인접 관계 다운 — OSPF 인접 관계 소실. 링크 장애, Dead Interval 초과
+  immediate:
+  - '인접 관계(읽기): `show ip ospf neighbor` — FULL 이 아닌 이웃과 Dead 시간 기록'
+  - '인터페이스 타이머·영역: `show ip ospf interface <if>` — Hello/Dead·Area·네트워크 유형이 양단 같은지'
+  - '이벤트 시각: `show logging | include OSPF`'
+  short:
+  - '(2차·승인 후, 롤백: running-config 백업) 링크 복구 또는 양단 타이머·MTU 불일치 수정'
+  - '영향: OSPF 라우팅 재수렴, 경로 소실.'
+  mid:
+  - Dead Interval 증가 검토
+  - OSPF 링크 복구와 양단 MTU·네트워크 유형 일치
+  - BFD(Bidirectional Forwarding Detection) 설정
+  long:
+  - OSPF 인접 변화 감시와 BFD 적용으로 장애 감지 시간 단축 표준화
+  source_note: 'legacy-analyzer-v2.2 network_hw_rules.json NET-OSPF (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-NET-STP
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:SPANNING_TREE.*TCN)|(?:STP.*topology.*change)|(?:Spanning-tree.*port.*change)|(?:RSTP.*topology.*change)|(?:%SPANTREE-\d+-TOPCHANGE)|(?:BPDU.*received)|(?:STP.*port.*blocking)|(?:STP.*reconverging)
+  severity: error
+  category: hardware
+  verdict: STP 토폴로지 변경 — STP 토폴로지 변경. 링크 장애, 루프, 잘못된 포트 설정
+  immediate:
+  - '토폴로지 변경 횟수·발생 포트(읽기): `show spanning-tree detail | include changes|from` — 최근 변경 발생 포트 기록'
+  - '루트 브리지 변경 여부: `show spanning-tree root`'
+  - '이벤트: `show logging | include SPANTREE`'
+  short:
+  - '(2차·승인 후, 롤백: running-config 백업) 원인 포트(플래핑·루프)에 PortFast·BPDU Guard 설정 또는 해당 포트 격리'
+  - '영향: 네트워크 재수렴으로 수 초~수십 초 통신 중단.'
+  mid:
+  - PortFast/BPDU Guard 설정 검토
+  - 루프 원인 포트 격리(err-disable 원인 확인)
+  - RSTP/MST 적용 검토
+  long:
+  - 토폴로지 변경 횟수 감시와 루트 브리지 우선순위 고정 설계 문서화
+  source_note: 'legacy-analyzer-v2.2 network_hw_rules.json NET-STP (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-NET-IF-ERR
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:input errors\s+\d{3,})|(?:CRC\s+\d{3,})|(?:output errors\s+\d{3,})|(?:runts\s+\d{3,})|(?:giants\s+\d{3,})|(?:collisions\s+\d{3,})|(?:frame\s+\d{3,})|(?:interface.*error.*increment)
+  severity: warn
+  category: internal
+  verdict: 인터페이스 오류 증가 — 네트워크 인터페이스 오류 패킷 증가. 케이블 불량, 듀플렉스 불일치
+  immediate:
+  - '오류 카운터 증가량(읽기): `show interfaces <if> | include errors|CRC|runts|giants|collisions` — 값 기록 후 5분 뒤 재조회해 증가량 비교'
+  - '전체 포트 오류 요약: `show interfaces counters errors` (Catalyst)'
+  - '속도·듀플렉스: `show interfaces <if> status` — half-duplex·속도 불일치면 원인 후보'
+  short:
+  - '(2차·승인 후, 롤백: 초기화 전 출력 보관) `clear counters <if>` 후 증가 추이 확인, 지속 증가면 케이블·SFP·포트 교체'
+  - '영향: 패킷 손실, 네트워크 성능 저하.'
+  mid:
+  - 케이블(패치코드)·SFP 교체 후 오류 증가 재측정
+  - 속도/듀플렉스를 양단 동일 정책(auto 또는 고정)으로 통일
+  - SFP 광 레벨(DOM) 점검
+  long:
+  - 인터페이스 오류율 SNMP 감시(ifInErrors 증가율) 등록
+  source_note: 'legacy-analyzer-v2.2 network_hw_rules.json NET-IF-ERR (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-NET-CPU
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:%CPU.*utilization.*for.*\d{2,3}%)|(?:CPU utilization.*\d{2,3}%.*five)|(?:high cpu.*router)|(?:high cpu.*switch)|(?:show processes cpu.*high)|(?:CPU.*threshold.*exceeded.*IOS)
+  severity: error
+  category: upstream
+  verdict: 네트워크 장비 CPU 과부하 — 네트워크 장비 CPU 과부하. 과도한 라우팅, DDoS, 잘못된 설정
+  immediate:
+  - 'CPU 상위 프로세스(읽기): `show processes cpu sorted | exclude 0.00%` — 특정 프로세스(IP Input·BGP 등) 편중 기록'
+  - 'CPU 추이: `show processes cpu history`'
+  - '트래픽 급증 포트: `show interfaces | include line protocol|input rate|output rate`'
+  short:
+  - '(2차·승인 후, 롤백: 변경 전 설정 백업) 비정상 트래픽 원인 포트·출발지 확인 후 ACL·CoPP 적용 요청'
+  - '영향: 라우팅/스위칭 지연, 패킷 드롭.'
+  mid:
+  - 불필요한 기능(디버그·로깅 과다·미사용 프로토콜) 비활성화
+  - ACL로 비정상 트래픽 차단
+  - 장비 처리 용량(CPU·메모리) 업그레이드 검토
+  long:
+  - 장비 CPU 사용률 감시 임계(5분 평균 70%) 등록
+  source_note: 'legacy-analyzer-v2.2 network_hw_rules.json NET-CPU (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-NET-LACP
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:LACP.*port.*leave)|(?:LACP.*timeout)|(?:port-channel.*down)|(?:EtherChannel.*misconfigured)|(?:LACP.*out of sync)|(?:%EC-5-CANNOT_BUNDLE)|(?:bundle.*degraded)|(?:lag.*member.*fail)
+  severity: error
+  category: upstream
+  verdict: LACP 포트채널 장애 — LACP 포트 채널 장애. 설정 불일치 또는 멤버 포트 이탈
+  immediate:
+  - '포트채널 멤버 상태(읽기): `show etherchannel summary` — 플래그 P(번들됨)가 아닌 s·I·D 멤버 기록'
+  - 'LACP 피어 정보: `show lacp neighbor` — 피어 시스템 ID·키 불일치 여부'
+  - 서버 측 본딩이면 Linux `cat /proc/net/bonding/bond0` / AIX `entstat -d ent<N>` (EtherChannel 장치)
+  short:
+  - '(2차·승인 후, 롤백: running-config 백업) 멤버 포트 속도·듀플렉스·LACP 모드를 양단 일치시킨 뒤 재번들 확인'
+  - '영향: 링크 이중화 소실, 대역폭 감소.'
+  mid:
+  - LACP 설정 일치화 (mode, speed, duplex)
+  - 이탈 멤버 포트 재활성화와 케이블 점검
+  - 포트채널 설정 템플릿 표준화
+  long:
+  - 포트채널 멤버 수 감소 감시 등록
+  source_note: 'legacy-analyzer-v2.2 network_hw_rules.json NET-LACP (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-NET-DDOS
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:DDoS.*detected)|(?:traffic.*anomaly.*detected)|(?:SYN.*flood.*detected)|(?:UDP.*flood.*detected)|(?:ICMP.*flood.*detected)|(?:rate.*limit.*exceeded.*attack)|(?:packet.*flood.*from)|(?:attack.*source.*detected)
+  severity: critical
+  category: internal
+  verdict: DDoS/트래픽 폭주 감지 — DDoS 공격 감지. 대용량 비정상 트래픽 유입
+  immediate:
+  - '유입 트래픽 급증 포트(읽기): `show interfaces | include line protocol|input rate` — 평시 대비 수 배 이상 포트 기록'
+  - '출발지·목적지 상위 확인: NetFlow 수집기 또는 방화벽·IPS 대시보드의 Top Talker 화면 캡처'
+  - 보안·네트워크 담당 즉시 통보 — 대상 서비스·시각·규모(bps/pps) 기록
+  short:
+  - '(2차·승인 후, 롤백: 적용 규칙 번호 기록 후 해제) 보안 담당 승인 하에 공격 출발지 ACL 차단 또는 ISP 에 업스트림 필터링·Blackhole 요청'
+  - '영향: 네트워크 대역폭 포화, 정상 서비스 접속 불가.'
+  mid:
+  - ISP 업스트림 필터링 요청
+  - Anti-DDoS 솔루션(스크러빙) 활성화
+  - BGP Blackhole Routing 적용
+  long:
+  - DDoS 대응 절차(ISP 연락망·스크러빙 전환 기준) 문서화와 트래픽 이상 감시 임계 등록
+  source_note: 'legacy-analyzer-v2.2 network_hw_rules.json NET-DDOS (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관

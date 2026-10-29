@@ -1,0 +1,237 @@
+product: cubrid
+layer: db
+note: GPT 협업 수집분 — 벤더 공식 문서와 대조 후 확정
+codes:
+- code: '-2'
+  severity: error
+  category: internal
+  title: 일반 오류(ER_GENERIC_ERROR)
+  immediate:
+  - "`grep -nE \"CODE = -2([^0-9]|$)\" $CUBRID/log/server/<db>_*.err | tail -10` 로 같은 줄의 오류 메시지 본문 확인 — -2 는 일반 오류라 본문(앞뒤 줄)이 실제 원인이다"
+  - "`grep -n -B3 -A3 \"CODE = -2\" $CUBRID/log/server/<db>_*.err | tail -40` 로 직전·직후 다른 오류 코드(-3 메모리, -4 중단 등)가 함께 있는지 확인"
+  short:
+  - "(2차·승인 후) 본문이 가리키는 원인별 절차로 넘긴다 — 같은 시각 다른 코드가 있으면 그 코드의 조치를 따른다"
+  - "반복되면 설치 판의 include/error_code.h 와 대조해 코드 의미를 확인하고 제조사 문의 자료(오류 로그·cubrid.conf) 준비"
+  mid:
+  - 일반 오류로만 남는 상황을 줄이도록 애플리케이션 오류 처리·로그 수준을 점검
+  long:
+  - 오류 코드별 발생 추이를 감시해 일반 오류의 실제 원인 분포를 정리
+  source: CUBRID 소스 src/base/error_code.h(release/10.2·develop) 대조 — 2026-10-16 5차 보강(이전 '가상 메모리 부족' 기재는 -3 과 혼동)
+  note: ER_GENERIC_ERROR
+  vendor_cause: "ER_GENERIC_ERROR — 원인을 특정 코드로 분류하지 않은 일반 오류. 같은 줄의 메시지 본문과 앞뒤 오류가 실제 원인을 알려 준다. (가상 메모리 부족은 -3 ER_OUT_OF_VIRTUAL_MEMORY)"
+  vendor_action: ''
+  vendor_url: https://github.com/CUBRID/cubrid/blob/release/10.2/src/base/error_code.h
+  verify_note: "미검증 — GPT 50차는 '10.2 매뉴얼은 -2 를 메모리 부족으로 기술'이라 했으나 release/10.2·develop 소스는 -2=ER_GENERIC_ERROR, -3=ER_OUT_OF_VIRTUAL_MEMORY. 매뉴얼 표와 소스가 다를 수 있어 설치 판의 error_code.h 로 확인"
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: '서버 오류 번호(음수)·ER_ 이름은 8.4~11.4 동일 — cub_server.log/cub_broker 오류 로그 ''Time: MM/DD/YY hh:mm:ss.mmm - ERROR *** file … ERROR CODE = -n'' 형식 공통'
+- code: '-73'
+  severity: error
+  category: lock
+  title: 객체 잠금 시간초과
+  immediate:
+  - "`cubrid lockdb -o <path>/lockdb_<db>.txt <db>` 로 잠금 표를 파일로 보존(읽기 전용) 후 `grep -n -i -B3 -A6 \"holders\" <path>/lockdb_<db>.txt | head -80` 으로 대상 객체의 보유·대기 Tran_index 확인 — 같은 보유 트랜잭션이 여러 대기를 막고 있으면 원인 트랜잭션 (9.3·10.x·11.x)"
+  - "lockdb 출력 상단의 트랜잭션 표에서 보유 Tran_index 의 프로그램·사용자·호스트를 확인하고 `grep -n -i \"lock_timeout\" $CUBRID/conf/cubrid.conf` 로 잠금 대기 한도 설정값 확인(-1 은 무한 대기)"
+  short:
+  - "(2차·업무 담당 승인 후, 롤백: 종료된 트랜잭션은 롤백되므로 해당 업무 재처리 필요) 보유 트랜잭션이 끝나지 않으면 `cubrid killtran -i <Tran_index> <db>` 로 종료"
+  - lock_timeout과 장기 트랜잭션을 분석
+  mid:
+  - 트랜잭션 범위와 객체 접근 순서를 개선
+  long:
+  - 잠금 대기 모니터링과 배치 동시성 기준을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://www.cubrid.org/manual/en/latest/admin/control.html)
+  note: ER_LK_OBJECT_TIMEOUT_SIMPLE_MSG
+  vendor_cause: 다른 트랜잭션의 객체 잠금 해제를 기다리다 lock timeout이 발생했다.
+  vendor_action: ''
+  vendor_url: https://www.cubrid.org/manual/en/10.0/admin/control.html
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: '서버 오류 번호(음수)·ER_ 이름은 8.4~11.4 동일 — cub_server.log/cub_broker 오류 로그 ''Time: MM/DD/YY hh:mm:ss.mmm - ERROR *** file … ERROR CODE = -n'' 형식 공통'
+- code: '-76'
+  severity: error
+  category: lock
+  title: 페이지 잠금 시간초과
+  immediate:
+  - "`cubrid lockdb -o <path>/lockdb_<db>.txt <db>` 로 잠금 표를 파일로 보존(읽기 전용) 후 `grep -n -i -B3 -A6 \"holders\" <path>/lockdb_<db>.txt | head -80` 으로 대상 객체의 보유·대기 Tran_index 확인 — 같은 보유 트랜잭션이 여러 대기를 막고 있으면 원인 트랜잭션 (9.3·10.x·11.x)"
+  - "lockdb 출력 상단의 트랜잭션 표에서 보유 Tran_index 의 프로그램·사용자·호스트를 확인하고 `grep -n -i \"lock_timeout\" $CUBRID/conf/cubrid.conf` 로 잠금 대기 한도 설정값 확인(-1 은 무한 대기)"
+  short:
+  - "(2차·업무 담당 승인 후, 롤백: 종료된 트랜잭션은 롤백되므로 해당 업무 재처리 필요) 보유 트랜잭션이 끝나지 않으면 `cubrid killtran -i <Tran_index> <db>` 로 종료"
+  - 장기 트랜잭션과 핫페이지 발생 SQL을 분석
+  mid:
+  - 인덱스와 트랜잭션 구조를 개선해 경합을 분산
+  long:
+  - 페이지 경합과 lock timeout 추세를 상시 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://www.cubrid.org/manual/en/latest/admin/control.html)
+  note: ER_LK_PAGE_TIMEOUT
+  vendor_cause: 다른 트랜잭션의 페이지 잠금 해제를 기다리다 lock timeout이 발생했다.
+  vendor_action: ''
+  vendor_url: https://www.cubrid.org/manual/en/10.0/admin/control.html
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: '서버 오류 번호(음수)·ER_ 이름은 8.4~11.4 동일 — cub_server.log/cub_broker 오류 로그 ''Time: MM/DD/YY hh:mm:ss.mmm - ERROR *** file … ERROR CODE = -n'' 형식 공통'
+- code: '-1021'
+  severity: error
+  category: lock
+  title: 교착상태 감지
+  immediate:
+  - "`grep -n -A2 -w \"CODE = -1021\" $CUBRID/log/server/<db>_*.err | tail -30` 으로 교착 발생 시각·Tran·CLIENT(프로그램) 확인 — 같은 프로그램 쌍이 반복되면 객체 접근 순서 문제 (9.3·10.x·11.x)"
+  - "이벤트 로그가 있으면 `grep -n -A20 \"DEADLOCK\" $CUBRID/log/server/<db>_*.event | tail -60` 으로 교착 참여 트랜잭션·SQL 확인(이벤트 로그가 생성되는 버전), 발생 중이면 `cubrid lockdb -o <path>/lockdb_<db>.txt <db>` 로 잠금 표를 파일로 보존(읽기 전용)"
+  short:
+  - "(2차·애플리케이션 담당 승인 후, 롤백: 재처리 전 중복 반영 여부 확인) 실패한 트랜잭션 재처리"
+  - 상충 트랜잭션의 객체 접근 순서를 분석
+  mid:
+  - 잠금 순서를 통일하고 트랜잭션 범위를 축소
+  long:
+  - deadlock 자동수집과 재시도 표준을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://www.cubrid.org/manual/en/8.4.4/admin/control.html)
+  note: ER_LK_DEADLOCK_CYCLE_DETECTED
+  vendor_cause: 둘 이상의 트랜잭션이 서로의 잠금 해제를 기다리는 교착상태 사이클이 감지됐다.
+  vendor_action: 인덱스로 잠금 범위를 줄이고 트랜잭션을 짧게 하거나 트랜잭션 격리 수준을 낮춰 교착 발생을 줄인다.
+  vendor_url: https://www.cubrid.org/manual/en/latest/sql/transaction.html
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: CAS(브로커) 오류 -10xxx 는 8.4~11.4 동일
+- code: '-10002'
+  severity: critical
+  category: memory
+  title: CAS 메모리 할당 실패
+  immediate:
+  - "`cubrid broker status -f <broker>` 로 CAS 별 PSIZE(프로세스 크기) 확인, `grep -n -i \"APPL_SERVER_MAX_SIZE\" $CUBRID/conf/cubrid_broker.conf` 값 근처면 CAS 한도 도달 (9.3·10.x·11.x)"
+  - "`free -m` 과 `ps -eo pid,rss,comm --sort=-rss | head -15` 로 서버 가용 메모리와 상위 메모리 프로세스 확인 — available 이 거의 0 이면 OS 메모리 부족(Linux)"
+  short:
+  - "(2차·업무 담당 승인 후, 롤백: 원래 접속 수·일정으로 되돌림) 비필수 애플리케이션 접속 수 축소·배치 보류"
+  - CAS 프로세스 수와 쿼리별 메모리 사용을 점검
+  mid:
+  - broker 구성과 서버 메모리 용량을 재산정
+  long:
+  - CAS 메모리 사용률과 재시작 추세를 모니터링
+  source: GPT 수집·벤더 문서 대조 완료(https://www.cubrid.org/manual/en/latest/admin/control.html)
+  note: CAS_ER_NO_MORE_MEMORY
+  vendor_cause: CAS가 필요한 메모리를 할당하지 못했다.
+  vendor_action: ''
+  vendor_url: https://www.cubrid.org/manual/en/latest/admin/control.html
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: CAS(브로커) 오류 -10xxx 는 8.4~11.4 동일
+- code: '-10003'
+  severity: error
+  category: connection
+  title: CAS 통신 오류
+  immediate:
+  - "`cubrid broker status -b` 로 브로커별 AS(CAS 수)·JQ(대기열)·LONG-T·LONG-Q·ERR-Q 확인, `cubrid broker status -f <broker>` 의 CLIENT IP·STATUS 로 연결이 닫힌 CAS 확인 (9.3·10.x·11.x)"
+  - "`grep -n -- \"-10003\" $CUBRID/log/broker/error_log/<broker>_*.err | tail -20` 과 `netstat -s | grep -i -E \"reset|retrans\" | head` 로 시각·TCP 재전송·리셋 증가 확인 — 특정 클라이언트 IP 만이면 네트워크·방화벽 세션 타임아웃 의심"
+  short:
+  - "(2차·애플리케이션 담당 승인 후, 롤백: 이전 풀 설정 보관 후 되돌림) 커넥션 풀의 유효성 검사·재접속 설정 확인·반영"
+  - broker 로그와 방화벽, TCP 오류를 분석
+  mid:
+  - 네트워크 타임아웃과 연결 재시도 정책을 개선
+  long:
+  - CAS 연결 품질과 오류율 경보를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://www.cubrid.org/manual/en/latest/admin/control.html)
+  note: CAS_ER_COMMUNICATION
+  vendor_cause: CAS가 클라이언트 데이터를 수신하지 못했거나 통신 오류가 발생했다.
+  vendor_action: ''
+  vendor_url: https://www.cubrid.org/manual/en/latest/admin/control.html
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: CAS(브로커) 오류 -10xxx 는 8.4~11.4 동일
+- code: '-10017'
+  severity: critical
+  category: capacity
+  title: 가용 CAS 없음
+  immediate:
+  - "`cubrid broker status -b` 로 브로커별 AS(CAS 수)·JQ(대기열)·LONG-T·LONG-Q·ERR-Q 확인 — JQ 가 0 보다 크게 유지되면 CAS 포화 확정 (9.3·10.x·11.x)"
+  - "`cubrid broker status -f <broker>` 로 BUSY CAS 의 마지막 SQL·실행 시각 확인(장기 질의가 CAS 를 붙잡는지), `grep -n -E \"MAX_NUM_APPL_SERVER|MIN_NUM_APPL_SERVER\" $CUBRID/conf/cubrid_broker.conf` 로 CAS 수 한도 확인"
+  short:
+  - "(2차·승인 후, 롤백: 원래 값으로 되돌려 브로커에 다시 반영) 서버 메모리 여유 확인 뒤 MAX_NUM_APPL_SERVER 상향 또는 애플리케이션 풀 최대치 조정으로 요청 유입 완화"
+  - CAS 수와 max clients, 장기 쿼리를 점검
+  mid:
+  - 피크 동시접속량 기준으로 broker와 CAS 용량을 재산정
+  long:
+  - 접속 백프레셔와 CAS 포화 임계치 경보를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://www.cubrid.org/manual/en/latest/admin/control.html)
+  note: CAS_ER_FREE_SERVER
+  vendor_cause: 애플리케이션 연결 요청을 처리할 CAS를 할당할 수 없다.
+  vendor_action: 잠시 후 다시 시도한다.
+  vendor_url: https://www.cubrid.org/manual/en/latest/admin/control.html
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: CAS(브로커) 오류 -10xxx 는 8.4~11.4 동일
+- code: '-10025'
+  severity: critical
+  category: connection
+  title: DB 서버 연결 끊김
+  immediate:
+  - "`cubrid server status` 와 `ps -ef | grep cub_server | grep -v grep` 로 <db> 서버 기동 여부 확인 — 없으면 서버 다운(-111 과 같이 .err 확인) (9.3·10.x·11.x)"
+  - "`cubrid broker status -b` 로 브로커별 AS(CAS 수)·JQ(대기열)·LONG-T·LONG-Q·ERR-Q 확인, `ls -lt $CUBRID/log/server/ | head` 후 `tail -100 $CUBRID/log/server/<db>_<최근>.err` 로 서버 쪽 오류 시각 확인, HA 면 `cubrid heartbeat status` 로 노드 역할 확인"
+  short:
+  - "(2차·승인 후, 롤백: 해당 없음 — 연결만 다시 맺고 진행 중 트랜잭션은 롤백됨) 서버 정상 확인 뒤 `cubrid broker reset <broker>` 로 영향 CAS 의 DB 연결 재수립"
+  - DB 서버 종료, 네트워크 단절, broker 로그를 분석
+  mid:
+  - HA와 broker 재연결 구성을 검증하고 장애 원인을 제거
+  long:
+  - DB 서버와 CAS 간 헬스체크 및 자동복구를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://www.cubrid.org/manual/en/latest/admin/control.html)
+  note: CAS_ER_DBSERVER_DISCONNECTED
+  vendor_cause: CAS가 DB 서버와 통신할 수 없다.
+  vendor_action: ''
+  vendor_url: https://www.cubrid.org/manual/en/latest/admin/control.html
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: CAS(브로커) 오류 -10xxx 는 8.4~11.4 동일

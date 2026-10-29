@@ -1,0 +1,15 @@
+product: windows
+title: Windows Server 운영 참고 (GPT 수집 — 벤더 문서 대조 필요)
+sections:
+- heading: 로그 위치
+  body: 핵심 로그는 Event Viewer의 Windows Logs/System, Application, Security이며 파일은 %SystemRoot%\System32\winevt\Logs\*.evtx에
+    있다. 서비스별 Operational 로그도 Applications and Services Logs에서 확인한다.
+- heading: 장애 시 수집 방법
+  body: System/Application EVTX와 Get-WinEvent, systeminfo, tasklist, netstat, 성능 카운터를
+    수집하고 BSOD면 %SystemRoot%\MEMORY.DMP 또는 Minidump와 이벤트 41/1001을 함께 보존한다.
+- heading: 대표 장애 신호
+  body: Event ID 41/6008 비정상 종료, 55/98 파일시스템, 129/153/157 스토리지, 2019/2020 커널 풀, 4227/4231
+    TCP 포트, 7031 서비스 종료를 우선 확인한다.
+- heading: 1차 확인 명령
+  body: PowerShell에서 Get-WinEvent -LogName System -MaxEvents 200 | ? LevelDisplayName
+    -in 'Critical','Error', Get-Service, Get-Counter '\Memory\Available MBytes'를 확인한다.

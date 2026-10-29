@@ -1,0 +1,5 @@
+PyYAML>=6.0
+lxml>=5.0          # 보고서(HWPX) · 자산 문서 읽기
+cryptography>=42   # 룰팩 Ed25519 서명 · 계정 자료 암호화
+pywebview>=5.0     # GUI (Windows: WebView2)
+# psycopg2-binary>=2.9   # 서버형에서 PostgreSQL 을 쓸 때만(기본은 SQLite)

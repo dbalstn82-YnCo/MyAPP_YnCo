@@ -1,0 +1,19 @@
+# 아이디어 3(2026-10-16) — Unix(AIX·HP-UX·Solaris) 판정 중 기존 절차가 실제로 맞는 것만 '전용'으로 잇는다(절차 파일은 고치지 않는다).
+# 맞지 않는 판정은 r6_unix_procedures.yaml 의 전용 절차로 옮겼다.
+# 공통 룰 OS-UNX-001/002/003 은 여기 넣지 않는다 — match 는 제품을 가리지 않아 제품별 절차에 이으면 다른 OS 판정에도 붙는다(UNX-PROC-R6-* 참고).
+links:
+- procedure: AIX-PROC-HARDWARE
+  match: [DCB47997, OS-AIX-ERRPT-001, LEG-AIX-ERRPT]
+  reviewed: "2026-10-16 판정 적합성 확인 — errpt 상세·lspath·디스크 상태 1차 확인과 경로 복구(chpath)·미러 디스크 교체 2차가 디스크·어댑터 PERM 오류(SC_DISK_ERR4 포함)와 errpt 하드웨어 경고 일반에 그대로 맞음"
+- procedure: AIX-PROC-R5-DISK
+  match: [F7FA22C9]
+  reviewed: "2026-10-16 판정 적합성 확인 — J2_FS_FULL 은 JFS2 공간 부족 그 자체이며 df -g·큰 파일 확인과 tar 보관 후 정리·chfs 증설 단계가 그대로 맞음"
+- procedure: AIX-PROC-R5-INTERNAL
+  match: [LEG-AIX-DUMP]
+  reviewed: "2026-10-16 판정 적합성 확인 — 커널 패닉 시스템 덤프는 같은 제품·유형(hardware) 절차가 아니라 sysdumpdev -L·errpt·snap 수집이 들어 있는 시스템 덤프 절차가 맞음"
+- procedure: HPUX-PROC-HARDWARE
+  match: [HPUX-EMS-ALERT, HPUX-ONLINE-DIAG, HPUX-MEMORY-DEALLOC]
+  reviewed: "2026-10-16 판정 적합성 확인 — EMS event.log·syslog 확인, 메모리 이벤트·페이지 할당 해제 전용 1차 단계, HPE 의뢰(3차)가 EMS·온라인 진단 경보와 메모리 할당 해제에 맞음(11i v1/v2 는 ioscan -P health 대신 event.log 로 판단)"
+- procedure: SOL-PROC-HARDWARE
+  match: [PCIEX-8000-5Y, SOL-FMA-RETIRE, SOL-MEMORY-ECC, SOL-SCSI-BUS-HUNG]
+  reviewed: "2026-10-16 판정 적합성 확인 — fmadm faulty·fmdump·iostat -En·cfgadm 1차와 cfgadm unconfigure·교체 후 fmadm repaired 2차가 FMA 결함 진단(PCIe·메모리 ECC·자원 격리)과 SCSI 버스 정지(장치·컨트롤러 교체)에 맞음"

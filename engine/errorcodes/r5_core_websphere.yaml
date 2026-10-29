@@ -1,0 +1,217 @@
+product: websphere
+layer: was
+note: 5차 핵심 코드 보강(2026-10-16) — IBM Docs WebSphere Application Server traditional 메시지 참조(WSVR·HMGR·DCSV·J2CA, 8.5.5 / J2CA 는 9.0.5 도) 원문 대조. 로그=<PROFILE_ROOT>/logs/<server>/SystemOut.log, FFDC=<PROFILE_ROOT>/logs/ffdc. wsadmin 은 비밀번호를 명령줄에 쓰지 않는다(프롬프트 또는 soap.client.props)
+codes:
+- code: WSVR0201E
+  severity: error
+  category: internal
+  title: 애플리케이션 초기화 실패
+  vendor_cause: 애플리케이션 {0} 이 초기화(시작)에 실패했다는 메시지(Application, {0}, failed to initialize). 문서상 예상치 못한 예외로 원인이 바로 드러나지 않으며, 함께 찍힌 예외({1})와 FFDC 에 실제 원인(클래스 누락·리소스 참조 실패·초기화 코드 예외)이 있다.
+  vendor_action: 문제가 계속되면 메시지 ID 로 IBM 지원 사이트를 검색해 추가 정보를 확인
+  vendor_url: https://www.ibm.com/docs/en/was-nd/8.5.5?topic=messages-wsvr
+  immediate:
+  - "`grep -n -A40 'WSVR0201E' <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -80` 로 실패한 애플리케이션 이름과 뒤따르는 예외(Caused by) 기록"
+  - "`ls -lt <PROFILE_ROOT>/logs/ffdc | head -10` 로 같은 시각 FFDC 파일을 찾아 첫 예외 확인, 직전 배포·설정 변경 이력과 대조"
+  - "`wsadmin.sh -lang jython -c \"print AdminControl.completeObjectName('type=Application,name=<app>,*')\"` 로 기동 여부 확인(빈 값이면 미기동, 읽기 전용)"
+  short:
+  - "(2차·승인 후, 롤백: 직전 EAR 재배포) 예외 원인(누락 라이브러리·JNDI 리소스·데이터소스)을 고친 뒤 해당 애플리케이션만 시작, 직전 배포가 원인이면 이전 버전 EAR 로 되돌림"
+  mid:
+  - "배포 전 검증 목록에 공유 라이브러리 참조·리소스 참조(JNDI) 바인딩 확인을 넣고 스테이징에서 애플리케이션 시작 시험을 필수화"
+  long:
+  - "SystemOut.log 의 WSVR0201E·WSVR0209E 를 배포 직후 자동 점검하고 FFDC 수 증가를 경보로 등록"
+  versions:
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  version_note: WSVR 메시지는 traditional 전용(Liberty 는 CWWK* 체계) — IBM Docs 8.5.5 메시지 참조 원문 확인, 7.0/8.0 은 미대조
+  source: 공식 문서 대조(2026-10-16 5차 보강)
+- code: WSVR0209E
+  severity: error
+  category: internal
+  title: EJB JAR 시작 실패
+  vendor_cause: EJB JAR {0} 의 엔터프라이즈 빈 {1} 이 시작되지 못했다는 메시지(Unable to start EJB jar). 배포 누락·클래스 로딩 실패·참조 리소스(데이터소스·JMS) 바인딩 오류가 흔하며, 이 메시지와 직전 WSVR0037I 사이의 오류가 원인이다.
+  vendor_action: 실패한 EJB 를 담은 JAR 가 배포되었는지 확인하고, 이 메시지와 직전 WSVR0037I 메시지 사이의 오류 메시지를 확인
+  vendor_url: https://www.ibm.com/docs/en/was-nd/8.5.5?topic=messages-wsvr
+  immediate:
+  - '`grep -n -B5 -A25 ''WSVR0209E'' <PROFILE_ROOT>/logs/<server>/SystemOut.log | head -80` 로 예외 클래스·스택 원문 확인(필터로 줄을 버리지 않는다)'
+  - 같은 시각 `<PROFILE_ROOT>/logs/<server>/SystemErr.log` 와 `ls -lt <PROFILE_ROOT>/logs/ffdc/ | head` 의 FFDC 확인
+  - '`ls -l <PROFILE_ROOT>/installedApps/<cell>/<app>.ear/` 로 해당 EJB JAR 가 실제 배포되어 있는지 확인'
+  short:
+  - "(2차·승인 후, 롤백: 직전 EAR 재배포) 누락 JAR·잘못된 바인딩을 고쳐 재배포하고 해당 애플리케이션만 시작 — 다른 애플리케이션 영향 없는지 확인"
+  mid:
+  - "EJB 참조·리소스 참조 바인딩을 배포 스크립트(wsadmin AdminApp.install 옵션)에 명시해 수동 바인딩 누락을 막음"
+  long:
+  - "배포 후 WSVR0209E 자동 점검과 EJB 모듈별 시작 시험을 회귀 시험에 포함"
+  versions:
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  version_note: WSVR 메시지는 traditional 전용 — IBM Docs 8.5.5 메시지 참조 원문 확인, 7.0/8.0 은 미대조
+  source: 공식 문서 대조(2026-10-16 5차 보강)
+- code: HMGR0020E
+  severity: error
+  category: internal
+  title: HA 관리자 구성 문서 읽기 실패
+  vendor_cause: HA 관리자(코어 그룹)가 구성 문서 {0} 을 저장소에서 읽지 못했다는 메시지. 문서상 구성 XML 이 없거나 손상되었거나 저장소 서비스에 문제가 있다 — 동기화 실패·디스크 가득참·수동 편집 오류가 흔한 배경이다.
+  vendor_action: IBM 지원 사이트의 문제 판별 정보를 참고해 원인을 확인
+  vendor_url: https://www.ibm.com/docs/en/was-nd/8.5.5?topic=messages-hmgr
+  immediate:
+  - "`grep -n 'HMGR0020E' <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -5` 로 읽지 못한 문서 경로({0}) 기록"
+  - "`ls -l <PROFILE_ROOT>/config/cells/<cell>/<문서경로>` 로 파일 존재·크기·수정 시각 확인, `xmllint --noout <PROFILE_ROOT>/config/cells/<cell>/<문서경로>` 로 XML 형식 오류 확인(xmllint 가 있을 때)"
+  - "`df -k <PROFILE_ROOT>` 로 프로파일 파일시스템 여유 확인 — 100% 면 저장 중 잘린 문서일 수 있음"
+  short:
+  - "(2차·승인 후, 롤백: backupConfig 백업 복원) 노드 측 문서가 손상되었으면 `backupConfig.sh -nostop` 으로 현재 구성 백업 후 DMgr 마스터 저장소 정본과 비교해 노드 동기화로 복구"
+  mid:
+  - "구성 파일 수동 편집을 금지하고 변경은 관리 콘솔·wsadmin 으로만 하도록 변경 관리 기준 수립, 동기화 실패 시 경보"
+  long:
+  - "정기 `backupConfig.sh -nostop` 백업과 프로파일 파일시스템 85% 경보 운영"
+  versions:
+  - WAS traditional ND 8.5/8.5.5
+  - WAS traditional ND 9.0
+  version_note: HMGR(HA 관리자)는 ND 셀 구성에서 사용 — IBM Docs 8.5.5 메시지 참조 원문 확인, 7.0/8.0 은 미대조
+  source: 공식 문서 대조(2026-10-16 5차 보강)
+- code: HMGR0122E
+  severity: error
+  category: connection
+  title: DCS 멀티캐스트 메시지 전송 오류
+  vendor_cause: HA 관리자가 DCS(분산 일관성 서비스) 멀티캐스트 메시지를 보내다 예외가 났다는 메시지(메시지 유형 {0}, 예외 {1}). 코어 그룹 멤버 간 네트워크 단절·DCS 포트 차단·멤버 프로세스 지연이 흔한 원인이다.
+  vendor_action: 문제의 근본 원인을 수정하고, 원인을 모르면 IBM 지원 사이트의 문제 판별 정보를 참고
+  vendor_url: https://www.ibm.com/docs/en/was-nd/8.5.5?topic=messages-hmgr
+  immediate:
+  - "`grep -n -A20 'HMGR0122E' <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -60` 로 메시지 유형·예외 스택 기록, 같은 시각 DCSV 메시지 동반 여부 확인"
+  - "`grep -A3 'DCS_UNICAST_ADDRESS' <PROFILE_ROOT>/config/cells/<cell>/nodes/<node>/serverindex.xml` 로 DCS 포트를 확인하고 `netstat -an | grep '.<DCS포트> '` 로 리스닝·연결 상태 확인"
+  short:
+  - "(2차) 멤버 간 DCS 포트 통신을 네트워크 담당과 확인하고, 차단이면 승인 후 방화벽 규칙 복구(롤백: 규칙 원복) — 코어 그룹 멤버 수가 많으면 분할 검토 자료 준비"
+  mid:
+  - "코어 그룹 크기·브리지 구성을 IBM 권고 범위로 재설계하고 DCS 포트를 방화벽 표준 허용 목록에 등록"
+  long:
+  - "HMGR·DCSV 오류 건수와 코어 그룹 뷰 변경 빈도를 감시"
+  versions:
+  - WAS traditional ND 8.5/8.5.5
+  - WAS traditional ND 9.0
+  version_note: HMGR 메시지는 ND 셀 구성에서 사용 — IBM Docs 8.5.5 원문 확인, 7.0/8.0 은 미대조
+  source: 공식 문서 대조(2026-10-16 5차 보강)
+- code: DCSV8030I
+  severity: warn
+  category: connection
+  title: DCS 뷰 구성 실패(멤버 합류 실패)
+  vendor_cause: DCS 스택 {0} 의 멤버 {1} 이 멤버 {2} 와 새 뷰를 맺지 못했다는 정보 메시지이며 사유({3})에 근본 원인이 있다. 반복되면 코어 그룹 멤버 간 통신 장애나 멤버 지연으로 HA 관리 기능(세션 복제·싱글톤 서비스)이 영향받는다.
+  vendor_action: 자주 반복되면 IBM 지원 사이트의 문제 판별 정보를 참고
+  vendor_url: https://www.ibm.com/docs/en/was-nd/8.5.5?topic=messages-dcsv
+  immediate:
+  - "`grep -n -E 'DCSV8030I|DCSV8031I' <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -20` 로 상대 멤버 이름·사유(The reason is …)와 반복 주기 기록 — 한두 번이면 멤버 기동·정지 시 일시 현상"
+  - "상대 멤버 서버 로그에서 같은 시각 GC 장시간 정지·Hung thread(WSVR0605W) 여부 확인, `ping -c 3 <상대호스트>` 로 기본 통신 확인"
+  short:
+  - "(2차) 사유가 통신 단절이면 네트워크 담당과 DCS 포트 경로 확인, 상대 멤버 지연이면 그 멤버의 힙·스레드 상태 분석 — 조치(설정 변경)는 승인 후(롤백: 이전 값)"
+  mid:
+  - "코어 그룹 멤버 수와 배치(데이터센터 간 분리 여부)를 점검해 필요하면 코어 그룹 분할·브리지 구성 설계"
+  long:
+  - "DCSV8030I/8031I 일일 건수를 기준선과 비교해 증가 시 경보"
+  versions:
+  - WAS traditional ND 8.5/8.5.5
+  - WAS traditional ND 9.0
+  version_note: DCSV 메시지는 ND 코어 그룹(HA 관리자) 구성 — IBM Docs 8.5.5 원문 확인, 7.0/8.0 은 미대조
+  source: 공식 문서 대조(2026-10-16 5차 보강)
+- code: DCSV8031I
+  severity: warn
+  category: connection
+  title: DCS 뷰 구성 시간 초과(멤버 무응답)
+  vendor_cause: 멤버 {3} 의 응답을 {2} 초 기다리다 시간 초과로 새 뷰를 맺지 못했다는 정보 메시지. 문서는 관련 노드의 높은 작업 부하를 원인으로 든다 — 긴 GC 정지·CPU 포화·네트워크 지연이 흔하다.
+  vendor_action: 관련 노드의 작업 부하를 확인하고, 자주 반복되면 IBM 지원 사이트의 문제 판별 정보를 참고
+  vendor_url: https://www.ibm.com/docs/en/was-nd/8.5.5?topic=messages-dcsv
+  immediate:
+  - "`grep -n 'DCSV8031I' <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -20` 로 무응답 멤버와 대기 초를 기록"
+  - "무응답 멤버 호스트에서 `vmstat 5 3` 로 CPU·메모리 부하 확인, 그 JVM 의 verbose GC 로그(<PROFILE_ROOT>/logs/<server>/native_stderr.log)에서 같은 시각 긴 정지 확인 (AIX/Linux)"
+  short:
+  - "(2차) 부하 원인(GC·CPU 폭주·스레드 고갈)을 해당 멤버에서 분석하고, 힙·스레드 풀 조정은 승인 후 적용(롤백: 이전 JVM 인수)"
+  mid:
+  - "멤버 JVM 힙 크기·GC 정책을 부하 시험으로 재산정하고 코어 그룹 멤버를 같은 네트워크 구간에 두도록 배치 기준 수립"
+  long:
+  - "멤버별 GC 정지 시간·CPU 사용률과 DCSV8031I 건수를 함께 추세 감시"
+  versions:
+  - WAS traditional ND 8.5/8.5.5
+  - WAS traditional ND 9.0
+  version_note: DCSV 메시지는 ND 코어 그룹 구성 — IBM Docs 8.5.5 원문 확인, 7.0/8.0 은 미대조
+  source: 공식 문서 대조(2026-10-16 5차 보강)
+- code: J2CA0020E
+  severity: error
+  category: connection
+  title: 커넥션 풀 관리자가 관리 연결 할당 실패
+  vendor_cause: 커넥션 풀 관리자가 관리 연결(Managed Connection)을 할당하다 예외가 났다는 메시지. 예외 문구에 원인이 있으며 DB 접속 불가·인증 실패·리소스 어댑터 오류가 흔하고, 사용자 원인 표시가 없으면 연결 관리자 내부 오류일 수 있다.
+  vendor_action: 예외 문구를 확인하고, 사용자 측 원인이 없으면 연결 관리자 내부 오류일 수 있으므로 진단 자료를 수집해 IBM 지원 사이트를 참고
+  vendor_url: https://www.ibm.com/docs/en/was-nd/8.5.5?topic=messages-j2ca
+  immediate:
+  - "`grep -n -A15 'J2CA0020E' <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -50` 로 예외 문구(DSRA·SQLException·ORA-/SQLSTATE) 기록, 같은 시각 J2CA0045E(풀 고갈) 동반 여부 확인"
+  - "`wsadmin.sh -lang jython -c \"print AdminControl.testConnection(AdminConfig.getid('/DataSource:<datasource>/'))\"` 로 연결 시험(읽기 전용 접속 1회) — 실패 문구로 DB 측·네트워크·인증 원인 구분"
+  short:
+  - "(2차) DB 접속 불가면 DB 담당에 리스너·세션 한도 확인 요청, 인증 실패면 승인 후 J2C 인증 별칭 갱신(롤백: 이전 별칭 값) — 변경 전 현재 구성 백업"
+  mid:
+  - "데이터소스 연결 시간 초과·최대 연결 수·만료 시간 값을 DB 세션 한도와 맞춰 재산정"
+  long:
+  - "J2CA0020E·J2CA0045E 건수와 풀 사용률(PMI JDBC 연결 풀) 경보 등록"
+  versions:
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  version_note: J2CA 메시지는 IBM Docs 8.5.5·9.0.5 메시지 참조에서 같은 문구 확인 — 7.0/8.0 은 미대조
+  source: 공식 문서 대조(2026-10-16 5차 보강)
+- code: J2CA0028E
+  severity: error
+  category: connection
+  title: XA 리소스 어댑터 메서드 호출 예외
+  vendor_cause: 데이터소스 {2} 의 XA 리소스 어댑터에서 메서드 {0}(start·end·prepare·commit·rollback 등) 호출 중 예외 {1} 가 나서 처리가 끝나지 못했다는 메시지. DB 측 XA 트랜잭션 오류·연결 단절·앞선 오류가 흔한 원인이다.
+  vendor_action: 애플리케이션 업무 로직이 발생한 예외를 제대로 잡고 복구 로직을 갖췄는지 확인하고, 예외를 일으킨 앞선 오류를 로그에서 확인
+  vendor_url: https://www.ibm.com/docs/en/was-nd/8.5.5?topic=messages-j2ca
+  immediate:
+  - "`grep -n -B5 -A15 'J2CA0028E' <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -60` 로 호출 메서드·데이터소스·예외(XAException 오류 코드) 기록"
+  - "같은 시각 WTRN* 트랜잭션 메시지와 DB 경고 로그를 대조해 in-doubt(미결) 트랜잭션이 남았는지 DB 담당에 확인 요청"
+  short:
+  - "(2차) 미결 트랜잭션이 남았으면 트랜잭션 관리자 복구 결과를 확인하고, 수동 정리(commit/rollback)는 DB·업무 담당 승인 후(롤백: 불가 — 정리 전 대상 목록 보존)"
+  mid:
+  - "애플리케이션의 트랜잭션 예외 처리·재시도 로직을 점검하고 XA 시간 초과(트랜잭션 서비스 총 트랜잭션 수명 제한)를 DB 측과 맞춤"
+  long:
+  - "XA 오류 건수와 미결 트랜잭션 수를 정기 점검 항목으로 등록"
+  versions:
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  version_note: J2CA 메시지는 IBM Docs 8.5.5·9.0.5 메시지 참조에서 같은 문구 확인 — 7.0/8.0 은 미대조
+  source: 공식 문서 대조(2026-10-16 5차 보강)
+- code: J2CA0048E
+  severity: error
+  category: internal
+  title: 인바운드 리소스 어댑터 XA 복구 설정 실패
+  vendor_cause: 인바운드 메시지용 리소스 어댑터 {0} 의 XA 트랜잭션 복구 설정을 끝내지 못했다는 메시지. 문서상 원인은 아카이브·클래스·네이티브 경로 오류나 서버 내부 오류이며, 이 상태에서는 장애 후 해당 어댑터의 트랜잭션 복구가 되지 않을 수 있다.
+  vendor_action: 연결 팩토리의 아카이브·클래스·네이티브 경로를 검증
+  vendor_url: https://www.ibm.com/docs/en/was-nd/8.5.5?topic=messages-j2ca
+  immediate:
+  - "`grep -n -A20 'J2CA0048E' <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -50` 로 리소스 어댑터 이름과 잡힌 예외 기록"
+  - "관리 콘솔(리소스 › 리소스 어댑터 › <RA>)에서 아카이브 경로·클래스 경로·네이티브 경로 값을 확인하고 `ls -l <경로>` 로 실제 파일 존재 확인(읽기 전용)"
+  short:
+  - "(2차·승인 후, 롤백: 이전 경로 값 복원) 잘못된 경로를 고치고 노드 동기화 후 해당 서버 기동 시 J2CA0048E 가 사라졌는지 확인"
+  mid:
+  - "리소스 어댑터 RAR 설치 위치를 노드 공통 변수(${WAS_INSTALL_ROOT} 등)로 표준화해 노드별 경로 차이를 없앰"
+  long:
+  - "기동 로그의 J2CA0048E 를 배포·패치 후 점검 항목에 포함"
+  versions:
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  version_note: J2CA 메시지는 IBM Docs 8.5.5·9.0.5 메시지 참조에서 같은 문구 확인 — 7.0/8.0 은 미대조
+  source: 공식 문서 대조(2026-10-16 5차 보강)
+- code: J2CA0058E
+  severity: error
+  category: connection
+  title: 연결 핸들을 관리 연결에 다시 연결하지 못함
+  vendor_cause: 연결 관리자가 연결 {0} 을 리소스 {3} 의 관리 연결 {1} 에 다시 연결(associate)하지 못했다는 메시지. 문서는 대부분 애플리케이션 오류로 보며, 트랜잭션에 참여한 캐시된 연결 핸들을 닫은 뒤 그 트랜잭션이 끝나기 전에 같은 EJB 로 다른 요청이 들어온 경우를 예로 든다.
+  vendor_action: 애플리케이션을 점검해 연결을 닫은 뒤 트랜잭션이 가능한 한 빨리 커밋되도록 수정
+  vendor_url: https://www.ibm.com/docs/en/was-nd/8.5.5?topic=messages-j2ca
+  immediate:
+  - "`grep -n -A20 'J2CA0058E' <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -60` 로 리소스 이름·받은 예외·호출 스택의 애플리케이션 클래스를 기록"
+  - "발생 시각의 요청 URL·EJB 이름을 액세스 로그와 대조해 특정 업무 기능에 몰리는지 확인 — 몰리면 개발 담당에 스택과 함께 전달"
+  short:
+  - "(2차) 개발 담당이 연결 핸들 캐시 사용과 트랜잭션 경계(커밋 시점)를 수정 — 운영 설정 변경으로는 해결되지 않음(배포는 승인 후, 롤백: 직전 EAR)"
+  mid:
+  - "연결은 메서드 안에서 얻고 닫는 패턴으로 코드 표준을 정하고 코드 리뷰 항목에 연결 핸들 필드 보관 금지를 추가"
+  long:
+  - "J2CA0058E 발생 건수를 배포 단위로 추적해 회귀 여부 확인"
+  versions:
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  version_note: J2CA 메시지는 IBM Docs 8.5.5·9.0.5 메시지 참조에서 같은 문구 확인 — 7.0/8.0 은 미대조
+  source: 공식 문서 대조(2026-10-16 5차 보강)

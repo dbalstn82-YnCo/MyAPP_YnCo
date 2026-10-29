@@ -1,0 +1,15 @@
+product: tibero
+title: Tibero 운영 참고 (GPT 수집 — 벤더 문서 대조 필요)
+sections:
+- heading: 로그 위치
+  body: 기본 로그는 $TB_HOME/instance/$TB_SID/log이며 sys.log, tbsvr.out.<PID>, callstack
+    dump가 생성된다. 리스너 로그는 $TB_HOME/instance/$TB_SID/log/lsnr/trace_list.log이다.
+- heading: 장애 시 수집 방법
+  body: sys.log, tbsvr.out.*, callstack dump, lsnr/trace_list.log, $TB_HOME/config/$TB_SID.tip을
+    보존하고 오류번호는 tberr <error-number>로 메시지와 조치를 확인한다.
+- heading: 대표 장애 신호
+  body: TBR 오류와 ec= 로그, tbsvr callstack dump, listener 연결 실패, 세션·워커 포화, tablespace/datafile
+    부족, redo/control file I/O 및 media recovery 요구를 우선 확인한다.
+- heading: 1차 확인 명령
+  body: ps -ef | grep tbsvr로 프로세스를 확인하고 tbsql 접속 후 select status from v$instance;
+    를 조회한다. 리스너는 trace_list.log의 최근 연결 오류를 확인한다.

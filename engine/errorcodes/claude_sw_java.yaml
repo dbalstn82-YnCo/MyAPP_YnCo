@@ -1,0 +1,1187 @@
+# Java 예외 코드 사전 — GPT 수집(공식 Javadoc/Spring/MyBatis/Jedis 문서, 2026-09-10) + Claude 검수. 소스 결함(app) 과 인프라(connection/upstream/…) 구분
+product: java
+layer: sw
+note: Java/Spring/JDBC/LDAP 예외 클래스(FQCN) 코드 — 파서가 벤더 코드 없는 예외 이벤트에 대표 예외 FQCN 을 코드로 부여. 실로그 JeusServer.log(2025-07) 검증. category app = 소스 결함 가능성
+codes:
+- code: java.lang.OutOfMemoryError
+  severity: critical
+  category: memory
+  title: Java 힙 객체 할당 실패 / 클래스 메타데이터 공간 고갈 / 새 네이티브 스레드 생성 실패
+  immediate:
+  - "`grep -n 'OutOfMemoryError' <log> | head -20` 로 첫 발생 시각과 종류(Java heap space·GC overhead limit exceeded·Metaspace·unable to create native thread·Direct buffer memory) 구분 — 종류에 따라 아래 확인 대상이 다름"
+  - "힙·Metaspace: `jstat -gcutil <PID> 1000 5` 로 O(Old)·M(Metaspace) 사용률과 FGC 증가 확인 — O 또는 M 이 95% 이상에서 FGC 가 계속 늘면 고갈 확정, 용량은 `jcmd <PID> GC.heap_info`(JDK 9+, JVM 실행 계정으로)"
+  - "native thread: `ps -o nlwp= -p <PID>` 와 `grep -E 'Max processes|Max open files' /proc/<PID>/limits` 로 스레드 수·한도 비교 — 스레드 수가 한도에 근접하면 OS 자원 한도 원인 확정(Linux)"
+  short:
+  - '2차 이관 기준: 반복 OOM·서비스 응답불가·GC 과다 또는 메모리 지속 증가 시 JVM/애플리케이션 담당 이관'
+  - '2차 이관 기준: 반복 발생·재배포 후 지속 증가·클래스로더 누수 의심 시 JVM/개발 담당 이관'
+  - "(2차·승인 후, 롤백: 없음 — 덤프 파일은 디스크 여유 확인 후 별도 경로 보관) `jcmd <PID> GC.heap_dump <path>/heap.hprof` 로 힙 덤프 확보(전체 GC 동반·수 초~수십 초 응답 정지, JDK 7+) 뒤 인스턴스 재기동으로 서비스 우선 복구"
+  mid:
+  - "힙 덤프(MAT Leak Suspects)·GC 로그로 누수 객체를 특정해 소스 수정, 실사용량 기준으로 -Xmx·-XX:MaxMetaspaceSize 재산정(서버 메모리 60~70% 이내)"
+  - "-XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=<path> 와 GC 로그(JDK 9+: -Xlog:gc*, JDK 8: -Xloggc) 상시 설정"
+  long:
+  - "jstat -gcutil Old(O)·Metaspace(M) 사용률 85% 지속 시 경보, 배포 전 부하 시험에서 힙 증가 추이 확인을 표준화"
+  source: GPT 수집·공식 문서 대조(등급 A) https://docs.oracle.com/javase/8/docs/technotes/guides/troubleshoot/memleaks002.html, https://docs.oracle.com/en/java/javase/17/troubleshoot/diagnostic-tools.html
+  vendor_cause: '[Java heap space] 힙에 새 객체를 할당할 공간이 없고 GC로도 충분한 공간을 확보하지 못함; 메모리 누수 또는 힙 크기 부족 가능 / [Metaspace] 클래스 메타데이터용 Metaspace가 부족하거나 MaxMetaspaceSize 제한에 도달함 / [unable to create native thread] JVM이
+    새 OS 스레드를 만들 자원을 확보하지 못한 상태; 실제 원인은 OS/JVM 자원 상태 추가 확인 필요'
+  vendor_action: 예외 상세문구·발생시각·JVM -Xms/-Xmx·GC 로그·프로세스 메모리 추이를 확인하고 반복 빈도와 직전 부하를 기록
+  vendor_url: https://docs.oracle.com/javase/8/docs/technotes/guides/troubleshoot/memleaks002.html
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: '문구가 버전에 따라 다름: ''PermGen space''(≤7) → ''Metaspace''·''Compressed class space''(8+), ''unable to create native thread: possibly out of memory or process/resource limits reached''(11+),
+    ''GC overhead limit exceeded''(6+), ''Java heap space''·''Direct buffer memory'' 공통'
+- code: java.lang.StackOverflowError
+  severity: critical
+  category: app
+  title: 스레드 스택 공간 고갈 — 소스(애플리케이션) 결함 가능성, WAS/WEB 장애 아님
+  immediate:
+  - "`grep -n -A60 'java.lang.StackOverflowError' <log> | head -80` 로 반복 프레임 확인 — 같은 클래스.메서드가 수십 번 연속되면 재귀·순환 참조(toString/JSON 직렬화) 결함"
+  - "`grep -c 'StackOverflowError' <log>` 로 건수 확인 후 같은 시각 액세스 로그의 요청 URI 대조 — 특정 요청·입력값에만 몰리면 입력 데이터 기인"
+  - "`jinfo -flag ThreadStackSize <PID>` 로 현재 스레드 스택 크기(KB) 확인 — 운영 설정(-Xss)으로 기본값보다 작게 줄여 놓았는지 판단(읽기 전용)"
+  short:
+  - '2차 이관 기준: 동일 호출 반복·다수 요청 재현 또는 업무 중단이 확인되면 개발/WAS 담당 이관'
+  mid:
+  - "반복 프레임의 재귀 종료 조건을 수정(반복문 전환), 깊은 재귀가 정상 설계라면 -Xss(스레드 스택) 상향을 시험 후 적용"
+  long:
+  - "재귀·순환 참조(toString/JSON 직렬화) 점검을 코드 리뷰 항목에 넣고 StackOverflowError 건수를 감시"
+  source: GPT 수집·공식 문서 대조(등급 A) https://docs.oracle.com/en/java/javase/26/docs/api/java.base/java/lang/StackOverflowError.html
+  vendor_cause: 애플리케이션이 지나치게 깊은 재귀 호출을 수행하여 스택 한계를 초과함
+  vendor_action: 동일 메서드가 스택트레이스에서 반복되는지 확인하고 최초 호출 경로·요청 URI·입력값·발생 빈도를 기록
+  vendor_url: https://docs.oracle.com/en/java/javase/26/docs/api/java.base/java/lang/StackOverflowError.html
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: java.* 표준 예외 클래스명 — JDK 6~25 동일(메시지 문구는 version_note 별도 표기 없는 한 동일)
+- code: java.lang.NullPointerException
+  severity: error
+  category: app
+  title: null 객체를 잘못 사용 — 소스(애플리케이션) 결함 가능성, WAS/WEB 장애 아님
+  immediate:
+  - "`grep -n -A15 'java.lang.NullPointerException' <log> | head -60` 로 첫 번째 업무 패키지 프레임(at <업무패키지>.…) 확인 — 그 클래스·라인이 결함 위치"
+  - "`grep -c 'NullPointerException' <log>` 로 건수 확인 — 메시지에 'because \"<변수>\" is null' 문구가 있으면 그 변수가 null(JDK 15+ 기본, JDK 14 는 -XX:+ShowCodeDetailsInExceptionMessages 필요), 특정 기능에만 몰리면 입력·데이터 기인"
+  short:
+  - '2차 이관 기준: 동일 기능 반복 실패·핵심 업무 영향 또는 공통 코드에서 다발하면 개발 담당 이관'
+  mid:
+  - "최초 애플리케이션 프레임 기준으로 null 방어(Optional·입력 검증) 수정, JDK 15+ 는 helpful NPE 메시지(JDK 14 는 -XX:+ShowCodeDetailsInExceptionMessages)로 null 변수명 확인"
+  long:
+  - "정적 분석(널 검사 규칙)을 빌드에 포함하고 NPE 발생 클래스별 건수를 배포 품질 지표로 관리"
+  source: GPT 수집·공식 문서 대조(등급 A) https://docs.oracle.com/en/java/javase/26/docs/api/java.base/java/lang/NullPointerException.html
+  vendor_cause: 필요한 객체가 null인데 메서드 호출·필드 접근·배열 접근 등 객체가 필요한 연산을 수행함
+  vendor_action: 최초 애플리케이션 프레임·클래스·메서드·요청값을 확인하고 같은 입력에서 반복되는지 기록
+  vendor_url: https://docs.oracle.com/en/java/javase/26/docs/api/java.base/java/lang/NullPointerException.html
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: java.* 표준 예외 클래스명 — JDK 6~25 동일(메시지 문구는 version_note 별도 표기 없는 한 동일)
+- code: java.lang.ClassNotFoundException
+  severity: error
+  category: app
+  title: 요청한 클래스 정의를 찾지 못함 — 소스(애플리케이션) 결함 가능성, WAS/WEB 장애 아님
+  immediate:
+  - "`grep -n -A20 'ClassNotFoundException' <log> | head -60` 로 누락 클래스 FQCN 과 로드를 시도한 위치(클래스로더·호출 프레임) 확인"
+  - "`find <path>/WEB-INF -xdev -name '<클래스명>.class'` 와 `ls -l <path>/WEB-INF/lib` 로 배포본에 클래스·jar 가 있는지 확인(jar 안이면 `unzip -l <jar> | grep '<클래스명>.class'`) — 없으면 배포 누락 확정"
+  - "`ls -lt <path>/WEB-INF/lib | head` 로 최근 바뀐 jar 시각 확인 — 직전 배포 시각과 같으면 배포 구성(라이브러리 누락·버전 교체) 문제"
+  short:
+  - '2차 이관 기준: 배포 파일 누락·라이브러리 버전 불일치 또는 기동 실패가 지속되면 WAS/개발 담당 이관'
+  mid:
+  - "배포 패키지(WAR/EAR·WEB-INF/lib)와 서버 공유 라이브러리의 jar 목록을 기준 목록과 대조해 누락·중복 jar 정리"
+  long:
+  - "빌드 산출물의 jar 목록·버전을 배포 점검표로 자동 비교하고 클래스로더 충돌 이력을 관리"
+  source: GPT 수집·공식 문서 대조(등급 A) https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/ClassNotFoundException.html
+  vendor_cause: Class.forName 또는 ClassLoader가 지정된 이름의 클래스 정의를 찾지 못함
+  vendor_action: 누락 클래스명·배포 WAR/EAR 버전·WEB-INF/lib 또는 서버 라이브러리 존재 여부와 직전 배포 이력을 확인
+  vendor_url: https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/ClassNotFoundException.html
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: java.* 표준 예외 클래스명 — JDK 6~25 동일(메시지 문구는 version_note 별도 표기 없는 한 동일)
+- code: java.lang.NoClassDefFoundError
+  severity: error
+  category: app
+  title: 실행 중 필요한 클래스 정의 없음 — 소스(애플리케이션) 결함 가능성, WAS/WEB 장애 아님
+  immediate:
+  - "`grep -n -A20 'NoClassDefFoundError' <log> | head -60` 로 클래스명과 Caused by 확인 — 'Could not initialize class' 이면 앞선 ExceptionInInitializerError 가 진짜 원인"
+  - "`grep -n -m1 -A30 'ExceptionInInitializerError' <log>` 로 첫 원인 예외(Caused by) 확인 — 있으면 그 원인(설정·드라이버·외부 자원)부터, 없으면 클래스 누락(배포 구성) 쪽"
+  - "`ls -l <path>/WEB-INF/lib` 로 해당 클래스가 든 jar 존재·같은 라이브러리의 버전 중복(두 버전 공존) 확인"
+  short:
+  - '2차 이관 기준: 다수 요청 또는 서버 기동 단계에서 반복되면 WAS/개발 담당 이관'
+  mid:
+  - "Caused by(ExceptionInInitializerError 등) 원인 클래스의 static 초기화 오류·의존 jar 버전 불일치를 수정"
+  long:
+  - "의존 라이브러리 버전 고정(빌드 도구 lock)과 기동 직후 핵심 클래스 로딩 점검을 배포 절차에 포함"
+  source: GPT 수집·공식 문서 대조(등급 A) https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/NoClassDefFoundError.html
+  vendor_cause: 컴파일 시 존재했던 클래스의 정의를 JVM이 실행 시점에 찾거나 초기화하지 못함
+  vendor_action: 에러 뒤 클래스명·Caused by·직전 ExceptionInInitializerError 여부와 배포 라이브러리 구성을 확인
+  vendor_url: https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/NoClassDefFoundError.html
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: java.* 표준 예외 클래스명 — JDK 6~25 동일(메시지 문구는 version_note 별도 표기 없는 한 동일)
+- code: java.lang.IllegalStateException
+  severity: error
+  category: app
+  title: 현재 상태에서 허용되지 않은 호출 — 소스(애플리케이션) 결함 가능성, WAS/WEB 장애 아님
+  immediate:
+  - "`grep -n -A25 'java.lang.IllegalStateException' <log> | head -60` 로 메시지와 첫 업무 프레임 확인 — 'Cannot create a session after the response has been committed'·'getOutputStream() has already been called' 같은 서블릿 문구면 응답 처리 순서 결함"
+  - "`grep -c 'IllegalStateException' <log>` 와 `grep -n 'IllegalStateException' <log> | tail -5` 로 건수·최근 시각 확인 — 기동 직후에만 몰리면 컨텍스트 기동(빈 생성) 실패 쪽, 운영 중 산발이면 요청 흐름 결함"
+  short:
+  - '2차 이관 기준: 세션·트랜잭션·라이프사이클 오류가 반복되면 개발/WAS 담당 이관'
+  mid:
+  - "메시지가 가리키는 상태 전이(응답 commit 후 쓰기, 종료된 세션 사용 등)를 호출 순서 기준으로 수정"
+  long:
+  - "객체 생명주기(세션·트랜잭션·스트림) 사용 규칙을 개발 표준에 명시하고 IllegalStateException 발생 건수 감시"
+  source: GPT 수집·공식 문서 대조(등급 A) https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/IllegalStateException.html
+  vendor_cause: 객체 또는 애플리케이션이 요청된 연산을 수행하기에 적절한 상태가 아님
+  vendor_action: 메시지·최초 업무 클래스·호출 순서·직전 상태변경 로그를 확인하고 동일 요청 반복 여부를 기록
+  vendor_url: https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/IllegalStateException.html
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: java.* 표준 예외 클래스명 — JDK 6~25 동일(메시지 문구는 version_note 별도 표기 없는 한 동일)
+- code: java.lang.NumberFormatException
+  severity: warn
+  category: app
+  title: 문자열 숫자 변환 실패 — 소스(애플리케이션) 결함 가능성, WAS/WEB 장애 아님
+  immediate:
+  - "`grep -n -A10 'NumberFormatException' <log> | head -40` 로 'For input string: \"…\"' 의 입력값과 첫 업무 프레임 확인 — 공백·빈 문자열·천단위 쉼표면 입력 형식 문제(보고서에는 값 마스킹)"
+  - "`grep -o 'For input string: \"[^\"]*\"' <log> | sort | uniq -c | sort -rn | head` 로 같은 값 반복 여부 확인 — 한 값에 몰리면 특정 설정값·데이터 기인, 값이 제각각이면 입력 검증 누락"
+  short:
+  - '2차 이관 기준: 정상 입력에서도 반복되거나 공통 변환 로직에서 다발하면 개발 담당 이관'
+  mid:
+  - "입력값 검증을 변환 전에 두고(형식·범위), 설정값 변환이면 기본값·오류 메시지를 명확히 처리"
+  long:
+  - "외부 전문·화면 입력의 숫자 필드 규격을 연계 명세에 명시하고 변환 실패 건수를 감시"
+  source: GPT 수집·공식 문서 대조(등급 A) https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/NumberFormatException.html
+  vendor_cause: 문자열을 요청된 숫자 형식으로 변환할 수 없음
+  vendor_action: 예외 메시지의 입력 문자열과 해당 요청 파라미터·설정값을 확인하고 개인정보는 마스킹하여 기록
+  vendor_url: https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/NumberFormatException.html
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: java.* 표준 예외 클래스명 — JDK 6~25 동일(메시지 문구는 version_note 별도 표기 없는 한 동일)
+- code: java.util.ConcurrentModificationException
+  severity: error
+  category: app
+  title: 허용되지 않은 컬렉션 변경 감지 — 소스(애플리케이션) 결함 가능성, WAS/WEB 장애 아님
+  immediate:
+  - "`grep -n -A15 'ConcurrentModificationException' <log> | head -50` 로 checkForComodification 다음의 첫 업무 프레임 확인 — 그 메서드가 반복(iterator) 중 컬렉션을 수정하는 위치"
+  - "`grep -c 'ConcurrentModificationException' <log>` 로 건수 확인 후 같은 시각 로그의 스레드명 비교 — 서로 다른 스레드가 같은 시각에 찍히면 공유 컬렉션 동시 접근(스레드 안전성 결함)"
+  short:
+  - '2차 이관 기준: 반복 재현되거나 공유 컬렉션 처리 코드에서 다발하면 개발 담당 이관'
+  mid:
+  - "순회 중 변경은 Iterator.remove()·removeIf 로 바꾸고, 공유 컬렉션은 ConcurrentHashMap·CopyOnWriteArrayList 등 동시성 컬렉션으로 교체"
+  long:
+  - "공유 상태 접근 규칙을 코드 리뷰 항목으로 두고 동시 요청 부하 시험을 배포 전 수행"
+  source: GPT 수집·공식 문서 대조(등급 A) https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/ConcurrentModificationException.html
+  vendor_cause: 순회 중 컬렉션 변경 등 객체의 동시 또는 계약 위반 변경이 감지됨; 반드시 다른 스레드 때문인 것은 아님
+  vendor_action: 최초 업무 클래스·컬렉션 처리 메서드·동시 요청 여부를 확인하고 동일 코드 경로 발생 빈도를 기록
+  vendor_url: https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/ConcurrentModificationException.html
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: java.* 표준 예외 클래스명 — JDK 6~25 동일(메시지 문구는 version_note 별도 표기 없는 한 동일)
+- code: java.net.ConnectException
+  severity: error
+  category: connection
+  title: 원격 주소 연결 시도 실패
+  immediate:
+  - "`grep -n -A5 'java.net.ConnectException' <log> | tail -30` 로 대상 host:port 와 'Connection refused'/'Connection timed out' 구분 — refused 는 대상 포트 미기동, timed out 은 방화벽·경로 문제"
+  - "`nc -zvw3 <host> <port>` 로 이 서버에서 직접 도달 확인(HTTP 대상은 `curl -s -o /dev/null -w '%{http_code}' --max-time 5 <url>`) — 실패하면 대상·네트워크 쪽 확정, 성공하면 간헐 장애로 발생 시각만 기록"
+  - "`ss -tn state syn-sent | head` 로 응답 없는 연결 시도 적체 확인 — 대상 주소의 SYN-SENT 가 쌓이면 경로·방화벽에서 응답이 없는 것"
+  short:
+  - '2차 이관 기준: 대상 서비스 정상인데 지속 실패하거나 다수 서버에서 같은 대상 실패 시 네트워크/대상 담당 이관'
+  mid:
+  - "대상 서비스 이중화·헬스체크와 연결 재시도(지수 백오프) 정책을 연계 설정에 반영"
+  long:
+  - "연계 대상별 연결 실패율과 LISTEN 상태를 감시 항목으로 등록하고 방화벽 변경은 연계 담당 협의 절차로 관리"
+  source: GPT 수집·공식 문서 대조(등급 A) https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/net/ConnectException.html
+  vendor_cause: 원격 주소·포트 연결 과정에서 오류가 발생하며 대표적으로 해당 포트에 리스닝 프로세스가 없어 연결이 거부됨
+  vendor_action: 대상 host:port·Connection refused 여부를 확인하고 DNS 해석·포트 LISTEN·방화벽 변경 없이 접속 가능 여부만 확인
+  vendor_url: https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/net/ConnectException.html
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: java.* 표준 예외 클래스명 — JDK 6~25 동일(메시지 문구는 version_note 별도 표기 없는 한 동일)
+- code: java.net.SocketTimeoutException
+  severity: error
+  category: upstream
+  title: 소켓 읽기·접속 시간 초과
+  immediate:
+  - "`grep -n -E 'SocketTimeoutException: (Read timed out|connect timed out|Connect timed out)' <log> | tail -30` 로 read/connect 구분과 대상 확인 — connect 면 도달 문제, read 면 대상 응답 지연"
+  - "`curl -s -o /dev/null -w '%{http_code} %{time_connect} %{time_total}\\n' --max-time 30 <대상 URL>` 로 응답시간 측정(조회성 URL만) — time_total 이 애플리케이션 read timeout 에 근접하면 대상 지연 확정"
+  - "`ss -tn dst <대상 IP> | wc -l` 로 대상과의 연결 수 확인 — 평소보다 크게 많으면 대상 처리 적체로 응답 대기 중"
+  short:
+  - '2차 이관 기준: 지연이 지속되거나 다수 거래에서 임계시간을 초과하면 대상 시스템/네트워크 담당 이관'
+  mid:
+  - "connect/read timeout 을 업무 SLA 기준으로 재설정하고 대상 시스템 처리 지연 원인(SQL·외부 호출) 개선 요청"
+  long:
+  - "연계 대상별 응답시간 p95 와 timeout 건수를 감시하고 임계 초과 시 경보"
+  source: GPT 수집·공식 문서 대조(등급 A) https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/net/SocketTimeoutException.html
+  vendor_cause: 설정된 socket read 또는 accept/connect 시간 제한 내 작업이 완료되지 않음
+  vendor_action: connect/read timeout 구분·대상 주소·응답시간·동시간대 대상 서비스 오류와 네트워크 지연 여부를 확인
+  vendor_url: https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/net/SocketTimeoutException.html
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: java.* 표준 예외 클래스명 — JDK 6~25 동일(메시지 문구는 version_note 별도 표기 없는 한 동일)
+- code: java.net.SocketException
+  severity: error
+  category: connection
+  title: 소켓 연결이 비정상 종료됨(Connection reset|Broken pipe)
+  immediate:
+  - "`grep -n -E 'SocketException: (Connection reset|Broken pipe|Socket closed)' <log> | tail -30` 로 문구·시각·상대 주소 확인 — 'Connection reset' 은 상대가 RST 를 보냄, 'Broken pipe' 는 이미 닫힌 연결에 쓰기"
+  - "`ss -tni dst <상대 IP> | head -40` 로 상대와의 연결 상태와 retrans 값 확인 — retrans 가 계속 늘면 구간 네트워크 문제, 특정 시각에만 몰리면 상대 서버 기동 이력·방화벽 세션 timeout 과 대조"
+  short:
+  - '2차 이관 기준: 특정 상대에 집중되거나 서비스 영향이 지속되면 네트워크/상대 시스템 담당 이관'
+  mid:
+  - "keep-alive 유휴 시간을 방화벽·L4 세션 timeout 보다 짧게 맞추고 커넥션 풀의 유효성 검사(validation) 설정"
+  long:
+  - "Connection reset/Broken pipe 건수를 상대 시스템별로 감시하고 네트워크 장비 세션 정책 변경 이력 관리"
+  source: GPT 수집·공식 문서 대조(등급 A) https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/net/SocketException.html
+  vendor_cause: '[Connection reset|Broken pipe] Connection reset은 연결 상대 또는 네트워크에서 연결이 끊긴 경우에 나타날 수 있고 Broken pipe는 끊긴 연결에 쓰기 시도 시 발생 가능'
+  vendor_action: 상세문구·local/remote 주소·발생 방향·동시간대 상대 서버 종료/timeout 로그와 반복률을 확인
+  vendor_url: https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/net/SocketException.html
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: java.* 표준 예외 클래스명 — JDK 6~25 동일(메시지 문구는 version_note 별도 표기 없는 한 동일)
+- code: java.net.UnknownHostException
+  severity: error
+  category: connection
+  title: 호스트 IP 주소 결정 실패
+  immediate:
+  - "`grep -n 'UnknownHostException' <log> | tail -20` 로 해석 실패한 호스트명 확인 — 오타·도메인 접미사 누락 여부부터 판단"
+  - "`getent hosts <hostname>` 과 `nslookup <hostname>` 으로 이 서버의 해석 결과 비교 — 둘 다 실패면 DNS·/etc/hosts 미등록, nslookup 만 성공이면 /etc/nsswitch.conf·hosts 순서 확인"
+  - "`cat /etc/resolv.conf` 로 DNS 서버 확인 — 해석이 이미 정상인데 JVM 만 계속 실패하면 JVM 부정 캐시(networkaddress.cache.negative.ttl, 기본 10초)·애플리케이션 자체 캐시 의심"
+  short:
+  - '2차 이관 기준: 정상 등록된 호스트가 반복 미해석되거나 여러 서버에서 발생하면 DNS/네트워크 담당 이관'
+  mid:
+  - "DNS 이중화와 /etc/hosts 사용 기준을 정리하고 JVM DNS 캐시(networkaddress.cache.ttl) 값을 운영 기준으로 설정"
+  long:
+  - "연계 호스트명 목록을 구성관리하고 DNS 조회 실패를 감시"
+  source: GPT 수집·공식 문서 대조(등급 A) https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/net/UnknownHostException.html
+  vendor_cause: 지정한 호스트 이름의 IP 주소를 결정하지 못함
+  vendor_action: 로그의 호스트명을 확인하고 서버의 이름해석 결과·DNS 설정 변경 이력·동일 호스트의 다른 조회 성공 여부를 확인
+  vendor_url: https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/net/UnknownHostException.html
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: java.* 표준 예외 클래스명 — JDK 6~25 동일(메시지 문구는 version_note 별도 표기 없는 한 동일)
+- code: javax.net.ssl.SSLHandshakeException
+  severity: error
+  category: security
+  title: TLS 핸드셰이크 협상 실패
+  immediate:
+  - "`grep -n -A5 'SSLHandshakeException' <log> | tail -30` 로 상세문구 구분 — 'PKIX path building failed' 는 신뢰 체인(truststore), 'Received fatal alert: handshake_failure'·'protocol_version' 은 TLS 버전·cipher 불일치, 'No subject alternative names'·'No name matching' 은 SAN 불일치"
+  - "`openssl s_client -connect <host>:<port> -servername <host> </dev/null 2>/dev/null | openssl x509 -noout -subject -issuer -dates -ext subjectAltName` 로 상대 인증서 만료일·발급자·SAN 확인(OpenSSL 1.1.1+, 이전은 -text) — notAfter 경과·SAN 에 호스트 없음이면 확정"
+  - "`grep -n 'jdk.tls.disabledAlgorithms' $JAVA_HOME/jre/lib/security/java.security`(JDK 8) / `$JAVA_HOME/conf/security/java.security`(JDK 11+) 로 JVM 이 막아 둔 TLS 버전 확인 — 상대가 그 버전만 지원하면 프로토콜 불일치(인증서·설정은 바꾸지 않음)"
+  short:
+  - '2차 이관 기준: 인증서·신뢰체인·프로토콜 불일치가 확인되거나 전 거래 실패 시 보안/대상 담당 이관'
+  mid:
+  - "인증서 체인·SAN·만료와 양측 TLS 버전(jdk.tls.disabledAlgorithms 포함) 합의안을 정리해 truststore·프로토콜 설정을 정비"
+  long:
+  - "인증서 만료일 30일 전 경보와 JDK 업데이트 시 TLS 기본값 변경 영향 시험을 표준화"
+  source: GPT 수집·공식 문서 대조(등급 A) https://docs.oracle.com/en/java/javase/26/docs/api/java.base/javax/net/ssl/SSLHandshakeException.html
+  vendor_cause: 클라이언트와 서버가 요구되는 보안 수준을 협상하지 못해 해당 TLS 연결을 사용할 수 없음
+  vendor_action: 대상 URL·인증서 만료/SAN·신뢰 체인·TLS 버전·cipher 관련 상세 오류를 확인하고 인증서나 설정은 변경하지 않음
+  vendor_url: https://docs.oracle.com/en/java/javase/26/docs/api/java.base/javax/net/ssl/SSLHandshakeException.html
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: '클래스명 공통 — ''Received fatal alert: handshake_failure''·''No appropriate protocol'' 문구는 8u291/11.0.11 부터 TLS 1.0/1.1 기본 비활성으로 증가'
+- code: java.sql.SQLException
+  severity: error
+  category: internal
+  title: JDBC 데이터베이스 접근 오류
+  immediate:
+  - "`grep -n -A20 'java.sql.SQLException' <log> | grep -E 'SQLException|ORA-|Caused by|SQLState|ErrorCode' | head -30` 로 DB 제품 코드(ORA-xxxxx·SQLState·vendorCode) 확인 — 제품 코드가 있으면 그 코드 사전 항목으로 판정"
+  - "같은 시각 DB 쪽 로그 대조(Oracle 예: `grep -n 'ORA-' <path>/alert_<SID>.log | tail -20`, 타 DB 는 해당 오류 로그) — DB 에도 같은 시각 오류가 있으면 DB 장애, 없으면 SQL·애플리케이션 쪽"
+  short:
+  - '2차 이관 기준: 동일 SQLState/vendorCode 반복·업무 실패 지속 또는 DB 장애 코드 확인 시 DB 담당 이관'
+  mid:
+  - "SQLState·vendorCode 별 원인(DB 오류 코드표)으로 분류해 SQL·연결·권한 원인별 조치 담당을 지정"
+  long:
+  - "SQLException 을 SQLState 별로 집계해 감시하고 신규 코드 출현 시 경보"
+  source: GPT 수집·공식 문서 대조(등급 A) https://docs.oracle.com/en/java/javase/21/docs/api/java.sql/java/sql/SQLException.html
+  vendor_cause: JDBC 처리 중 발생한 일반 SQL 예외로 클래스만으로 실제 DB 원인은 확정할 수 없음
+  vendor_action: SQLState·vendorCode·메시지·nextException·Caused by와 DB 제품 코드를 확인하고 해당 시각 DB 로그와 대조
+  vendor_url: https://docs.oracle.com/en/java/javase/21/docs/api/java.sql/java/sql/SQLException.html
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: java.* 표준 예외 클래스명 — JDK 6~25 동일(메시지 문구는 version_note 별도 표기 없는 한 동일)
+- code: java.sql.SQLRecoverableException
+  severity: error
+  category: connection
+  title: 복구 후 재시도 가능한 DB 오류
+  immediate:
+  - "`grep -n -A10 'SQLRecoverableException' <log> | tail -40` 로 원인 문구 확인 — 'IO Error'·'Closed Connection'·'Connection reset' 이면 DB 세션·네트워크 단절 쪽"
+  - "`nc -zvw3 <db_host> <db_port>` 로 DB 리스너 도달 확인, `ss -tn dst <db_host> | wc -l` 로 현재 DB 연결 수 확인 — 도달 실패면 DB/네트워크, 도달 정상·간헐 발생이면 방화벽 유휴 세션 timeout 의심"
+  short:
+  - '2차 이관 기준: 연결 재획득 실패가 지속되거나 다수 거래에서 발생하면 DB/WAS 담당 이관'
+  mid:
+  - "커넥션 풀의 유효성 검사·maxLifetime 을 DB/방화벽 세션 timeout 보다 짧게 설정하고 재시도 로직 반영"
+  long:
+  - "DB 연결 재획득 실패 건수와 DB 리스너 가용성을 함께 감시"
+  source: GPT 수집·공식 문서 대조(등급 A) https://docs.oracle.com/en/java/javase/21/docs/api/java.sql/java/sql/SQLRecoverableException.html
+  vendor_cause: 현재 연결을 폐기하고 새 연결을 얻는 등의 복구 후 전체 트랜잭션 재시도가 가능한 상황에 사용됨
+  vendor_action: SQLState·vendorCode·원인 메시지와 DB 연결 상태·풀 오류·동시간대 DB 리스너/세션 오류를 확인
+  vendor_url: https://docs.oracle.com/en/java/javase/21/docs/api/java.sql/java/sql/SQLRecoverableException.html
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: JDBC 4.0(JDK 6) 도입
+- code: java.sql.SQLTimeoutException
+  severity: error
+  category: performance
+  title: JDBC 지정 시간 제한 초과
+  immediate:
+  - "`grep -n -B5 -A10 'SQLTimeoutException' <log> | tail -50` 로 SQL·매퍼 ID·소요시간 확인 — Oracle 에서 'ORA-01013' 이 함께 있으면 JDBC queryTimeout 만료로 취소된 것"
+  - "`grep -c 'SQLTimeoutException' <log>` 로 건수 확인 후 DB 대기 이벤트 조회(Oracle 예: `SELECT event, count(*) FROM v$session WHERE wait_class<>'Idle' GROUP BY event ORDER BY 2 DESC;`) — 특정 SQL 만이면 SQL·실행계획, 전체 SQL 이면 DB 부하"
+  short:
+  - '2차 이관 기준: 같은 SQL 반복 timeout·업무 SLA 영향 또는 DB 대기 증가 확인 시 DB/개발 담당 이관'
+  mid:
+  - "timeout 난 SQL 의 실행계획·인덱스 개선, Statement queryTimeout 과 트랜잭션 timeout 의 상하 관계를 정리"
+  long:
+  - "SQL 별 수행시간 상위 목록을 정기 점검하고 timeout 건수를 감시"
+  source: GPT 수집·공식 문서 대조(등급 A) https://docs.oracle.com/en/java/javase/21/docs/api/java.sql/java/sql/SQLTimeoutException.html
+  vendor_cause: Statement query timeout 또는 JDBC 로그인·DataSource 로그인 제한시간 등이 만료됨
+  vendor_action: 어떤 timeout이 만료됐는지 메시지·SQL·소요시간·DB 대기 이벤트와 동시간대 부하를 확인
+  vendor_url: https://docs.oracle.com/en/java/javase/21/docs/api/java.sql/java/sql/SQLTimeoutException.html
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: JDBC 4.0(JDK 6) 도입
+- code: java.sql.SQLIntegrityConstraintViolationException
+  severity: error
+  category: internal
+  title: DB 무결성 제약 위반
+  immediate:
+  - "`grep -n -A10 'SQLIntegrityConstraintViolationException' <log> | tail -40` 로 제약조건명(예: ORA-00001 unique constraint (<스키마>.<제약>))·SQL·업무 키 확인(키 값은 마스킹)"
+  - "제약 종류 조회(Oracle 예): `SELECT constraint_type, table_name FROM all_constraints WHERE constraint_name='<제약명>';` — P/U 면 중복 키, R 이면 부모 행 없음, C 면 값 조건 위반(조회만, 데이터는 손대지 않음)"
+  short:
+  - '2차 이관 기준: 동일 제약 위반 반복·정상 업무 입력에서 발생하거나 데이터 정합성 영향 시 DB/개발 담당 이관'
+  mid:
+  - "중복 요청 방지(멱등 키)·입력 검증을 애플리케이션에 반영하고 제약조건과 업무 규칙을 대조"
+  long:
+  - "제약 위반 건수를 제약조건별로 집계해 감시하고 데이터 정합성 점검을 정기화"
+  source: GPT 수집·공식 문서 대조(등급 A) https://docs.oracle.com/en/java/javase/21/docs/api/java.sql/java/sql/SQLIntegrityConstraintViolationException.html
+  vendor_cause: SQLState 23 계열 또는 벤더 조건에 따른 무결성 제약 위반이 발생함
+  vendor_action: SQLState·vendorCode·제약조건명·대상 테이블·업무 키를 확인하고 데이터 수정 없이 요청 흐름만 대조
+  vendor_url: https://docs.oracle.com/en/java/javase/21/docs/api/java.sql/java/sql/SQLIntegrityConstraintViolationException.html
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: JDBC 4.0(JDK 6) 도입
+- code: org.springframework.dao.DataAccessResourceFailureException
+  severity: error
+  category: connection
+  title: 데이터 접근 자원 완전 실패
+  immediate:
+  - "`grep -n -A30 'DataAccessResourceFailureException' <log> | grep -E 'Caused by|SQLState|Exception:' | head -20` 로 최하위 원인(Connection refused·IO Error·풀 오류) 확인"
+  - "`nc -zvw3 <db_host> <db_port>` 로 DB 도달 확인 — 실패면 DB 기동·네트워크, 성공이면 계정·DataSource(풀) 설정 쪽"
+  short:
+  - '2차 이관 기준: DB는 정상인데 반복되거나 여러 업무에서 동시에 발생하면 DB/WAS 담당 이관'
+  mid:
+  - "DataSource 의 연결 검증·재연결 설정과 DB 이중화(접속 URL 다중 호스트) 구성을 정비"
+  long:
+  - "DB 연결 실패율·풀 사용률을 감시하고 DB 점검 일정과 애플리케이션 영향 공지를 연계"
+  source: GPT 수집·공식 문서 대조(등급 A) https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/dao/DataAccessResourceFailureException.html
+  vendor_cause: DB JDBC 연결 실패 같은 데이터 접근 자원의 중대한 실패를 나타냄
+  vendor_action: root cause·SQLState·DB host:port·DataSource 상태와 같은 시각 DB 연결 오류를 확인
+  vendor_url: https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/dao/DataAccessResourceFailureException.html
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: Spring 4.x(JDK 6+)~6.x(JDK 17+) 공통 클래스명 — 패키지 변경 없음
+- code: org.springframework.jdbc.CannotGetJdbcConnectionException
+  severity: error
+  category: connection
+  title: JDBC DB 연결 획득 실패
+  immediate:
+  - "`grep -n -A30 'CannotGetJdbcConnectionException' <log> | grep -E 'Caused by|timed out|Timeout|refused|ORA-' | head -20` 로 원인 구분 — 'Connection is not available, request timed out'(HikariCP)·'Timeout waiting for idle object'(DBCP) 면 풀 고갈, refused·ORA-12541 이면 DB 접속 불가"
+  - "`jcmd <PID> Thread.print | grep -c 'getConnection'` 과 `ss -tn dst <db_host> | wc -l` 로 연결 대기 프레임 수(대략의 대기 스레드)와 실제 DB 연결 수 확인 — 대기가 많고 연결 수가 풀 최대치면 풀 고갈(장시간 SQL·반납 누락), 설정은 바꾸지 않음"
+  short:
+  - '2차 이관 기준: 풀 고갈·DB 접속 불가가 지속되거나 다수 요청 실패 시 DB/WAS 담당 이관'
+  mid:
+  - "풀 크기(maximumPoolSize 등)와 connectionTimeout 을 동시 요청량 기준으로 재산정, 커넥션 미반환(누수) 코드를 leak detection 으로 찾아 수정"
+  long:
+  - "풀 active/idle/pending 지표를 감시하고 pending 지속 시 경보"
+  source: GPT 수집·공식 문서 대조(등급 A) https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/jdbc/CannotGetJdbcConnectionException.html
+  vendor_cause: Spring이 JDBC를 통해 RDBMS에 연결할 수 없을 때 발생하는 치명적 데이터 접근 예외
+  vendor_action: root cause SQLException·DB 주소·풀 active/idle/waiting 상태·DB 접속 가능 여부를 확인하고 설정은 변경하지 않음
+  vendor_url: https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/jdbc/CannotGetJdbcConnectionException.html
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: Spring 4.x(JDK 6+)~6.x(JDK 17+) 공통 클래스명 — 패키지 변경 없음
+- code: org.springframework.dao.DeadlockLoserDataAccessException
+  severity: error
+  category: lock
+  title: 교착상태 희생 거래 롤백
+  immediate:
+  - "`grep -n -A20 'DeadlockLoserDataAccessException' <log> | grep -E 'ORA-00060|Deadlock|deadlock|SQL \\[|Caused by' | head -20` 로 DB 코드(ORA-00060·MySQL 1213·SQL Server 1205·PostgreSQL 40P01)와 SQL 확인"
+  - "DB 쪽 교착 기록 대조 — Oracle: `grep -n 'ORA-00060' <path>/alert_<SID>.log | tail` 로 같은 시각 trace 파일 경로 확인, MySQL: `SHOW ENGINE INNODB STATUS\\G` 의 LATEST DETECTED DEADLOCK — 같은 테이블·SQL 쌍이 반복되면 접근 순서 결함(세션은 손대지 않음)"
+  short:
+  - '2차 이관 기준: 반복 deadlock·핵심 거래 롤백 또는 동일 객체 경합 지속 시 DB/개발 담당 이관'
+  mid:
+  - "교착 거래들의 자원 접근 순서를 통일하고 트랜잭션 범위를 축소, 희생 거래는 짧은 재시도로 처리"
+  long:
+  - "DB deadlock 건수를 감시하고 동일 테이블 경합 거래를 설계 검토 대상으로 관리"
+  source: GPT 수집·공식 문서 대조(등급 A) https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/dao/DeadlockLoserDataAccessException.html
+  vendor_cause: 현재 프로세스가 DB deadlock의 희생자로 선택되어 해당 트랜잭션이 롤백됨
+  vendor_action: root cause의 DB 코드·관련 SQL·동일 시각 deadlock 로그·반복 거래를 확인하고 세션 종료나 강제 재처리는 하지 않음
+  vendor_url: https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/dao/DeadlockLoserDataAccessException.html
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: Spring 4.x(JDK 6+)~6.x(JDK 17+) 공통 클래스명 — 패키지 변경 없음
+- code: org.springframework.dao.QueryTimeoutException
+  severity: error
+  category: performance
+  title: Spring 쿼리 시간 초과
+  immediate:
+  - "`grep -n -B5 -A20 'QueryTimeoutException' <log> | grep -E 'SQL \\[|Caused by|ORA-01013|57014' | head -20` 로 SQL·원인 확인 — ORA-01013(Oracle)·57014(PostgreSQL) 이면 statement timeout 만료로 취소된 것"
+  - "`grep -c 'QueryTimeoutException' <log>` 로 건수 확인 후 현재 장시간 실행 SQL 조회(Oracle 예: `SELECT sid, sql_id, last_call_et FROM v$session WHERE status='ACTIVE' AND type='USER' ORDER BY last_call_et DESC;`) — last_call_et 가 timeout 초를 넘는 세션이 있으면 DB 쪽 지연"
+  short:
+  - '2차 이관 기준: 동일 SQL 반복 timeout 또는 다수 거래 지연 시 DB/개발 담당 이관'
+  mid:
+  - "대상 SQL 실행계획·인덱스 개선과 함께 Spring/JDBC 쿼리 timeout 값을 업무 SLA 기준으로 재설정"
+  long:
+  - "SQL 별 수행시간과 timeout 건수 감시, 대량 조회는 배치 시간대로 분리"
+  source: GPT 수집·공식 문서 대조(등급 A) https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/dao/QueryTimeoutException.html
+  vendor_cause: DB가 완료 전 쿼리 처리를 중단하거나 데이터 접근 API의 쿼리 제한시간이 만료될 때 사용됨
+  vendor_action: root cause·SQL·실행시간·timeout 설정값·DB 대기 이벤트를 확인하고 SQL 변경 없이 반복 여부를 기록
+  vendor_url: https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/dao/QueryTimeoutException.html
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: Spring 4.x(JDK 6+)~6.x(JDK 17+) 공통 클래스명 — 패키지 변경 없음
+- code: org.springframework.jdbc.BadSqlGrammarException
+  severity: error
+  category: app
+  title: 잘못된 SQL 문법 또는 사용 — 소스(애플리케이션) 결함 가능성, WAS/WEB 장애 아님
+  immediate:
+  - "`grep -n -A10 'BadSqlGrammarException' <log> | grep -E 'bad SQL grammar|ORA-|SQLState|Caused by' | head -20` 로 SQL 과 DB 코드 확인 — ORA-00942(테이블·뷰 없음)·ORA-00904(컬럼 없음)·42S02(MySQL)·42P01(PostgreSQL) 이면 객체 누락·권한"
+  - "객체 존재 조회(Oracle 예): `SELECT owner, object_name, status FROM all_objects WHERE object_name='<테이블>';` — 없거나 다른 스키마면 배포·권한 문제, 있으면 SQL 문 결함으로 직전 배포 이력과 대조"
+  short:
+  - '2차 이관 기준: 배포 직후 반복·공통 SQL 실패 또는 운영 업무 중단 시 개발/DB 담당 이관'
+  mid:
+  - "실패 SQL 을 대상 DB 스키마와 대조해 테이블·컬럼명 수정, 스키마 변경과 애플리케이션 배포 순서를 맞춤"
+  long:
+  - "배포 전 SQL 검증(대상 DB 스키마 기준 시험)을 표준화하고 DB 변경관리와 연계"
+  source: GPT 수집·공식 문서 대조(등급 A) https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/jdbc/BadSqlGrammarException.html
+  vendor_cause: Spring JDBC에 지정된 SQL이 유효하지 않을 때 발생하며 root cause는 SQLException임
+  vendor_action: getSql 또는 로그 SQL·SQLException·SQLState/vendorCode를 확인하고 테이블/컬럼 존재 여부와 배포 변경 이력을 대조
+  vendor_url: https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/jdbc/BadSqlGrammarException.html
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: Spring 4.x(JDK 6+)~6.x(JDK 17+) 공통 클래스명 — 패키지 변경 없음
+- code: org.springframework.dao.DuplicateKeyException
+  severity: error
+  category: internal
+  title: PK·유니크 키 중복 위반
+  immediate:
+  - "`grep -n -A10 'DuplicateKeyException' <log> | grep -E 'ORA-00001|Duplicate entry|23505|unique constraint' | head -20` 로 제약조건명·중복 키 확인(값은 마스킹하여 기록, 데이터 변경 없이 조회만)"
+  - "`grep -n '<업무키>' <log> | head` 로 같은 업무 키의 앞선 성공 거래 확인 — 직전 성공 기록이 있으면 이중 전송·재시도 중복, 없으면 채번·키 생성 결함"
+  short:
+  - '2차 이관 기준: 정상 거래에서 반복되거나 중복 처리·정합성 문제가 의심되면 개발/DB 담당 이관'
+  mid:
+  - "멱등 키·중복 요청 차단 로직과 시퀀스/채번 방식 점검으로 중복 INSERT 원인을 제거"
+  long:
+  - "키 중복 건수를 업무별로 감시하고 재시도 정책과 중복 방지 규칙을 연계 명세에 명시"
+  source: GPT 수집·공식 문서 대조(등급 A) https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/dao/DuplicateKeyException.html
+  vendor_cause: INSERT 또는 UPDATE가 primary key나 unique constraint를 위반함
+  vendor_action: 제약조건명·업무 키·SQLState/vendorCode와 동일 요청 중복 호출 여부를 확인하고 데이터 삭제·수정은 하지 않음
+  vendor_url: https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/dao/DuplicateKeyException.html
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: Spring 4.x(JDK 6+)~6.x(JDK 17+) 공통 클래스명 — 패키지 변경 없음
+- code: org.springframework.transaction.TransactionTimedOutException
+  severity: error
+  category: performance
+  title: Spring 트랜잭션 제한시간 초과
+  immediate:
+  - "`grep -n -A10 'TransactionTimedOutException' <log> | head -40` 로 'Transaction timed out: deadline was <시각>' 과 업무 메서드 확인 — 발생 직전 SQL·외부 호출 로그 시각과 대조"
+  - "`jcmd <PID> Thread.print > <path>/td_$(date +%H%M%S).txt` 로 스레드 덤프 저장 후 `grep -A15 '<업무 클래스>' <path>/td_*.txt | head -60` 으로 해당 업무 스레드 위치 확인 — socketRead·executeQuery 에 머물면 DB/외부 호출 지연, 업무 코드 안이면 로직 지연"
+  short:
+  - '2차 이관 기준: 동일 업무 반복 timeout·장시간 DB/외부 호출 확인 시 개발/DB 담당 이관'
+  mid:
+  - "트랜잭션 안의 느린 SQL·외부 호출을 분리하거나 개선하고 @Transactional timeout 값을 업무별로 재설정"
+  long:
+  - "트랜잭션 수행시간 분포를 감시하고 외부 호출을 트랜잭션 밖에서 하도록 개발 표준화"
+  source: GPT 수집·공식 문서 대조(등급 A) https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/transaction/TransactionTimedOutException.html
+  vendor_cause: 지정된 트랜잭션 deadline에 도달한 후 작업이 시도되어 트랜잭션 timeout 처리됨
+  vendor_action: 트랜잭션 timeout 값·시작/종료 시각·내부 SQL/외부호출 소요시간과 직전 오류를 확인
+  vendor_url: https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/transaction/TransactionTimedOutException.html
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: Spring 4.x(JDK 6+)~6.x(JDK 17+) 공통 클래스명 — 패키지 변경 없음
+- code: org.springframework.transaction.UnexpectedRollbackException
+  severity: error
+  category: internal
+  title: 커밋 시 예상치 못한 롤백
+  immediate:
+  - "`grep -n -B30 'UnexpectedRollbackException' <log> | grep -E 'Exception|Caused by' | tail -20` 로 직전 하위 예외 확인 — 'Transaction silently rolled back because it has been marked as rollback-only' 이면 내부 트랜잭션에서 삼킨 예외가 진짜 원인"
+  - "`grep -c 'rollback-only' <log>` 로 반복 건수 확인하고 실패 업무 ID 기록 — 같은 서비스 메서드에 몰리면 트랜잭션 경계(propagation) 결함"
+  short:
+  - '2차 이관 기준: 반복 롤백 또는 원인 예외가 숨겨진 상태이면 개발/DB 담당 이관'
+  mid:
+  - "rollback-only 를 만든 하위 예외를 로그로 남기도록 수정하고 전파(propagation) 설정·예외 처리 경계를 정리"
+  long:
+  - "트랜잭션 경계·전파 규칙을 개발 표준에 명시하고 예상치 못한 롤백 건수를 감시"
+  source: GPT 수집·공식 문서 대조(등급 A) https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/transaction/UnexpectedRollbackException.html
+  vendor_cause: 트랜잭션 커밋을 시도했지만 트랜잭션이 예상과 달리 rollback됨
+  vendor_action: 직전 예외·rollback-only 설정 원인이 된 하위 예외·트랜잭션 경계를 확인하고 실패 업무 ID를 기록
+  vendor_url: https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/transaction/UnexpectedRollbackException.html
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: Spring 4.x(JDK 6+)~6.x(JDK 17+) 공통 클래스명 — 패키지 변경 없음
+- code: org.springframework.web.client.ResourceAccessException
+  severity: error
+  category: upstream
+  title: HTTP 자원 접근 I/O 실패
+  immediate:
+  - "`grep -n 'ResourceAccessException' <log> | tail -20` 로 'I/O error on <METHOD> request for \"<URL>\"' 뒤 원인 문구 확인 — Read timed out·Connection refused·UnknownHost·SSLHandshake 로 갈래 판정"
+  - "`curl -s -o /dev/null -w '%{http_code} %{time_total}\\n' --max-time 10 <대상 URL>` 로 이 서버에서 직접 호출(조회성 URL만) — 000 이면 연결 실패(네트워크·DNS·방화벽), 응답시간이 timeout 근처면 대상 지연"
+  short:
+  - '2차 이관 기준: 대상 정상인데 지속되거나 다수 외부 호출 실패 시 네트워크/상대 시스템 담당 이관'
+  mid:
+  - "HTTP 클라이언트 connect/read timeout·재시도·커넥션 풀 설정을 대상 시스템 SLA 기준으로 정비"
+  long:
+  - "외부 호출 대상별 실패율·응답시간을 감시하고 장애 시 우회(서킷 차단) 정책을 운영"
+  source: GPT 수집·공식 문서 대조(등급 A) https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/web/client/ResourceAccessException.html
+  vendor_cause: Spring HTTP 클라이언트 수행 중 IOException이 발생함
+  vendor_action: root cause가 timeout·DNS·connect·SSL 중 무엇인지 확인하고 대상 URL·host:port·발생 빈도와 상대 상태를 대조
+  vendor_url: https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/web/client/ResourceAccessException.html
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: Spring 4.x(JDK 6+)~6.x(JDK 17+) 공통 클래스명 — 패키지 변경 없음
+- code: org.springframework.web.client.HttpClientErrorException
+  severity: warn
+  category: upstream
+  title: HTTP 4xx 응답 수신
+  immediate:
+  - "`grep -n 'HttpClientErrorException' <log> | tail -20` 로 상태코드와 대상 URL 확인 — 401/403 인증·권한, 404 경로 변경, 429 호출량 제한(인증 토큰 값은 기록하지 않음)"
+  - "`grep 'HttpClientErrorException' <log> | grep -o -E '4[0-9]{2} [A-Za-z ]+' | sort | uniq -c | sort -rn | head` 로 코드별 건수 집계 — 한 코드·한 URL 에 몰리면 대상 API 계약·인증 방식 변경 의심"
+  short:
+  - '2차 이관 기준: 같은 4xx가 정상 요청에서 반복되거나 인증·계약 API 영향이 지속되면 개발/대상 담당 이관'
+  mid:
+  - "4xx 유형별(400 요청 형식·401/403 인증·404 경로)로 요청 규격·인증 정보 갱신 절차를 정비"
+  long:
+  - "연계 API 명세 변경 공지 절차와 4xx 건수 감시를 운영"
+  source: GPT 수집·공식 문서 대조(등급 A) https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/web/client/HttpClientErrorException.html
+  vendor_cause: Spring HTTP 클라이언트가 대상 서버에서 HTTP 4xx 상태를 수신함
+  vendor_action: HTTP 상태코드·URL·응답 본문 요약·요청 파라미터를 확인하고 401/403이면 인증정보 노출 없이 인증 상태를 확인
+  vendor_url: https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/web/client/HttpClientErrorException.html
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: Spring 4.x(JDK 6+)~6.x(JDK 17+) 공통 클래스명 — 패키지 변경 없음
+- code: org.springframework.web.client.HttpServerErrorException
+  severity: error
+  category: upstream
+  title: HTTP 5xx 응답 수신
+  immediate:
+  - "`grep -n 'HttpServerErrorException' <log> | tail -20` 로 상태코드(500/502/503/504)·대상 URL·시각 확인 — 502/503/504 는 대상 앞단(프록시·LB)·가용성, 500 은 대상 애플리케이션 오류"
+  - "`curl -s -o /dev/null -w '%{http_code} %{time_total}\\n' --max-time 10 <대상 헬스체크 URL>` 로 현재 대상 상태 확인 — 지금도 5xx 면 대상 담당에 즉시 통보, 200 이면 일시 장애로 발생 구간만 기록"
+  short:
+  - '2차 이관 기준: 5xx가 반복되거나 502/503/504 등 가용성 장애가 지속되면 대상 시스템 담당 이관'
+  mid:
+  - "대상 시스템 5xx 원인 해결을 요청하고 호출 측 재시도·서킷 차단·대체 응답 정책을 정비"
+  long:
+  - "대상 시스템별 5xx 비율을 감시하고 SLA 위반 시 연계 담당에 자동 통보"
+  source: GPT 수집·공식 문서 대조(등급 A) https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/web/client/HttpServerErrorException.html
+  vendor_cause: Spring HTTP 클라이언트가 대상 서버에서 HTTP 500~599 응답을 수신함
+  vendor_action: 상태코드·대상 URL·응답시간·응답 본문 요약과 같은 시각 상대 시스템 장애 여부를 확인
+  vendor_url: https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/web/client/HttpServerErrorException.html
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: Spring 4.x(JDK 6+)~6.x(JDK 17+) 공통 클래스명 — 패키지 변경 없음
+- code: org.apache.ibatis.exceptions.PersistenceException
+  severity: error
+  category: internal
+  title: MyBatis 영속성 처리 예외 상위형
+  immediate:
+  - "`grep -n -A30 'PersistenceException' <log> | grep -E '^### ' | head -20` 로 MyBatis 진단 블록(### The error may involve <mapper ID>·### SQL·### Cause) 확인 — ### Cause 의 하위 예외가 실제 원인"
+  - "`grep -c 'PersistenceException' <log>` 로 건수 확인 — Cause 에 DB 코드(ORA-·SQLState)가 있으면 그 코드 사전으로, 'There is no getter'·'Could not find' 면 매퍼·파라미터 결함으로 판정"
+  short:
+  - '2차 이관 기준: 하위 원인이 DB·매퍼·설정 문제로 확인되거나 반복 업무 실패 시 개발/DB 담당 이관'
+  mid:
+  - "최하위 원인(DB 오류·매퍼·설정)별로 수정하고 매퍼 XML·DB 스키마 변경을 함께 배포"
+  long:
+  - "MyBatis 예외의 최하위 원인별 집계 감시와 매퍼 변경 리뷰를 표준화"
+  source: GPT 수집·공식 문서 대조(등급 A) https://mybatis.org/mybatis-3/apidocs/org/apache/ibatis/exceptions/PersistenceException.html
+  vendor_cause: MyBatis의 binding·builder·datasource·executor·mapping·SQL session 등 다양한 하위 예외의 공통 상위 예외로 클래스만으로 원인 확정 불가
+  vendor_action: Caused by 최하위 예외와 mapper ID·SQL·DB vendor code를 확인하고 PersistenceException 자체를 근본 원인으로 판정하지 않음
+  vendor_url: https://mybatis.org/mybatis-3/apidocs/org/apache/ibatis/exceptions/PersistenceException.html
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: 라이브러리 예외 클래스명 — JDK 버전 무관(MyBatis 3 / Jackson 2 / Jedis 2+)
+- code: org.apache.ibatis.binding.BindingException
+  severity: error
+  category: app
+  title: MyBatis 매퍼 바인딩 실패 — 소스(애플리케이션) 결함 가능성, WAS/WEB 장애 아님
+  immediate:
+  - "`grep -n 'BindingException' <log> | tail -20` 로 문구 확인 — 'Invalid bound statement (not found): <namespace.id>' 는 매퍼 XML 누락·namespace 불일치, \"Parameter '<이름>' not found\" 는 @Param 이름 불일치"
+  - "`grep -rl 'namespace=\"<namespace>\"' <path>/WEB-INF/classes` 로 배포본에 매퍼 XML 이 있는지 확인(jar 안이면 `unzip -l <jar> | grep -i mapper`) — 없으면 빌드 리소스 누락으로 배포 문제 확정"
+  short:
+  - '2차 이관 기준: 배포 후 반복되거나 특정 mapper 호출 전체가 실패하면 개발 담당 이관'
+  mid:
+  - "매퍼 인터페이스 메서드명과 XML statement id·namespace, @Param 이름을 일치시키고 mapperLocations 설정 확인"
+  long:
+  - "매퍼 바인딩 검사(기동 시 전 매퍼 로딩 시험)를 빌드·배포 절차에 포함"
+  source: GPT 수집·공식 문서 대조(등급 A) https://mybatis.org/mybatis-3/apidocs/org/apache/ibatis/binding/BindingException.html
+  vendor_cause: MyBatis mapper 인터페이스와 mapped statement/파라미터 바인딩 처리에서 발생하는 PersistenceException 하위 예외
+  vendor_action: 예외 메시지의 mapper namespace·statement ID·parameter 이름과 XML/애노테이션 배포 버전을 확인
+  vendor_url: https://mybatis.org/mybatis-3/apidocs/org/apache/ibatis/binding/BindingException.html
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: 라이브러리 예외 클래스명 — JDK 버전 무관(MyBatis 3 / Jackson 2 / Jedis 2+)
+- code: javax.naming.CommunicationException
+  severity: error
+  category: upstream
+  title: LDAP·네이밍 서비스 통신 실패
+  immediate:
+  - "`grep -n -A5 'javax.naming.CommunicationException' <log> | tail -30` 로 LDAP host:port 와 원인(Connection refused·timed out·SSL) 확인"
+  - "`nc -zvw3 <ldap_host> <port>` (LDAP 389·LDAPS 636 기본) 로 도달 확인 — 실패면 LDAP 서버·방화벽, 성공이면 TLS·타임아웃 쪽(설정·인증정보는 바꾸지 않음)"
+  short:
+  - '2차 이관 기준: 다수 인증 요청 실패·LDAP 정상인데 지속 통신 실패 시 LDAP/네트워크 담당 이관'
+  mid:
+  - "LDAP 서버 이중화(URL 다중 지정)와 connect/read timeout 설정을 정비"
+  long:
+  - "LDAP 응답시간·통신 실패를 감시하고 인증 장애 시 대체 절차를 마련"
+  source: GPT 수집·공식 문서 대조(등급 A) https://docs.oracle.com/javase/8/docs/api/javax/naming/CommunicationException.html
+  vendor_cause: 클라이언트가 directory/naming 서비스와 통신할 수 없으며 네트워크·클라이언트·서버 문제 등 다양한 요인이 가능
+  vendor_action: LDAP host:port·DNS 해석·접속 가능 여부·동시간대 LDAP 서비스 상태를 확인하고 설정/인증정보는 변경하지 않음
+  vendor_url: https://docs.oracle.com/javase/8/docs/api/javax/naming/CommunicationException.html
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: java.* 표준 예외 클래스명 — JDK 6~25 동일(메시지 문구는 version_note 별도 표기 없는 한 동일)
+- code: javax.naming.AuthenticationException
+  severity: error
+  category: security
+  title: LDAP·디렉터리 인증 실패
+  immediate:
+  - "`grep -n 'javax.naming.AuthenticationException' <log> | tail -20` 로 LDAP 응답 확인 — 'error code 49' 뒤 AD 하위코드 data 52e 는 자격증명 불일치, 775 는 계정 잠김, 532 는 비밀번호 만료(비밀번호 값은 기록하지 않음)"
+  - "`grep -c 'error code 49' <log>` 로 건수 확인 후 바인드 계정(DN)별로 대조 — 한 계정에 몰리면 서비스 계정 비밀번호 만료·변경, 다수 계정이면 LDAP 쪽 장애"
+  short:
+  - '2차 이관 기준: 정상 자격증명에서도 반복되거나 다수 계정에서 동시 실패하면 LDAP/보안 담당 이관'
+  mid:
+  - "LDAP 바인드 계정 비밀번호 변경 주기와 애플리케이션 설정 반영 절차를 맞춤"
+  long:
+  - "바인드 계정 만료일 사전 경보와 인증 실패 건수 감시"
+  source: GPT 수집·공식 문서 대조(등급 A) https://docs.oracle.com/javase/8/docs/api/javax/naming/AuthenticationException.html
+  vendor_cause: naming/directory 서비스 접근 시 제공된 자격증명이 유효하지 않거나 인증에 실패함
+  vendor_action: 계정명·인증 방식·LDAP 응답 메시지·계정 상태를 확인하되 비밀번호 값을 로그나 보고서에 기록하지 않음
+  vendor_url: https://docs.oracle.com/javase/8/docs/api/javax/naming/AuthenticationException.html
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: java.* 표준 예외 클래스명 — JDK 6~25 동일(메시지 문구는 version_note 별도 표기 없는 한 동일)
+- code: javax.naming.NameNotFoundException
+  severity: error
+  category: internal
+  title: LDAP 이름 또는 객체 미존재
+  immediate:
+  - "`grep -n 'NameNotFoundException' <log> | tail -20` 로 문구 확인 — JNDI 면 'Name [jdbc/<이름>] is not bound in this Context'(Tomcat), LDAP 이면 'error code 32 - No Such Object' 와 조회 DN"
+  - "JNDI 리소스 정의 확인(Tomcat 예): `grep -n '<리소스 이름>' <path>/conf/context.xml <path>/conf/server.xml` — 정의가 없거나 이름이 다르면 설정 누락(JEUS·WebLogic 은 관리 콘솔의 JNDI 트리 조회)"
+  short:
+  - '2차 이관 기준: 정상 DN이 반복 미조회되거나 공통 설정 문제이면 LDAP/개발 담당 이관'
+  mid:
+  - "조회 DN·JNDI 이름을 디렉터리 구조 변경 내역과 대조해 설정을 정정"
+  long:
+  - "디렉터리 구조·JNDI 이름 변경을 변경관리 대상으로 등록"
+  source: GPT 수집·공식 문서 대조(등급 A) https://docs.oracle.com/javase/8/docs/api/javax/naming/NameNotFoundException.html
+  vendor_cause: 요청한 이름의 구성요소가 naming/directory 서비스에 bind되어 있지 않아 해석되지 않음
+  vendor_action: 조회 DN/JNDI 이름·base DN·검색 경로와 최근 디렉터리 구조/설정 변경 이력을 확인
+  vendor_url: https://docs.oracle.com/javase/8/docs/api/javax/naming/NameNotFoundException.html
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: java.* 표준 예외 클래스명 — JDK 6~25 동일(메시지 문구는 version_note 별도 표기 없는 한 동일)
+- code: org.springframework.security.authentication.BadCredentialsException
+  severity: warn
+  category: security
+  title: 잘못된 인증 자격증명
+  immediate:
+  - "`grep -c 'BadCredentialsException' <log>` 와 `grep 'BadCredentialsException' <log> | tail -20` 로 건수·시각 확인 — 평소 대비 급증이면 대입 공격 의심(비밀번호는 수집·표시하지 않음)"
+  - "로그에 접속 IP 가 있으면 `grep 'Bad credentials' <log> | grep -o -E '([0-9]{1,3}\\.){3}[0-9]{1,3}' | sort | uniq -c | sort -rn | head` 로 IP 별 집계 — 한 IP 에서 다수 계정이면 대입 공격으로 보안 담당 통보"
+  short:
+  - '2차 이관 기준: 대량 반복·다수 계정 동시 발생·공격 의심 패턴이면 보안 담당 이관'
+  mid:
+  - "계정 잠금 임계·실패 횟수 정책을 점검하고 공격 패턴이면 출처 IP 차단 정책을 보안 담당과 수립"
+  long:
+  - "로그인 실패를 계정·IP 별로 감시하고 짧은 시간 다발 시 경보"
+  source: GPT 수집·공식 문서 대조(등급 A) https://docs.spring.io/spring-security/reference/7.0/api/java/org/springframework/security/authentication/BadCredentialsException.html
+  vendor_cause: Spring Security에서 계정이 잠금·비활성 상태가 아닌데 제공된 credentials가 유효하지 않아 인증이 거부됨
+  vendor_action: 사용자 식별자·실패 횟수·발생 IP·동일 계정/다수 계정 패턴을 확인하되 비밀번호는 수집하거나 표시하지 않음
+  vendor_url: https://docs.spring.io/spring-security/reference/7.0/api/java/org/springframework/security/authentication/BadCredentialsException.html
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: Spring 4.x(JDK 6+)~6.x(JDK 17+) 공통 클래스명 — 패키지 변경 없음
+- code: org.springframework.security.authentication.LockedException
+  severity: warn
+  category: security
+  title: 잠긴 계정의 인증 요청 거부
+  immediate:
+  - "`grep -n 'LockedException' <log> | tail -20` 로 'User account is locked' 발생 계정·시각 확인(사용자 식별자는 마스킹)"
+  - "`grep -c 'Bad credentials' <log>` 로 잠금 직전 실패 누적 확인 — 같은 시각 다수 계정이 잠기면 대입 공격 의심, 잠금 해제는 계정 담당 절차로만"
+  short:
+  - '2차 이관 기준: 업무 필수 계정 잠금·다수 계정 동시 잠금 또는 공격 징후 시 보안/계정 담당 이관'
+  mid:
+  - "잠금 해제 절차(본인 확인·승인)와 잠금 정책(임계·자동 해제 시간)을 정비"
+  long:
+  - "잠금 발생 건수와 업무 필수 계정 잠금을 감시"
+  source: GPT 수집·공식 문서 대조(등급 A) https://docs.spring.io/spring-security/reference/api/java/org/springframework/security/authentication/LockedException.html
+  vendor_cause: Spring Security에서 계정이 locked 상태로 판단되어 인증 요청이 거부됨
+  vendor_action: 계정 잠금 상태·실패 누적 횟수·잠금 정책·발생 시각을 확인하고 임의 잠금해제는 하지 않음
+  vendor_url: https://docs.spring.io/spring-security/reference/api/java/org/springframework/security/authentication/LockedException.html
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: Spring 4.x(JDK 6+)~6.x(JDK 17+) 공통 클래스명 — 패키지 변경 없음
+- code: com.fasterxml.jackson.core.JsonParseException
+  severity: error
+  category: app
+  title: 유효하지 않은 JSON 구문 — 소스(애플리케이션) 결함 가능성, WAS/WEB 장애 아님
+  immediate:
+  - "`grep -n -A5 'JsonParseException' <log> | tail -30` 로 'Unexpected character'·'line: N, column: M' 위치와 요청 출처 확인 — 문자가 '<' 이면 JSON 대신 HTML(오류 페이지)을 받은 것"
+  - "`grep -c 'Unexpected character' <log>` 로 건수 확인 — 특정 대상 API 응답에 몰리면 상대 응답 형식 변경, 본문 샘플은 개인정보 마스킹 후 최소만 보존"
+  short:
+  - '2차 이관 기준: 정상 규격 요청에서도 반복되거나 외부 API 응답 포맷 변경이 확인되면 개발/대상 담당 이관'
+  mid:
+  - "송신 측 JSON 생성 규격(인코딩·이스케이프)과 Content-Type 을 연계 명세에 맞추고 수신 측 오류 응답을 표준화"
+  long:
+  - "연계 메시지 규격 검증(스키마 검사)을 시험 단계에 포함하고 파싱 오류 건수 감시"
+  source: GPT 수집·공식 문서 대조(등급 A) https://fasterxml.github.io/jackson-core/javadoc/2.12/com/fasterxml/jackson/core/JsonParseException.html
+  vendor_cause: Jackson이 JSON 규격에 맞지 않는 입력을 파싱하다 구문 오류를 발견함
+  vendor_action: 파싱 위치·요청 출처·Content-Type·본문 구조를 확인하고 개인정보를 마스킹한 최소 샘플만 보존
+  vendor_url: https://fasterxml.github.io/jackson-core/javadoc/2.12/com/fasterxml/jackson/core/JsonParseException.html
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: 라이브러리 예외 클래스명 — JDK 버전 무관(MyBatis 3 / Jackson 2 / Jedis 2+)
+- code: java.io.IOException
+  severity: critical
+  category: capacity
+  title: 프로세스 파일 디스크립터 고갈(Too many open files)
+  immediate:
+  - "`grep -n 'Too many open files' <log> | head -5` 로 첫 발생 시각 확인 — 이후 신규 연결·파일 처리 실패가 이어지는지 판단"
+  - "`ls /proc/<PID>/fd | wc -l` 과 `grep 'Max open files' /proc/<PID>/limits` 로 사용량·한도 비교 — 사용량이 한도의 90% 이상이면 확정(값은 바꾸지 않음)"
+  - "`ls -l /proc/<PID>/fd | grep -c socket` 과 `ss -tanp | grep 'pid=<PID>,' | awk '{print $1}' | sort | uniq -c` 로 소켓 비중·상태별 집계 — CLOSE-WAIT 가 많으면 소켓 반납 누락"
+  short:
+  - '2차 이관 기준: FD가 한계에 근접·지속 증가하거나 신규 연결/파일 처리 실패가 발생하면 OS/WAS 담당 이관'
+  mid:
+  - "FD 증가 원인(소켓·파일 미close)을 lsof 결과로 특정해 소스 수정, nofile 한도(limits.conf·systemd LimitNOFILE)를 실사용량 기준 재산정"
+  long:
+  - "프로세스 열린 파일 수(/proc/<PID>/fd 개수)를 한도 대비 80% 경보로 감시"
+  source: GPT 수집·공식 문서 대조(등급 A) https://docs.oracle.com/html/E13980_01/troublesht.htm
+  vendor_cause: '[Too many open files] OS가 파일·소켓·파이프 등에 사용하는 file descriptor를 더 할당하지 못할 정도로 소진됨'
+  vendor_action: 상세문구 확인 후 프로세스 FD 사용량·OS open-file limit·소켓/파일 증가 추이를 읽기 전용으로 확인하고 값 변경은 하지 않음
+  vendor_url: https://docs.oracle.com/html/E13980_01/troublesht.htm
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: java.* 표준 예외 클래스명 — JDK 6~25 동일(메시지 문구는 version_note 별도 표기 없는 한 동일)
+- code: java.nio.file.NoSuchFileException
+  severity: error
+  category: storage
+  title: 접근 대상 파일이 존재하지 않음
+  immediate:
+  - "`grep -n 'NoSuchFileException' <log> | tail -20` 로 없는 파일 경로 확인 — 경로 오타·날짜 치환 오류 여부부터 판단"
+  - "`ls -ld <상위 디렉터리>` 와 `df -h <상위 디렉터리>` 로 디렉터리 존재·마운트 상태 확인 — 상위가 없거나 df 의 Mounted on 이 기대와 다르면(예: /) 마운트 누락"
+  - "`ps -o user= -p <PID>` 로 실행 계정 확인 후 `namei -l <파일 경로>` 로 경로 단계별 권한 확인(파일을 임의로 만들지 않음)"
+  short:
+  - '2차 이관 기준: 필수 설정/데이터 파일 누락·마운트 장애 또는 반복 업무 실패 시 OS/개발 담당 이관'
+  mid:
+  - "필수 파일 생성·배포 순서와 경로 설정을 정비하고 마운트 의존 경로는 기동 전 점검 추가"
+  long:
+  - "필수 파일·마운트 존재 여부를 감시하고 배치 선후행 관계를 스케줄러에 명시"
+  source: GPT 수집·공식 문서 대조(등급 A) https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/nio/file/NoSuchFileException.html
+  vendor_cause: 존재하지 않는 파일에 접근하려 할 때 발생함
+  vendor_action: 예외의 file 경로·마운트 상태·배포/배치 생성 여부·권한과 경로 오타를 확인하고 파일을 임의 생성하지 않음
+  vendor_url: https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/nio/file/NoSuchFileException.html
+  versions:
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: java.nio.file 은 JDK 7(NIO.2) 도입
+- code: java.util.concurrent.TimeoutException
+  severity: error
+  category: performance
+  title: 블로킹 작업 제한시간 초과
+  immediate:
+  - "`grep -n -B5 -A15 'java.util.concurrent.TimeoutException' <log> | tail -50` 로 대기한 작업(Future.get 등 호출 위치)과 대기 시간 확인"
+  - "`jcmd <PID> Thread.print > <path>/td_$(date +%H%M%S).txt` 로 스레드 덤프 저장 후 `grep -c 'State: BLOCKED' <path>/td_*.txt` 와 작업 스레드 프레임 확인 — 작업 스레드가 socketRead·DB 호출에 머물면 하위 시스템 지연, 풀 스레드가 모두 바쁘면 처리량 포화"
+  short:
+  - '2차 이관 기준: 동일 작업 반복 timeout·처리 큐 증가 또는 업무 지연 지속 시 개발/WAS 담당 이관'
+  mid:
+  - "대기 대상(스레드 풀·외부 호출·DB) 병목을 개선하고 Future.get timeout 값을 SLA 기준으로 재설정"
+  long:
+  - "비동기 작업 대기시간·timeout 건수를 감시"
+  source: GPT 수집·공식 문서 대조(등급 A) https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/concurrent/TimeoutException.html
+  vendor_cause: 시간 제한이 지정된 blocking operation이 허용 시간 내 완료되지 않음
+  vendor_action: 예외 발생 작업·설정 timeout·실제 대기시간·동시간대 thread/DB/외부연계 지연 여부를 확인
+  vendor_url: https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/concurrent/TimeoutException.html
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: java.* 표준 예외 클래스명 — JDK 6~25 동일(메시지 문구는 version_note 별도 표기 없는 한 동일)
+- code: java.util.concurrent.RejectedExecutionException
+  severity: error
+  category: capacity
+  title: Executor가 작업 접수를 거부
+  immediate:
+  - "`grep -n 'RejectedExecutionException' <log> | tail -20` 로 문구 확인 — '[Running, pool size = N, active threads = N, queued tasks = N' 이면 풀·큐 포화, 'Shutting down'·'Terminated' 면 종료 중인 Executor 에 작업 제출"
+  - "`jcmd <PID> Thread.print > <path>/td_$(date +%H%M%S).txt` 로 스레드 덤프 저장 후 `grep -A10 '\"<풀 스레드 이름>' <path>/td_*.txt | head -60` 으로 풀 스레드 위치 확인 — 모두 같은 하위 호출(DB·외부)에 머물면 하위 지연이 원인(풀 설정은 바꾸지 않음)"
+  short:
+  - '2차 이관 기준: 거부 건수 증가·큐 포화·핵심 비동기 작업 누락이 지속되면 WAS/개발 담당 이관'
+  mid:
+  - "Executor core/max 크기·큐 용량·거부 정책(CallerRunsPolicy 등)을 처리량 기준으로 재산정, shutdown 뒤 제출 여부 확인"
+  long:
+  - "스레드 풀 active·queue·rejected 지표를 감시하고 거부 발생 시 경보"
+  source: GPT 수집·공식 문서 대조(등급 A) https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/RejectedExecutionException.html
+  vendor_cause: Executor가 제출된 작업을 실행 대상으로 받아들일 수 없는 상태에서 발생함
+  vendor_action: Executor 이름·pool size·active/queue/rejected 수·shutdown 여부와 발생 직전 요청량을 확인하고 풀 설정은 변경하지 않음
+  vendor_url: https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/RejectedExecutionException.html
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: java.* 표준 예외 클래스명 — JDK 6~25 동일(메시지 문구는 version_note 별도 표기 없는 한 동일)
+- code: org.apache.catalina.connector.ClientAbortException
+  severity: warn
+  category: connection
+  title: 원격 클라이언트가 요청 연결 중단
+  immediate:
+  - "`grep -n 'ClientAbortException' <log> | tail -20` 로 원인 문구(Broken pipe·Connection reset by peer)·시각 확인 — 산발이면 사용자 브라우저 이탈, 특정 API 에 몰리면 처리 지연"
+  - "같은 시각 액세스 로그 `grep '<요청 URI>' <path>/localhost_access_log.*.txt | tail` 의 처리시간 칸과 앞단 프록시 timeout 값 비교 — 처리시간이 프록시 timeout 이상이면 프록시가 먼저 연결을 닫은 것"
+  short:
+  - '2차 이관 기준: 대량 반복·특정 API 장시간 처리 또는 프록시 timeout과 연계되면 WEB/WAS 담당 이관'
+  mid:
+  - "장시간 처리 API 를 개선하고 앞단 프록시 timeout 과 WAS 처리 시간을 맞춤"
+  long:
+  - "API 별 처리시간과 클라이언트 중단 건수를 감시"
+  source: GPT 수집·공식 문서 대조(등급 A) https://tomcat.apache.org/tomcat-9.0-doc/api/org/apache/catalina/connector/ClientAbortException.html
+  vendor_cause: Tomcat이 원격 클라이언트가 요청을 중도 종료한 상황을 IOException 계열로 식별함
+  vendor_action: 요청 URI·처리시간·응답 크기·앞단 프록시 timeout·동일 시각 클라이언트 종료 패턴을 확인
+  vendor_url: https://tomcat.apache.org/tomcat-9.0-doc/api/org/apache/catalina/connector/ClientAbortException.html
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: Tomcat/JBossWeb 커넥터 클래스 — 5.5~11 공통
+- code: org.apache.commons.dbcp.SQLNestedException
+  severity: error
+  category: capacity
+  title: DBCP 1.x 커넥션 풀 획득 실패(Cannot get a connection, pool exhausted)
+  immediate:
+  - "`grep -n -A5 'SQLNestedException' <log> | tail -30` 로 문구 구분 — 'Timeout waiting for idle object' 는 풀 고갈(maxActive 모두 사용 중), 'Cannot create PoolableConnectionFactory' 는 DB 접속 실패"
+  - "`ss -tn dst <db_host> | grep -c ESTAB` 로 실제 DB 연결 수를 maxActive 와 비교 — 같으면 풀 고갈 확정, `jcmd <PID> Thread.print | grep -c 'borrowObject'` 로 대기 프레임 수 확인(풀 값은 바꾸지 않음)"
+  short:
+  - '2차 이관 기준: 풀 고갈이 반복되거나 DB 정상인데 연결 획득 실패가 지속되면 DB/WAS 담당 이관'
+  mid:
+  - "maxActive·maxWait 를 동시 요청량 기준으로 재산정하고 removeAbandoned 로 커넥션 누수를 찾아 수정, DBCP2 이상 전환 검토"
+  long:
+  - "풀 active/idle 지표 감시와 커넥션 누수 점검을 배포 시험에 포함"
+  source: GPT 수집·공식 문서 대조(등급 B) https://issues.apache.org/jira/browse/DBCP-225
+  vendor_cause: '[Cannot get a connection, pool exhausted] DBCP 1.x에서 사용 가능한 풀 연결을 얻지 못하거나 유효 연결 생성 실패 등으로 getConnection이 실패한 사례가 확인됨'
+  vendor_action: DBCP 버전·maxActive/maxWait·active/idle 상태·DB 접속 오류와 대기 요청 증가를 확인하고 풀 값 변경은 하지 않음
+  vendor_url: https://issues.apache.org/jira/browse/DBCP-225
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: DBCP 1.x 전용 클래스(DBCP 2 는 SQLException 직접) — JDK 6~8 세대 애플리케이션에서 주로 관찰
+- code: com.zaxxer.hikari.pool.HikariPool$PoolInitializationException
+  severity: critical
+  category: connection
+  title: HikariCP 풀 초기화 실패
+  immediate:
+  - "`grep -n -A10 'PoolInitializationException' <log> | grep -E 'Failed to initialize pool|Caused by' | head -20` 로 원인 확인 — ORA-01017·Access denied 는 계정, Connection refused·ORA-12541 은 DB/리스너, timeout 은 네트워크"
+  - "`nc -zvw3 <db_host> <db_port>` 로 DB 포트 도달 확인 — 실패면 DB 기동·방화벽, 성공이면 JDBC URL·계정 설정 쪽(비밀번호는 출력·기록하지 않음)"
+  short:
+  - '2차 이관 기준: 애플리케이션 기동 실패 또는 초기 연결 생성 실패가 계속되면 DB/WAS 담당 이관'
+  mid:
+  - "JDBC URL·계정·네트워크를 정정하고 initializationFailTimeout 과 기동 순서(DB 먼저)를 운영 기준으로 설정"
+  long:
+  - "애플리케이션 기동 시 DB 연결 사전 점검과 DB 가용성 감시를 연계"
+  source: GPT 수집·공식 문서 대조(등급 A) https://github.com/brettwooldridge/HikariCP/blob/dev/src/main/java/com/zaxxer/hikari/pool/HikariPool.java
+  vendor_cause: HikariCP가 초기 연결을 생성·검증하지 못해 풀 초기화에 실패함; 원인은 첨부된 cause로 확인해야 함
+  vendor_action: cause·JDBC URL·DB host:port·인증 오류·connectionTimeout/initializationFailTimeout과 DB 상태를 확인
+  vendor_url: https://github.com/brettwooldridge/HikariCP/blob/dev/src/main/java/com/zaxxer/hikari/pool/HikariPool.java
+  versions:
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: HikariCP 2.x+ 는 JDK 8 이상
+- code: redis.clients.jedis.exceptions.JedisConnectionException
+  severity: error
+  category: connection
+  title: Jedis Redis 연결 장애
+  immediate:
+  - "`grep -n -A5 'JedisConnectionException' <log> | tail -30` 로 문구 확인 — 'Could not get a resource from the pool' 은 풀 고갈 또는 연결 실패, 'Unexpected end of stream'·'Connection reset' 은 서버 쪽에서 연결이 닫힘(timeout·maxclients)"
+  - "`redis-cli -h <host> -p <port> ping` 과 `redis-cli -h <host> -p <port> info clients` 로 응답·connected_clients 확인 — PONG 이 없으면 Redis 장애, connected_clients 가 maxclients 근처면 연결 포화(AUTH 비밀번호가 셸 이력에 남지 않게 주의)"
+  short:
+  - '2차 이관 기준: 반복 연결 실패·다수 요청 영향 또는 Redis 노드 장애가 확인되면 Redis/네트워크 담당 이관'
+  mid:
+  - "Jedis 풀(maxTotal·maxWait)·timeout 설정과 Redis 이중화(Sentinel/Cluster) 구성을 정비"
+  long:
+  - "Redis 연결 실패율·응답시간을 감시하고 캐시 장애 시 원본 조회 대체 경로 운영"
+  source: GPT 수집·공식 문서 대조(등급 A) https://redis.github.io/jedis/failover/
+  vendor_cause: Jedis에서 Redis 연결 관련 실패를 나타내며 공식 failover 기능도 이 예외를 연결 실패 대상으로 처리함
+  vendor_action: Redis endpoint·DNS·port·timeout·동시간대 Redis 상태와 예외 cause를 확인하고 데이터/설정 변경은 하지 않음
+  vendor_url: https://redis.github.io/jedis/failover/
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: 라이브러리 예외 클래스명 — JDK 버전 무관(MyBatis 3 / Jackson 2 / Jedis 2+)
+- code: javax.persistence.OptimisticLockException
+  severity: error
+  category: lock
+  title: 낙관적 잠금 충돌 발생
+  immediate:
+  - "`grep -n -A10 'OptimisticLockException' <log> | tail -40` 로 대상 엔티티·식별자 확인 — Hibernate 면 'Row was updated or deleted by another transaction' 과 [엔티티#ID] 형식"
+  - "`grep -A3 'OptimisticLockException' <log> | grep -o -E '\\[[A-Za-z0-9_.$]+#[^]]+\\]' | sort | uniq -c | sort -rn | head` 로 같은 엔티티·ID 반복 집계 — 한 ID 에 몰리면 동시 수정 경합(화면 중복 저장·배치와 온라인 충돌), 데이터는 임의 수정하지 않음"
+  short:
+  - '2차 이관 기준: 동일 엔티티 충돌 반복·업무 실패 또는 동시성 설계 검토 필요 시 개발/DB 담당 이관'
+  mid:
+  - "동시 수정 거래에 재조회·재시도 로직을 넣고 갱신 범위를 축소"
+  long:
+  - "엔티티별 낙관적 잠금 충돌 건수를 감시하고 동시성 설계를 리뷰 항목으로 관리"
+  source: GPT 수집·공식 문서 대조(등급 A) https://jakarta.ee/specifications/persistence/2.2/apidocs/javax/persistence/optimisticlockexception
+  vendor_cause: Persistence provider가 optimistic locking conflict를 감지했으며 활성 트랜잭션은 rollback 표시될 수 있음
+  vendor_action: 대상 엔티티·식별자·version 값·동시 수정 요청과 발생 빈도를 확인하고 데이터 값을 임의 수정하지 않음
+  vendor_url: https://jakarta.ee/specifications/persistence/2.2/apidocs/javax/persistence/optimisticlockexception
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: javax.persistence 는 Java EE 8 까지 — Jakarta EE 9+(Spring 6/Boot 3, JDK 17+)에서는 jakarta.persistence.OptimisticLockException 으로 패키지명 변경(룰 APP-CONC-009 는 클래스 단순명으로 매칭)

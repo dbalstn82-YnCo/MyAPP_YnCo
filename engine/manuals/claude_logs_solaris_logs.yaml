@@ -1,0 +1,83 @@
+product: solaris
+layer: os
+title: solaris 로그 종류 카탈로그 (GPT 수집 — 벤더 문서 대조 필요)
+source: GPT 수집(벤더 문서 대조 필요)
+sources: []
+logtypes:
+- name: 시스템 메시지
+  path: /var/adm/messages
+  format: 텍스트·RFC3164 (syslog 우선순위 [ID nnn kern.notice])
+  check: panic·WARNING·SCSI error·NFS not responding·ZFS 이벤트·link down
+  sample: 'Sep  9 14:02:11 db1 scsi: [ID 107833 kern.warning] WARNING: /pci@0/scsi@1/sd@1,0 (sd1): Error for Command: read'
+- name: FMA 결함 로그
+  path: fmdump -v · fmdump -eV (/var/fm/fmd/errlog, fltlog)
+  format: 바이너리(fmdump로 텍스트)·ISO
+  check: SUNW-MSG-ID·결함 FRU·CPU/메모리/디스크 격리
+  sample: Sep 09 14:02:11.1234 a1b2c3d4-... SUN4V-8000-6H Diagnosed
+- name: SMF 서비스 로그
+  path: /var/svc/log/<fmri>.log · svcs -xv
+  format: 텍스트
+  check: 서비스 maintenance 전환·start 메서드 실패 원인
+  sample: '[ Sep  9 14:02:11 Method "start" exited with status 1. ]'
+- name: 인증 로그
+  path: /var/adm/authlog · /var/log/authlog(syslog auth.* 설정)
+  format: 텍스트·RFC3164
+  check: 로그인 실패·su 실패·sshd 인증 실패
+  sample: 'Sep  9 14:00:01 db1 sshd[2211]: [ID 800047 auth.info] Failed keyboard-interactive for root from 10.0.0.5'
+- name: su 로그
+  path: /var/adm/sulog
+  format: 텍스트 'SU MM/DD HH:MM +/- tty user-target'
+  check: 권한 상승 시도·실패(-)
+  sample: SU 09/09 14:00 - pts/1 oper-root
+- name: 감사(BSM/audit)
+  path: /var/audit/*.not_terminated.* · auditreduce | praudit
+  format: 바이너리(praudit로 텍스트)
+  check: login 실패·권한 사용·파일 접근
+  sample: 'header,...,login - ssh,...,return,failure: Authentication failed'
+- name: 로그인 이력
+  path: /var/adm/wtmpx · last · /var/adm/lastlog
+  format: 바이너리(last로 텍스트)
+  check: 장애 시각 접속 사용자·재부팅 이력(last reboot)
+  sample: reboot    system boot  5.11 Tue Sep  9 14:10
+- name: 크래시 덤프
+  path: /var/crash/<host>/vmcore.N · unix.N
+  format: 바이너리(mdb)
+  check: panic 원인 스택
+  sample: 'panic[cpu0]/thread=...: BAD TRAP'
+- name: ZFS 이력
+  path: zpool history · zpool status -v · zpool events
+  format: 텍스트
+  check: 풀 저하·resilver·체크섬 오류·디스크 교체 이력
+  sample: 2026-09-09.14:02:11 zpool replace tank c1t2d0 c1t3d0
+- name: sar 성능 이력
+  path: /var/adm/sa/saDD
+  format: 바이너리(sar -f)
+  check: CPU·메모리·I/O 추세
+  sample: 14:00:01 %usr %sys %wio %idle
+sections:
+- heading: 로그 종류 카탈로그 (전수)
+  body: '시스템 메시지: /var/adm/messages · FMA 결함 로그: fmdump -v · fmdump -eV (/var/fm/fmd/errlog, fltlog) · SMF 서비스 로그: /var/svc/log/<fmri>.log · svcs -xv · 인증 로그: /var/adm/authlog · /var/log/authlog(syslog
+    auth.* 설정) · su 로그: /var/adm/sulog · 감사(BSM/audit): /var/audit/*.not_terminated.* · auditreduce | praudit · 로그인 이력: /var/adm/wtmpx · last · /var/adm/lastlog · 크래시 덤프: /var/crash/<host>/vmcore.N · unix.N
+    · ZFS 이력: zpool history · zpool status -v · zpool events · sar 성능 이력: /var/adm/sa/saDD'
+- heading: '로그: 시스템 메시지'
+  body: '경로 /var/adm/messages / 형식 텍스트·RFC3164 (syslog 우선순위 [ID nnn kern.notice]) / 확인 panic·WARNING·SCSI error·NFS not responding·ZFS 이벤트·link down / 샘플 Sep  9 14:02:11 db1 scsi: [ID 107833 kern.warning]
+    WARNING: /pci@0/scsi@1/sd@1,0 (sd1): Error for Command: read'
+- heading: '로그: FMA 결함 로그'
+  body: 경로 fmdump -v · fmdump -eV (/var/fm/fmd/errlog, fltlog) / 형식 바이너리(fmdump로 텍스트)·ISO / 확인 SUNW-MSG-ID·결함 FRU·CPU/메모리/디스크 격리 / 샘플 Sep 09 14:02:11.1234 a1b2c3d4-... SUN4V-8000-6H Diagnosed
+- heading: '로그: SMF 서비스 로그'
+  body: 경로 /var/svc/log/<fmri>.log · svcs -xv / 형식 텍스트 / 확인 서비스 maintenance 전환·start 메서드 실패 원인 / 샘플 [ Sep  9 14:02:11 Method "start" exited with status 1. ]
+- heading: '로그: 인증 로그'
+  body: '경로 /var/adm/authlog · /var/log/authlog(syslog auth.* 설정) / 형식 텍스트·RFC3164 / 확인 로그인 실패·su 실패·sshd 인증 실패 / 샘플 Sep  9 14:00:01 db1 sshd[2211]: [ID 800047 auth.info] Failed keyboard-interactive for
+    root from 10.0.0.5'
+- heading: '로그: su 로그'
+  body: 경로 /var/adm/sulog / 형식 텍스트 'SU MM/DD HH:MM +/- tty user-target' / 확인 권한 상승 시도·실패(-) / 샘플 SU 09/09 14:00 - pts/1 oper-root
+- heading: '로그: 감사(BSM/audit)'
+  body: '경로 /var/audit/*.not_terminated.* · auditreduce | praudit / 형식 바이너리(praudit로 텍스트) / 확인 login 실패·권한 사용·파일 접근 / 샘플 header,...,login - ssh,...,return,failure: Authentication failed'
+- heading: '로그: 로그인 이력'
+  body: 경로 /var/adm/wtmpx · last · /var/adm/lastlog / 형식 바이너리(last로 텍스트) / 확인 장애 시각 접속 사용자·재부팅 이력(last reboot) / 샘플 reboot    system boot  5.11 Tue Sep  9 14:10
+- heading: '로그: 크래시 덤프'
+  body: '경로 /var/crash/<host>/vmcore.N · unix.N / 형식 바이너리(mdb) / 확인 panic 원인 스택 / 샘플 panic[cpu0]/thread=...: BAD TRAP'
+- heading: '로그: ZFS 이력'
+  body: 경로 zpool history · zpool status -v · zpool events / 형식 텍스트 / 확인 풀 저하·resilver·체크섬 오류·디스크 교체 이력 / 샘플 2026-09-09.14:02:11 zpool replace tank c1t2d0 c1t3d0
+- heading: '로그: sar 성능 이력'
+  body: 경로 /var/adm/sa/saDD / 형식 바이너리(sar -f) / 확인 CPU·메모리·I/O 추세 / 샘플 14:00:01 %usr %sys %wio %idle

@@ -1,0 +1,456 @@
+product: iis
+layer: web
+note: GPT 협업 수집분 — 벤더 공식 문서와 대조 후 확정
+codes:
+- code: IIS-HTTPERR-TIMER-MINBYTESPERSECOND
+  severity: warn
+  category: connection
+  title: 최소 전송 속도 미달
+  immediate:
+  - '`Select-String -Path "%SystemRoot%\System32\LogFiles\HTTPERR\httperr*.log" -Pattern "Timer_MinBytesPerSecond" | Measure-Object` 로 건수 확인(PowerShell에서는 `$env:SystemRoot` 사용) — 평소 대비 급증이면 이상'
+  - 'HTTPERR 줄의 c-ip 칸으로 출처 IP 상위 10개 확인 — 특정 IP 편중이면 slow read 공격 의심(보안 담당 통보), 고르게 분산이면 회선 품질 문제'
+  short:
+  - '(2차·승인 후, 롤백: 원래 값 복원) `appcmd list config -section:system.applicationHost/webLimits` 로 minBytesPerSecond 현재 값 확인 후, 대용량 다운로드 사이트에 한해 값 조정 — 0(해제)은 DoS 노출로 금지'
+  mid:
+  - '대용량 파일 다운로드 경로를 별도 사이트/CDN 으로 분리하고 공격 출처는 방화벽·dynamicIpSecurity 로 차단 정책화'
+  long:
+  - 'HTTPERR Timer_MinBytesPerSecond 시간당 건수 기준선 수립·급증(기준선 3배) 경보'
+  vendor_cause: 'HTTP.sys(HTTPERR) 사유 Timer_MinBytesPerSecond — 클라이언트가 응답을 최소 전송 속도(HTTP Server API 문서 기본 150바이트/초, IIS 에서는 webLimits minBytesPerSecond 로 설정 — IIS 구성 기본 240)보다 느리게 받아 HTTP.sys 가 연결을 끊었다. 저속 회선·모바일 클라이언트 또는 느린 응답 수신형(slow read) 공격이 흔한 원인.'
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - IIS 6.0 (2003)
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: HTTP.sys 오류 로그(HTTPERR) 사유 문구 — 2003(IIS 6.0)부터 동일
+- code: IIS-HTTPERR-CLIENT-RESET
+  severity: warn
+  category: connection
+  title: 클라이언트 리셋
+  immediate:
+  - '`Select-String -Path "$env:SystemRoot\System32\LogFiles\HTTPERR\httperr*.log" -Pattern "Client_Reset|Timer_EntityBody|Timer_HeaderWait" | Group-Object { $_.Matches[0].Value } | Select Count,Name` 로 사유별 건수 확인'
+  - '같은 시각 W3C 로그(`C:\inetpub\logs\LogFiles\W3SVC<siteID>`)의 time-taken 과 LB·방화벽 세션 타임아웃 값 대조 — 특정 IP 반복이면 공격 의심'
+  short:
+  - '(2차) LB·방화벽 유휴 타임아웃이 IIS connectionTimeout(기본 120초)보다 짧으면 장비 쪽 값을 IIS 이상으로 맞추도록 네트워크 담당에 변경 요청'
+  mid:
+  - '슬로우 요청 공격 대비 Http.sys 타이머(HeaderWait·EntityBody)와 dynamicIpSecurity 요청 빈도 제한 정책 수립'
+  long:
+  - 'Client_Reset·Timer_HeaderWait 일별 건수 추세 감시와 출처 IP 상위 목록 주간 보고'
+  vendor_cause: 'HTTP.sys(HTTPERR) 사유 Client_Reset·Timer_EntityBody·Timer_HeaderWait — 요청 헤더/본문을 받는 도중 클라이언트가 연결을 끊었거나 ConnectionTimeout(기본 2분) 안에 헤더·본문이 도착하지 않았다. 클라이언트 취소·중간 장비(LB·방화벽) 세션 종료·느린 요청(slowloris) 공격이 흔한 원인.'
+  verify_note: '미검증 — Client_Reset 사유 문구는 Win32 HTTP Server API 사유 표(learn.microsoft.com/windows/win32/http/types-of-errors-logged-by-the-http-server-api)에 없어 공식 정의 문구를 확인하지 못함(Timer_EntityBody·Timer_HeaderWait 는 확인)'
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - IIS 6.0 (2003)
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: HTTP.sys 오류 로그(HTTPERR) 사유 문구 — 2003(IIS 6.0)부터 동일
+- code: IIS-HTTPERR-INTERNAL
+  severity: error
+  category: internal
+  title: HTTP.sys 내부 오류
+  immediate:
+  - '`Select-String -Path "$env:SystemRoot\System32\LogFiles\HTTPERR\httperr*.log" -Pattern " Internal" | Select-Object -Last 20` 로 발생 시각·URL·사이트ID 확인'
+  - '`Get-WinEvent -FilterHashtable @{LogName="System"; ProviderName="Microsoft-Windows-HttpEvent"} -MaxEvents 20 | Format-List TimeCreated,Id,Message` 로 HTTP.sys 이벤트 동반 여부 확인'
+  - '`netsh http show servicestate` 로 요청 큐·URL 그룹 상태 확인(읽기 전용)'
+  short:
+  - '(2차) 같은 시각 System 이벤트·SSL 바인딩(`netsh http show sslcert`)과 대조해 원인 범위를 좁히고, 최신 누적 업데이트 적용 여부를 Windows 담당과 확인'
+  mid:
+  - 'Windows 누적 업데이트(HTTP.sys 포함) 적용 주기 표준화, 적용은 변경 관리 승인 후 정기 점검 시간에'
+  long:
+  - 'HTTPERR Internal 건수 0 기준 경보, 발생 시 System 이벤트 자동 첨부'
+  vendor_cause: 'HTTP.sys(HTTPERR) 사유 Internal — HTTP.sys 내부 서버 오류(HTTP 500)로 요청을 처리하지 못했다. 드라이버·SSL 바인딩 이상이나 커널 자원 부족 등 IIS 앱 바깥(커널 모드) 문제에서 나며, 반복되면 OS 패치 수준과 시스템 이벤트를 함께 봐야 한다.'
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - IIS 6.0 (2003)
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: HTTP.sys 오류 로그(HTTPERR) 사유 문구 — 2003(IIS 6.0)부터 동일
+- code: IIS-HTTPERR-URL-LENGTH
+  severity: warn
+  category: capacity
+  title: URL 길이 초과
+  immediate:
+  - '`Select-String -Path "$env:SystemRoot\System32\LogFiles\HTTPERR\httperr*.log" -Pattern "URL_Length" | Select-Object -Last 20` 로 대상 URL·출처 IP 확인'
+  - '`reg query HKLM\System\CurrentControlSet\Services\HTTP\Parameters` 로 UrlSegmentMaxLength·MaxFieldLength 설정 여부 확인(값 없으면 기본값)'
+  short:
+  - '(2차·승인 후, 롤백: 레지스트리 내보내기 후 복원) 정상 업무 URL 이면 UrlSegmentMaxLength 를 필요한 최소만큼 상향 — HTTP 서비스 재시작 필요해 서비스 중단 일정 확보'
+  mid:
+  - '긴 데이터를 URL 대신 POST 본문으로 전달하도록 애플리케이션 설계 변경 요청'
+  long:
+  - 'URL_Length 거부 건수와 출처 IP 를 보안 감시 항목에 등록'
+  vendor_cause: 'HTTP.sys(HTTPERR) 사유 URL_Length — 요청 URL 이 허용 최대 크기를 넘어 HTTP.sys 가 거부했다(경로 세그먼트 한도 UrlSegmentMaxLength 기본 260자, 헤더 한도 MaxFieldLength 기본 16384바이트). 비정상 긴 쿼리·스캐너 요청이 흔한 원인.'
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - IIS 6.0 (2003)
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: HTTP.sys 오류 로그(HTTPERR) 사유 문구 — 2003(IIS 6.0)부터 동일
+- code: IIS-HTTPERR-HEADER
+  severity: warn
+  category: security
+  title: 헤더 오류
+  immediate:
+  - '`Select-String -Path "$env:SystemRoot\System32\LogFiles\HTTPERR\httperr*.log" -Pattern " Header" | Select-Object -Last 30` 로 출처 IP·URL 확인'
+  - '출처가 내부 프록시·LB 면 그 장비가 추가하는 헤더 크기를, 외부 다수 IP 면 스캔 여부를 보안 담당과 확인'
+  short:
+  - '(2차) 정상 클라이언트로 확인되면 문제 요청을 재현(curl -v)해 헤더 구성 확인 후 MaxFieldLength·MaxRequestBytes 조정 필요성 검토(변경은 승인 후)'
+  mid:
+  - 'WAF/요청 필터링에서 비정상 헤더 차단 규칙 수립'
+  long:
+  - 'HTTPERR Header 거부 건수 일별 추세 감시'
+  vendor_cause: 'HTTP.sys(HTTPERR) 사유 Header — 요청 헤더를 해석하다 구문 오류가 나 HTTP.sys 가 400 으로 거부했다. 잘못된 헤더 형식을 보내는 클라이언트·프록시, 헤더 한도(MaxFieldLength) 초과, 비정상 요청 스캔이 흔한 원인.'
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - IIS 6.0 (2003)
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: HTTP.sys 오류 로그(HTTPERR) 사유 문구 — 2003(IIS 6.0)부터 동일
+- code: IIS-HTTPERR-FORBIDDEN
+  severity: warn
+  category: security
+  title: 금지된 요청
+  immediate:
+  - '`Select-String -Path "$env:SystemRoot\System32\LogFiles\HTTPERR\httperr*.log" -Pattern "Forbidden" | Select-Object -Last 30` 로 URL·출처 IP 확인'
+  - '같은 IP 가 짧은 시간 다수 시도하면 공격으로 분류해 보안 담당에 IP·시각 전달'
+  short:
+  - '(2차) 정상 업무 요청으로 확인되면 애플리케이션 측 URL 인코딩 수정 요청, 공격이면 방화벽·IP 제한(ipSecurity) 등록을 승인 후 적용'
+  mid:
+  - 'HTTP.sys 거부 사유(Forbidden·URL·Header)를 WAF 차단 정책과 연계한 대응 기준 수립'
+  long:
+  - 'Forbidden 거부 건수·출처 IP 를 보안 관제에 연동'
+  vendor_cause: 'HTTP.sys(HTTPERR) 사유 Forbidden — 요청을 해석하던 중 허용되지 않는 요소나 문자열 순서를 만나 HTTP.sys 가 거부했다. 경로 조작(../)·제어 문자 포함 URL 같은 공격성 요청이나 잘못 인코딩된 클라이언트 요청이 흔한 원인.'
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - IIS 6.0 (2003)
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: HTTP.sys 오류 로그(HTTPERR) 사유 문구 — 2003(IIS 6.0)부터 동일
+- code: IIS-HTTPERR-CONNLIMIT
+  severity: critical
+  category: capacity
+  title: 연결 한도 초과
+  immediate:
+  - '`Get-Counter "\Web Service(_Total)\Current Connections"` 로 현재 연결 수와 `%windir%\system32\inetsrv\appcmd list site /config` 의 limits maxConnections 비교'
+  - '`Select-String -Path "$env:SystemRoot\System32\LogFiles\HTTPERR\httperr*.log" -Pattern "ConnLimit" | Measure-Object` 로 거부 건수, W3C 로그 time-taken 으로 응답 지연 동반 여부 확인'
+  short:
+  - '(2차·승인 후, 롤백: 이전 값 복원) 정상 증가로 확인되면 사이트 maxConnections 상향, 지연이 원인이면 백엔드(앱 풀·DB) 지연 해소를 우선'
+  mid:
+  - '연결 수 최대치 기반 maxConnections·서버 대수 재산정과 부하 분산 구성'
+  long:
+  - 'Current Connections 가 한도의 80% 도달 시 경보'
+  vendor_cause: 'HTTP.sys(HTTPERR) 사유 ConnLimit — 사이트 수준 연결 한도(limits maxConnections)에 도달해 HTTP.sys 가 503 으로 거부했다. 접속 폭주나 응답 지연으로 연결이 오래 유지된 것이 흔한 원인.'
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - IIS 6.0 (2003)
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: HTTP.sys 오류 로그(HTTPERR) 사유 문구 — 2003(IIS 6.0)부터 동일
+- code: IIS-HTTPERR-LOGGING-FAIL
+  severity: error
+  category: disk
+  title: 로그 쓰기 실패
+  immediate:
+  - '`Get-PSDrive C` 와 `Get-ChildItem $env:SystemRoot\System32\LogFiles\HTTPERR | Measure-Object Length -Sum` 로 드라이브 여유·로그 총량 확인 — 여유 5% 미만이면 디스크 원인'
+  - '`reg query HKLM\System\CurrentControlSet\Services\HTTP\Parameters /v ErrorLoggingDir` 와 `icacls <로그폴더>` 로 경로·권한 확인(읽기 전용)'
+  short:
+  - '(2차·승인 후, 롤백: 옮긴 파일 원위치) 오래된 httperr*.log 를 다른 볼륨으로 보관 이동해 공간 확보, 권한은 Administrators·SYSTEM 전체 권한으로 복구'
+  mid:
+  - 'ErrorLogFileTruncateSize(기본 1MB, 순환 단위)와 보관 일수 기준 정리 작업(예약 작업) 표준화, 로그 전용 볼륨 검토'
+  long:
+  - '시스템 드라이브 사용률 85%/95% 경보와 HTTPERR 폴더 크기 월간 점검'
+  vendor_cause: 'HTTP.sys 오류 로그(HTTPERR) 기록 실패 — 로그 폴더(ErrorLoggingDir, 기본 %SystemRoot%\System32\LogFiles\HTTPERR) 쓰기 중 오류가 나 HTTP.sys 가 이벤트 로그로 기록 실패를 알렸다. 디스크 가득참·폴더 권한 변경(Administrators·SYSTEM 전용)·잘못된 경로 설정이 흔한 원인.'
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - IIS 6.0 (2003)
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: HTTP.sys 오류 로그(HTTPERR) 사유 문구 — 2003(IIS 6.0)부터 동일
+- code: IIS-W3SVC-1004
+  severity: error
+  category: connection
+  title: 사이트 URL 접두사 등록 실패
+  immediate:
+  - '`Get-WinEvent -FilterHashtable @{LogName="System"; Id=1004} -MaxEvents 10 | Format-List TimeCreated,ProviderName,Message` 로 비활성화된 사이트·URL 접두사 확인'
+  - '`netsh http show urlacl` 와 `netsh http show iplisten` 으로 같은 접두사·IP 를 다른 프로세스가 선점했는지 확인(읽기 전용)'
+  - '`%windir%\system32\inetsrv\appcmd list site` 로 해당 사이트 state 가 Stopped 인지 확인'
+  short:
+  - '(2차·승인 후, 롤백: 바인딩 원복) 접두사 충돌·권한(Access is denied) 원인을 제거하고 사이트 바인딩 수정 후 사이트 시작'
+  mid:
+  - '사이트 바인딩(IP·포트·호스트 헤더) 대장 관리와 HTTP.sys 를 쓰는 다른 서비스(WinRM·Reporting 등) 포트 정리'
+  long:
+  - 'W3SVC 1004 이벤트 즉시 경보와 사이트 state 감시(Stopped 감지)'
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/answers/questions/2601492/iis-unable-to-start-default-site-access-is-denied)
+  note: 웹 서비스 전체 시작 실패가 아니라 해당 사이트 URL 접두사 등록 실패로 사이트가 비활성화되는 오류임
+  vendor_cause: WWW Service가 사이트의 URL 접두사를 등록하지 못해 해당 사이트를 비활성화했다.
+  vendor_action: ''
+  vendor_url: https://learn.microsoft.com/en-us/answers/questions/2601492/iis-unable-to-start-default-site-access-is-denied
+  versions:
+  - IIS 6.0 (2003)
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: W3SVC 이벤트 ID — IIS 6.0~10.0 공통
+- code: IIS-W3SVC-1007
+  severity: error
+  category: connection
+  title: 사이트 URL 접두사 등록 실패
+  immediate:
+  - '`Get-WinEvent -FilterHashtable @{LogName="System"; Id=1007} -MaxEvents 10 | Format-List TimeCreated,ProviderName,Message` 로 대상 사이트·바인딩 확인'
+  - '`netstat -ano | findstr :<port>` 로 포트 점유 PID 확인 후 `tasklist /fi "PID eq <PID>"` 로 프로세스 이름 확인'
+  short:
+  - '(2차·승인 후, 롤백: 바인딩 원복) 포트를 점유한 다른 서비스와 협의해 포트 분리하거나 사이트 바인딩 수정 후 사이트 시작'
+  mid:
+  - '서버별 포트 사용 대장과 바인딩 변경 절차(변경 전 `netsh http show iplisten` 확인) 표준화'
+  long:
+  - '사이트 Stopped 상태·1007 이벤트 경보'
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/developer/webapps/iis/health-diagnostic-performance/iis-events-not-display-remotely)
+  note: 웹 서비스 초기화 실패가 아니라 URL 접두사 또는 네트워크 바인딩 등록 실패이며 IIS 7.x W3SVC 이벤트로 확인됨
+  vendor_cause: 'W3SVC 1007 — WWW 서비스가 사이트의 URL 접두사 또는 네트워크 바인딩을 HTTP.sys 에 등록하지 못해 해당 사이트를 시작하지 못했다. 다른 프로세스의 포트·접두사 선점이나 잘못된 바인딩 구성이 흔한 원인.'
+  vendor_action: ''
+  vendor_note: 제조사 문서에 원인·조치 항목 없음
+  vendor_url: https://learn.microsoft.com/en-us/troubleshoot/developer/webapps/iis/health-diagnostic-performance/iis-events-not-display-remotely
+  versions:
+  - IIS 6.0 (2003)
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: W3SVC 이벤트 ID — IIS 6.0~10.0 공통
+- code: IIS-W3SVC-1037
+  severity: error
+  category: security
+  title: 바인딩 인증서 오류
+  immediate:
+  - '`netsh http show sslcert` 로 IP:포트별 바인딩 인증서 해시 확인 후 `Get-ChildItem Cert:\LocalMachine\My | Select Subject,NotAfter,Thumbprint,HasPrivateKey` 와 대조'
+  - '바인딩 해시가 저장소에 없거나 NotAfter 가 지났거나 HasPrivateKey=False 면 확정'
+  short:
+  - '(2차·승인 후, 롤백: 이전 인증서 바인딩 복원) 유효 인증서를 가져와 IIS 관리자 사이트 바인딩에서 새 인증서 선택'
+  mid:
+  - '인증서 갱신 절차에 바인딩 교체·`netsh http show sslcert` 검증 단계를 포함'
+  long:
+  - '인증서 NotAfter 60/30/7일 전 경보'
+  vendor_cause: '이 사전 정의상 W3SVC 1037 은 사이트 HTTPS 바인딩의 서버 인증서를 사용할 수 없는 상태(인증서 누락·만료·개인 키 접근 불가)를 가리킨다. 인증서 교체 후 바인딩 미갱신이나 개인 키 권한 문제가 흔한 원인.'
+  verify_note: '미검증 — W3SVC 이벤트 1037 의 공식 의미를 Microsoft 문서에서 확인하지 못함(원 수집 note 와 같음)'
+  source: GPT 수집·공식 문서 미확인(보류)(https://learn.microsoft.com/en-us/troubleshoot/developer/webapps/iis/health-diagnostic-performance/iis-events-not-display-remotely)
+  note: IIS 7.0~10 Microsoft 공식 문서에서 해당 이벤트 ID와 바인딩 인증서 오류 의미를 확인할 수 없음
+  versions:
+  - IIS 6.0 (2003)
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: W3SVC 이벤트 ID — IIS 6.0~10.0 공통
+- code: IIS-W3SVC-1039
+  severity: error
+  category: internal
+  title: 사이트 시작 실패(바인딩)
+  immediate:
+  - '`%windir%\system32\inetsrv\appcmd list site` 로 사이트별 바인딩·state 확인 — 같은 바인딩을 가진 사이트가 둘 이상이면 충돌'
+  - '`netstat -ano | findstr :<port>` 로 포트 점유 PID 확인'
+  short:
+  - '(2차·승인 후, 롤백: 바인딩 원복) 중복 바인딩을 정리(호스트 헤더 구분)한 뒤 사이트 시작'
+  mid:
+  - '사이트 바인딩 대장 관리와 변경 전 중복 검사 절차'
+  long:
+  - '사이트 state 감시와 바인딩 변경 이력 관리'
+  vendor_cause: '이 사전 정의상 W3SVC 1039 는 바인딩 문제로 사이트를 시작하지 못한 상태를 가리킨다. 같은 IP·포트·호스트 헤더를 쓰는 사이트 중복이나 다른 프로세스의 포트 점유가 흔한 원인.'
+  verify_note: '미검증 — W3SVC 이벤트 1039 의 공식 의미를 Microsoft 문서에서 확인하지 못함'
+  source: GPT 수집·공식 문서 미확인(보류)(https://learn.microsoft.com/en-us/troubleshoot/developer/webapps/iis/health-diagnostic-performance/iis-events-not-display-remotely)
+  note: IIS 7.0~10 Microsoft 공식 문서에서 해당 이벤트 ID와 사이트 시작 실패 의미를 확인할 수 없음
+  versions:
+  - IIS 6.0 (2003)
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: W3SVC 이벤트 ID — IIS 6.0~10.0 공통
+- code: IIS-W3SVC-1074
+  severity: warn
+  category: internal
+  title: 앱 풀 재활용(예약)
+  immediate:
+  - '`%windir%\system32\inetsrv\appcmd list apppool "<AppPool>" /config` 로 recycling periodicRestart(time·schedule·requests·memory) 값 확인'
+  - '`Get-WinEvent -FilterHashtable @{LogName="System"; ProviderName="Microsoft-Windows-WAS"} -MaxEvents 30 | Format-List TimeCreated,Id,Message` 로 재활용 시각·빈도 확인'
+  short:
+  - '(2차·승인 후, 롤백: 이전 값 복원) 업무 시간 재활용이면 periodicRestart time 을 0 으로 두고 schedule 을 야간 시각으로 지정'
+  mid:
+  - '앱 풀별 재활용 정책 표준(야간 예약·overlap) 수립'
+  long:
+  - '재활용 이벤트 일별 건수 감시'
+  vendor_cause: '이 사전 정의상 W3SVC 1074 는 워커 프로세스가 앱 풀 재활용 설정(정해진 처리 시간 한도)에 따라 재활용을 요청했다는 기록이다. 설정에 따른 정상 동작이지만 업무 시간 중 재활용이면 세션 유실·첫 요청 지연이 생긴다.'
+  verify_note: '미검증 — W3SVC 이벤트 1074 의 공식 의미를 Microsoft 문서에서 확인하지 못함(IIS 7.0+ 는 WAS 50xx 이벤트로 기록될 수 있음)'
+  source: GPT 수집·공식 문서 미확인(보류)(https://learn.microsoft.com/en-us/troubleshoot/developer/webapps/iis/health-diagnostic-performance/iis-events-not-display-remotely)
+  note: IIS 7.0~10 Microsoft 공식 문서에서 해당 W3SVC 이벤트 ID와 예약 재활용 의미를 확인할 수 없음
+  versions:
+  - IIS 6.0 (2003)
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: W3SVC 이벤트 ID — IIS 6.0~10.0 공통
+- code: IIS-W3SVC-1077
+  severity: warn
+  category: memory
+  title: 앱 풀 재활용(메모리)
+  immediate:
+  - '`%windir%\system32\inetsrv\appcmd list apppool "<AppPool>" /config` 로 periodicRestart privateMemory·memory 한도 확인'
+  - '`%windir%\system32\inetsrv\appcmd list wp` 로 w3wp PID 확인 후 `Get-Process -Id <PID> | Select PrivateMemorySize64,WorkingSet64` 로 현재 사용량 확인'
+  short:
+  - '(2차) 재활용 간격이 짧아지는 추세면 DebugDiag 메모리 누수 규칙으로 덤프 수집 후 개발팀 분석 의뢰(한도 상향은 승인 후)'
+  mid:
+  - '애플리케이션 메모리 누수 수정과 메모리 한도를 실제 사용량 기준으로 재산정'
+  long:
+  - 'w3wp Private Bytes 추세 감시와 메모리 재활용 빈도 경보'
+  vendor_cause: '이 사전 정의상 W3SVC 1077 은 워커 프로세스가 앱 풀 메모리 한도(recycling privateMemory 또는 memory)에 도달해 재활용됐다는 기록이다. 애플리케이션 메모리 누수·캐시 과다·한도 과소 설정이 흔한 원인.'
+  verify_note: '미검증 — W3SVC 이벤트 1077 의 공식 의미를 Microsoft 문서에서 확인하지 못함'
+  source: GPT 수집·공식 문서 미확인(보류)(https://learn.microsoft.com/en-us/troubleshoot/developer/webapps/iis/health-diagnostic-performance/iis-events-not-display-remotely)
+  note: IIS 7.0~10 Microsoft 공식 문서에서 해당 W3SVC 이벤트 ID와 메모리 재활용 의미를 확인할 수 없음
+  versions:
+  - IIS 6.0 (2003)
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: W3SVC 이벤트 ID — IIS 6.0~10.0 공통
+- code: IIS-W3SVC-1080
+  severity: warn
+  category: internal
+  title: 앱 풀 재활용(요청 수)
+  immediate:
+  - '`%windir%\system32\inetsrv\appcmd list apppool "<AppPool>" /config` 로 periodicRestart requests 값 확인'
+  - 'WAS·W3SVC 이벤트 시각과 W3C 로그 요청량을 대조해 재활용 간격 계산 — 1시간 미만이면 한도 과소'
+  short:
+  - '(2차·승인 후, 롤백: 이전 값 복원) requests 한도를 0(해제) 또는 요청량에 맞게 상향하고 야간 예약 재활용으로 대체'
+  mid:
+  - '앱 풀 재활용 기준을 요청 수 대신 예약 시각 중심으로 표준화'
+  long:
+  - '재활용 이벤트 빈도 감시'
+  vendor_cause: '이 사전 정의상 W3SVC 1080 은 워커 프로세스가 앱 풀 요청 수 한도(recycling periodicRestart requests)에 도달해 재활용됐다는 기록이다. 설정에 따른 동작이지만 한도가 작으면 잦은 재활용으로 응답 지연이 생긴다.'
+  verify_note: '미검증 — W3SVC 이벤트 1080 의 공식 의미를 Microsoft 문서에서 확인하지 못함'
+  source: GPT 수집·공식 문서 미확인(보류)(https://learn.microsoft.com/en-us/troubleshoot/developer/webapps/iis/health-diagnostic-performance/iis-events-not-display-remotely)
+  note: IIS 7.0~10 Microsoft 공식 문서에서 해당 W3SVC 이벤트 ID와 요청 수 재활용 의미를 확인할 수 없음
+  versions:
+  - IIS 6.0 (2003)
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: W3SVC 이벤트 ID — IIS 6.0~10.0 공통
+- code: IIS-W3SVC-1117
+  severity: error
+  category: internal
+  title: 앱 풀 시작 실패
+  immediate:
+  - '`%windir%\system32\inetsrv\appcmd list apppool "<AppPool>" /text:*` 로 state·processModel identityType·userName 확인(비밀번호 칸은 화면 공유 금지)'
+  - '`Get-WinEvent -FilterHashtable @{LogName="System"; ProviderName="Microsoft-Windows-WAS"} -MaxEvents 20 | Format-List TimeCreated,Id,Message` 로 5021·5057·5059 동반 확인'
+  short:
+  - '(2차·승인 후) 계정 담당이 비밀번호·잠금 상태를 정정하고 앱 풀 ID 재설정 후 앱 풀 시작(롤백: 이전 ID 설정 복원)'
+  mid:
+  - '앱 풀 ID 를 ApplicationPoolIdentity 또는 비밀번호 만료 정책 예외 서비스 계정으로 표준화'
+  long:
+  - '앱 풀 state 감시와 서비스 계정 비밀번호 만료 사전 알림'
+  vendor_cause: '이 사전 정의상 W3SVC 1117 은 앱 풀(워커 프로세스) 시작 실패를 가리킨다. 앱 풀 ID 계정의 비밀번호 만료·잠금, 권한(배치 작업으로 로그온) 누락, 구성 오류가 흔한 원인.'
+  verify_note: '미검증 — W3SVC 이벤트 1117 의 공식 의미를 Microsoft 문서에서 확인하지 못함'
+  source: GPT 수집·공식 문서 미확인(보류)(https://learn.microsoft.com/en-us/troubleshoot/developer/webapps/iis/health-diagnostic-performance/iis-events-not-display-remotely)
+  note: IIS 7.0~10 Microsoft 공식 문서에서 해당 W3SVC 이벤트 ID와 앱 풀 시작 실패 의미를 확인할 수 없음
+  versions:
+  - IIS 6.0 (2003)
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: W3SVC 이벤트 ID — IIS 6.0~10.0 공통
+- code: IIS-ASPNET-1309
+  severity: error
+  category: internal
+  title: ASP.NET 처리되지 않은 예외
+  immediate:
+  - '`Get-WinEvent -FilterHashtable @{LogName="Application"; Id=1309} -MaxEvents 10 | Format-List TimeCreated,ProviderName,Message` 로 예외 형식·요청 URL·스택 확인'
+  - '같은 시각 W3C 로그에서 해당 URL 의 500 응답 건수 확인 — 특정 URL 집중이면 코드 결함, 전체면 구성·의존 자원 문제'
+  short:
+  - '(2차) 예외 메시지에 나온 누락 파일·구성·의존 자원(DB·외부 API) 상태를 확인해 개발/운영 담당에 전달, 구성 파일 복구는 승인 후 백업을 남기고 진행'
+  mid:
+  - '예외 발생 코드 수정 배포와 전역 예외 처리·로깅 보강'
+  long:
+  - 'ASP.NET 1309 이벤트 건수·500 비율 감시'
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/exchange/client-connectivity/event-1309-code-3005-cannot-access-owa-ecp)
+  vendor_cause: 'ASP.NET 웹 이벤트 1309(이벤트 코드 3005) — 애플리케이션에서 처리되지 않은 예외가 발생했다는 뜻. 이벤트 본문에 예외 종류·메시지·스택·요청 URL 이 남으며 원인은 애플리케이션 코드·설정·의존 자원(DB·파일) 오류다. 예: Exchange 의 SharedWebConfig.config 누락.'
+  vendor_action: '문서 사례: 누락 파일을 다시 생성하고 IISRESET 또는 서버 재시작을 수행한다.'
+  vendor_url: https://learn.microsoft.com/en-us/troubleshoot/exchange/client-connectivity/event-1309-code-3005-cannot-access-owa-ecp
+  versions:
+  - IIS 6.0 (2003)
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: ASP.NET 이벤트 ID 1309/1310/1325/1334 — .NET Framework 2.0 이후 공통
+- code: IIS-ASPNET-1310
+  severity: warn
+  category: internal
+  title: ASP.NET 웹 이벤트 오류
+  immediate:
+  - '`Get-WinEvent -FilterHashtable @{LogName="Application"; Id=1310} -MaxEvents 10 | Format-List TimeCreated,ProviderName,Message` 로 이벤트 코드·예외 메시지(컴파일·구성 오류 여부) 확인'
+  - '메시지에 접근 거부·Temp 경로가 있으면 `icacls C:\Windows\Temp` 로 앱 풀 계정(IIS AppPool\<AppPool>) 권한 확인'
+  short:
+  - '(2차·승인 후, 롤백: 권한 원복) 앱 풀 계정에 필요한 폴더 쓰기 권한을 부여하고 권한을 제거하는 그룹 정책 여부를 보안 담당과 확인'
+  mid:
+  - 'web.config 구성 오류·컴파일 경고 수정 배포와 배포 전 검증 단계 추가'
+  long:
+  - 'ASP.NET 1310 경고 건수 주간 점검'
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/mem/intune/certificates/certificateregistrationsvc-verify-request-error)
+  note: ASP.NET Event ID 1310은 컴파일·구성 등 웹 이벤트를 Warning으로 기록하는 사례가 공식 문서에서 확인되어 warn이 타당함
+  vendor_cause: 'ASP.NET 웹 이벤트 1310(이벤트 코드 3008) — 구성 오류. web.config·machine.config 문법·섹션 오류, 참조 어셈블리 누락, 동적 컴파일 실패(임시 폴더 권한 등)가 흔한 원인이다. 예: 앱 풀 계정에 C:\Windows\Temp 쓰기 권한이 없어 컴파일 실패.'
+  vendor_action: '문서 사례: 앱 풀 실행 계정에 C:\Windows\Temp 쓰기 권한을 추가하고 권한을 제거하는 정책이 없는지 확인한다.'
+  vendor_url: https://learn.microsoft.com/en-us/troubleshoot/mem/intune/certificates/certificateregistrationsvc-verify-request-error
+  versions:
+  - IIS 6.0 (2003)
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: ASP.NET 이벤트 ID 1309/1310/1325/1334 — .NET Framework 2.0 이후 공통
+- code: IIS-ASPNET-1325
+  severity: error
+  category: internal
+  title: 예외로 ASP.NET 프로세스 종료
+  immediate:
+  - '`Get-WinEvent -FilterHashtable @{LogName="Application"; Id=1325} -MaxEvents 10 | Format-List TimeCreated,ProviderName,Message` 로 예외 형식·스택 확인'
+  - '같은 시각 WAS 5011·Application Error 1000 이벤트와 앱 풀 state(`%windir%\system32\inetsrv\appcmd list apppool`) 확인'
+  short:
+  - '(2차) 반복되면 DebugDiag 충돌 규칙으로 w3wp 덤프를 수집해 개발팀·제품 지원에 분석 의뢰, 제품 누적 업데이트 적용은 승인 후'
+  mid:
+  - '처리되지 않은 예외 원인 코드 수정과 해당 제품 누적 업데이트 적용'
+  long:
+  - '1325·5011 이벤트 경보와 워커 프로세스 충돌 건수 감시'
+  source: GPT 수집·벤더 문서 대조 완료(https://support.microsoft.com/ko-kr/topic/event-id-1325-and-test-exchangesearch-crashes-application-pool-with-nullreferenceexception-in-exchange-server-2016-553a8fe3-c992-2f3c-011b-85b794b63ddd)
+  note: 처리되지 않은 예외로 프로세스가 종료되는 오류이나 앱 풀이 재기동될 수 있어 단독 이벤트는 error가 타당함
+  vendor_cause: 'ASP.NET 이벤트 1325 — 처리되지 않은 예외(주로 백그라운드 스레드)로 워커 프로세스가 종료됐다는 뜻(.NET 2.0+ 기본 동작). 같은 시각 WAS 5009·Application 1000/1026 이 함께 남고 원인은 애플리케이션 코드 결함이 대부분이다. 예: Exchange 특정 명령 실행 시 NullReferenceException.'
+  vendor_action: '문서 사례: 해당 제품의 누적 업데이트를 설치한다.'
+  vendor_url: https://support.microsoft.com/ko-kr/servicing/exchange/server/troubleshooting/event-id-1325-and-test-exchangesearch-crashes-application-pool-with-nullreferenceexception-in-exchan
+  versions:
+  - IIS 6.0 (2003)
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: ASP.NET 이벤트 ID 1309/1310/1325/1334 — .NET Framework 2.0 이후 공통
+- code: IIS-ASPNET-1334
+  severity: error
+  category: internal
+  title: ASP.NET 앱 도메인 언로드
+  immediate:
+  - '`Get-WinEvent -FilterHashtable @{LogName="Application"; Id=1334} -MaxEvents 10 | Format-List TimeCreated,ProviderName,Message` 로 언로드 사유 문구 확인'
+  - '같은 시각 사이트 폴더(web.config·bin) 수정 시각을 `Get-ChildItem <사이트경로> -Recurse -Include web.config,*.dll | Sort LastWriteTime -Desc | Select -First 10` 로 확인'
+  short:
+  - '(2차) 운영 중 파일 변경(백신 검사 결과 쓰기·로그를 사이트 폴더에 쓰는 앱)이 원인이면 해당 쓰기 경로를 사이트 밖으로 옮기도록 담당자와 조정'
+  mid:
+  - '배포를 정해진 시간에 한정하고 사이트 폴더 안 쓰기 금지 기준 수립'
+  long:
+  - 'AppDomain 언로드 건수 감시'
+  vendor_cause: '이 사전 정의상 ASP.NET 1334 는 애플리케이션 도메인(AppDomain)이 언로드됐다는 기록이다. web.config·bin 폴더 변경, 앱 풀 재활용, 파일 변경 감시 한도 초과가 흔한 원인이며 언로드 직후 첫 요청이 느려진다.'
+  verify_note: '미검증 — ASP.NET 이벤트 1334 의 공식 의미를 Microsoft 문서에서 확인하지 못함'
+  source: GPT 수집·공식 문서 미확인(보류)(https://learn.microsoft.com/en-us/troubleshoot/developer/webapps/iis/health-diagnostic-performance/iis-events-not-display-remotely)
+  note: Microsoft 공식 문서에서 ASP.NET Event ID 1334와 AppDomain 언로드 의미를 확인할 수 없음
+  versions:
+  - IIS 6.0 (2003)
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: ASP.NET 이벤트 ID 1309/1310/1325/1334 — .NET Framework 2.0 이후 공통

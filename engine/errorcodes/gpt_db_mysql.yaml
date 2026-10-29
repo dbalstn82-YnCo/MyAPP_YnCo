@@ -1,0 +1,392 @@
+product: mysql
+layer: db
+note: GPT 협업 수집분 — 벤더 공식 문서와 대조 후 확정
+codes:
+- code: MY-1037
+  severity: critical
+  category: memory
+  title: 서버 메모리 부족
+  immediate:
+  - '`SELECT * FROM sys.memory_global_by_current_bytes LIMIT 10;` (5.7+, performance_schema 메모리 계측이 켜져 있을 때) 로 메모리 상위 사용처 확인'
+  - '`free -m` 과 `ps -o pid,rss,cmd -C mysqld` 로 OS 가용 메모리·mysqld 상주 크기 확인, `SHOW PROCESSLIST;` 로 대형 쿼리 세션 확인'
+  short:
+  - '(2차·승인 후, 롤백: 없음) 비필수 대형 쿼리 세션 종료(KILL <id>)·배치 보류 요청'
+  - 버퍼와 연결 수, 대형 쿼리의 메모리 소비를 점검
+  mid:
+  - 서버 메모리와 MySQL 메모리 파라미터를 워크로드 기준으로 재산정
+  long:
+  - 메모리 헤드룸과 OOM 조기경보 기준을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_outofmemory)
+  vendor_cause: 서버가 작업에 필요한 메모리를 할당하지 못했다.
+  vendor_action: 서버를 재시작한 뒤 작업을 다시 시도한다.
+  vendor_url: https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_outofmemory
+  versions:
+  - MySQL 5.5
+  - MySQL 5.6
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: 서버 오류 번호(ER_) 1000번대 — 5.5~9.x 동일(SQL 클라이언트 오류·에러 로그 문구 공통)
+- code: MY-1038
+  severity: error
+  category: memory
+  title: 정렬 메모리 부족
+  immediate:
+  - "`SHOW GLOBAL VARIABLES LIKE 'sort_buffer_size';` 와 `SHOW GLOBAL STATUS LIKE 'Sort_merge_passes';` — Sort_merge_passes 가 빠르게 늘면 정렬 버퍼 부족 (5.7·8.0, 읽기 전용)"
+  - "정렬 중 세션: `SELECT ID, USER, HOST, TIME, STATE, LEFT(INFO,80) FROM information_schema.PROCESSLIST WHERE COMMAND <> 'Sleep' AND STATE LIKE '%sort%' ORDER BY TIME DESC;` (8.0.22+ 는 performance_schema.processlist 도 가능)"
+  - "정렬 부담 큰 SQL: `SELECT LEFT(DIGEST_TEXT,100), SUM_SORT_MERGE_PASSES, SUM_SORT_ROWS FROM performance_schema.events_statements_summary_by_digest ORDER BY SUM_SORT_MERGE_PASSES DESC LIMIT 5;`"
+  short:
+  - "(2차·승인 후, 롤백: 세션 단위 변경은 연결 종료 시 소멸) 해당 작업 세션에서만 `SET SESSION sort_buffer_size = <bytes>;` 후 재실행, 전역 상향은 연결 수 × 값 메모리 영향 계산 후 — 근본은 ORDER BY·GROUP BY 열 인덱스 추가"
+  mid:
+  - 정렬 유발 SQL과 인덱스를 개선하고 메모리 상한을 재산정
+  long:
+  - SQL 성능검증과 메모리 회귀시험을 배포 절차에 포함
+  source: GPT 수집·벤더 문서 대조 완료(https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_out_of_sortmemory)
+  vendor_cause: 정렬 작업에 필요한 메모리가 부족하다.
+  vendor_action: 서버의 sort buffer 크기를 늘리는 것을 고려한다.
+  vendor_url: https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_out_of_sortmemory
+  versions:
+  - MySQL 5.5
+  - MySQL 5.6
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: 서버 오류 번호(ER_) 1000번대 — 5.5~9.x 동일(SQL 클라이언트 오류·에러 로그 문구 공통)
+- code: MY-1040
+  severity: critical
+  category: capacity
+  title: 접속 수 초과
+  immediate:
+  - "예약 관리자 연결(SUPER·CONNECTION_ADMIN 권한 1개 허용, 8.0.14+ 는 admin_address 설정 시 관리 포트)로 접속해 `SHOW GLOBAL STATUS WHERE Variable_name IN ('Threads_connected','Max_used_connections');` 와 `SELECT @@max_connections;` — Threads_connected 가 한도에 닿아 있으면 확정 (읽기 전용)"
+  - "사용자·출처별 분포: `SELECT USER, SUBSTRING_INDEX(HOST,':',1) AS client, COMMAND, COUNT(*) AS cnt, MAX(TIME) AS max_time FROM information_schema.PROCESSLIST GROUP BY USER, client, COMMAND ORDER BY cnt DESC LIMIT 20;` — 특정 애플리케이션 Sleep 다수면 풀 누수, Query 다수면 느린 쿼리 적체"
+  short:
+  - "(2차·승인 후, 롤백: 종료한 세션은 되돌릴 수 없음 — 목록 기록 선행) 업무 담당 확인 후 장시간 Sleep 세션 `KILL <id>;`, 임시로 `SET GLOBAL max_connections = <값>;`(이전 값 기록, 메모리 영향 확인) — 신규 접속 유입 제한은 애플리케이션·L4 담당과 협의"
+  mid:
+  - 피크 동시접속량 기준으로 풀과 서버 용량을 조정
+  long:
+  - 연결 수요 예측과 풀 상한, 백프레셔 정책을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_con_count_error)
+  vendor_cause: 현재 연결 수가 허용된 max_connections 한도에 도달했다.
+  vendor_action: 더 많은 동시 접속이 필요하면 max_connections 값을 늘린다.
+  vendor_url: https://dev.mysql.com/doc/refman/8.0/en/too-many-connections.html
+  versions:
+  - MySQL 5.5
+  - MySQL 5.6
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: 서버 오류 번호(ER_) 1000번대 — 5.5~9.x 동일(SQL 클라이언트 오류·에러 로그 문구 공통)
+- code: MY-1041
+  severity: critical
+  category: memory
+  title: 시스템 메모리 자원 부족
+  immediate:
+  - "`free -m` 과 `ps -o pid,rss,vsz,cmd -C mysqld` — available 이 작고 mysqld RSS 가 대부분이면 MySQL 메모리 과다, 다른 프로세스면 동거 원인 (읽기 전용)"
+  - "OOM·한도 흔적: `dmesg -T | grep -i -E 'out of memory|oom' | tail -20` 와 `grep -E 'open files|address space' /proc/$(pidof mysqld)/limits`"
+  - "MySQL 메모리 구성: `SELECT @@innodb_buffer_pool_size/1024/1024 AS bp_mb, @@max_connections, @@sort_buffer_size, @@join_buffer_size, @@tmp_table_size;` 와 `SELECT * FROM sys.memory_global_total;` (8.0 기본 계측, 5.7 은 memory 계측 활성 시만 의미)"
+  short:
+  - "(2차·승인 후, 롤백: 변경 전 my.cnf 백업·이전 값 기록) 동거 프로세스 메모리 확보 또는 innodb_buffer_pool_size(8.0·5.7.5+ 온라인 변경)·연결당 버퍼 축소, 스왑 추가는 시스템 담당 승인"
+  mid:
+  - 병목 자원을 증설하고 설정 한도를 재산정
+  long:
+  - 자원 포화 임계치와 용량예측을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_out_of_resources)
+  note: 공식 메시지는 메모리 부족을 중심으로 한 시스템 자원 오류이므로 유형을 memory로 수정
+  vendor_cause: mysqld 또는 다른 프로세스의 메모리 사용으로 시스템 자원이 부족하다.
+  vendor_action: 메모리 사용량을 확인하고 필요하면 프로세스 한도 조정이나 swap 추가를 검토한다.
+  vendor_url: https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_out_of_resources
+  versions:
+  - MySQL 5.5
+  - MySQL 5.6
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: 서버 오류 번호(ER_) 1000번대 — 5.5~9.x 동일(SQL 클라이언트 오류·에러 로그 문구 공통)
+- code: MY-1053
+  severity: critical
+  category: internal
+  title: 서버 종료 중
+  immediate:
+  - "`systemctl status mysqld`(배포판에 따라 mysql) 와 `ps -ef | grep [m]ysqld` — 프로세스가 남아 종료 진행 중인지, 이미 내려갔는지 판단 (읽기 전용)"
+  - "종료 경위: `grep -n -E 'SHUTDOWN|Shutdown|shutdown|got signal|ready for connections' <오류 로그 경로> | tail -30` — 'Received SHUTDOWN from user'·'Normal shutdown' 이면 계획 종료, 'got signal 11/6' 이면 비정상 종료"
+  - "OS 측 요청 주체: `journalctl -u mysqld --since '-2h' | tail -50` (systemd, 서비스명 mysqld/mysql) — 패키지 업데이트·HA 스크립트·OOM 흔적 확인"
+  short:
+  - "(2차·승인 후, 롤백: 해당 없음 — 기동 전 오류 로그·core 보관) 비정상 종료였으면 원인 확인 후 서비스 기동, crash recovery 완료('ready for connections') 와 애플리케이션 재접속 확인"
+  mid:
+  - 비정상 종료 원인을 제거하고 복구 절차를 검증
+  long:
+  - HA와 서비스 재기동, crash recovery 훈련을 정례화
+  source: GPT 수집·벤더 문서 대조 완료(https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_server_shutdown)
+  vendor_cause: MySQL 서버가 종료 절차를 수행 중이다.
+  vendor_action: ''
+  vendor_url: https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_server_shutdown
+  versions:
+  - MySQL 5.5
+  - MySQL 5.6
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: 서버 오류 번호(ER_) 1000번대 — 5.5~9.x 동일(SQL 클라이언트 오류·에러 로그 문구 공통)
+- code: MY-1114
+  severity: critical
+  category: storage
+  title: 테이블 공간 가득참
+  immediate:
+  - "경로·상한: `SELECT @@datadir, @@tmpdir, @@innodb_data_file_path, @@innodb_temp_data_file_path;` 후 `df -h <datadir>` · `df -h <tmpdir>` — 100% 면 파일시스템 원인, data_file_path 에 :max: 가 있으면 시스템 테이블스페이스 상한 (읽기 전용)"
+  - "대상 테이블: `SELECT TABLE_SCHEMA, TABLE_NAME, ENGINE, ROUND((DATA_LENGTH+INDEX_LENGTH)/1024/1024) AS mb, DATA_FREE FROM information_schema.TABLES WHERE TABLE_NAME = '<table>';` — MEMORY 엔진이면 max_heap_table_size, 내부 임시 테이블이면 tmp_table_size(8.0 TempTable 은 temptable_max_ram) 한도"
+  short:
+  - "(2차·승인 후, 롤백: 변경 전 my.cnf 백업·이전 값 기록) 파일시스템 증설 또는 binlog `PURGE BINARY LOGS BEFORE '<시각>';` 로 공간 확보, 메모리 테이블 한도는 `SET GLOBAL max_heap_table_size`·tmp_table_size 조정"
+  mid:
+  - 데이터 증가율에 맞춰 저장공간과 파티션 정책을 조정
+  long:
+  - 스토리지 예측증설과 용량 임계치 경보를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_record_file_full)
+  vendor_cause: 테이블 또는 InnoDB 시스템 테이블스페이스에 더 이상 데이터를 저장할 공간이 없다.
+  vendor_action: InnoDB 시스템 테이블스페이스가 가득 찼다면 새 데이터파일을 추가하도록 시스템 테이블스페이스를 재구성한다.
+  vendor_url: https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_record_file_full
+  versions:
+  - MySQL 5.5
+  - MySQL 5.6
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: 서버 오류 번호(ER_) 1000번대 — 5.5~9.x 동일(SQL 클라이언트 오류·에러 로그 문구 공통)
+- code: MY-1158
+  severity: error
+  category: connection
+  title: 통신 패킷 읽기 오류
+  immediate:
+  - "발생 분포: `SHOW GLOBAL STATUS LIKE 'Aborted_%';` 와 `grep -n 'Got an error reading communication packets' <오류 로그 경로> | tail -30` — 특정 user·host 에 몰리면 그 클라이언트 원인 (읽기 전용)"
+  - "`SHOW GLOBAL VARIABLES WHERE Variable_name IN ('max_allowed_packet','net_read_timeout','wait_timeout');` — 대용량 BLOB·긴 문장 전송 직후면 max_allowed_packet 초과 의심"
+  - "서버 네트워크 오류 누적: `netstat -s | grep -i -E 'retrans|reset'` 를 1분 간격 2회 비교 — 급증하면 네트워크 구간 원인"
+  short:
+  - "(2차·승인 후, 롤백: 이전 값 기록) 클라이언트·풀의 연결 종료 처리(close) 보완, 필요 시 `SET GLOBAL max_allowed_packet = <bytes>;`(클라이언트 설정도 함께) — 재접속은 애플리케이션 재시도 정책으로"
+  mid:
+  - 네트워크 타임아웃과 연결풀 재시도 정책을 조정
+  long:
+  - 구간별 연결 품질 모니터링과 이중화를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_net_read_error)
+  vendor_cause: 클라이언트에서 통신 패킷을 읽는 중 오류가 발생했다.
+  vendor_action: ''
+  vendor_url: https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_net_read_error
+  versions:
+  - MySQL 5.5
+  - MySQL 5.6
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: 서버 오류 번호(ER_) 1000번대 — 5.5~9.x 동일(SQL 클라이언트 오류·에러 로그 문구 공통)
+- code: MY-1159
+  severity: error
+  category: connection
+  title: 통신 패킷 읽기 시간초과
+  immediate:
+  - "읽기 한도 — 서버 기본값과 실패 세션 값은 다를 수 있다: `SHOW GLOBAL VARIABLES LIKE 'net_read_timeout';` 는 새 연결의 기본값일 뿐이고 클라이언트·커넥터가 세션 값을 바꿨을 수 있으므로 커넥터 설정(JDBC URL·풀 초기화 SQL 의 SET SESSION 등)을 확인하고, 가능하면 같은 애플리케이션 풀의 연결에서 `SHOW SESSION VARIABLES LIKE 'net_read_timeout';`, DBA 쪽에서는 `SELECT * FROM performance_schema.variables_by_thread WHERE VARIABLE_NAME = 'net_read_timeout';`(5.7+, 지금 붙어 있는 연결만) — 대용량 전송(LOAD DATA·대량 INSERT·BLOB) 중 클라이언트가 그 세션 값(초) 넘게 다음 데이터를 보내지 못하면 이 오류 (읽기 전용)"
+  - "추세·출처: `SHOW GLOBAL STATUS LIKE 'Aborted_%';` 를 1~5분 간격 2회 읽은 차이는 '끊김이 늘고 있는가'의 추세일 뿐 1159 건수가 아니다(기동 이후 누적값이며 다른 사유의 끊김도 함께 센다) · 건수와 출처는 `grep -n 'Got timeout reading communication packets' <오류 로그 경로> | tail -30` 의 user·host 분포로 — 특정 클라이언트에 몰리면 그 클라이언트·구간 지연 (8.0+ 는 log_error_verbosity=3 일 때만 기록, 끊긴 연결은 PROCESSLIST 에 남지 않음)"
+  - "가르기: 같은 'Got timeout reading communication packets' 문구는 유휴 연결이 wait_timeout(대화형은 interactive_timeout) 만료로 끊길 때도 남는다(MySQL 작업 기록 WL#12999 — 이때 클라이언트는 다음 사용에서 2013/2006 을 받음) → 끊긴 연결이 전송 중이었는지 유휴였는지를 클라이언트 로그로 가른다 · max_allowed_packet 초과는 다른 오류(1153 ER_NET_PACKET_TOO_LARGE, 'Got a packet bigger than max_allowed_packet')이므로 1159 의 원인으로 보지 않는다"
+  short:
+  - "(2차·승인 후, 롤백: 이전 값 기록 후 SET GLOBAL 로 원복) 대용량 전송 작업에 한해 세션 단위 `SET SESSION net_read_timeout = <초>;`(커넥터가 세션 값을 덮어쓰면 커넥터 설정에서) 또는 전송을 작은 배치로 분할 — 유휴 끊김으로 판명되면 별도 장애로 보고 풀 유휴 수명을 wait_timeout 보다 짧게 조정"
+  mid:
+  - 느린 쿼리와 네트워크 병목을 개선
+  long:
+  - 서비스별 타임아웃 표준과 지연 SLO를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_net_read_interrupted)
+  vendor_cause: 클라이언트 통신 패킷을 읽는 작업이 시간 초과로 중단됐다(ER_NET_READ_INTERRUPTED). 전송 도중 읽기 대기 한도는 net_read_timeout 이며, 대용량 전송 중 클라이언트 처리 지연·네트워크 지연이 원인 후보다.
+  vendor_action: ''
+  vendor_url: https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_net_read_interrupted
+  versions:
+  - MySQL 5.5
+  - MySQL 5.6
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: 서버 오류 번호(ER_) 1000번대 — 5.5~9.x 동일(SQL 클라이언트 오류·에러 로그 문구 공통)
+- code: MY-1160
+  severity: error
+  category: connection
+  title: 통신 패킷 쓰기 오류
+  immediate:
+  - "타임아웃 값: `SHOW GLOBAL VARIABLES WHERE Variable_name IN ('net_write_timeout','max_allowed_packet');` — 대량 결과를 천천히 받는 클라이언트면 net_write_timeout 초과 (읽기 전용)"
+  - "발생 출처: `grep -n -E 'Got an error writing communication packets|Got timeout writing communication packets' <오류 로그 경로> | tail -30` 와 `SHOW GLOBAL STATUS LIKE 'Aborted_clients';` — 특정 host 에 몰리면 그 클라이언트 종료·네트워크 원인"
+  short:
+  - "(2차·승인 후, 롤백: 이전 값 기록) 대량 결과를 받는 작업에 한해 세션 단위 `SET SESSION net_write_timeout = <초>;`, 클라이언트가 결과를 끝까지 읽기 전에 연결을 닫는지 애플리케이션 담당 확인"
+  mid:
+  - 네트워크 경로와 재연결 정책을 개선
+  long:
+  - 연결 품질과 오류율 기반 경보를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_net_error_on_write)
+  vendor_cause: 클라이언트로 통신 패킷을 쓰는 중 오류가 발생했다.
+  vendor_action: ''
+  vendor_url: https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_net_error_on_write
+  versions:
+  - MySQL 5.5
+  - MySQL 5.6
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: 서버 오류 번호(ER_) 1000번대 — 5.5~9.x 동일(SQL 클라이언트 오류·에러 로그 문구 공통)
+- code: MY-1205
+  severity: error
+  category: lock
+  title: 잠금 대기 시간초과
+  immediate:
+  - "대기·보유 관계: `SELECT * FROM sys.innodb_lock_waits\\G` (5.7.7+·8.0) — blocking_pid·blocking_trx_started·blocking_query 기록 (조회만, 결과의 sql_kill_blocking_* 문은 실행하지 않음)"
+  - "오래 열린 트랜잭션: `SELECT trx_id, trx_state, trx_started, trx_mysql_thread_id, trx_rows_locked, LEFT(trx_query,80) FROM information_schema.innodb_trx ORDER BY trx_started LIMIT 10;` — trx_query 가 NULL 인데 오래된 트랜잭션이면 커밋 누락 세션"
+  - "`SELECT @@innodb_lock_wait_timeout, @@innodb_rollback_on_timeout;` — 기본(50초·OFF)이면 실패한 문장만 취소(ROLLBACK)되고 트랜잭션은 남아 있음"
+  short:
+  - "(2차·승인 후, 롤백: 종료한 트랜잭션은 롤백되어 되돌릴 수 없음 — thread id·SQL 기록 선행) 업무 담당 확인 후 blocking 스레드 `KILL <thread_id>;`"
+  - "(2차) 애플리케이션이 1205 수신 시 트랜잭션 전체를 롤백 후 재시도하도록 보강, 장시간 미커밋 경로 수정 요청"
+  mid:
+  - 트랜잭션 범위와 인덱스를 최적화해 잠금 시간을 줄임
+  long:
+  - 잠금 대기 상시 모니터링과 배치 동시성 기준을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_lock_wait_timeout)
+  vendor_cause: InnoDB가 행 잠금을 기다리다 innodb_lock_wait_timeout을 초과했다.
+  vendor_action: 트랜잭션을 다시 시작하고, 더 오래 기다려야 하는 환경이면 innodb_lock_wait_timeout을 늘린다.
+  vendor_url: https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_lock_wait_timeout
+  versions:
+  - MySQL 5.5
+  - MySQL 5.6
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: 서버 오류 번호(ER_) 1000번대 — 5.5~9.x 동일(SQL 클라이언트 오류·에러 로그 문구 공통)
+- code: MY-1206
+  severity: error
+  category: lock
+  title: 잠금 테이블 크기 한도 초과
+  immediate:
+  - '`SELECT trx_id, trx_rows_locked, trx_rows_modified, trx_query FROM information_schema.innodb_trx ORDER BY trx_rows_locked DESC LIMIT 5;` 로 잠금이 많은 트랜잭션 확인'
+  - '`SHOW VARIABLES LIKE ''innodb_buffer_pool_size'';` 로 잠금 테이블이 쓰는 버퍼 풀 크기 확인'
+  short:
+  - '(2차·승인 후, 롤백: 없음) 대량 트랜잭션 중지·분할 실행 요청 후 재시도'
+  - InnoDB buffer pool과 대량 DML의 잠금 수를 점검
+  mid:
+  - buffer pool 용량과 배치 단위를 재설계
+  long:
+  - 대량작업 사전 용량검증과 잠금 사용량 경보를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_lock_table_full)
+  note: 잠금 테이블 한도 초과로 해당 트랜잭션이 실패하지만 단독으로 서비스 전체 중단을 의미하지 않음
+  vendor_cause: 트랜잭션이 보유할 잠금 수가 InnoDB 잠금 테이블에 할당된 메모리를 초과했다.
+  vendor_action: innodb_buffer_pool_size를 늘리거나 큰 작업을 여러 개의 작은 작업으로 나눠 실행한다.
+  vendor_url: https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_lock_table_full
+  versions:
+  - MySQL 5.5
+  - MySQL 5.6
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: 서버 오류 번호(ER_) 1000번대 — 5.5~9.x 동일(SQL 클라이언트 오류·에러 로그 문구 공통)
+- code: MY-1213
+  severity: error
+  category: lock
+  title: 교착상태 발생
+  immediate:
+  - "`SHOW ENGINE INNODB STATUS\\G` 의 'LATEST DETECTED DEADLOCK' 구간에서 두 트랜잭션의 SQL·잠금 인덱스·'WE ROLL BACK TRANSACTION (n)' 기록 (PROCESS 권한, 읽기 전용, 5.7·8.0)"
+  - "이력 수집 여부: `SELECT @@innodb_print_all_deadlocks;` — ON 이면 `grep -n -A40 'deadlock' <오류 로그 경로> | tail -80` 로 반복 패턴 확인, OFF 면 마지막 1건만 남음"
+  short:
+  - "(2차) 애플리케이션이 1213 수신 시 트랜잭션 전체 재시도(InnoDB 가 희생 트랜잭션 전체를 롤백), 반복되면 `SET GLOBAL innodb_print_all_deadlocks = ON;` 로 이력 수집(승인 후, 롤백: OFF 로 원복)"
+  mid:
+  - 객체 접근 순서와 트랜잭션 범위를 통일
+  long:
+  - deadlock 자동수집과 재시도 표준을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_lock_deadlock)
+  vendor_cause: InnoDB가 트랜잭션 간 교착상태를 감지해 한 트랜잭션을 롤백했다.
+  vendor_action: 롤백된 트랜잭션의 모든 작업을 다시 실행하며 애플리케이션이 교착상태 후 재시도하도록 작성한다.
+  vendor_url: https://dev.mysql.com/doc/refman/8.0/en/innodb-deadlocks.html
+  versions:
+  - MySQL 5.5
+  - MySQL 5.6
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: 서버 오류 번호(ER_) 1000번대 — 5.5~9.x 동일(SQL 클라이언트 오류·에러 로그 문구 공통)
+- code: MY-2002
+  severity: critical
+  category: connection
+  title: 로컬 서버 접속 실패
+  immediate:
+  - "`systemctl status mysqld`(또는 mysql) 와 `ps -ef | grep [m]ysqld` — 미기동이면 `tail -50 <오류 로그 경로>` 로 기동 실패 원인 확인 (읽기 전용)"
+  - "소켓 경로 일치: `my_print_defaults mysqld client | grep -i socket` 와 `ls -l <socket 경로>` — 서버와 클라이언트 socket 경로가 다르거나 파일이 없으면 원인, 기동 중이면 `mysql -h 127.0.0.1 -P <port> -u <user> -p -e 'SELECT @@socket'` 로 TCP 경유 확인"
+  - "디렉터리 권한: `ls -ldZ $(dirname <socket 경로>)` — mysql 사용자 쓰기 권한·SELinux 컨텍스트 확인"
+  short:
+  - "(2차·승인 후, 롤백: 변경 전 my.cnf 백업) 클라이언트 [client] socket 경로를 서버와 일치시키거나 서비스 기동 — 성공: `mysqladmin -u <user> -p ping` 이 'mysqld is alive'"
+  mid:
+  - 서비스 의존성과 소켓 경로 구성을 표준화
+  long:
+  - 프로세스와 소켓 헬스체크를 자동화
+  source: GPT 수집·벤더 문서 대조 완료(https://dev.mysql.com/doc/mysql-errors/8.0/en/client-error-reference.html#error_cr_connection_error)
+  vendor_cause: 로컬 MySQL 서버가 실행 중이지 않거나 잘못된 UNIX 소켓 또는 TCP 포트로 연결했다.
+  vendor_action: 서버 실행 여부와 올바른 소켓·포트 사용 여부를 확인하고 TCP 연결이면 방화벽도 확인한다.
+  vendor_url: https://dev.mysql.com/doc/refman/8.0/en/can-not-connect-to-server.html
+  versions:
+  - MySQL 5.5
+  - MySQL 5.6
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: 클라이언트(CR_) 오류 번호 2000번대 — 5.5~9.x 동일(클라이언트 라이브러리·커넥터 로그에 기록)
+- code: MY-2006
+  severity: critical
+  category: connection
+  title: 서버 연결 소실
+  immediate:
+  - "서버 가동 시간: `SHOW GLOBAL STATUS LIKE 'Uptime';` — 오류 시각 이후만큼 짧으면 서버가 그 시각에 다시 기동된 것, 오류 로그 `grep -n -E 'ready for connections|got signal' <오류 로그 경로> | tail -20` 로 확인 (읽기 전용)"
+  - "`SHOW GLOBAL VARIABLES WHERE Variable_name IN ('wait_timeout','interactive_timeout','max_allowed_packet');` — 단절 연결의 유휴 시간이 wait_timeout 이상이면 유휴 타임아웃, 큰 문장·BLOB 전송 직후면 max_allowed_packet 초과"
+  short:
+  - "(2차·승인 후, 롤백: 이전 풀 설정 보관) 커넥션 풀에 대여 시 유효성 검사·maxLifetime < wait_timeout 적용, 대용량 전송이면 서버·클라이언트 max_allowed_packet 상향(이전 값 기록)"
+  mid:
+  - 연결풀 재검증과 장시간 작업의 연결정책을 개선
+  long:
+  - 연결 생존성 모니터링과 자동 재접속 정책을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://dev.mysql.com/doc/mysql-errors/8.0/en/client-error-reference.html#error_cr_server_gone_error)
+  vendor_cause: 서버가 wait_timeout으로 연결을 닫았거나 종료·크래시·네트워크 문제 등으로 연결이 사라졌다.
+  vendor_action: 연결을 다시 설정하고 필요하면 wait_timeout, 서버 오류 로그와 네트워크 상태를 확인한다.
+  vendor_url: https://dev.mysql.com/doc/refman/8.0/en/gone-away.html
+  versions:
+  - MySQL 5.5
+  - MySQL 5.6
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: 클라이언트(CR_) 오류 번호 2000번대 — 5.5~9.x 동일(클라이언트 라이브러리·커넥터 로그에 기록)
+- code: MY-2013
+  severity: error
+  category: connection
+  title: 쿼리 중 연결 소실
+  immediate:
+  - "서버 측 원인: `SHOW GLOBAL STATUS LIKE 'Uptime';` 와 `dmesg -T | grep -i -E 'out of memory|oom' | tail -10` — 오류 시각에 mysqld 가 다시 기동됐거나 OOM 이면 서버 원인 (읽기 전용)"
+  - "`SHOW GLOBAL VARIABLES WHERE Variable_name IN ('net_read_timeout','net_write_timeout','max_execution_time','max_allowed_packet','connect_timeout');` — 'at reading initial communication packet' 문구면 connect_timeout·네트워크, 쿼리 실행 중이면 실행 시간과 net_*_timeout 대조"
+  - "해당 쿼리 실행 시간: `SELECT LEFT(DIGEST_TEXT,100), COUNT_STAR, MAX_TIMER_WAIT/1000000000000 AS max_sec FROM performance_schema.events_statements_summary_by_digest ORDER BY MAX_TIMER_WAIT DESC LIMIT 5;`"
+  short:
+  - "(2차·승인 후, 롤백: 이전 값 기록) 장시간 쿼리 튜닝 전까지 해당 작업 세션에 한해 net_read_timeout·net_write_timeout 상향, 중간 방화벽 유휴 타임아웃과 TCP keepalive 정렬은 네트워크 담당 승인"
+  mid:
+  - 느린 쿼리와 네트워크 경로를 개선
+  long:
+  - 재시도 가능 트랜잭션 설계와 연결 SLO를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://dev.mysql.com/doc/mysql-errors/8.0/en/client-error-reference.html#error_cr_server_lost)
+  vendor_cause: 쿼리 실행 중 서버 종료·네트워크 문제·타임아웃 등으로 서버 연결이 끊겼다.
+  vendor_action: 다시 연결해 쿼리를 재시도하고 서버 오류 로그, 네트워크 상태와 관련 timeout 설정을 확인한다.
+  vendor_url: https://dev.mysql.com/doc/refman/8.0/en/gone-away.html
+  versions:
+  - MySQL 5.5
+  - MySQL 5.6
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: 클라이언트(CR_) 오류 번호 2000번대 — 5.5~9.x 동일(클라이언트 라이브러리·커넥터 로그에 기록)

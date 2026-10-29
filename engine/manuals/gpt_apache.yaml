@@ -1,0 +1,15 @@
+product: apache
+title: Apache HTTP Server 운영 참고 (GPT 수집 — 벤더 문서 대조 필요)
+sections:
+- heading: 로그 위치
+  body: ErrorLog와 CustomLog 지시어가 실제 위치를 결정한다. 소스 기본값은 $ServerRoot/logs/error_log와
+    access_log이며 Linux 패키지는 보통 /var/log/httpd 또는 /var/log/apache2를 사용한다.
+- heading: 장애 시 수집 방법
+  body: error/access log와 httpd.conf, include 설정을 보존하고 apachectl -t -D DUMP_VHOSTS,
+    apachectl -M, 필요 시 server-status?auto 결과를 장애 시각에 수집한다.
+- heading: 대표 장애 신호
+  body: AH00072 bind 실패, AH00484 worker 한도, AH00526 설정 오류, AH00957 백엔드 연결 실패, AH01079
+    FCGI 실패, AH01102 backend read 실패와 SSL 오류를 우선 확인한다.
+- heading: 1차 확인 명령
+  body: apachectl -t, apachectl status 또는 systemctl status httpd/apache2, curl -s -o /dev/null -w '%{http_code}' (GET)
+    http://127.0.0.1/ 를 실행하고 ErrorLog 최근 AH 오류를 확인한다.

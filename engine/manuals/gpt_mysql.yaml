@@ -1,0 +1,15 @@
+product: mysql
+title: MySQL/MariaDB 운영 참고 (GPT 수집 — 벤더 문서 대조 필요)
+sections:
+- heading: 로그 위치
+  body: MySQL 오류 로그는 log_error 변수로 확인한다. Linux 패키지는 /var/log/mysqld.log, /var/log/mysql/error.log
+    또는 systemd journal을 사용할 수 있으므로 SHOW VARIABLES LIKE 'log_error'; 로 확정한다.
+- heading: 장애 시 수집 방법
+  body: 오류 로그와 SHOW ENGINE INNODB STATUS\G, SHOW GLOBAL STATUS, SHOW PROCESSLIST,
+    필요 시 Performance Schema 대기·잠금 정보를 동일 시각 기준으로 수집한다.
+- heading: 대표 장애 신호
+  body: errno 1040 접속 초과, 1205 잠금시간초과, 1213 교착, 1114 공간 부족, 2006/2013 연결 소실, InnoDB
+    crash recovery와 OOM 메시지를 우선 확인한다.
+- heading: 1차 확인 명령
+  body: mysqladmin status와 mysql -e "SHOW GLOBAL STATUS LIKE 'Threads_connected';
+    SHOW VARIABLES LIKE 'max_connections';" 를 실행하고 SHOW ENGINE INNODB STATUS\G를 확인한다.

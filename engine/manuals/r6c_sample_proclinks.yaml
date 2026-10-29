@@ -1,0 +1,34 @@
+# 2026-10-16 6차 표본 57 교차 검토 — 판정과 절차의 짝을 사람이 확인한 기록(전용 절차 7건은 r6c_sample_procedures.yaml 의 match 로도 이어져 있다)
+# 이전에 붙어 있던 절차(EAP-PROC-R6-APP·WAS-PROC-INTERNAL·JAVA-PROC-R5-INTERNAL·OSC-PROC-R5-STORAGE·WTB-PROC-R5-SECURITY·LNX-PROC-SECURITY·TBR-PROC-R5-LOCK)의
+# match 에서 해당 ID 를 뺐다(백업: 검증도구\_bak\r6\sample57\manuals).
+links:
+- procedure: TBR-PROC-R6-RECOVERY
+  match: [TBR-1022]
+  reviewed: "TIBERO TBR-1022 RESETLOGS 실패 — 미디어 복구·RESETLOGS 절차가 맞음, 1차 slog grep 정규식 완결 확인(잘림 없음)"
+- procedure: EAP-PROC-R6C-SPRING
+  match: [LEG-WFLY-SPRING-ALL]
+  reviewed: "JBoss Spring 예외 전체 — 전에는 배포·WAR 일반 절차(EAP-PROC-R6-APP). Caused by 사슬 추적·원인 유형 분기 전용 절차로, WAR 확인은 조건부 보조"
+- procedure: WAS-PROC-R6C-CNTR0020E
+  match: [CNTR0020E]
+  reviewed: "WebSphere CNTR0020E — 전에는 WSVR/ADMU/SRVE 코드를 grep 하는 기동 실패 절차(WAS-PROC-INTERNAL). 예외 데이터·중첩 원인·같은 시각 FFDC·원인 유형 분기 전용 절차로"
+- procedure: JAVA-PROC-R6C-BEANCREATION
+  match: [ORG.SPRINGFRAMEWORK.BEANS.FACTORY.BEANCREATIONEXCEPTION]
+  reviewed: "Spring BeanCreationException — 전에는 FD/lsof 를 기본 단계로 둔 SQL·내부 예외 절차(JAVA-PROC-R5-INTERNAL). 실패 빈·맨 안쪽 원인을 한 묶음으로, nc·FD 는 조건부"
+- procedure: OSC-PROC-R6C-TIERING
+  match: [LEG-STOR-TIERING]
+  reviewed: "스토리지 자동 계층화 — 전에는 StorCLI RAID·vSAN 이 섞인 절차(OSC-PROC-R5-STORAGE, esxcli vsan 줄은 완결 확인). FabricPool·콘솔 계층화 작업 전용 절차로"
+- procedure: MY-PROC-R6-DISCONNECT
+  match: [MY-1159]
+  reviewed: "MySQL 1159 — 연결 끊김 전용 절차 유지, net_read_timeout 직접 변수·Aborted_* 증가분 비교·유휴 끊김(wait_timeout) 구분 문구로 보강"
+- procedure: WTB-PROC-R6C-TLS
+  match: [LEG-WEBTOB-SSL]
+  reviewed: "WebtoB SSL — 전에는 400/403 access log 집계가 섞인 보안 묶음 절차(WTB-PROC-R5-SECURITY). WebtoB 5 *SSL 절·s_client 검증·키 짝 전용 TLS 절차로"
+- procedure: LNX-PROC-R6C-APPARMOR
+  match: [LNX-APPARMOR-DENIED]
+  reviewed: "Linux AppArmor DENIED — 전에는 SSH 로그인 실패 검색 절차(LNX-PROC-SECURITY). DENIED 필드 추출·aa-status·프로세스 표지·complain/enforce 전용 절차로"
+- procedure: TBR-PROC-R6C-NOWAIT
+  match: [TBR-12033]
+  reviewed: "TIBERO TBR-12033 NOWAIT — 전에는 통계 잠금(DBA_TAB_STATISTICS) 조회가 섞인 잠금 절차(TBR-PROC-R5-LOCK). V$LOCK/GV$LOCK·V$SESSION·V$SQL 전용 절차로"
+- procedure: OSC-PROC-R6-POWER
+  match: [LEG-GEN-POWER-WARN]
+  reviewed: "전원 이상 경고 — 전원 절차 유지, IPMI 단계는 IPMI 지원 하드웨어에만·IBM Power 는 HMC/ASMI·errpt 로 구분해 보강"

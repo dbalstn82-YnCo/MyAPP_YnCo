@@ -1,0 +1,325 @@
+# WAS 계층 제품 버전 카탈로그 — 코드 조회 › 제품 › [버전] 탭 (검증 2026-09-11, Claude 웹 대조 + GPT 교차 수집 A28/B5 반영)
+products:
+  jeus:
+    title: TmaxSoft JEUS 버전별 수명주기·로그 코드 체계
+    updated: '2026-09-11'
+    note: '모듈명-4자리 코드([Network-0708] 등)는 JEUS 6 컨테이너 실로그와 7+ 문서에서 동일하게 확인되어 Network-/WEB-/JMX-/TM-/JNSS- 코드는 6~9 공통으로 수집한다. 7 에서 도메인(DAS/MS)·Launcher 구조가 도입되어 SERVER-/LAUNCHER-/DOMAIN-/DEPLOY- 코드는 7+ 전용(8.5 부터 DAS→MASTER 명칭). 기존 도구 룰의 NET-/D_SESSION- 접두는
+      도입 버전 미확인이라 전 버전 수집. EOL/EOS 는 tmaxsoft 공지(6: 2016-12-31/2018-12-31/ES 2021-12-31, 7: 2021-06-30/2022-06-30/ES 2025-06-30). GPT 교차(A 28/B 5) 반영.'
+    columns:
+    - version
+    - released
+    - support_end
+    - jdk
+    - config
+    - log_format
+    - code_scheme
+    - source
+    labels:
+      version: 버전
+      released: 출시
+      support_end: 지원 종료
+      jdk: JDK
+      config: 설정 파일
+      log_format: 로그 형식
+      code_scheme: 코드 체계
+      source: 출처
+    versions:
+    - version: 6.0 (Fix#1~#10)
+      released: 2007-06
+      support_end: EOL 2016-12-31 / EOS 2018-12-31 / Extended 2021-12-31
+      jdk: 5 / 6
+      config: JEUSMain.xml + 컨테이너별 xml
+      log_format: '[YYYY.MM.DD HH:MM:SS][level][pid] [container1-tid] [Network-0708] msg (실로그)'
+      code_scheme: Network-/WEB-(WJP 33xx)/JMX-/TM-/JNSS- (6 실로그·GPT 확인) — 도메인 코드(SERVER-/LAUNCHER-/DOMAIN-)는 없음
+      source: collect/gpt_bizmaster_2026-09-10.md ; collect/verify/resp_was_versions_2026-09-11.txt
+    - version: 7.0 (Fix#0~#5)
+      released: 2012-06
+      support_end: EOL 2021-06-30 / EOS 2022-06-30 / Extended 2025-06-30 (GPT A, tmaxsoft 공지)
+      jdk: 6 / 7 / 8
+      config: domain.xml (DAS 관리)
+      log_format: '[YYYY.MM.DD HH:MM:SS][level][pid] [server-tid] [CODE-nnnn] msg (JEUS 6 형식 옵션 제공)'
+      code_scheme: SERVER-/LAUNCHER-/Network-/SESSION-/JNDI.CONTEXT-/DEPLOY-/DOMAIN-/CPOOL-/JDBC-/TM-/JMX-/WEB-
+      source: JEUS 7 Release Note(technet) ; Server Guide Logging
+    - version: 8 (Fix#1~#4)
+      released: 2017-02 (Java EE 7 인증 2013)
+      support_end: 미공개(지원 중)
+      jdk: 7 / 8
+      config: domain.xml
+      log_format: 7 과 동일
+      code_scheme: 7 과 동일
+      source: https://en.wikipedia.org/wiki/JEUS
+    - version: 8.5 (8 Fix#5)
+      released: 2020-02
+      support_end: 미공개(지원 중)
+      jdk: 8 / 11
+      config: domain.xml (MASTER/MS 명칭)
+      log_format: formatter-pattern [%d{yyyy.MM.dd HH:mm:ss}][%l] [%J-%T] [%M-%N] %m 지원, JeusLoggerStatus.log 추가
+      code_scheme: 7 과 동일 — 메시지 문구 DAS→MASTER
+      source: https://en.wikipedia.org/wiki/JEUS
+    - version: 9 / 9.1
+      released: 2024-09-27 / 2025-09-30 (9.1.1 2026-06-08, 내장 WebtoB 제거)
+      support_end: 미공개(지원 중)
+      jdk: 11 / 17 (Jakarta EE 9.1/10)
+      config: domain.xml
+      log_format: '[%d] [%l] [%J-%T] [%M-%N] %m, 레벨 0=SEVERE 1=WARNING 2=INFO'
+      code_scheme: SERVER/WEB/JNSS/JMX/Network/TM/Launcher/SESSION 모듈(공식 목록)
+      source: docs.tmaxsoft.com/ko/jeus/9
+  tomcat:
+    title: Apache Tomcat 버전별 수명주기·로그 형식
+    updated: '2026-09-11'
+    note: 'Tomcat 은 고유 코드가 없어 문구 별칭(TOMCAT-*)으로 판정한다(GPT A: 6~11 모두 통일 코드 없음 확인, 11 은 JsonFormatter 선택 가능). catalina.out/catalina.YYYY-MM-DD.log 의 JULI 형식(7 이하 2줄, 8.5+ 1줄 ''DD-MMM-YYYY HH:MM:SS.mmm LEVEL [thread] class.method msg'')을 파서가 모두 읽는다. EOS 된
+      5.5/6/7/8.0/8.5/10.0 도 문구가 같아 수집 대상.'
+    columns:
+    - version
+    - released
+    - support_end
+    - latest
+    - servlet
+    - log_format
+    - note
+    - source
+    labels:
+      version: 버전
+      released: 출시
+      support_end: 지원 종료
+      latest: 최종 릴리스
+      servlet: Servlet/JSP
+      log_format: 로그 형식
+      note: 비고
+      source: 출처
+    versions:
+    - version: '5.5'
+      released: '2003-09 (5.5: 2004-08)'
+      support_end: '2012-09-30'
+      latest: 5.5.36
+      servlet: 2.4 / 2.0
+      log_format: 'JULI 2줄 (날짜 클래스 메서드 / LEVEL: msg)'
+      note: JDK 1.4/5
+      source: https://endoflife.date/tomcat
+    - version: '6.0'
+      released: '2006-10-21'
+      support_end: '2016-12-31'
+      latest: 6.0.53
+      servlet: 2.5 / 2.1
+      log_format: JULI 2줄
+      note: NIO 커넥터 도입, 6.0.24+ 메모리 누수 감지
+      source: https://endoflife.date/tomcat
+    - version: '7.0'
+      released: 2013-01-10 (7.0.0 2010-06)
+      support_end: '2021-03-31'
+      latest: 7.0.109
+      servlet: 3.0 / 2.2
+      log_format: JULI 2줄
+      note: 비동기·StuckThreadDetectionValve(7.0.13)·WebSocket(7.0.27+)
+      source: https://endoflife.date/tomcat
+    - version: '8.0'
+      released: '2014-01-29'
+      support_end: '2018-06-30'
+      latest: 8.0.53
+      servlet: 3.1 / 2.3
+      log_format: JULI 2줄
+      note: NIO 기본, JarScanner 문구 변경
+      source: https://endoflife.date/tomcat
+    - version: '8.5'
+      released: '2016-03-17'
+      support_end: '2024-03-31'
+      latest: 8.5.100
+      servlet: 3.1 / 2.3
+      log_format: JULI 1줄 (OneLineFormatter)
+      note: HTTP/2·ALPN, BIO 커넥터 제거, AJP secretRequired(8.5.51)
+      source: https://endoflife.date/tomcat
+    - version: '9.0'
+      released: '2017-09-27'
+      support_end: '2027-03-31'
+      latest: 9.0.122
+      servlet: 4.0 / 2.3
+      log_format: JULI 1줄
+      note: javax 패키지 마지막 라인
+      source: https://endoflife.date/tomcat
+    - version: '10.0'
+      released: '2020-12-03'
+      support_end: '2022-10-31'
+      latest: 10.0.27
+      servlet: 5.0 / 3.0 (jakarta)
+      log_format: JULI 1줄
+      note: jakarta 전환
+      source: https://endoflife.date/tomcat
+    - version: '10.1'
+      released: '2022-09-23'
+      support_end: 지원 중
+      latest: 10.1.60
+      servlet: 6.0 / 3.1
+      log_format: JULI 1줄
+      note: ''
+      source: https://endoflife.date/tomcat
+    - version: '11.0'
+      released: '2024-10-03'
+      support_end: 지원 중
+      latest: 11.0.26
+      servlet: 6.1 / 4.0
+      log_format: JULI 1줄
+      note: Java 17+
+      source: https://endoflife.date/tomcat
+  weblogic:
+    title: Oracle WebLogic Server 버전별 수명주기·로그 체계
+    updated: '2026-09-11'
+    note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 부터 유지되어 EOS 된 10.3.6/12.1.3 로그도 동일 ID 로 판정된다. 서버 로그 형식 '####<날짜> <Severity> <Subsystem> <machine> <server> <thread> <user> <tx> <diag> <timestamp> <BEA-nnnnnn> <msg>' 는 9.0 이후 동일.
+    columns:
+    - version
+    - released
+    - premier_end
+    - extended_end
+    - jdk
+    - javaee
+    - source
+    labels:
+      version: 버전
+      released: 출시
+      premier_end: Premier 지원 종료
+      extended_end: Extended 지원 종료
+      jdk: JDK
+      javaee: Java EE
+      source: 출처
+    versions:
+    - version: 10.3.6 (11gR1)
+      released: 2012-02
+      premier_end: 2018-12
+      extended_end: 2021-12
+      jdk: 6 / 7 / 8
+      javaee: '5'
+      source: 'Oracle Lifetime Support Policy: Fusion Middleware'
+    - version: 12.1.3
+      released: 2014-06
+      premier_end: 2017-12
+      extended_end: '2022-01-31'
+      jdk: 7 / 8
+      javaee: 6 (일부 7)
+      source: 'Oracle Lifetime Support Policy: Fusion Middleware'
+    - version: 12.2.1.x (12.2.1.3 / 12.2.1.4)
+      released: '2015-10 (12.2.1.4: 2019-09)'
+      premier_end: 2026-12
+      extended_end: 2027-12
+      jdk: '8'
+      javaee: 7 — 12.2.1 부터 LogFormatCompatibilityEnabled=false 기본(호환 형식 옵션)
+      source: 'Oracle Lifetime Support Policy: Fusion Middleware'
+    - version: 14.1.1
+      released: 2020-03
+      premier_end: '2026-12-31'
+      extended_end: Error Correction 2027-12
+      jdk: 8 / 11
+      javaee: '8'
+      source: 'Oracle Lifetime Support Policy: Fusion Middleware'
+    - version: 14.1.2
+      released: 2024-12
+      premier_end: 2030-12
+      extended_end: 2033-12
+      jdk: 17 / 21
+      javaee: 8 (Jakarta EE 8)
+      source: 'Oracle Lifetime Support Policy: Fusion Middleware'
+  websphere:
+    title: IBM WebSphere Application Server 버전별 수명주기·로그 체계
+    updated: '2026-09-11'
+    note: 'traditional 의 SystemOut.log/SystemErr.log 형식 ''[MM/DD/YY HH:MM:SS:mmm TZ] threadId Component  LEVEL   MSGIDnnnnX: msg'' 는 6.0~9.0 동일. 메시지 ID(WSVR/SRVE/DSRA/J2CA/WTRN/SECJ/CWPKI …)는 7.0~9.0 유지되고 일부는 Liberty(messages.log)와 공유된다. Liberty 고유 CWWK*
+      코드는 사전에 없음(별도 수집 대상).'
+    columns:
+    - version
+    - released
+    - support_end
+    - jdk
+    - javaee
+    - log_files
+    - source
+    labels:
+      version: 버전
+      released: 출시
+      support_end: 지원 종료(EOS)
+      jdk: JDK
+      javaee: Java EE
+      log_files: 로그 파일
+      source: 출처
+    versions:
+    - version: traditional 7.0
+      released: '2008-10-17'
+      support_end: 2018-04-30 (Extended 2021-04-30)
+      jdk: '6'
+      javaee: '5'
+      log_files: SystemOut.log / SystemErr.log / trace.log / ffdc
+      source: IBM Software Lifecycle (5724-J08)
+    - version: traditional 8.0
+      released: '2011-07-22'
+      support_end: 2018-04-30 (Extended 2021-04-30)
+      jdk: '6'
+      javaee: '6'
+      log_files: 동일 (+HPEL 옵션)
+      source: IBM Software Lifecycle
+    - version: traditional 8.5 / 8.5.5
+      released: 2012-06 / 2013-06-14
+      support_end: 미정(지원 중)
+      jdk: 6 / 7 / 8
+      javaee: 6 (8.5.5 EE7 일부)
+      log_files: 동일
+      source: IBM Software Lifecycle
+    - version: traditional 9.0
+      released: '2016-06-24'
+      support_end: 미정(지원 중)
+      jdk: 8 / 11 / 17
+      javaee: '7'
+      log_files: 동일
+      source: IBM Software Lifecycle
+    - version: Liberty (continuous delivery)
+      released: 2012~ (4주 단위)
+      support_end: SSCD(연속 배포) 정책
+      jdk: 8 / 11 / 17 / 21
+      javaee: EE7~Jakarta EE 10
+      log_files: messages.log / console.log (CWWK* 코드)
+      source: IBM Liberty support policy
+  jboss:
+    title: Red Hat JBoss EAP 버전별 수명주기·로그 코드 체계
+    updated: '2026-09-11'
+    note: 'EAP 6(AS 7)은 JBAS0xxxxx, EAP 7(WildFly 10+)부터 WFLY<서브시스템>nnnn 코드 체계이며 Undertow(UT)·Artemis(AMQ)도 7 부터. IronJacamar(IJ)·Narayana(ARJUNA)·JGroups(JGRP)·Infinispan(ISPN)·MSC 코드는 6 부터 동일. server.log 형식 ''HH:MM:SS,mmm LEVEL [logger] (thread) CODE:
+      msg'' 는 6~8 동일. EAP 5 이하는 메시지 코드 없음(문구 룰만).'
+    columns:
+    - version
+    - released
+    - full_end
+    - maint_end
+    - els_end
+    - codes
+    - source
+    labels:
+      version: 버전
+      released: 출시
+      full_end: Full 지원 종료
+      maint_end: Maintenance 종료
+      els_end: ELS 종료
+      codes: 코드 체계
+      source: 출처
+    versions:
+    - version: EAP 5.x
+      released: '2009-11-01'
+      full_end: 2013-11
+      maint_end: '2016-11-30'
+      els_end: 2019-11 (ELS)
+      codes: 코드 없음(문구)
+      source: https://endoflife.date/red-hat-jboss-eap
+    - version: EAP 6.x (AS 7.x)
+      released: '2012-06-01'
+      full_end: '2016-06-30'
+      maint_end: '2019-06-30'
+      els_end: ELS-2 2028-12-30 (GPT A, access.redhat.com/support/policy/updates/jboss_notes)
+      codes: JBAS0xxxxx, JBWEB*, IJ*, ARJUNA*, JGRP*, ISPN*, HQ*(HornetQ), MSC00001
+      source: https://endoflife.date/red-hat-jboss-eap ; https://access.redhat.com/support/policy/updates/jboss_notes
+    - version: EAP 7.0~7.4 (WildFly 10~23)
+      released: '2016-05-01'
+      full_end: '2023-12-31'
+      maint_end: '2025-06-30'
+      els_end: 2030-12-31 (endoflife.date; GPT 는 ELS 2027-10 표기 — 확인 필요)
+      codes: WFLY*, UT*, IJ*, ARJUNA*, JGRP*, ISPN*, AMQ*(Artemis), MSC000001
+      source: https://endoflife.date/red-hat-jboss-eap
+    - version: EAP 8.0/8.1 (WildFly 28+)
+      released: '2024-02-05'
+      full_end: '2028-02-05'
+      maint_end: 2031-02-05 (ELS1)
+      els_end: 2033-02-05 (ELS2)
+      codes: 7 과 동일(jakarta 패키지)
+      source: https://endoflife.date/red-hat-jboss-eap

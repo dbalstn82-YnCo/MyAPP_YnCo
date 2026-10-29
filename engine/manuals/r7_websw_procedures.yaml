@@ -1,0 +1,390 @@
+# 근거 매뉴얼·작성 기준 — 7차(2026-10-16) WEB·SW 묶음 '이 판정 전용' 연결 재검토(kw7/D_websw.json)에서 기존 절차가 판정을 진단하지 못한 것만 새로 만든다.
+#  - 맞는 기존 절차는 r7_websw_proclinks.yaml 로 잇는다(fit_reviewed / primary). 기존 절차 파일은 고치지 않는다.
+#  - nginx: nginx.org 'ngx_http_core_module (listen … proxy_protocol 1.5.12, PROXY v2 1.13.11+, $proxy_protocol_addr)'·'ngx_http_realip_module (set_real_ip_from, real_ip_header proxy_protocol — 기본 빌드 아님 --with-http_realip_module)'
+#  - WebtoB: TmaxSoft WebtoB 관리자 안내서 '환경설정 NODE/VHOST 절 Options(INDEX)·IndexName(기본 index.html)·DirIndex, DIRINDEX 절' — 원문 페이지 직접 열람 불가, 공식 도메인 검색 요약으로만 확인(verify_note)
+#  - IIS: Microsoft Learn 'HTTP status code overview(401.1/401.2/403.1/403.2/403.3/403.14/500.19/500.21)'·'Fix HTTP Error 500.19 (HRESULT 별 원인)'·'Handlers <handlers> accessPolicy'·'Default Document <defaultDocument>'·'Directory Browse <directoryBrowse>'·'Windows Authentication <windowsAuthentication>'·'WebDAV Authoring Rules <authoringRules>'
+#  - Java: Oracle Java SE API 'javax.naming.NameNotFoundException'·Java Tutorial 'JNDI LDAP — LDAP 상태 코드 32(No such object) → NameNotFoundException'·Apache Tomcat 9 'JNDI Resources HOW-TO'(java:comp/env, <Resource>, GlobalNamingResources, <ResourceLink>)
+#  - MESIM(메타빌드)는 공개 매뉴얼이 없다 — 관리 콘솔 메뉴 이름·로그 문구는 납품본 확인 전까지 verify_note 로 미검증 표시.
+#  - 1차 = 읽기 전용(재기동·kill·삭제·설정 변경 없음) · 2차 = 사전조건·영향·승인·백업/롤백 + 성공/실패 판단 · 3차 = 민감정보 마스킹·전달 승인 · 비밀번호는 명령줄에 쓰지 않는다
+procedures:
+# ── nginx ──
+- id: NGX-PROC-R7-PROXYPROTO
+  scope: id
+  products: [nginx]
+  category: connection
+  match: [NGX-PROXY-PROTOCOL-BROKEN]
+  title: PROXY 프로토콜 헤더 오류(broken header) — 앞단 LB 송신 설정 불일치·LB 우회 직접 접속·헬스체크 (nginx)
+  source: "nginx.org 'ngx_http_core_module' listen 의 proxy_protocol 파라미터(1.5.12, PROXY v2 는 1.13.11+)·$proxy_protocol_addr / 'ngx_http_realip_module' set_real_ip_from·real_ip_header proxy_protocol(1.5.12, --with-http_realip_module 필요)"
+  stages:
+  - stage: 1
+    steps:
+    - do: "broken header 발생 시각·출처(client) 집계 (읽기 전용)"
+      cmd: |
+        grep -n "broken header" /var/log/nginx/error.log | tail -20
+        grep "broken header" /var/log/nginx/error.log | grep -o -E "client: [0-9a-fA-F.:]+" | sort | uniq -c | sort -rn | head
+      check: "출처가 LB 헬스체크·감시 서버 IP 뿐이면 헬스체크가 PROXY 헤더 없이 접속하는 것(서비스 요청은 정상) · LB 가 아닌 IP 면 LB 를 거치지 않은 직접 접속(방화벽·접근 경로 확인) · 모든 LB 주소에서 다수 발생이면 LB 의 PROXY 프로토콜 송신이 꺼졌거나 버전 불일치 — 서비스 장애"
+      note: "적용: nginx 1.5.12+ · error_log 경로는 nginx -T | grep error_log 로 확인 · client: 칸이 없는 줄은 줄 전체로 확인 · 권한: 로그 읽기"
+    - do: "PROXY 프로토콜 수신 포트·실제 IP 복원 설정 확인 (읽기 전용)"
+      cmd: |
+        nginx -T 2>/dev/null | grep -n -E "listen .*proxy_protocol|set_real_ip_from|real_ip_header"
+        ss -ltnp | grep nginx
+      check: "LB 가 PROXY 헤더를 보내는 포트만 listen … proxy_protocol 이어야 정상 · LB 가 헤더를 보내지 않는 포트에 proxy_protocol 이 있으면 모든 요청이 broken header · real_ip_header proxy_protocol 을 쓰면 set_real_ip_from 에 LB 대역이 있어야 함"
+      note: "nginx -T 는 설정을 출력만 함(1.9.2+) · 적용: nginx 1.5.12+ · 권한: root(설정 덤프·ss -p)"
+    - do: "버전·realip 모듈 포함 여부 확인 (PROXY v2 수신 가능 여부)"
+      cmd: |
+        nginx -V 2>&1 | grep -o -E "nginx/[0-9.]+|with-http_realip_module|with-stream_realip_module"
+      check: "nginx 1.13.11 미만인데 LB 가 PROXY v2(이진 형식)를 보내면 broken header — LB 담당에게 송신 버전(v1/v2) 확인 · realip 모듈이 없으면 real_ip_header 설정 자체를 쓸 수 없음"
+      note: "조회 전용 · 권한: 일반 사용자"
+  - stage: 2
+    steps:
+    - do: "LB 송신 설정과 nginx 수신 포트를 맞춤 — 헬스체크 전용 포트 분리 또는 LB 송신 버전·대상 포트 정정"
+      cmd: |
+        cp -p /etc/nginx/conf.d/<site>.conf /etc/nginx/conf.d/<site>.conf.$(date +%Y%m%d%H%M)
+        vi /etc/nginx/conf.d/<site>.conf
+        nginx -t && nginx -s reload
+      config:
+        file: /etc/nginx/conf.d/<site>.conf
+        snippet: |
+          server {
+            listen <port> proxy_protocol;          # LB 가 PROXY 헤더를 보내는 포트만
+            set_real_ip_from <LB 대역>;
+            real_ip_header proxy_protocol;
+          }
+          server {
+            listen <헬스체크포트>;                 # LB 헬스체크가 PROXY 헤더를 못 보낼 때 별도 포트(proxy_protocol 없음)
+            location = /health { return 200; }
+          }
+      check: "성공: nginx -t 'test is successful', reload 뒤 broken header 미발생·LB 헬스체크 정상·접근 로그의 클라이언트 IP 가 실제 사용자 IP · 실패: nginx -t 오류면 reload 하지 않음, reload 뒤 정상 요청이 broken header·400 이면 즉시 백업 복원 후 nginx -t && nginx -s reload"
+      note: "사전조건: LB 담당과 PROXY 송신 여부·버전(v1/v2)·대상 포트·헬스체크 방식을 대조, LB 쪽을 고치는 것이 맞으면 nginx 는 바꾸지 않음 · 영향: proxy_protocol 을 잘못 빼거나 넣으면 해당 포트 전체 요청 실패, reload 는 무중단(워커 교체) · 승인: 웹 운영 담당·네트워크(LB) 담당·변경 관리 · 백업/롤백: 날짜 붙은 conf 복사본으로 cp 후 nginx -t && nginx -s reload · 적용: nginx 1.5.12+(v2 는 1.13.11+), realip 모듈 포함 빌드"
+  - stage: 3
+    steps:
+    - do: "nginx·LB 담당 전달 자료"
+      cmd: |
+        nginx -V 2> nginx_V.txt ; nginx -T > nginx_T.txt 2>&1
+        grep "broken header" /var/log/nginx/error.log | tail -300 > broken_header.txt
+      check: "nginx 버전·빌드 옵션·listen/realip 설정·broken header 발췌·LB 의 PROXY 송신 설정 캡처"
+      note: "민감정보 마스킹: nginx -T 의 인증서·키 경로·내부 호스트명·IP, 로그의 client IP 를 가림(LB 대역은 담당 확인용으로만) · 전달 승인: 보안 담당"
+# ── WebtoB ──
+- id: WTB-PROC-R7-DIRINDEX
+  scope: id
+  products: [webtob]
+  category: security
+  match: [WEBTOB-DIRECTORY-LISTING]
+  title: 디렉터리 목록 노출·인덱스 파일 누락 — Options(INDEX)·IndexName·DirIndex 확인 (WebtoB)
+  source: "TmaxSoft WebtoB 관리자 안내서 '환경설정' NODE·VHOST 절 Options(INDEX 를 넣으면 디렉터리 인덱싱)·IndexName(기본 index.html)·DirIndex, DIRINDEX 절(Options Fancy 등) — WebtoB 4.1~5.x 문서"
+  verify_note: "미검증 — TmaxSoft 관리자 안내서 원문 페이지를 직접 열지 못하고 공식 도메인(technet/docs.tmaxsoft.com) 검색 요약으로만 Options 'INDEX'·IndexName 기본값·DirIndex·DIRINDEX 절을 확인함 · 끄는 표기('-Index' 등)와 WebtoB 6 의 JSON 형식 설정 항목 이름은 확인하지 못함"
+  stages:
+  - stage: 1
+    steps:
+    - do: "디렉터리 인덱싱 관련 설정 확인 (읽기 전용)"
+      cmd: |
+        grep -n -i -E "Options|IndexName|DirIndex|DIRINDEX|DOCROOT" $WEBTOBDIR/config/http.m
+      check: "NODE 또는 VHOST 의 Options 에 Index(INDEX) 가 있고 DirIndex 가 지정돼 있으면 디렉터리 목록 노출 켜짐 — 의도하지 않았다면 보안 담당 즉시 통보 · Index 가 없는데 IndexName(기본 index.html) 파일이 폴더에 없으면 디렉터리 요청은 403"
+      note: "적용: WebtoB 4.1/5 (http.m), WebtoB 6 은 설정 형식이 다름 · 조회 전용 · 권한: WebtoB 설치 계정"
+    - do: "디렉터리 URL(끝이 /) 요청의 응답 코드·출처 확인"
+      cmd: |
+        grep -E "\"(GET|HEAD) [^ ]*/ HTTP" <access_log> | awk -F'"' '{split($3,a," "); print a[1]}' | sort | uniq -c | sort -rn
+        grep -E "\"(GET|HEAD) [^ ]*/ HTTP" <access_log> | awk '{print $1}' | sort | uniq -c | sort -rn | head
+      check: "디렉터리 URL 이 200 이고 그 폴더에 IndexName 파일이 없으면 목록이 노출된 것 · 403 이면 목록 꺼짐+인덱스 파일 누락(배포 누락) · 외부 다수 IP 가 여러 디렉터리를 훑으면 정보 수집 시도"
+      note: "형식 가정: CLF/combined 꼴(IP 맨 앞, 요청줄이 첫 큰따옴표 안, 상태 코드가 닫는 따옴표 바로 뒤) — http.m LOGGING 절 Format 과 로그 한 줄(head -1)로 먼저 확인하고 다르면 칸 번호를 맞춤 · 권한: 로그 읽기"
+    - do: "해당 경로의 인덱스 파일 존재 확인"
+      cmd: |
+        ls -l <DOCROOT>/<경로>/ | head -20
+      check: "IndexName 에 지정된 파일(기본 index.html)이 없으면 배포 누락 · 있는데도 목록이 보이면 IndexName 값과 파일 이름이 다른지 확인"
+      note: "조회 전용 · 권한: WebtoB 실행 계정"
+  - stage: 2
+    steps:
+    - do: "인덱스 파일 누락이면 배포본에서 인덱스 파일 재배포"
+      cmd: |
+        cp -p <배포본경로>/<IndexName 파일> <DOCROOT>/<경로>/
+      check: "성공: 디렉터리 URL 이 인덱스 파일 내용으로 200 · 실패: 계속 403·목록이면 IndexName 값·VHOST 의 DOCROOT 를 다시 대조"
+      note: "사전조건: 배포 담당이 누락 파일·정상 배포본 확인 · 영향: 해당 경로 화면만 바뀜(재기동 없음) · 승인: 웹 운영 담당·배포 담당 · 백업/롤백: 같은 이름 파일이 있었다면 날짜 붙여 보관, 이상 시 복사한 파일만 원래대로 되돌림"
+    - do: "의도하지 않은 목록 노출이면 Options 에서 Index 를 빼고 컴파일·기동"
+      cmd: |
+        cp -p $WEBTOBDIR/config/http.m $WEBTOBDIR/config/http.m.$(date +%Y%m%d%H%M)
+        cp -p $WEBTOBDIR/config/wsconfig $WEBTOBDIR/config/wsconfig.$(date +%Y%m%d%H%M)
+        vi $WEBTOBDIR/config/http.m
+        cd $WEBTOBDIR/config && $WEBTOBDIR/bin/wscfl -i http.m
+        $WEBTOBDIR/bin/wsdown ; $WEBTOBDIR/bin/wsboot
+      check: "성공: wscfl 오류 없음, 디렉터리 URL 이 목록 대신 403(또는 인덱스 파일) · 실패: wscfl 오류(CFL-)면 down 하지 않고 백업 http.m 으로 되돌림, wsboot 실패면 백업 http.m·wsconfig 로 복원 후 wsboot"
+      note: "사전조건: 목록 노출이 업무상 필요 없는지 업무·보안 담당 확인(파일 내려받기 용도면 목록 대신 별도 다운로드 화면) · 영향: wsdown~wsboot 동안 웹 서비스 중단 · 승인: 웹 운영 담당·보안 담당·변경 관리(업무 외 시간 또는 L4 우회 후) · 백업/롤백: 날짜 붙은 http.m·wsconfig 로 복원 후 wscfl -i http.m → wsdown/wsboot · 적용: WebtoB 4.1/5 (http.m)"
+  - stage: 3
+    steps:
+    - do: "TmaxSoft·보안 담당 전달 자료"
+      cmd: |
+        grep -n -i -E "Options|IndexName|DirIndex|DIRINDEX|DOCROOT" $WEBTOBDIR/config/http.m > webtob_index_conf.txt
+        $WEBTOBDIR/bin/wsadmin -v > webtob_version.txt 2>&1
+      check: "인덱싱 관련 설정 발췌·WebtoB 버전(Fix 레벨)·디렉터리 URL 접근 로그 발췌"
+      note: "민감정보 마스킹: 경로의 사용자명·호스트명, 접근 로그의 client IP·쿼리 문자열·쿠키를 가림 — 노출된 목록 화면 캡처는 파일 이름만 남기고 내용은 첨부하지 않음 · 전달 승인: 보안 담당"
+# ── Java ──
+- id: JAVA-PROC-R7-NAMING
+  scope: id
+  products: [java]
+  category: internal
+  match: [JAVAX.NAMING.NAMENOTFOUNDEXCEPTION]
+  title: LDAP 이름 또는 객체 미존재·JNDI 이름 미바인딩 (NameNotFoundException)
+  source: "Oracle Java SE API 'javax.naming.NameNotFoundException' · Java Tutorial 'JNDI — LDAP 상태 코드 ↔ JNDI 예외(32 No such object → NameNotFoundException)' — docs.oracle.com/javase/tutorial/jndi/ldap/exceptions.html · Apache Tomcat 9 'JNDI Resources HOW-TO'(java:comp/env, <Resource>, GlobalNamingResources, <ResourceLink>)"
+  stages:
+  - stage: 1
+    steps:
+    - do: "JNDI 조회 실패인지 LDAP 객체 없음인지 구분 (읽기 전용)"
+      cmd: |
+        grep -n -A12 "NameNotFoundException" <app_log> | grep -E "NameNotFoundException|not bound|error code 32|No Such Object|remaining name|Caused by" | head -30
+        grep -c "NameNotFoundException" <app_log>
+      check: "'… is not bound in this Context'·'Name [jdbc/<이름>]' = JNDI 리소스 미정의·이름 불일치(WAS 설정) · 'LDAP: error code 32'·'No Such Object' = 조회한 LDAP DN(base DN)이 디렉터리에 없음(LDAP 이동·삭제·오타) · remaining name 이 실제 찾은 이름"
+      note: "적용: JDK 8~21 · 권한: 애플리케이션 로그 읽기 — 로그의 사용자 DN·계정은 옮겨 적을 때 가림"
+    - do: "JNDI 이름이면 리소스 정의와 조회 이름 대조 (Tomcat 예, 읽기 전용)"
+      cmd: |
+        grep -n -E "<Resource |<ResourceLink |GlobalNamingResources" $CATALINA_BASE/conf/server.xml $CATALINA_BASE/conf/context.xml
+        grep -n -E "<Resource |<ResourceLink " <배포경로>/META-INF/context.xml 2>/dev/null ; grep -n -A3 "<resource-ref>" <배포경로>/WEB-INF/web.xml 2>/dev/null
+      check: "애플리케이션이 찾는 이름(java:comp/env/ 아래)과 Resource name 이 다르거나, GlobalNamingResources 에만 있고 해당 앱 Context 에 ResourceLink 가 없으면 설정 누락 확정 · 직전 배포에서 context.xml 이 빠졌는지 배포 이력과 대조"
+      note: "적용: Tomcat 8.5/9/10 — JEUS·WebLogic·JBoss 는 관리 콘솔 JNDI 트리 조회(변경 없이) · 설정 파일의 password 속성 값은 화면에 띄우지 않음 · 권한: WAS 설정 읽기"
+    - do: "LDAP 이면 조회 DN 이 실제로 있는지 base 범위로 확인 (읽기 전용)"
+      cmd: |
+        nc -zvw3 <ldap_host> <port>
+        ldapsearch -x -H ldap://<ldap_host>:<port> -D "<bind_dn>" -W -b "<조회 DN>" -s base dn
+      check: "'No such object (32)' 면 그 DN 자체가 없음 → 조직 개편·이동·삭제 또는 애플리케이션 설정의 base DN 오타 · 결과가 나오면 DN 은 있음 → 애플리케이션이 다른 DN 을 만들고 있는지(로그 remaining name) 확인"
+      note: "-W 는 비밀번호를 프롬프트로 묻는다(명령줄에 쓰지 않음) · 틀린 비밀번호로 반복 시도 금지(계정 잠금 유발) · 적용: OpenLDAP ldapsearch 클라이언트 · 권한: LDAP 조회 계정(LDAP 담당에 요청 가능)"
+  - stage: 2
+    steps:
+    - do: "JNDI 리소스 정의 추가·이름 정정 후 재배포"
+      cmd: |
+        cp -p $CATALINA_BASE/conf/context.xml $CATALINA_BASE/conf/context.xml.$(date +%Y%m%d%H%M)
+        vi <리소스를 정의할 context.xml 또는 server.xml>
+        <배포 스크립트> <설정 반영본>
+      check: "성공: 기동·재배포 로그에 NameNotFoundException 없음, 해당 기능 정상 · 실패: 같은 예외가 계속되면 lookup 이름(java:comp/env/<이름>)과 Resource name 철자 재대조, 기동 오류가 생기면 백업본 복원 후 재배포"
+      note: "사전조건: 개발 담당과 lookup 이름·리소스 종류 확정, 데이터소스 비밀번호는 기존 비밀 저장·암호화 방식 그대로 · 영향: 재배포·재기동 동안 해당 애플리케이션 서비스 중단 · 승인: WAS 담당·애플리케이션 담당·변경 관리 · 백업/롤백: 날짜 붙은 context.xml/server.xml 사본으로 복원 후 재배포"
+    - do: "LDAP DN 이 바뀌었으면 애플리케이션의 조회 base DN 설정 정정 또는 LDAP 담당이 엔트리 복구"
+      cmd: |
+        cp -p <애플리케이션 LDAP 설정 파일> <애플리케이션 LDAP 설정 파일>.bak.$(date +%Y%m%d)
+        vi <애플리케이션 LDAP 설정 파일>
+      check: "성공: ldapsearch base 조회가 결과를 돌려주고 애플리케이션 로그에 error code 32 미발생 · 실패: 계속되면 LDAP 담당과 새 DN 위치 재확인, 다른 조회가 깨지면 .bak 원복"
+      note: "사전조건: LDAP 담당이 엔트리 이동·삭제 여부와 새 DN 을 확인(삭제된 엔트리 복구는 LDAP 담당 절차) · 영향: 설정 반영에 애플리케이션 재기동 필요할 수 있음 · 승인: 애플리케이션 담당·LDAP(계정) 담당·변경 관리 · 백업/롤백: .bak 사본으로 복원 후 재기동"
+  - stage: 3
+    steps:
+    - do: "개발·LDAP 담당 전달 자료"
+      cmd: |
+        grep -n -A20 "NameNotFoundException" <app_log> > naming_$(date +%Y%m%d).txt
+        grep -v -i -E "password|credential" $CATALINA_BASE/conf/context.xml > context_masked.xml
+      check: "예외 원문(remaining name·error code)·발생 시각·리소스 정의(비밀값 제외)·ldapsearch base 조회 결과"
+      note: "민감정보 마스킹: 사용자 DN·계정 이름·LDAP 호스트명/IP·JDBC URL 을 가림, 비밀번호·바인드 자격 증명 줄은 빼고 전달 · 전달 승인: 보안 담당"
+# ── IIS ──
+- id: IIS-PROC-R7-AUTH
+  scope: id
+  products: [iis]
+  category: security
+  match: ['401.1', '401.2']
+  title: 로그온 실패·서버 구성으로 인한 로그온 실패 (IIS 401.1 · 401.2) — 자격 증명·계정 상태와 인증 방식 구성
+  source: "Microsoft Learn 'HTTP status code overview'(401.1 Logon failed — 잘못된 사용자 이름·비밀번호, 401.2 Logon failed due to server configuration)·'Windows Authentication <windowsAuthentication>'(providers Negotiate·NTLM, appcmd /commit:apphost)·'Anonymous Authentication <anonymousAuthentication>'"
+  verify_note: "미검증 — Windows 인증 협상 첫 요청에 401.2 가 남고 이어서 200 이 오는 것을 정상으로 보는 판단과, 하위 상태(sc-substatus)가 W3C 로그에 남는지(문서는 401 하위 상태가 브라우저에만 보인다고도 적음)를 Microsoft 문서로 확정하지 못함"
+  stages:
+  - stage: 1
+    steps:
+    - do: "401.1·401.2 건수를 사용자명·출처 IP 별로 집계 (W3C 로그, 읽기 전용)"
+      cmd: |
+        Get-Content "C:\inetpub\logs\LogFiles\W3SVC<siteID>\u_ex$(Get-Date -Format yyMMdd).log" -Tail 50000 | Select-String " 401 [12] " | ForEach-Object { $f = $_.Line -split " "; "{0}.{1} {2} {3}" -f $f[-4],$f[-3],$f[7],$f[8] } | Group-Object | Sort-Object Count -Descending | Select-Object -First 15 Count,Name
+      check: "401.1 이 한 IP 에서 여러 사용자명으로 반복 = 대입 공격 의심(보안 담당 즉시 통보) · 한 사용자만 반복 = 그 계정 비밀번호 오류·잠김·만료 · 401.2 만 반복되고 같은 클라이언트의 200 이 없으면 클라이언트가 쓰는 인증 방식이 서버에서 꺼져 있음(구성 원인)"
+      note: "기본 W3C 필드 순서(cs-username 8번째·c-ip 9번째, sc-status 뒤에서 4번째) 기준 — 필드를 바꾼 사이트는 #Fields 줄 확인 · 적용: IIS 7.0+ · 권한: 로그 폴더 읽기"
+    - do: "로그온 실패 사유 확인 — Security 4625 (401.1)"
+      cmd: |
+        Get-WinEvent -FilterHashtable @{LogName="Security"; Id=4625} -MaxEvents 30 | Format-List TimeCreated,Message
+      check: "실패 사유(Failure Reason·Status/Sub Status)가 잘못된 비밀번호면 사용자 입력·저장된 자격 증명 문제, 계정 잠김·만료·비활성이면 계정 담당 조치 대상 · 4625 가 없고 401.1 만 있으면 도메인 컨트롤러 쪽 기록 확인(계정 담당)"
+      note: "Security 로그는 계정 이름·출처 IP 를 담으므로 화면 공유 주의 · 적용: Windows Server 2008 R2+ · 권한: 관리자(보안 로그 읽기)"
+    - do: "사이트에 켜진 인증 방식 확인 (401.2, 읽기 전용)"
+      cmd: |
+        %windir%\system32\inetsrv\appcmd list config "<site>" -section:system.webServer/security/authentication/anonymousAuthentication
+        %windir%\system32\inetsrv\appcmd list config "<site>" -section:system.webServer/security/authentication/windowsAuthentication
+        %windir%\system32\inetsrv\appcmd list config "<site>" -section:system.webServer/security/authentication/basicAuthentication
+        Get-WindowsFeature Web-Windows-Auth, Web-Basic-Auth | Format-Table Name, InstallState
+      check: "익명이 꺼졌는데 Windows·Basic 도 모두 enabled=false 면 어떤 방식으로도 로그온 불가 → 401.2 원인 확정 · Windows 인증의 providers(Negotiate·NTLM)가 클라이언트가 쓰는 방식과 다르면 원인 · 역할 서비스가 Available(미설치)이면 설정만 있고 동작 안 함"
+      note: "조회 전용(set 아님) · cmd.exe 기준(PowerShell 에서는 & $env:windir\\system32\\inetsrv\\appcmd.exe) · Get-WindowsFeature 는 Windows Server 전용 · 권한: 관리자"
+  - stage: 2
+    steps:
+    - do: "401.1 공격 출처 차단 요청 (정상 사용자면 계정 담당이 잠금 해제·비밀번호 재설정)"
+      cmd: |
+        %windir%\system32\inetsrv\appcmd add backup "before_auth_<날짜>"
+        %windir%\system32\inetsrv\appcmd set config "<site>" -section:system.webServer/security/ipSecurity /+"[ipAddress='<차단IP>',allowed='False']" /commit:apphost
+      check: "성공: 해당 IP 의 401.1 이 403(IP 거부)으로 바뀌고 다른 사용자 로그온 정상 · 실패: 정상 사용자(같은 NAT 뒤)가 막히면 즉시 규칙 제거, 출처가 계속 바뀌면 방화벽·WAF 차단으로 전환"
+      note: "사전조건: 보안 담당이 공격 출처임을 확인, IP 및 도메인 제한 역할 서비스 설치 · 영향: 같은 IP(NAT) 뒤 정상 사용자도 차단 · 승인: 보안 담당·웹 운영 담당 · 백업/롤백: appcmd add backup 후 변경, 이상 시 appcmd restore backup before_auth_<날짜> 또는 /-\"[ipAddress='<차단IP>']\" 로 제거 · 계정 잠금 해제·비밀번호 재설정은 계정 담당 절차(비밀번호를 명령줄에 쓰지 않음)"
+    - do: "401.2 — 업무에 필요한 인증 방식 활성화 (구성 정정)"
+      cmd: |
+        %windir%\system32\inetsrv\appcmd add backup "before_auth_<날짜>"
+        %windir%\system32\inetsrv\appcmd set config "<site>" -section:system.webServer/security/authentication/windowsAuthentication /enabled:"True" /commit:apphost
+      check: "성공: 사용자 요청이 401.2 없이(또는 협상 뒤) 200, 익명 허용 범위는 의도대로 · 실패: 계속 401.2 면 providers·브라우저 인트라넷 영역·Kerberos SPN 확인을 Windows 담당에 요청하고 백업 복원"
+      note: "사전조건: 업무 담당과 사이트가 써야 할 인증 방식(익명·Windows·Basic) 확정, Basic 은 HTTPS 에서만 · 영향: 인증 방식 변경은 해당 사이트 전체 사용자 로그온 방식에 즉시 적용 · 승인: 웹 운영 담당·보안 담당·변경 관리 · 백업/롤백: appcmd add backup 후 변경, 이상 시 appcmd restore backup before_auth_<날짜> · 적용: IIS 7.0+, Windows 인증 역할 서비스 설치 필요"
+  - stage: 3
+    steps:
+    - do: "보안 담당·Microsoft 의뢰 자료"
+      cmd: |
+        Get-Content "C:\inetpub\logs\LogFiles\W3SVC<siteID>\u_ex$(Get-Date -Format yyMMdd).log" | Select-String " 401 [12] " | Select-Object -Last 500 | Out-File w3c_401.txt
+        %windir%\system32\inetsrv\appcmd list config "<site>" -section:system.webServer/security/authentication/windowsAuthentication > auth_config.txt
+      check: "401.1/401.2 발췌·인증 구성·4625 실패 사유 요약·발생 시각"
+      note: "민감정보 마스킹: cs-username·c-ip·쿼리 문자열, 4625 의 계정 이름·워크스테이션 이름을 가림(공격 출처 IP 는 보안 담당 원본에만) · 전달 승인: 보안 담당"
+- id: IIS-PROC-R7-ACCESS
+  scope: id
+  products: [iis]
+  category: security
+  match: ['403.1', '403.2', '403.3', '403.14']
+  title: 실행·읽기·쓰기 접근 금지와 디렉터리 검색 금지 (IIS 403.1 · 403.2 · 403.3 · 403.14) — 처리기 accessPolicy·WebDAV·기본 문서
+  source: "Microsoft Learn 'HTTP status code overview'(403.1 Execute access forbidden · 403.2 Read access forbidden · 403.3 Write access forbidden · 403.14 Directory listing denied)·'Handlers <handlers>'(accessPolicy 기본 Read)·'Default Document <defaultDocument>'·'Directory Browse <directoryBrowse>'(enabled 기본 false)·'WebDAV Authoring Rules <authoringRules>'"
+  stages:
+  - stage: 1
+    steps:
+    - do: "403 하위 상태·메서드·대상 URL 집계 (W3C 로그, 읽기 전용)"
+      cmd: |
+        Get-Content "C:\inetpub\logs\LogFiles\W3SVC<siteID>\u_ex$(Get-Date -Format yyMMdd).log" -Tail 50000 | Select-String " 403 (1|2|3|14) " | ForEach-Object { $f = $_.Line -split " "; "{0}.{1} {2} {3}" -f $f[-4],$f[-3],$f[3],$f[4] } | Group-Object | Sort-Object Count -Descending | Select-Object -First 15 Count,Name
+      check: "403.1 = 스크립트·실행 파일 요청인데 실행 권한 없음 · 403.2 = 읽기 권한 없음(기본 문서 존재도 확인) · 403.3 = PUT·MOVE 등 쓰기 요청 — 외부 출처면 공격 시도 · 403.14 = 폴더 URL 인데 기본 문서 없음(목록 표시는 꺼진 게 정상)"
+      note: "기본 W3C 필드(cs-method 4번째·cs-uri-stem 5번째, sc-status 뒤에서 4번째) 기준 · 적용: IIS 7.0+ · 권한: 로그 폴더 읽기"
+    - do: "처리기 접근 정책(accessPolicy) 확인 — 403.1·403.2 (읽기 전용)"
+      cmd: |
+        %windir%\system32\inetsrv\appcmd list config "<site>/<path>" -section:handlers | findstr /i "accessPolicy"
+        Get-ChildItem <사이트경로>\<path> -Filter web.config | Select-String -Pattern "accessPolicy"
+      check: "accessPolicy 기본값은 Read — 스크립트(.aspx 등)가 403.1 이면 Script(또는 Execute)가 빠진 것, 정적 파일이 403.2 면 Read 가 빠진 것 · 하위 폴더 web.config 가 상위 값을 덮었는지 확인"
+      note: "accessPolicy 는 보안 정책이 아니라 처리기 선택 필터(Microsoft 문서) · cmd.exe 기준 · 조회 전용 · 권한: 관리자"
+    - do: "기본 문서·디렉터리 검색 설정과 실제 파일 확인 — 403.14 (읽기 전용)"
+      cmd: |
+        %windir%\system32\inetsrv\appcmd list config "<site>/<path>" -section:defaultDocument
+        %windir%\system32\inetsrv\appcmd list config "<site>/<path>" -section:directoryBrowse
+        Get-ChildItem "<사이트경로>\<path>" | Select-Object Name,LastWriteTime | Select-Object -First 30
+      check: "defaultDocument 가 enabled 인데 목록의 파일(Default.htm·Index.html·Default.aspx 등)이 폴더에 없으면 배포 누락 확정 · directoryBrowse enabled=false 는 정상(보안상 유지)"
+      note: "조회 전용 · 적용: IIS 7.0+ · 권한: 관리자(사이트 폴더 읽기)"
+    - do: "쓰기 요청 경로의 WebDAV 저작 규칙·폴더 권한 확인 — 403.3 (읽기 전용)"
+      cmd: |
+        %windir%\system32\inetsrv\appcmd list config "<site>" -section:system.webServer/webdav/authoring
+        %windir%\system32\inetsrv\appcmd list config "<site>" -section:system.webServer/webdav/authoringRules
+        icacls "<사이트경로>\<path>"
+      check: "업무상 PUT·WebDAV 게시를 쓰는 경로인데 authoring 이 꺼졌거나 authoringRules 에 Write 가 없으면 구성 원인, 앱 풀 ID 에 NTFS 쓰기 권한이 없으면 권한 원인 · WebDAV 를 쓰지 않는 사이트에 외부 PUT 이면 정상 차단(보안 담당 통보)"
+      note: "WebDAV 섹션은 WebDAV 게시 역할 서비스 설치 시에만 조회됨(미설치면 알 수 없는 섹션 오류) · icacls 는 경로만 주면 권한 표시만 함 · 권한: 관리자"
+  - stage: 2
+    steps:
+    - do: "403.14 — 기본 문서 재배포 또는 기본 문서 항목 추가 (디렉터리 검색은 켜지 않음)"
+      cmd: |
+        %windir%\system32\inetsrv\appcmd add backup "before_access_<날짜>"
+        Copy-Item <사이트경로>\web.config <사이트경로>\web.config.$(Get-Date -Format yyyyMMddHHmm)
+        %windir%\system32\inetsrv\appcmd set config "<site>/<path>" /section:defaultDocument /enabled:true /+files.[value='<기본문서파일>']
+      check: "성공: 폴더 URL 이 기본 문서로 200, 403.14 미발생 · 실패: 계속 403.14 면 파일 이름 철자·위치 재확인, 다른 경로 동작이 바뀌면 백업 복원"
+      note: "사전조건: 배포 담당과 기본 문서 파일 이름 확정(누락이면 재배포가 우선), directoryBrowse 활성화는 보안 담당 승인 없이는 하지 않음 · 영향: web.config 변경은 앱 도메인 재시작(InProc 세션 유실) · 승인: 웹 운영 담당·배포 담당 · 백업/롤백: web.config 날짜 복사본 복원 또는 appcmd restore backup before_access_<날짜>"
+    - do: "403.1·403.2 — 필요한 폴더에 한해 accessPolicy 에 Script·Read 추가"
+      cmd: |
+        %windir%\system32\inetsrv\appcmd add backup "before_access_<날짜>"
+        %windir%\system32\inetsrv\appcmd set config "<site>/<path>" -section:handlers /accessPolicy:"Read, Script"
+      check: "성공: 해당 경로 스크립트·정적 파일이 200, 403.1/403.2 미발생 · 실패: 업로드 폴더처럼 실행되면 안 되는 경로에서 스크립트가 실행되기 시작하면 즉시 원복"
+      note: "사전조건: 그 폴더가 스크립트 실행·읽기가 필요한 업무 경로인지 개발·보안 담당 확인(업로드 폴더에는 Script·Execute 금지), Execute 는 CGI·실행 파일이 꼭 필요할 때만 · 영향: 해당 폴더의 처리기 선택이 바뀜(앱 도메인 재시작 가능) · 승인: 웹 운영 담당·보안 담당 · 백업/롤백: appcmd restore backup before_access_<날짜> 또는 web.config 날짜 복사본 복원"
+    - do: "403.3 — 정상 WebDAV 게시 경로에 한해 저작 규칙 추가 (공격이면 차단 요청)"
+      cmd: |
+        %windir%\system32\inetsrv\appcmd add backup "before_access_<날짜>"
+        %windir%\system32\inetsrv\appcmd set config "<site>" -section:system.webServer/webdav/authoringRules /+"[roles='<게시그룹>',path='<경로>',access='Read, Write']" /commit:apphost
+      check: "성공: 게시 담당의 PUT 이 성공하고 다른 사용자 PUT 은 계속 거부 · 실패: 권한이 넓게 열리면(익명·전체 사용자 쓰기) 즉시 규칙 제거"
+      note: "사전조건: WebDAV 게시가 업무상 필요하고 대상 그룹·경로를 보안 담당이 확정, 외부 PUT 시도는 규칙 추가 대상이 아님 · 영향: 지정 그룹이 해당 경로에 파일을 쓰고 바꿀 수 있게 됨 · 승인: 보안 담당·웹 운영 담당·변경 관리 · 백업/롤백: appcmd restore backup before_access_<날짜> 또는 /-\"[roles='<게시그룹>',path='<경로>']\" 로 제거 · 적용: IIS 7.5+ WebDAV 게시 역할 서비스(authoringRules 는 applicationHost.config 에만 — web.config 의 값은 무시됨)"
+  - stage: 3
+    steps:
+    - do: "보안 담당·Microsoft 의뢰 자료"
+      cmd: |
+        %windir%\system32\inetsrv\appcmd list config "<site>/<path>" -section:handlers > handlers.txt
+        %windir%\system32\inetsrv\appcmd list config "<site>/<path>" -section:defaultDocument > defaultdoc.txt
+      check: "403 하위 상태 발췌·처리기·기본 문서·WebDAV 구성·폴더 권한(icacls) 결과"
+      note: "민감정보 마스킹: W3C 로그의 c-ip·cs-username·쿼리 문자열, 폴더 경로의 사용자명·호스트명을 가림 · 전달 승인: 보안 담당"
+- id: IIS-PROC-R7-CONFIG
+  scope: id
+  products: [iis]
+  category: internal
+  match: ['500.19', '500.21']
+  title: 구성 데이터 오류·모듈 인식 실패 (IIS 500.19 · 500.21) — web.config/applicationHost.config HRESULT·미설치 모듈
+  source: "Microsoft Learn 'Fix HTTP Error 500.19 in IIS Configuration Files'(HRESULT 0x8007000d 잘못된 XML·미설치 모듈 / 0x80070021 섹션 잠금 / 0x80070005 IIS_IUSRS 권한 / 0x800700b7 중복 항목 / 0x8007007e 없는 모듈 DLL / 0x800700c1 비트 수 불일치 / ASP.NET Core Hosting Bundle, appcmd list config /section:system.webServer)·'HTTP status code overview'(500.19 Configuration data is invalid · 500.21 Module not recognized)"
+  stages:
+  - stage: 1
+    steps:
+    - do: "500.19·500.21 대상 URL 과 sc-win32-status 집계 (W3C 로그, 읽기 전용)"
+      cmd: |
+        Get-Content "C:\inetpub\logs\LogFiles\W3SVC<siteID>\u_ex$(Get-Date -Format yyMMdd).log" -Tail 50000 | Select-String " 500 (19|21) " | ForEach-Object { $f = $_.Line -split " "; "{0}.{1} win32={2} {3}" -f $f[-4],$f[-3],$f[-2],$f[4] } | Group-Object | Sort-Object Count -Descending | Select-Object -First 15 Count,Name
+      check: "sc-win32-status 는 HRESULT 0x8007xxxx 의 뒤 네 자리(10진) — 13=0x8007000d(XML 오류·미설치 모듈 섹션) · 33=0x80070021(섹션 잠금) · 5=0x80070005(권한) · 183=0x800700b7(중복 항목) · 126=0x8007007e(없는 모듈 DLL) · 193=0x800700c1(32/64비트 불일치) · 한 앱 경로에만 몰리면 그 앱 web.config"
+      note: "기본 W3C 필드(cs-uri-stem 5번째, sc-status 뒤에서 4번째, sc-win32-status 뒤에서 2번째) 기준 · 적용: IIS 7.0+ · 권한: 로그 폴더 읽기"
+    - do: "구성 읽기 시험 — 오류 파일·줄 번호 확인 (읽기 전용)"
+      cmd: |
+        %windir%\system32\inetsrv\appcmd list config "<site>/<path>"
+        %windir%\system32\inetsrv\appcmd list config /section:system.webServer
+      check: "오류가 나면 출력의 Filename·Line Number·알 수 없는 섹션 이름(<rewrite> 등)이 원인 위치 · 정상 출력이면 구성 파일 자체는 읽힘 → 권한(0x80070005)·모듈 DLL(0x8007007e) 쪽"
+      note: "조회 전용(set·unlock 아님) · cmd.exe 기준(PowerShell 에서는 & $env:windir\\system32\\inetsrv\\appcmd.exe) · 출력에 연결 문자열이 있을 수 있어 화면 공유 주의 · 권한: 관리자"
+    - do: "모듈·IIS 기능 설치와 앱 풀 비트 수 확인 — 500.21·미설치 모듈 (읽기 전용)"
+      cmd: |
+        %windir%\system32\inetsrv\appcmd list modules
+        Get-WindowsFeature Web-* | Where-Object InstallState -eq Installed | Format-Table Name
+        %windir%\system32\inetsrv\appcmd list apppool "<AppPool>" /text:enable32BitAppOnWin64
+      check: "상세 오류의 Module·Handler 이름이 appcmd list modules 에 없으면 미설치·미등록 확정(500.21) · web.config 의 <rewrite> 인데 URL Rewrite 모듈이 없으면 0x8007000d · ASP.NET Core 앱인데 AspNetCoreModuleV2 가 없으면 Hosting Bundle 미설치 · 32비트 모듈을 64비트 앱 풀(enable32BitAppOnWin64=false)이 쓰면 0x800700c1"
+      note: "조회 전용 · Get-WindowsFeature 는 Windows Server 전용(클라이언트 OS 는 Get-WindowsOptionalFeature) · 권한: 관리자"
+    - do: "최근 구성 변경·구성 파일 권한 확인 (읽기 전용)"
+      cmd: |
+        Get-ChildItem <사이트경로>\web.config, $env:windir\System32\inetsrv\config\applicationHost.config | Select-Object FullName,LastWriteTime
+        icacls <사이트경로>\web.config
+      check: "오류 시작 직전에 web.config·applicationHost.config 가 바뀌었으면 그 변경(배포·수동 편집·병합)이 원인 후보 · IIS_IUSRS(또는 앱 풀 ID)에 읽기 권한이 없으면 0x80070005 원인"
+      note: "icacls 는 경로만 주면 권한 표시만 함 · 조회 전용 · 권한: 관리자"
+  - stage: 2
+    steps:
+    - do: "잘못된 구성 정정 — 정상 시점 web.config 복원 또는 해당 줄 수정 (0x8007000d·0x800700b7)"
+      cmd: |
+        %windir%\system32\inetsrv\appcmd add backup "before_config_<날짜>"
+        Copy-Item <사이트경로>\web.config <사이트경로>\web.config.bad.$(Get-Date -Format yyyyMMddHHmm)
+        Copy-Item <정상 배포본 경로>\web.config <사이트경로>\web.config
+      check: "성공: appcmd list config \"<site>/<path>\" 가 오류 없이 출력되고 해당 URL 200, 500.19 미발생 · 실패: 다른 HRESULT 로 바뀌면 그 코드 기준으로 1차 재확인, 앱 동작이 이상하면 web.config.bad 사본과 비교 후 되돌림"
+      note: "사전조건: 1차에서 오류 파일·줄·HRESULT 확정, 정상 배포본이 같은 판의 것인지 배포 담당 확인 · 영향: web.config 교체는 앱 도메인 재시작(InProc 세션 유실) · 승인: 웹 운영 담당·배포 담당 · 백업/롤백: web.config.bad.<시각> 사본과 appcmd add backup 보관, 되돌릴 때 사본 복사 또는 appcmd restore backup before_config_<날짜>"
+    - do: "없는 모듈·기능 설치 (500.21·미설치 모듈 섹션)"
+      cmd: |
+        Install-WindowsFeature <기능이름>
+        %windir%\system32\inetsrv\appcmd list modules
+      check: "성공: appcmd list modules 에 해당 모듈이 나타나고 500.21·0x8007000d 미발생 · 실패: 설치 후에도 인식 안 되면 앱 풀 비트 수·모듈 등록 경로 확인, 다른 사이트에 영향이 생기면 Uninstall-WindowsFeature 로 되돌림"
+      note: "사전조건: 필요한 기능(예 Web-Asp-Net45)·URL Rewrite·ASP.NET Core Hosting Bundle(앱 대상 .NET 판)을 개발 담당과 확정, 외부 설치 파일은 반입 절차·해시 확인 · 영향: 기능 설치는 IIS 재시작·서버 재부팅이 필요할 수 있음 · 승인: Windows 담당·웹 운영 담당·변경 관리 · 백업/롤백: 설치 전 appcmd add backup before_config_<날짜>, 이상 시 기능 제거 후 appcmd restore backup · 적용: Install-WindowsFeature 는 Windows Server 전용"
+    - do: "섹션 잠금(0x80070021)·구성 파일 권한(0x80070005) 해소"
+      cmd: |
+        %windir%\system32\inetsrv\appcmd add backup "before_config_<날짜>"
+        %windir%\system32\inetsrv\appcmd unlock config /section:<섹션이름>
+        icacls <사이트경로> /grant "IIS_IUSRS:(OI)(CI)R"
+      check: "성공: 해당 URL 200, 500.19 하위 HRESULT 사라짐 · 실패: 계속되면 잠금 해제·권한 부여를 되돌리고 web.config 에서 그 섹션을 빼 서버 수준에서 설정하는 방법으로 전환"
+      note: "사전조건: 섹션 잠금이 보안 정책상 의도된 것인지 보안 담당 확인(의도된 잠금이면 해제하지 않고 web.config 에서 해당 섹션 제거), 권한 원인이면 UNC 공유·앱 풀 ID 여부 확인 · 영향: 잠금 해제는 모든 사이트의 web.config 가 그 섹션을 덮어쓸 수 있게 함, 권한 부여는 사이트 폴더 읽기 범위 확대 · 승인: 웹 운영 담당·보안 담당·변경 관리 · 백업/롤백: appcmd restore backup before_config_<날짜>, 권한은 icacls <사이트경로> /remove IIS_IUSRS 로 원복(부여 전 icacls 출력 보관)"
+  - stage: 3
+    steps:
+    - do: "Microsoft·개발 의뢰 자료"
+      cmd: |
+        %windir%\system32\inetsrv\appcmd list config "<site>/<path>" > config_read_test.txt 2>&1
+        %windir%\system32\inetsrv\appcmd list modules > modules.txt
+        Get-WindowsFeature Web-* | Where-Object InstallState -eq Installed | Out-File features.txt
+      check: "구성 읽기 시험 결과(Filename·Line·HRESULT)·모듈 목록·설치 기능·W3C 500.19/500.21 발췌·web.config(비밀값 제외)"
+      note: "민감정보 마스킹: web.config·applicationHost.config 의 connectionStrings·appSettings 비밀값·machineKey·앱 풀 계정 비밀번호(암호화 값 포함)를 가림, 로그의 클라이언트 IP·쿼리 문자열 가림 · 전달 승인: 보안 담당"
+# ── MESIM ESB ──
+- id: MESIM-PROC-R7-VERIFY
+  scope: id
+  products: [mesim-esb]
+  category: internal
+  match: [ESB-MESSAGE-VERIFY-FAIL]
+  title: 메시지 검증 실패 — 스키마·업무 검증 규칙 위반 전문 (MESIM ESB)
+  source: "메타빌드 MESIM ESB 운영 매뉴얼(납품본) '인터페이스 스키마·검증 규칙·실패 전문 재처리' — 공개 매뉴얼 없음, 로그 문구는 판정 별칭(validation/verify fail·schema invalid·검증 실패) 기준"
+  verify_note: "미검증 — MESIM 공개 매뉴얼이 없어 검증 실패 로그 문구·관리 콘솔 메뉴 이름(인터페이스 스키마·검증 규칙·실패 전문 재처리)을 납품본으로 확인하지 못함"
+  stages:
+  - stage: 1
+    steps:
+    - do: "위반 항목·인터페이스·건수 확인 (읽기 전용)"
+      cmd: |
+        grep -n -i -E "(validat|verif).*(fail|error)|검증|schema.*invalid" <MESIM_HOME>/logs/*.log | tail -30
+        grep -h -i -E "(validat|verif).*(fail|error)|검증|schema.*invalid" <MESIM_HOME>/logs/*.log | grep -c "<인터페이스ID>"
+      check: "한 송신 시스템·한 필드에 몰리면 송신 데이터 형식 결함(송신 담당 통보) · 배포·규칙 변경 직후 여러 인터페이스에서 동시에 나면 스키마·검증 규칙 변경이 원인 · 산발 1~2건이면 개별 전문 결함"
+      note: "적용: MESIM ESB 납품본 · 위반 전문 원문은 열람·복사하지 않고 인터페이스·필드 이름·건수만 기록 · 권한: MESIM 실행 계정(로그 읽기)"
+    - do: "스키마·검증 규칙 변경 이력 조회 (변경 없이)"
+      cmd: |
+        # 관리 콘솔 › 인터페이스 › 스키마(전문 레이아웃)·검증 규칙: 대상 인터페이스의 마지막 변경자·시각 캡처
+        ls -lt <MESIM_HOME>/conf | head
+      check: "실패 시작 시각과 스키마·규칙 변경 시각이 일치하면 규칙·스키마 설정 원인 · 변경이 없으면 송신 데이터 원인"
+      note: "적용: MESIM 관리 콘솔(납품 버전) · 조회 화면만 — 배포·재처리 버튼 누르지 않음 · 권한: 콘솔 조회 계정"
+  - stage: 2
+    steps:
+    - do: "송신 데이터 정정 후 실패 전문 재처리 또는 스키마·검증 규칙 정정 후 배포 (관리 콘솔)"
+      cmd: |
+        # 송신 시스템 데이터 정정 → 관리 콘솔에서 실패 전문 재처리
+        # 또는 관리 콘솔 › 인터페이스 › 스키마·검증 규칙 편집 › 검증 › 배포
+      check: "성공: 재처리 건수 = 위반 건수, 같은 위반 미발생 · 실패: 재처리가 다시 검증 실패면 중단하고 송신 담당과 데이터 재확인, 규칙 배포 뒤 다른 인터페이스가 실패하면 이전 규칙·스키마 재배포"
+      note: "사전조건: 위반 전문 목록·건수 기록, 재처리해도 중복 반영되지 않는 업무인지 업무 담당 확인, 규칙 완화는 업무 담당 동의 · 영향: 재처리는 수신 시스템에 실제 데이터 반영, 규칙 완화는 불량 데이터 유입 위험 · 승인: 연계 담당·업무 담당·변경 관리 · 백업/롤백: 배포 전 현재 스키마·규칙 내보내기(또는 화면 캡처), 이상 시 이전 판 재배포 — 재처리는 되돌릴 수 없어 승인된 목록만"
+  - stage: 3
+    steps:
+    - do: "메타빌드 기술지원·송신 담당 전달 자료"
+      cmd: |
+        grep -h -i -E "(validat|verif).*(fail|error)|검증|schema.*invalid" <MESIM_HOME>/logs/*.log > verify_fail_$(date +%Y%m%d).txt
+      check: "위반 규칙·필드 이름·인터페이스·건수·시각(전문 본문 제외)·스키마 변경 이력 캡처"
+      note: "민감정보 마스킹: 전문 필드 값(개인정보·계좌·인증 토큰)은 빼고 필드 이름·규칙만 남김, 내부 호스트명/IP 가림 · 전달 승인: 보안 담당·연계 기관 승인 후 반출"

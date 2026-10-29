@@ -1,0 +1,117 @@
+product: webtob
+layer: web
+title: webtob 로그 종류 카탈로그 (GPT 수집 — 벤더 문서 대조 필요)
+source: GPT 수집(벤더 문서 대조 필요)
+sources: []
+logtypes:
+- name: 시스템 로그
+  path: $WEBTOB_HOME/webtob_system.log 기본
+  format: 텍스트·타임스탬프 포함·세부 포맷 버전별
+  check: DEBUG·INFO·WARNING·FATAL·CONN/DST/REQ/RSC·프로세스/스레드 상태
+  sample: <timestamp> <level> <logger> <message>
+- name: Access 로그
+  path: $WEBTOB_HOME/webtob_access.log 기본
+  format: 텍스트·설정 format·HTTP 시간 필드
+  check: HTTP status·URI·client·bytes·duration·접근 이력
+  sample: <client> <time> "<request>" <status> <bytes> <duration>
+- name: Error 로그
+  path: $WEBTOB_HOME/webtob_error.log 기본
+  format: 텍스트·타임스탬프 포함
+  check: COM_·CONN_·DST_·REQ_·RSC_ 오류와 HTTP 처리 실패
+  sample: <timestamp> <error-code> <request/message>
+- name: HTTP 모듈 로그
+  path: 버전별 상이(LOGGING system_log의 webtob.http FileHandler)
+  format: 텍스트·WebtoB system timestamp
+  check: HTTP message parsing·request/response·header 처리 오류
+  sample: <timestamp> DEBUG webtob.http <message>
+- name: WJP 로그
+  path: 버전별 상이(webtob.wjp FileHandler)
+  format: 텍스트·WebtoB system timestamp
+  check: JEUS/WAS 연계 WJP 메시지·backend 통신·연결 오류
+  sample: <timestamp> WARNING webtob.wjp <message>
+- name: SSL 로그
+  path: 버전별 상이(webtob.ssl FileHandler)
+  format: 텍스트·WebtoB system timestamp
+  check: TLS handshake·certificate·cipher·SSL read/write 오류
+  sample: <timestamp> WARNING webtob.ssl <message>
+- name: Network 로그
+  path: 버전별 상이(webtob.network FileHandler)
+  format: 텍스트·WebtoB system timestamp
+  check: socket·connect·accept·read/write·connection reset
+  sample: <timestamp> WARNING webtob.network <message>
+- name: 서버 Thread 로그
+  path: 버전별 상이(webtob.server FileHandler)
+  format: 텍스트·WebtoB system timestamp
+  check: 각 thread startup/termination·worker 비정상 종료
+  sample: <timestamp> INFO webtob.server <thread startup/termination>
+- name: Acceptor 로그
+  path: 버전별 상이(webtob.em.acceptor FileHandler)
+  format: 텍스트·WebtoB system timestamp
+  check: 신규 연결 accept·socket 수락 실패·connection backlog
+  sample: <timestamp> WARNING webtob.em.acceptor <message>
+- name: Admin API 로그
+  path: 버전별 상이(webtob.em.control FileHandler)
+  format: 텍스트·WebtoB system timestamp
+  check: 관리 API 통신·명령 처리·관리 연결 오류
+  sample: <timestamp> INFO webtob.em.control <message>
+- name: HTH Worker 로그
+  path: 버전별 상이(webtob.em.worker FileHandler)
+  format: 텍스트·WebtoB system timestamp
+  check: HTH worker·queue·thread 상태·NRDY·처리 오류
+  sample: <timestamp> WARNING webtob.em.worker <message>
+- name: Utility 로그
+  path: 버전별 상이(webtob.util FileHandler)
+  format: 텍스트·WebtoB system timestamp
+  check: 공통 유틸리티·파일·설정·내부 보조기능 오류
+  sample: <timestamp> WARNING webtob.util <message>
+- name: 클라이언트 Dump
+  path: webtob system_log FileHandler·DEBUG dump=FromClient/ToClient
+  format: 텍스트/데이터 dump·system timestamp
+  check: 클라이언트 요청·응답 raw 데이터·프로토콜 장애 분석
+  sample: <timestamp> DEBUG FromClient <dump-data>
+- name: 서버 Dump
+  path: webtob system_log FileHandler·DEBUG dump=FromServer/ToServer
+  format: 텍스트/데이터 dump·system timestamp
+  check: 내부서버 송수신 전문·연계 응답 이상·WJP 분석
+  sample: <timestamp> DEBUG FromServer <dump-data>
+- name: SSL Dump
+  path: webtob system_log FileHandler·DEBUG dump=SSLRead/SSLWrite
+  format: 텍스트/데이터 dump·system timestamp
+  check: SSL 송수신 단계·TLS 데이터 흐름 문제 분석
+  sample: <timestamp> DEBUG SSLRead <dump-data>
+sections:
+- heading: 로그 종류 카탈로그 (전수)
+  body: '시스템 로그: $WEBTOB_HOME/webtob_system.log 기본 · Access 로그: $WEBTOB_HOME/webtob_access.log 기본 · Error 로그: $WEBTOB_HOME/webtob_error.log 기본 · HTTP 모듈 로그: 버전별 상이(LOGGING system_log의 webtob.http FileHandler)
+    · WJP 로그: 버전별 상이(webtob.wjp FileHandler) · SSL 로그: 버전별 상이(webtob.ssl FileHandler) · Network 로그: 버전별 상이(webtob.network FileHandler) · 서버 Thread 로그: 버전별 상이(webtob.server FileHandler) · Acceptor 로그: 버전별
+    상이(webtob.em.acceptor FileHandler) · Admin API 로그: 버전별 상이(webtob.em.control FileHandler) · HTH Worker 로그: 버전별 상이(webtob.em.worker FileHandler) · Utility 로그: 버전별 상이(webtob.util FileHandler) · 클라이언트 Dump:
+    webtob system_log FileHandler·DEBUG dump=FromClient/ToClient · 서버 Dump: webtob system_log FileHandler·DEBUG dump=FromServer/ToServer · SSL Dump: webtob system_log FileHandler·DEBUG dump=SSLRead/SSLWrite'
+- heading: '로그: 시스템 로그'
+  body: 경로 $WEBTOB_HOME/webtob_system.log 기본 / 형식 텍스트·타임스탬프 포함·세부 포맷 버전별 / 확인 DEBUG·INFO·WARNING·FATAL·CONN/DST/REQ/RSC·프로세스/스레드 상태 / 샘플 <timestamp> <level> <logger> <message>
+- heading: '로그: Access 로그'
+  body: 경로 $WEBTOB_HOME/webtob_access.log 기본 / 형식 텍스트·설정 format·HTTP 시간 필드 / 확인 HTTP status·URI·client·bytes·duration·접근 이력 / 샘플 <client> <time> "<request>" <status> <bytes> <duration>
+- heading: '로그: Error 로그'
+  body: 경로 $WEBTOB_HOME/webtob_error.log 기본 / 형식 텍스트·타임스탬프 포함 / 확인 COM_·CONN_·DST_·REQ_·RSC_ 오류와 HTTP 처리 실패 / 샘플 <timestamp> <error-code> <request/message>
+- heading: '로그: HTTP 모듈 로그'
+  body: 경로 버전별 상이(LOGGING system_log의 webtob.http FileHandler) / 형식 텍스트·WebtoB system timestamp / 확인 HTTP message parsing·request/response·header 처리 오류 / 샘플 <timestamp> DEBUG webtob.http <message>
+- heading: '로그: WJP 로그'
+  body: 경로 버전별 상이(webtob.wjp FileHandler) / 형식 텍스트·WebtoB system timestamp / 확인 JEUS/WAS 연계 WJP 메시지·backend 통신·연결 오류 / 샘플 <timestamp> WARNING webtob.wjp <message>
+- heading: '로그: SSL 로그'
+  body: 경로 버전별 상이(webtob.ssl FileHandler) / 형식 텍스트·WebtoB system timestamp / 확인 TLS handshake·certificate·cipher·SSL read/write 오류 / 샘플 <timestamp> WARNING webtob.ssl <message>
+- heading: '로그: Network 로그'
+  body: 경로 버전별 상이(webtob.network FileHandler) / 형식 텍스트·WebtoB system timestamp / 확인 socket·connect·accept·read/write·connection reset / 샘플 <timestamp> WARNING webtob.network <message>
+- heading: '로그: 서버 Thread 로그'
+  body: 경로 버전별 상이(webtob.server FileHandler) / 형식 텍스트·WebtoB system timestamp / 확인 각 thread startup/termination·worker 비정상 종료 / 샘플 <timestamp> INFO webtob.server <thread startup/termination>
+- heading: '로그: Acceptor 로그'
+  body: 경로 버전별 상이(webtob.em.acceptor FileHandler) / 형식 텍스트·WebtoB system timestamp / 확인 신규 연결 accept·socket 수락 실패·connection backlog / 샘플 <timestamp> WARNING webtob.em.acceptor <message>
+- heading: '로그: Admin API 로그'
+  body: 경로 버전별 상이(webtob.em.control FileHandler) / 형식 텍스트·WebtoB system timestamp / 확인 관리 API 통신·명령 처리·관리 연결 오류 / 샘플 <timestamp> INFO webtob.em.control <message>
+- heading: '로그: HTH Worker 로그'
+  body: 경로 버전별 상이(webtob.em.worker FileHandler) / 형식 텍스트·WebtoB system timestamp / 확인 HTH worker·queue·thread 상태·NRDY·처리 오류 / 샘플 <timestamp> WARNING webtob.em.worker <message>
+- heading: '로그: Utility 로그'
+  body: 경로 버전별 상이(webtob.util FileHandler) / 형식 텍스트·WebtoB system timestamp / 확인 공통 유틸리티·파일·설정·내부 보조기능 오류 / 샘플 <timestamp> WARNING webtob.util <message>
+- heading: '로그: 클라이언트 Dump'
+  body: 경로 webtob system_log FileHandler·DEBUG dump=FromClient/ToClient / 형식 텍스트/데이터 dump·system timestamp / 확인 클라이언트 요청·응답 raw 데이터·프로토콜 장애 분석 / 샘플 <timestamp> DEBUG FromClient <dump-data>
+- heading: '로그: 서버 Dump'
+  body: 경로 webtob system_log FileHandler·DEBUG dump=FromServer/ToServer / 형식 텍스트/데이터 dump·system timestamp / 확인 내부서버 송수신 전문·연계 응답 이상·WJP 분석 / 샘플 <timestamp> DEBUG FromServer <dump-data>
+- heading: '로그: SSL Dump'
+  body: 경로 webtob system_log FileHandler·DEBUG dump=SSLRead/SSLWrite / 형식 텍스트/데이터 dump·system timestamp / 확인 SSL 송수신 단계·TLS 데이터 흐름 문제 분석 / 샘플 <timestamp> DEBUG SSLRead <dump-data>

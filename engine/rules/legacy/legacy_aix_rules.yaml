@@ -1,0 +1,255 @@
+# 기존 'AI 로그분석기 v2.2' 내장 룰에서 변환 반입(tools/import_legacy_rules.py) — 중복(코드·패턴) 제외
+# 심각도 CRITICAL→critical HIGH→error MEDIUM→warn LOW→info · immediate_actions→즉시 · root_actions→중기 · negative_patterns→exclude
+rules:
+- id: LEG-AIX-DISK-ERR
+  layer: os
+  product:
+  - aix
+  match:
+    regex: (?:DISK_ERR)|(?:SC_DISK_ERR)|(?:errpt.*disk)|(?:AIX.*disk.*error)|(?:I/O error.*hdisk)|(?:disk.*error.*AIX)|(?:physical.*volume.*error)
+  severity: error
+  category: disk
+  verdict: AIX 디스크 오류 — 물리 디스크 불량 또는 FC/SCSI 경로 오류
+  immediate:
+  - errpt -a | head -100 으로 디스크 오류 LABEL(SC_DISK_ERRn·DISK_ERRn)·hdisk·sense data 기록
+  - lspv 와 lsvg -p <vg> 로 해당 PV 상태(active/missing)와 소속 VG, lspath -l hdisk<N> 으로 경로 상태 확인
+  short:
+  - '영향: 파일시스템 접근 불가, 데이터 손상 위험.'
+  - (2차·승인 후) 미러 여부 확인 뒤 업무 영향 시간을 협의해 diag -d hdisk<N> 으로 디스크 진단, 비미러면 데이터 백업 우선
+  mid:
+  - '불량 디스크: replacepv로 교체'
+  - 'FC 경로 오류: HBA 카드 또는 FC 스위치 점검'
+  long:
+  - errpt 하드웨어(H) 클래스 디스크 오류와 lspath Failed 경로 수 감시, 데이터 VG 미러·MPIO 이중 경로 구성 표준화
+  source_note: 'legacy-analyzer-v2.2 aix_rules.json AIX-DISK-ERR (원 출처: builtin)'
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: 기존 도구 룰 — DISK_ERR/SC_DISK_ERR 전 버전
+- id: LEG-AIX-CORE
+  layer: os
+  product:
+  - aix
+  match:
+    regex: (?:core dump)|(?:Segmentation fault)|(?:core was generated)|(?:errpt.*CORE_DUMP)|(?:CORE.*generated)
+  severity: error
+  category: internal
+  verdict: AIX 프로세스 코어 덤프 — 세그멘테이션 폴트로 프로세스 비정상 종료
+  immediate:
+  - errpt -a | grep CORE_DUMP
+  - dbx <바이너리> core.<PID>로 덤프 분석
+  short:
+  - '영향: 해당 서비스 프로세스 중단.'
+  mid:
+  - 개발사 패치 적용
+  - ulimit -c unlimited 설정 확인
+  long:
+  - errpt CORE_DUMP 발생 감시와 코어 저장 경로(lscore) 전용 FS 사용률 감시 등록
+  source_note: 'legacy-analyzer-v2.2 aix_rules.json AIX-CORE (원 출처: builtin)'
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: CORE_DUMP 전 버전
+- id: LEG-AIX-ERRPT
+  layer: os
+  product:
+  - aix
+  match:
+    regex: (?:errpt.*HARDWARE)|(?:errpt.*SRC)|(?:EPOW.*AIX)|(?:AIX.*hardware.*error)
+  severity: error
+  category: hardware
+  verdict: AIX errpt 하드웨어 경고 — AIX errpt에 하드웨어 오류/경고 기록
+  immediate:
+  - errpt -a -j <IDENTIFIER> 로 상세(Location·FRU·Type) 확인, errpt -d H | head -20 으로 하드웨어 클래스 오류 목록 확인
+  - HMC 의 Serviceable Events 와 같은 시각 항목 대조
+  short:
+  - '영향: 하드웨어 장애 예고.'
+  - (2차·승인 후) 업무 영향 시간을 협의해 diag 로 해당 자원 진단, 결과와 FRU 위치를 IBM HW 지원에 접수
+  mid:
+  - IBM HW 지원팀 연락
+  - 부품 교체 계획 수립
+  long:
+  - HMC Call Home 과 errpt H 클래스 오류 실시간 감시 연동
+  source_note: 'legacy-analyzer-v2.2 aix_rules.json AIX-ERRPT (원 출처: builtin)'
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: errpt 요약 문구
+- id: LEG-AIX-NETWORK
+  layer: os
+  product:
+  - aix
+  match:
+    regex: (?:en0.*down)|(?:AIX.*network.*fail)|(?:entstat.*error)|(?:AIX.*link.*down)|(?:RDMA.*AIX)
+  severity: error
+  category: internal
+  verdict: AIX 네트워크 오류 — AIX 이더넷 인터페이스 오류 또는 다운
+  immediate:
+  - entstat -d en0 | grep -i error
+  - netstat -i로 인터페이스 상태 확인
+  short:
+  - '영향: 네트워크 통신 불가.'
+  mid:
+  - NIC 드라이버 업데이트
+  - 케이블 및 스위치 포트 점검
+  - 이더채널(EtherChannel) 구성으로 이중화
+  long:
+  - entstat 링크 상태·netstat -in 오류 카운터 감시와 단일 링크 인터페이스 이중화 점검
+  source_note: 'legacy-analyzer-v2.2 aix_rules.json AIX-NETWORK (원 출처: builtin)'
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: en0 등 인터페이스 문구
+- id: LEG-AIX-PERF
+  layer: os
+  product:
+  - aix
+  match:
+    regex: (?:AIX.*high cpu)|(?:AIX.*load.*average)|(?:topas.*100%)|(?:nmon.*cpu.*high)
+  severity: error
+  category: memory
+  verdict: AIX 시스템 성능 저하 — AIX 시스템 CPU 또는 메모리 과부하
+  immediate:
+  - topas로 CPU/메모리 사용률 확인
+  - ps aux로 고 CPU 프로세스 확인
+  short:
+  - '영향: 전체 시스템 응답 지연.'
+  mid:
+  - 고 CPU 프로세스 최적화
+  - CPU 추가 (LPAR 설정 변경)
+  - 워크로드 분산
+  long:
+  - topasrec/nmon 으로 CPU·메모리 추세 상시 기록, lparstat %entc 80%·lsps 사용률 70% 감시 임계 등록
+  source_note: 'legacy-analyzer-v2.2 aix_rules.json AIX-PERF (원 출처: builtin)'
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: 모니터링 문구
+- id: LEG-AIX-DUMP
+  layer: os
+  product:
+  - aix
+  match:
+    regex: (?:AIX.*system dump)|(?:sysdumpdev)|(?:0517-010)|(?:kernel.*dump.*AIX)|(?:system.*crash.*AIX)
+  severity: critical
+  category: hardware
+  verdict: AIX 시스템 덤프 — AIX 커널 패닉으로 시스템 덤프 발생
+  immediate:
+  - sysdumpdev -l 로 덤프 장치 확인, sysdumpdev -L 로 마지막 덤프의 시각·크기·성공 여부 확인
+  - errpt | head -30 으로 덤프 직전 하드웨어·커널 오류 확인
+  short:
+  - '영향: 시스템 재기동, 모든 서비스 중단.'
+  - (2차) snap -ac 로 시스템 정보 수집(/tmp/ibmsupt 공간 확인 후) 하여 덤프와 함께 IBM 지원팀에 분석 의뢰
+  mid:
+  - IBM Fix Central에서 APARs 패치 적용
+  - sysdumpdev -e로 덤프 공간 확인
+  long:
+  - TL/SP·펌웨어 수준 표준화, 덤프 장치 크기(sysdumpdev -e) 정기 점검과 덤프 발생 감시
+  source_note: 'legacy-analyzer-v2.2 aix_rules.json AIX-DUMP (원 출처: builtin)'
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: sysdumpdev·0517-010 전 버전
+- id: LEG-AIX-LVM
+  layer: os
+  product:
+  - aix
+  match:
+    regex: (?:AIX.*volume group.*vary.*off)|(?:varyon.*fail)|(?:lqueryvg.*error)|(?:vgid.*mismatch)
+  severity: error
+  category: hardware
+  verdict: AIX LVM 볼륨 그룹 오류 — AIX LVM 볼륨 그룹 비정상. VGDA 손상
+  immediate:
+  - lsvg -o 로 활성 볼륨 그룹 확인, lsvg 와 비교해 비활성 VG 식별
+  - lspv 로 소속 디스크의 PVID·VG 표시, errpt | head -20 으로 같은 시각 디스크·LVM 오류 확인
+  short:
+  - '영향: 논리 볼륨 접근 불가.'
+  - '(2차·승인 후, 롤백: 실행 전 lspv·lsvg 출력 보관) 디스크·경로 정상 확인 후 varyonvg <vgname> 으로 활성화, 실패 메시지는 그대로 기록'
+  mid:
+  - exportvg/importvg로 볼륨 그룹 재구성
+  - AIX 지원팀 연락
+  long:
+  - VG 활성 상태(lsvg -o)와 PV missing 감시, VG 구성(lspv·lsvg -l) 정기 백업
+  source_note: 'legacy-analyzer-v2.2 aix_rules.json AIX-LVM (원 출처: builtin)'
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: varyon/varyoff 문구 전 버전
+- id: LEG-AIX-BACKUP
+  layer: os
+  product:
+  - aix
+  match:
+    regex: (?:mksysb.*fail)|(?:AIX.*backup.*error)|(?:savevg.*error)|(?:backup.*AIX.*fail)
+  severity: error
+  category: internal
+  verdict: AIX 백업 실패 — AIX mksysb 또는 savevg 백업 실패
+  immediate:
+  - "백업 작업(cron·스크립트) 출력과 `tail -100 /smit.log`(SMIT 로 실행한 경우, root 홈)에서 마지막 mksysb/savevg 오류 문구 확인"
+  - "`df -g <백업경로>` 와 `df -g /tmp` 로 여유 공간 확인 — 백업 경로 여유가 백업 대상 사용량보다 작거나 /tmp 사용률 95% 이상이면 공간 부족 확정"
+  - "`errpt | head -20` 으로 같은 시각 테이프(rmt)·디스크 오류 동반 여부 확인 — 동반이면 백업 장치 원인"
+  short:
+  - '영향: 재해 복구 불가.'
+  - "(2차·승인 후, 롤백: 새 백업 성공 전까지 직전 정상 이미지 보존) 공간·장치 원인 해소 후 백업 창에서 mksysb/savevg 재수행, 완료 메시지와 이미지 크기 확인"
+  mid:
+  - 백업 디바이스 정상화 후 재수행
+  - NIM 구성 검토
+  long:
+  - mksysb/savevg 성공 여부와 백업 파일 크기를 일 단위로 감시, 분기별 복원 시험
+  source_note: 'legacy-analyzer-v2.2 aix_rules.json AIX-BACKUP (원 출처: builtin)'
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: mksysb/savevg 전 버전
+- id: LEG-AIX-SSH
+  layer: os
+  product:
+  - aix
+  match:
+    regex: (?:AIX.*sshd.*fail)|(?:ssh.*AIX.*refuse)|(?:startsrc.*sshd.*error)
+  severity: error
+  category: connection
+  verdict: AIX SSH 접속 오류 — AIX SSH 데몬 오류 또는 접속 실패
+  immediate:
+  - lssrc -s sshd 로 SSH 서비스 상태 확인(active 여부)
+  - errpt -N SRC 와 인증 로그에서 sshd 오류 문구 확인, /usr/sbin/sshd -t 로 설정 문법 검사(설정 변경 없음)
+  short:
+  - '영향: 원격 관리 불가.'
+  - '(2차·승인 후, 롤백: 설정 변경 시 sshd_config 백업 복원) 원인 확인 후 startsrc -s sshd 로 기동하고 lssrc -s sshd 로 active 확인'
+  mid:
+  - SSH 설정 파일 (/etc/ssh/sshd_config) 검토
+  - SSH 키 권한 확인
+  long:
+  - sshd active 상태 감시와 sshd_config 변경 이력 관리
+  source_note: 'legacy-analyzer-v2.2 aix_rules.json AIX-SSH (원 출처: builtin)'
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: sshd 문구

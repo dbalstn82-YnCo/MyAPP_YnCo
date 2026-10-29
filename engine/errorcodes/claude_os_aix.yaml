@@ -1,0 +1,754 @@
+product: aix
+layer: os
+note: GPT 협업 수집분 — 벤더 공식 문서와 대조 후 확정
+codes:
+- code: AIX-CORE-DUMP
+  severity: error
+  category: internal
+  title: 프로세스 코어 덤프
+  vendor_cause: 프로세스가 비정상 종료하며 core 파일을 남긴 상태(errpt LABEL CORE_DUMP, 'SOFTWARE PROGRAM
+    ABNORMALLY TERMINATED'). 애플리케이션 결함(세그멘테이션 오류)·라이브러리 불일치·메모리 손상이 흔한 원인.
+  immediate:
+  - '`errpt -a -J CORE_DUMP | head -60` 으로 PROGRAM NAME·CORE FILE NAME·신호 번호 확인'
+  - '`lscore` (AIX 5.3+) 로 코어 생성 위치·압축 설정 확인, `ls -l <코어경로>` 로 파일이 완전한지(크기) 확인'
+  short:
+  - (2차) `snapcore -d /var/tmp <core> <program>` 으로 코어와 라이브러리 묶음 수집, `dbx <program>
+    <core>` 의 where 로 스택 확인 후 개발사 전달
+  mid:
+  - 개발사 패치·라이브러리 버전 정합 조치, 코어 경로를 전용 FS 로 지정(`chcore -p on -l <경로>`, 변경 관리)
+  long:
+  - errpt CORE_DUMP 발생 감시와 코어 FS 사용률 감시 등록
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: 'CORE_DUMP(LABEL) / ''SOFTWARE PROGRAM ABNORMALLY TERMINATED'' 전 버전.
+    errpt LABEL/IDENTIFIER 형식은 AIX 5.3~7.3 동일(errpt -a: LABEL·IDENTIFIER·Date/Time·Sequence·Machine
+    Id·Node Id·Class·Type·Resource Name·Description)'
+- code: AIX-DISK-OP-ERROR
+  severity: critical
+  category: disk
+  title: 디스크 작업 오류
+  vendor_cause: 디스크 장치 드라이버가 I/O 동작 실패를 기록한 상태(DISK_ERR1~4, 'DISK OPERATION ERROR').
+    디스크 매체·하드웨어 불량, SCSI/SAS 버스 오류, 스토리지 컨트롤러 이상이 흔한 원인.
+  immediate:
+  - '`errpt -a -N hdisk<N> | head -80` 으로 LABEL·Type(PERM/TEMP)·sense data 확인 — PERM
+    이면 하드웨어 결함 가능성 높음'
+  - '`lspv` 와 `lsvg -p <vg>` 로 해당 PV 상태(active/missing)와 소속 VG, `lsdev -Cc disk` 로
+    Available 여부 확인'
+  short:
+  - (2차·승인 후) 미러 구성이면 영향 LV 확인 후 `diag -d hdisk<N>` 진단(업무 영향 시간 협의), 비미러면 데이터 백업 우선
+  mid:
+  - 결함이 확인되면 HW 유지보수 업체에 교체 의뢰, 미러면 replacepv/unmirrorvg→교체→mirrorvg 절차로 복구
+  long:
+  - errpt 하드웨어(H) 클래스 오류 실시간 감시와 rootvg·데이터 VG 미러 구성 표준화
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: DISK_ERR1~4 'DISK OPERATION ERROR' 전 버전
+- code: AIX-SC-DISK-ERR
+  severity: critical
+  category: disk
+  title: SCSI 디스크 오류
+  vendor_cause: SCSI/FC 디스크 드라이버가 기록한 오류(SC_DISK_ERR1~10). 번호별로 하드웨어 오류·경로 오류·스토리지
+    측 거부 등 의미가 다르며 sense data 로 원인을 구분한다. SAN fabric·스토리지 포트 문제가 흔하다.
+  immediate:
+  - '`errpt -a -N hdisk<N> | head -80` 으로 LABEL 번호(SC_DISK_ERRn)·PATH ID·SENSE DATA
+    기록'
+  - '`lspath -l hdisk<N>` 으로 경로별 Enabled/Failed, `lspv | grep hdisk<N>` 으로 소속 VG 확인'
+  short:
+  - (2차) sense data 와 PATH ID 를 스토리지·SAN 담당에 전달해 해당 LUN·포트 오류 대조, 경로 복구는 스토리지 측 조치
+    후 `lspath` 로 확인
+  mid:
+  - 결함 경로·포트·HBA 를 특정해 해당 부품만 교체, 멀티패스 알고리즘·health check 속성(`lsattr -El hdisk<N>`)
+    표준화
+  long:
+  - SC_DISK_ERR 발생 건수와 Failed 경로 감시 등록
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: SC_DISK_ERR1~10 전 버전 (ERR2/ERR4 가 가장 흔함, IDENTIFIER DCB47997 등)
+- code: AIX-LVM-IO-FAIL
+  severity: critical
+  category: storage
+  title: LVM I/O 실패
+  vendor_cause: LVM 이 물리 볼륨 I/O 실패를 기록한 상태(LVM_IO_FAIL). 하부 디스크·경로 장애로 LV 쓰기/읽기가 실패한
+    것이며 미러가 없으면 데이터 접근 불가로 이어진다.
+  immediate:
+  - '`errpt -a -J LVM_IO_FAIL | head -60` 으로 대상 PV·LV 와 시각, 같은 시각 SC_DISK_ERR 동반 여부
+    확인'
+  - '`lsvg -p <vg>` 로 PV STATE(active/missing/removed), `lsvg -l <vg>` 로 LV STATE(stale
+    여부) 확인'
+  short:
+  - '(2차·승인 후, 롤백: 변경 전 lsvg 결과 보관) 디스크·경로 복구 후 PVID 일치 확인(`lquerypv -h /dev/hdisk<N>
+    80 10`), `varyonvg <vg>` 로 PV 재활성화 후 `syncvg -v <vg>`'
+  mid:
+  - 반복 PV 는 replacepv 로 교체, 데이터 VG 미러·MPIO 이중 경로 구성 확인
+  long:
+  - LVM_IO_FAIL·LVM_SA_PVMISS 감시와 lsvg stale PP 수 일일 점검
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: LVM_IO_FAIL(E86653C3)·LVM_SA_PVMISS(F7DDA124) 전 버전
+- code: AIX-LVM-STALE
+  severity: error
+  category: storage
+  title: LV 미러 stale
+  vendor_cause: 미러된 LV 의 일부 복사본(PP)이 최신이 아니어서 stale 로 표시된 상태(LVM_SA_STALEPP). 한쪽 디스크
+    I/O 실패·일시 경로 단절 후 재동기화되지 않은 것이 흔한 원인.
+  immediate:
+  - '`lsvg -l <vg>` 에서 LV STATE 가 ''open/stale'' 인 LV 식별, `lsvg <vg>` 의 STALE PPs
+    수 확인'
+  - '`lsvg -p <vg>` 로 어느 PV 가 문제인지, `errpt | head -20` 에 해당 PV 오류가 있는지 확인'
+  short:
+  - '(2차·승인 후, 롤백: 불필요 — 읽기 동기화, 단 I/O 부하 발생) 디스크 정상 확인 후 업무 부하가 낮은 시간에 `syncvg -l
+    <lv>` 또는 `syncvg -v <vg>` 실행'
+  mid:
+  - stale 이 반복되는 PV 는 교체 계획, 미러 쓰기 일관성(MWC) 설정 확인
+  long:
+  - STALE PPs 0 이 아닌 VG 를 일일 감시
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: LVM_SA_STALEPP(EAA3D429) 전 버전
+- code: AIX-VG-QUORUM-LOST
+  severity: critical
+  category: storage
+  title: VG 쿼럼 상실
+  vendor_cause: VG 의 VGDA 과반을 가진 디스크에 접근할 수 없어 쿼럼을 잃은 상태(LVM_SA_QUORCLOSE). 쿼럼이 켜진
+    VG 는 자동 varyoff 되어 모든 LV 접근이 끊긴다. 디스크·경로 다중 장애가 원인.
+  immediate:
+  - '`lsvg -o` 로 해당 VG 가 활성 목록에서 빠졌는지, `errpt -a -J LVM_SA_QUORCLOSE | head -40` 으로
+    시각·VG 확인'
+  - '`lspv` 와 `lsdev -Cc disk` 로 소속 디스크의 PVID·Available 상태, `lspath` 로 경로 상태 확인'
+  short:
+  - '(2차·승인 후, 롤백: 복구 전 lspv·lsvg 출력 보관) 디스크·경로를 먼저 복구한 뒤 `varyonvg <vg>`, 강제(-f)
+    활성화는 데이터 정합성 위험이 있어 IBM 지원과 협의 후에만'
+  mid:
+  - 2-디스크 미러 VG 는 쿼럼 정책(`chvg -Q`)을 설계 기준에 맞게 재검토, 디스크를 서로 다른 경로·스토리지에 분산
+  long:
+  - VG 활성 상태(lsvg -o)와 PV missing 감시 등록
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: LVM_SA_QUORCLOSE 전 버전
+- code: AIX-FS-FULL
+  severity: critical
+  category: disk
+  title: 파일시스템 가득참
+  vendor_cause: JFS/JFS2 파일시스템에 남은 블록이 없어 쓰기가 실패한 상태(JFS2_FS_FULL, 'FILE SYSTEM FULL').
+    로그·코어·임시 파일 누적과 열린 채 삭제된 파일이 흔한 원인.
+  immediate:
+  - '`errpt | grep -i full | head -20` 으로 대상 자원·시각 확인, `df -g <mount>` 로 현재 사용률 확인'
+  - '`du -sm <mount>/* 2>/dev/null | sort -rn | head` 와 `fuser -cu <mount>` 로 큰 디렉터리와
+    사용 프로세스 확인(정리는 2차)'
+  short:
+  - '(2차·승인 후, 롤백: 정리 대상 tar 보관) 소유자 확인 후 로그·코어 정리 또는 `chfs -a size=+<n>G <mount>`
+    로 온라인 증설'
+  mid:
+  - VG 여유 PP 확보(디스크 추가·extendvg), 애플리케이션 로그 순환·보존 주기 정비
+  long:
+  - df -g 85%/95% 감시 임계와 증가율 기반 용량 계획
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: JFS2_FS_FULL 은 JFS2(5.1+) 전 버전, JFS 는 'FILE SYSTEM FULL'
+- code: AIX-JFS2-ERROR
+  severity: critical
+  category: storage
+  title: JFS2 메타데이터 오류
+  vendor_cause: JFS2 가 메타데이터 손상·로그 대기 등 무결성 문제를 기록한 상태(JFS2_META_CORRUPTION 등). 하부
+    디스크 I/O 오류, 비정상 종료 후 로그 재생 실패가 흔한 원인이며 방치 시 파일시스템이 읽기 전용·마운트 불가로 악화된다.
+  immediate:
+  - '`errpt -a | grep -E ''^LABEL:'' | grep -i j2 | sort | uniq -c` 로 LABEL 종류, `errpt
+    -a -J <LABEL> | head -60` 으로 대상 LV·시각 확인, 같은 시각 디스크·LVM 오류 동반 여부 확인'
+  - '`lsvg -l <vg>` 와 `mount | grep <lv>` 로 해당 LV 의 마운트 상태 확인 — 응용 오류(입출력 실패) 신고와
+    대조'
+  short:
+  - '(2차·승인 후, 롤백: 사전 백업 필수) 업무 중단 창에서 umount 후 `fsck -y /dev/<lv>`, 하부 디스크 오류가 있으면
+    디스크 복구가 먼저'
+  mid:
+  - fsck 로 복구되지 않으면 백업에서 복원, 디스크·경로 결함 부품 교체
+  long:
+  - JFS2 계열 errpt 감시와 정기 백업 복원 시험
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: JFS2_META_CORRUPTION·JFS2_LOG_WAIT 등 JFS2 전 버전
+- code: AIX-PAGING-LOW
+  severity: critical
+  category: memory
+  title: 페이징 공간 부족
+  vendor_cause: 페이징 공간 사용률이 임계에 도달한 상태('PAGING SPACE LOW'). 계속 증가하면 커널이 SIGDANGER
+    를 보내고 이어 프로세스를 강제로 끝낸다(PGSP_KILL). 메모리 누수·과다 할당·페이징 공간 과소가 원인.
+  immediate:
+  - '`lsps -a` 와 `lsps -s` 로 페이징 공간별 사용률 확인 — 70% 이상 경고, 90% 이상 위험'
+  - '`svmon -G` 로 실메모리·페이징 사용 현황, `ps -eo pid,vsz,user,args | sort -k2 -rn | head`
+    로 가상 메모리 상위 프로세스 확인'
+  short:
+  - '(2차·승인 후, 롤백: 추가한 PP 는 chps -d 로 축소 가능) `chps -s <LP수> hd6` 로 페이징 공간 즉시 확장, 누수
+    프로세스는 담당자 확인 후 재시작 일정'
+  mid:
+  - 애플리케이션 메모리 설정(JVM -Xmx, DB 캐시) 재산정, 필요 시 LPAR 메모리 증설(DLPAR)
+  long:
+  - lsps 사용률 70% 감시와 svmon 메모리 추세 기록
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: PGSP_KILL / 'PAGING SPACE LOW' 전 버전
+- code: AIX-MEMORY-ERROR
+  severity: error
+  category: hardware
+  title: 메모리 하드웨어 오류
+  vendor_cause: 메모리(DIMM) 하드웨어 오류가 errpt 에 기록된 상태. 정정 가능 오류가 누적되면 펌웨어가 해당 메모리를 격리(deconfigure)할
+    수 있으며 정정 불가 오류는 시스템 중단으로 이어진다.
+  immediate:
+  - "`errpt -d H | head -20` 으로 하드웨어 클래스 오류, `errpt -a -j <IDENTIFIER> | head -60` 으로 위치 코드(Location)·FRU 확인 — H 클래스 PERM 메모리 항목이 있으면 확정"
+  - "`lsattr -El mem0` 의 size 와 goodsize 비교 — goodsize 가 작으면 메모리 일부가 펌웨어에 의해 사용 제외(deconfigure)된 상태"
+  short:
+  - (2차) HMC 의 Serviceable Events(`lssvcevents -t hardware`)와 대조해 FRU 위치를 확정하고 HW
+    유지보수 업체에 접수
+  mid:
+  - 업체 일정에 맞춰 DIMM 교체(대개 시스템 정지 필요 — 변경 관리), 교체 후 lsattr -El mem0 정상 확인
+  long:
+  - HMC Call Home·errpt H 클래스 감시 등록
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: SCAN_ERROR_CHRP / MEMORY 계열 하드웨어 오류 전 버전(POWER 세대별 LABEL 상이)
+- code: AIX-CPU-ERROR
+  severity: critical
+  category: hardware
+  title: CPU 하드웨어 오류
+  vendor_cause: 프로세서 하드웨어 오류가 errpt 에 기록된 상태. 반복되면 CPU Guard/펌웨어가 해당 CPU 를 동적으로 격리하며,
+    정정 불가 오류는 LPAR·시스템 중단으로 이어진다.
+  immediate:
+  - '`errpt -d H | head -20` 으로 CPU 관련 항목, `errpt -a -j <IDENTIFIER> | head -60` 으로
+    Location·FRU 확인'
+  - '`lsdev -Cc processor` 와 `lparstat -i | grep -i -E ''Online Virtual CPUs|Entitled''`
+    로 현재 CPU 구성 확인, `lsattr -El sys0 -a cpuguard` 로 CPU Guard 설정 확인'
+  short:
+  - (2차) HMC Serviceable Events 와 대조해 FRU 확정 후 HW 유지보수 업체 접수, 격리로 CPU 가 줄었으면 업무 부하
+    영향 평가
+  mid:
+  - 업체 일정에 맞춰 프로세서 모듈 교체(변경 관리), 교체 전까지 부하 분산
+  long:
+  - HMC Call Home 과 errpt H 클래스 감시 등록
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: 프로세서 하드웨어 오류 전 버전(POWER 세대별 LABEL 상이)
+- code: AIX-FC-LINK-DOWN
+  severity: critical
+  category: storage
+  title: FC 링크 다운
+  vendor_cause: FC 어댑터(fcs)의 링크가 끊긴 상태. 케이블·SFP 불량, SAN 스위치 포트 장애·zoning 변경, 스토리지
+    포트 장애가 흔한 원인이며 이중 경로가 없으면 디스크 I/O 가 멈춘다.
+  immediate:
+  - "`errpt -a -N fscsi<N> | head -60` 과 `errpt -a -N fcs<N> | head -60` 으로 LABEL(FCS_ERR*, LINK 계열)·시각 확인"
+  - "`fcstat fcs<N> | head -40` 으로 Port Speed·Link 상태·오류 카운터, `lspath | grep -v Enabled` 로 Failed/Missing 경로 확인 — 한 경로라도 있으면 경로 이중화 상실"
+  short:
+  - (2차) SAN 담당과 스위치 포트 상태·zoning 변경 이력 대조, 케이블·SFP 교체 후 `lspath` 로 경로 Enabled 복귀
+    확인
+  mid:
+  - 반복 시 HBA 교체, 모든 hdisk 가 서로 다른 fabric 2개 이상 경로를 갖도록 구성 표준화
+  long:
+  - fcstat 오류 카운터와 Failed 경로 수 감시 등록
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: FCS_ERR*, LINK_ERR 전 버전
+- code: AIX-MPIO-PATH-FAIL
+  severity: critical
+  category: storage
+  title: MPIO 경로 실패
+  vendor_cause: MPIO 디스크의 경로 일부가 Failed 로 바뀐 상태('PATH HAS FAILED'). 남은 경로로 I/O 는 계속되지만
+    이중화가 깨진 상태이며 SAN·HBA·스토리지 포트 장애가 원인.
+  immediate:
+  - '`lspath | grep -v Enabled` 로 Failed/Missing 경로 목록, `lspath -H -l hdisk<N> -F
+    ''status name parent connection''` 으로 경로별 부모 어댑터 확인'
+  - '`errpt | head -30` 에서 같은 시각 FC·SC_DISK 오류 확인, lsmpio 가 있는 판은 `lsmpio -l hdisk<N>`
+    으로 경로 상태 추가 확인'
+  short:
+  - (2차) SAN·스토리지 측 원인 해결 후 health check 로 자동 복구되는지 확인, 남으면 승인 후 `chpath -l hdisk<N>
+    -p <fscsi> -s enable`
+  mid:
+  - hcheck_interval·hcheck_mode 속성을 스토리지 권고값으로 표준화, 결함 HBA·케이블 교체
+  long:
+  - Failed 경로 수 0 유지 감시와 분기별 경로 이중화 점검
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: MPIO 는 AIX 5.2+ — 'PATH HAS FAILED' 5.3~7.3
+- code: AIX-ENT-LINK-DOWN
+  severity: error
+  category: connection
+  title: 이더넷 링크 다운
+  vendor_cause: 이더넷 어댑터(ent)의 물리 링크가 끊긴 상태. 케이블·스위치 포트 장애, 속도/듀플렉스 불일치, 어댑터 불량이 흔한
+    원인.
+  immediate:
+  - '`errpt -a -N ent<N> | head -40` 으로 LINK DOWN 시각, `entstat -d ent<N> | grep -i
+    -E ''link status|media speed|error''` 로 현재 링크·속도·오류 확인'
+  - '`netstat -in` 으로 인터페이스 Ierrs/Oerrs, `ifconfig -a` 로 IP 가 올라간 인터페이스 확인'
+  short:
+  - (2차) 네트워크 담당과 스위치 포트 상태·로그 대조, 케이블 교체 후 entstat 로 Link Status Up 확인
+  mid:
+  - 반복 시 어댑터 교체, 단일 링크 구성은 EtherChannel/NIB 이중화 구성
+  long:
+  - 링크 상태와 인터페이스 오류 카운터 감시 등록
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: GOENT_LINK_DOWN 등 어댑터 드라이버별 LABEL, 'ETHERNET DOWN' 공통
+- code: AIX-ETHERCHANNEL-FAILOVER
+  severity: warn
+  category: connection
+  title: EtherChannel 전환
+  vendor_cause: EtherChannel/NIB 의 주 어댑터 링크가 끊겨 백업 어댑터로 트래픽이 전환된 상태. 통신은 유지되지만 이중화가
+    깨진 상태이며 주 링크의 케이블·스위치 문제가 원인.
+  immediate:
+  - '`entstat -d ent<EC> | grep -i -E ''active channel|link status|backup''` 으로 현재
+    활성 어댑터 확인'
+  - '`lsattr -El ent<EC>` 로 adapter_names·backup_adapter·netaddr(ping 대상) 확인, `errpt
+    | head -20` 에서 구성원 ent 의 LINK DOWN 확인'
+  short:
+  - (2차) 주 어댑터 케이블·스위치 포트 복구 후 entstat 로 링크 Up 확인, 자동 복귀(failback) 동작 여부 확인
+  mid:
+  - 구성원 어댑터를 서로 다른 스위치에 연결, netaddr 감시 대상 주소 정비
+  long:
+  - EtherChannel 전환 이벤트와 구성원 링크 상태 감시 등록
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: ECH_* EtherChannel 전 버전
+- code: AIX-ENV-TEMP
+  severity: critical
+  category: hardware
+  title: 환경 온도 경고
+  vendor_cause: 시스템 내부 온도 센서가 임계 초과를 보고한 상태(환경 경고). 팬 고장, 전산실 냉각 이상, 공기 흐름 차단이 흔한
+    원인이며 방치 시 EPOW 로 시스템이 보호 정지될 수 있다.
+  immediate:
+  - '`errpt -a -d H | head -60` 으로 환경 경고 LABEL·위치 코드 확인'
+  - HMC 의 Serviceable Events·시스템 상태 화면과 전산실 온도·항온항습기 상태를 함께 확인
+  short:
+  - (2차) 팬 FRU 교체를 HW 업체에 접수, 전산실 냉각 이상이면 시설 담당에 즉시 통보
+  mid:
+  - 랙 공기 흐름(블랭크 패널·케이블 정리) 개선, 고장 팬 교체 후 경고 재발 여부 확인
+  long:
+  - HMC Call Home·전산실 온도 감시 연계
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: ENVIRONMENTAL 계열 전 버전
+- code: AIX-POWER-FAIL
+  severity: critical
+  category: hardware
+  title: 전원 장애
+  vendor_cause: 전원 공급 장치 또는 입력 전원 이상이 보고된 상태(EPOW 계열). 이중 전원 중 한쪽 상실, PSU 고장, UPS·분전반
+    문제가 흔한 원인.
+  immediate:
+  - '`errpt -a | grep -E ''^LABEL:'' | grep -i epow | sort | uniq -c` 로 EPOW 유형, `errpt
+    -a -J <LABEL> | head -60` 으로 위치 코드·시각 확인'
+  - HMC 의 Serviceable Events 와 랙 PDU·UPS 상태를 확인해 이중 전원 중 어느 쪽인지 식별
+  short:
+  - (2차) PSU 교체를 HW 업체에 접수, 입력 전원 문제면 시설 담당에 통보
+  mid:
+  - 모든 PSU 가 서로 다른 전원 계통(A/B)에 연결되도록 정비
+  long:
+  - HMC Call Home 과 PDU·UPS 경보 연계 감시
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: EPOW_* 전 버전
+- code: AIX-SYSTEM-DUMP
+  severity: critical
+  category: internal
+  title: 시스템 덤프 발생
+  vendor_cause: 커널이 시스템 덤프를 생성한 상태로, 대개 시스템 크래시(패닉) 또는 운영자가 요청한 덤프다. 원인은 커널 확장·드라이버
+    결함, 하드웨어 오류 등이며 덤프 분석으로만 확정된다.
+  immediate:
+  - '`sysdumpdev -L` 로 마지막 덤프의 시각·크기·상태(성공/부분), `sysdumpdev -l` 로 덤프 장치·복사 디렉터리 확인'
+  - '`errpt | head -20` 에서 SYSDUMP·DUMP_STATS 항목과 그 직전 하드웨어 오류 확인, `ls -l /var/adm/ras/vmcore*`
+    로 복사본 존재 확인'
+  short:
+  - (2차) `snap -gc` 와 덤프 파일을 IBM 지원에 전달(업로드 전 크기·전송 승인), 덤프가 잘렸으면 덤프 장치 크기부터 보완
+  mid:
+  - IBM 분석 결과의 APAR/서비스 팩을 변경 관리로 적용
+  long:
+  - 덤프 발생 감시와 덤프 장치 크기(sysdumpdev -e) 정기 점검
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: SYSDUMP/DUMP_STATS 전 버전 (7.x 는 기본 /var/adm/ras/livedump 도 존재)
+- code: AIX-KERNEL-PANIC
+  severity: critical
+  category: internal
+  title: 커널 패닉
+  vendor_cause: 커널이 복구 불가능한 오류로 시스템을 정지한 상태. 커널 확장·장치 드라이버 결함, 하드웨어(메모리·CPU) 오류가 흔한
+    원인이며 시스템 덤프 분석으로 원인을 확정한다.
+  immediate:
+  - 시스템 복귀 후 `errpt | head -30` 에서 패닉 직전 하드웨어·커널 오류 확인, `sysdumpdev -L` 로 덤프가 정상 저장됐는지
+    확인
+  - '`oslevel -s` 와 `lslpp -h | tail -20` 으로 최근 패치·소프트웨어 변경 이력 확인'
+  short:
+  - (2차) 덤프와 `snap -a` 결과를 IBM 지원에 전달해 kdb 분석 의뢰, 최근 변경이 원인 의심이면 변경 관리로 원복 검토
+  mid:
+  - 분석 결과의 APAR·서비스 팩·펌웨어 업데이트 적용
+  long:
+  - TL/SP·펌웨어 수준 표준화와 덤프 장치 크기 정기 점검
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: KERNEL_PANIC / SYSTEM CRASH 전 버전
+- code: AIX-SRC-FAIL
+  severity: error
+  category: internal
+  title: SRC 서브시스템 실패
+  vendor_cause: SRC(System Resource Controller)가 관리하는 서브시스템(sshd·syslogd·xntpd·inetd
+    등)이 비정상 종료했거나 시작에 실패한 상태. 설정 오류·의존 자원 부재·프로그램 결함이 원인.
+  immediate:
+  - '`lssrc -a | grep -v active | head -30` 으로 inoperative 서브시스템 확인, `lssrc -ls <subsys>`
+    로 상세 상태 확인'
+  - '`errpt -a -N SRC | head -40` 으로 종료 코드·시각, 해당 서브시스템 로그 확인'
+  short:
+  - '(2차·승인 후, 롤백: 설정 변경 시 백업 복원) 원인(설정 오류 등) 수정 후 `startsrc -s <subsys>`, 반복 실패면
+    설정 파일 비교'
+  mid:
+  - SRC 서브시스템 정의(`lssrc -S -s <subsys>`) 의 재시작 정책·설정 표준화
+  long:
+  - 핵심 서브시스템 active 상태 감시 등록
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: SRC(srcmstr) 전 버전
+- code: AIX-HACMP-EVENT
+  severity: critical
+  category: internal
+  title: PowerHA 이벤트 오류
+  vendor_cause: PowerHA(HACMP) 클러스터 이벤트 스크립트가 실패했거나 config_too_long 등으로 이벤트 처리가 멈춘
+    상태. 리소스(VG·IP·애플리케이션) 기동/정지 스크립트 오류, 공유 디스크 문제가 흔한 원인.
+  immediate:
+  - '`tail -300 /var/hacmp/log/hacmp.out | grep -i -E ''EVENT (START|COMPLETED|FAILED)|ERROR''`
+    로 실패 이벤트 확인(6.1+ PowerHA, HACMP 5.x 는 /tmp/hacmp.out)'
+  - '`/usr/es/sbin/cluster/utilities/clRGinfo` 로 리소스 그룹 상태, `lssrc -ls clstrmgrES
+    | grep -i state` 로 클러스터 매니저 상태 확인'
+  short:
+  - (2차·승인 후) 실패 이벤트 스크립트 원인(VG varyon·IP 별칭·앱 스크립트 반환값) 수정 후 SMIT 'Recover From Script
+    Failure' 로 이벤트 처리 재개
+  mid:
+  - 애플리케이션 start/stop 스크립트 반환값·시간 정비, 클러스터 검증(`clmgr verify cluster`, 7.1+) 정기 수행
+  long:
+  - hacmp.out 의 EVENT FAILED·config_too_long 감시와 분기별 절체 시험
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: HACMP 5.x(AIX 5.3)~PowerHA 7.x(AIX 6.1+) — 로그 위치 /var/hacmp/log(6.1+)
+    vs /tmp/hacmp.out(5.3)
+- code: AIX-HACMP-NODE-DOWN
+  severity: critical
+  category: connection
+  title: PowerHA 노드 다운
+  vendor_cause: PowerHA 클러스터에서 상대 노드가 down 으로 판정된 상태. 실제 노드 장애, 하트비트(네트워크·디스크·CAA
+    저장소 디스크) 단절, 클러스터 서비스 정지가 원인이며 리소스 그룹 절체가 뒤따른다.
+  immediate:
+  - '`lscluster -m` 로 노드별 State(UP/DOWN) 확인(CAA, PowerHA 7.1+), `clRGinfo` 로 리소스 그룹이
+    어느 노드에 있는지 확인'
+  - '`tail -300 /var/hacmp/log/hacmp.out | grep -i node_down` 과 `errpt | head -20`
+    으로 하트비트 단절·네트워크 오류 시각 확인'
+  short:
+  - (2차·승인 후) 상대 노드·하트비트 네트워크 복구 후 클러스터 서비스 기동(`clmgr start node <node>`, 7.1+) —
+    리소스 원위치 이동은 업무 협의 후
+  mid:
+  - 하트비트 경로 이중화(복수 네트워크·저장소 디스크) 점검, 네트워크 장애 원인 제거
+  long:
+  - 노드 상태·리소스 그룹 위치 감시와 정기 절체 훈련
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: node_down 이벤트 전 버전
+- code: AIX-NFS-HANG
+  severity: error
+  category: connection
+  title: NFS 응답 없음
+  vendor_cause: NFS 클라이언트가 서버 응답을 받지 못해 'NFS server not responding' 상태가 된 것. 하드 마운트면
+    해당 경로 접근 프로세스가 멈춘다. 서버 장애·네트워크 단절·방화벽이 흔한 원인.
+  immediate:
+  - '`mount | grep -i nfs` 로 NFS 마운트 목록과 옵션 확인(멈춘 경로에 df·ls 금지 — 세션이 멈춤)'
+  - '`ping -c 3 <server>` 와 `rpcinfo -p <server>` 로 서버·nfsd/mountd 응답 확인, `nfsstat
+    -c` 의 timeout·retrans 증가 확인'
+  short:
+  - (2차·승인 후) 서버·네트워크 복구가 우선, 장기화 시 영향 프로세스 확인(`fuser -cu <mount>`) 후 `umount -f <mount>`
+    로 강제 해제 검토
+  mid:
+  - 업무 성격에 따라 soft/hard·intr·timeo 옵션 재설계, NFS 서버 이중화
+  long:
+  - NFS 응답 시간·retrans 감시 등록
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: NFS 클라이언트 문구 전 버전
+- code: AIX-FD-EXHAUSTED
+  severity: critical
+  category: capacity
+  title: 파일디스크립터 고갈
+  vendor_cause: 프로세스가 열 수 있는 파일 디스크립터 한도에 도달해 'Too many open files'(EMFILE) 가 발생한
+    상태. 소켓·파일 누수 또는 nofiles 한도 과소가 흔한 원인.
+  immediate:
+  - '`ls /proc/<PID>/fd | wc -l` 로 해당 프로세스의 열린 FD 수 확인(대상 종류 확인용 procfiles 는 2차)'
+  - '`lsuser -a nofiles nofiles_hard <user>` 로 한도 확인 — 열린 수가 한도에 근접하면 확정'
+  short:
+  - '(2차·승인 후, 롤백: 원래 값으로 chuser) `procfiles <PID> | head -30` 으로 열린 대상 종류 확인(대상 프로세스를
+    잠시 멈출 수 있음) 후 `chuser nofiles=<값> <user>` 로 한도 상향(다음 로그인·재시작부터 적용), 누수면 개발사 확인'
+  mid:
+  - 애플리케이션 커넥션 풀·파일 close 누락 수정, /etc/security/limits 기본값 표준화
+  long:
+  - 주요 프로세스 FD 사용률(한도 대비 80%) 감시
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: EMFILE 전 버전
+- code: AIX-PROC-LIMIT
+  severity: critical
+  category: capacity
+  title: 프로세스 한도 초과
+  vendor_cause: 사용자당 프로세스 수 한도(sys0 maxuproc)에 도달해 fork 가 실패한 상태. 프로세스 폭주·좀비 누적·기본값(128
+    등) 과소가 흔한 원인.
+  immediate:
+  - '`lsattr -El sys0 -a maxuproc` 로 한도, `ps -fu <user> | wc -l` 로 해당 사용자 프로세스 수 확인'
+  - '`ps -e -o user,ppid,comm | sort | uniq -c | sort -rn | head` 로 폭주 부모 프로세스·명령
+    식별, `ps -ef | grep -c defunct` 로 좀비 수 확인'
+  short:
+  - '(2차·승인 후, 롤백: 이전 값으로 chdev) `chdev -l sys0 -a maxuproc=<값>` 으로 즉시 상향(재부팅 불필요),
+    폭주 원인 프로세스는 담당자 확인 후 정리'
+  mid:
+  - 애플리케이션 프로세스 생성 구조 개선, maxuproc 표준값 수립
+  long:
+  - 사용자별 프로세스 수 감시(한도 대비 80%)
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: maxuproc 전 버전
+- code: AIX-AUTH-FAIL
+  severity: error
+  category: security
+  title: 인증 실패 반복
+  vendor_cause: 로그인 인증 실패가 반복된 상태(3004-xxx 메시지). 비밀번호 오입력·만료, loginretries 초과 잠금,
+    무차별 대입 시도가 흔한 원인.
+  immediate:
+  - '`who /etc/security/failedlogin | tail -20` 으로 실패 계정·터미널·시각, 인증 로그에서 출발지 확인'
+  - '`lsuser -a unsuccessful_login_count account_locked loginretries <user>` 로 잠금
+    여부 확인'
+  short:
+  - '(2차·승인 후, 롤백: 차단 해제) 외부 반복 시도면 출발지 차단, 정상 사용자면 본인 확인 후 `chsec -f /etc/security/lastlog
+    -a unsuccessful_login_count=0 -s <user>`'
+  mid:
+  - /etc/security/user 의 loginretries·maxage 정책과 원격 접속 경로 제한 정비
+  long:
+  - 계정·IP 별 인증 실패 임계 감시
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: 3004-xxx 로그인 메시지 전 버전, /var/adm/sulog·/etc/security/failedlogin
+- code: AIX-NTP-FAIL
+  severity: warn
+  category: connection
+  title: NTP 동기화 실패
+  vendor_cause: xntpd/ntpd 가 시간 서버와 동기화하지 못한 상태. 서버 도달 불가(UDP 123 차단), 시간 차이가 너무 커서
+    동기화 거부, 데몬 정지가 흔한 원인.
+  immediate:
+  - '`lssrc -ls xntpd | head -20` 으로 데몬 상태·sys peer 확인, `ntpq -p` 로 서버별 reach·offset
+    확인 — reach 0 이면 통신 불가'
+  - '`grep -v ''^#'' /etc/ntp.conf` 로 server 설정 확인, `date` 와 시간 서버 시각 비교'
+  short:
+  - '(2차·승인 후, 롤백: ntp.conf 백업 복원) 방화벽 UDP 123 확인, 시각 차가 크면 업무 영향 검토 후 `ntpdate -d
+    <server>` 로 확인 후 단계 보정, `stopsrc/startsrc -s xntpd`'
+  mid:
+  - 시간 서버 2대 이상 지정, 부팅 시 자동 기동(/etc/rc.tcpip) 확인
+  long:
+  - 'ntpq offset 임계(예: 100ms) 감시'
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: xntpd(5.3~7.1 기본)·ntpd4(7.1+ 선택) 문구 모두 포함
+- code: AIX-HMC-CONNECT-FAIL
+  severity: warn
+  category: connection
+  title: HMC 연결 실패
+  vendor_cause: LPAR 과 HMC 간 RMC 연결이 끊긴 상태. DLPAR·LPM·운영체제 종료 등 HMC 기능을 쓸 수 없게 된다.
+    방화벽(포트 657) 차단, IP 변경, RSCT 데몬 이상, 노드 ID 중복이 흔한 원인.
+  immediate:
+  - '`lssrc -s ctrmc` 로 RMC 데몬 상태, `lsrsrc IBM.MCP` 로 등록된 HMC 와 IP 확인(root)'
+  - HMC 에서 `lspartition -dlpar` 로 해당 LPAR 의 Active 값 확인, `ping -c 3 <HMC IP>` 로 도달성
+    확인
+  short:
+  - (2차·승인 후) 방화벽 TCP/UDP 657 개방 확인, IBM 'Fixing the No RMC Connection Error' 절차의
+    `/usr/sbin/rsct/bin/rmcctrl -z; rmcctrl -A; rmcctrl -p` 수행 후 수 분 뒤 재확인
+  mid:
+  - LPAR 복제 시 RSCT 노드 ID 재생성 절차 표준화, HMC 관리 네트워크 경로 정비
+  long:
+  - HMC 에서 rmc_state 를 주기 점검
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: RMC/HMC 연결 문구 전 버전
+  vendor_url: https://www.ibm.com/support/pages/fixing-no-rmc-connection-error
+- code: AIX-VIOS-PATH-FAIL
+  severity: critical
+  category: storage
+  title: VIOS 가상 경로 실패
+  vendor_cause: VIOS 를 통한 가상 SCSI/FC 경로가 실패한 상태. VIOS 재기동·장애, VIOS 의 물리 경로 장애가 원인이며
+    이중 VIOS 구성이면 남은 경로로 I/O 가 계속된다.
+  immediate:
+  - 클라이언트 LPAR 에서 `lspath | grep -v Enabled` 로 Failed 경로와 부모(vscsi/fscsi) 확인, `errpt
+    | head -20` 으로 시각 확인
+  - VIOS(padmin)에서 `lsmap -all | head -60` 으로 매핑, `errlog | head -20` 으로 VIOS 측 오류
+    확인
+  short:
+  - (2차) VIOS 복구 후 경로 자동 복귀 확인, 남으면 승인 후 `chpath -l hdisk<N> -p vscsi<N> -s enable`
+  mid:
+  - 이중 VIOS·hcheck_interval 설정 표준화, VIOS 업데이트는 한 대씩 순차 진행
+  long:
+  - 클라이언트 Failed 경로 수와 VIOS 상태 감시
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: VIOS vscsi 는 AIX 5.3+ (VIOS 1.x~)
+- code: A2205861
+  severity: warn
+  category: performance
+  title: 인터럽트 비활성 시간 과다(DELAYED_INTS)
+  immediate:
+  - "`errpt -a -j A2205861 | head -60` 으로 Detail Data(Resource·지연 정보)와 발생 빈도 확인 — 같은 시각 응답 지연 보고와 겹치면 영향 확정(읽기 전용)"
+  - "`errpt -s <mmddhhmmyy> | head -40` 으로 같은 시각 장치 어댑터·드라이버 오류 동반 여부, `oslevel -s` 로 TL·SP 기록(IBM APAR 대조용)"
+  short:
+  - IBM 지원(APAR) 대조 — 특정 드라이버·커널 확장 결함 여부(2차)
+  mid:
+  - 해당 APAR·서비스 팩 적용 계획(변경 관리)
+  long:
+  - 커널·펌웨어 수준 표준화
+  source: 룰 학습 4차(2026-10-15) — GPT 13차 IBM 문서 대조
+  vendor_cause: 커널이 인터럽트를 과도하게 오래 비활성화함(성능 문제 — 특정 프로그램의 CPU 과다가 아님)
+  vendor_action: ''
+  vendor_url: https://www.ibm.com/support/pages/detection-excessive-interrupt-disablement
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: LABEL DELAYED_INTS · IDENTIFIER A2205861 · Class S · Type PERF

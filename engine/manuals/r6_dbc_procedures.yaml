@@ -1,0 +1,619 @@
+# 근거 매뉴얼·작성 기준 (r6 아이디어 3 — '같은 제품·유형'으로만 붙던 판정의 전용 절차, CUBRID·GOLDILOCKS, 2026-10-16)
+# - CUBRID: CUBRID 11.4 Manual 'cubrid Utilities(spacedb·checkdb·backupdb·restoredb·paramdump)'·'Controlling CUBRID Processes(cubrid server/broker status·broker reset, CAS 오류 코드표 -10014 CAS_ER_OPEN_FILE)'
+#   ·'CUBRID HA(cubrid applyinfo·cubrid heartbeat copylogdb/applylogdb·HA 오류 메시지표 -10·-98·-897·-1028·-1029·-1030)'·'System Parameters(cubrid_broker.conf LOG_DIR·ERROR_LOG_DIR, cubrid.conf log_max_archives)' — www.cubrid.org/manual/en/11.4/
+#   오류 이름(ER_PB_BAD_PAGEID·ER_DISK_UNKNOWN_PURPOSE·ER_IO_WRITE_OUT_OF_SPACE·ER_LOG_MOUNT_FAIL·ER_LOG_DBBACKUP_FAIL·ER_PT_SYNTAX)은 CUBRID 소스 src/base/error_code.h 기준
+# - GOLDILOCKS: SUNJESOFT GOLDILOCKS 26c 매뉴얼 '오류 메시지(13024·13039·13050·14051·14055·14056·14088·14094·14095·14106·16038·16040·16309)'·'Backup and Recovery(ALTER DATABASE RECOVER TABLESPACE, Corrupted Control File, Recovery Using Backup)'
+#   ·'V$TABLESPACE(TBS_NAME·IS_ONLINE·OFFLINE_STATE)·V$TABLESPACE_STAT·V$DATAFILE(TBS_NAME·DATAFILE_NAME·FILE_SIZE — 손상 페이지 열 없음)·V$CONTROLFILE·V$BACKUP·V$PROPERTY(PROPERTY_NAME·PROPERTY_VALUE)·V$SESSION·V$STATEMENT·V$LOCK_WAIT' — manual.sunjesoft.co.kr
+# 작성 기준: knowledge_spec.md 5차(GPT 45차 관문) — 1차 읽기 전용 · 2차 사전조건·영향·승인·백업/롤백 + 성공/실패 판단 · 3차 민감정보 마스킹·전달 승인
+#   비밀번호는 명령줄에 쓰지 않는다(도구가 묻게 함) · 네트워크 도달 확인은 nc -zvw3 만
+procedures:
+# ── CUBRID ──
+- id: CUB-PROC-R6-CORRUPT
+  scope: id
+  products: [cubrid]
+  category: storage
+  match: ["-17", "-21", "-22", "-50", "-51", "-52", "-411", "-582"]
+  title: 페이지·섹터·레코드·인덱스·볼륨 헤더 손상 의심 (CUBRID)
+  source: "CUBRID 11.4 Manual 'cubrid Utilities — spacedb·checkdb(-C/-S, --check-btree, --check-file-tracker, -r 는 복구 옵션)·backupdb·restoredb'·'CUBRID HA — cubrid heartbeat status' · 오류 이름은 src/base/error_code.h(-17 ER_PB_BAD_PAGEID, -582 ER_DISK_UNKNOWN_PURPOSE)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 오류 위치(볼륨·페이지·OID·테이블)와 반복 여부 기록 (읽기 전용)
+      cmd: |
+        grep -n -A1 -E "CODE = -(17|21|22|50|51|52|411|582)([^0-9]|$)" $CUBRID/log/server/<db>_*.err | tail -40
+        grep -c -E "CODE = -(17|21|22|50|51|52|411|582)([^0-9]|$)" $CUBRID/log/server/<db>_*.err
+        grep -n -E "CODE = -1[34]([^0-9]|$)" $CUBRID/log/server/<db>_*.err | tail -10
+      check: "같은 볼륨·페이지·OID·테이블이 반복되면 그 객체 손상 의심 확정 · 직전에 -13/-14(I/O 오류)가 있으면 스토리지 원인 우선 · 한 번만 나오고 이후 같은 작업이 정상이면 기록만 하고 2차에 공유"
+      note: "적용: CUBRID 9.3·10.x·11.x · 권한: CUBRID 설치 OS 계정 · 같은 SQL·배치를 반복 실행해 재현하지 않는다(손상 범위가 넓어질 수 있음)"
+    - do: 볼륨 상태·OS 디스크 오류·복구 수단(HA·백업) 확인 (읽기 전용)
+      cmd: |
+        cubrid spacedb -s <db>
+        cat $CUBRID_DATABASES/databases.txt ; ls -l <db경로>/<db>_* | head -40
+        dmesg -T | grep -i -E "I/O error|medium error|blk_update" | tail -20
+        cubrid heartbeat status
+      check: "OS 디스크 오류가 함께 있으면 스토리지 장애로 확정해 시스템 담당 동시 호출 · 없으면 DB 내부 손상으로 2차 DBA 호출 · HA 정상 노드가 있으면 복구 선택지(정상 노드 기준 재구축)가 있음 · -582 는 볼륨 파일 목록과 <db>_vinf 가 맞지 않는지 대조"
+      note: "적용: CUBRID 9.3·10.x·11.x (dmesg -T 는 Linux) · 권한: CUBRID 설치 OS 계정 · heartbeat status 는 HA 구성일 때만 의미 있음"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 백업 확보 뒤 손상 범위만 일관성 점검
+      cmd: |
+        cubrid backupdb -D <백업 경로> <db>
+        cubrid checkdb -C <db> <schema.table>
+        cubrid checkdb -C --check-btree <db> <schema.table>      # -411(인덱스 키 오류)
+      check: "성공: 백업 완료(<db>_bkvinf 갱신) 후 checkdb 가 불일치 0 건 — 일시적 오류로 보고 감시 강화 · 실패: 불일치 보고 → --repair(-r) 는 쓰지 말고 출력 전체를 보존해 3차 의뢰, backupdb 가 손상 페이지에서 실패하면 그 오류를 그대로 3차 자료로"
+      note: "사전조건: 오류 테이블·인덱스 이름 확정, 백업 경로 디스크 여유 확인, 업무 영향이 적은 시간 · 영향: backupdb·checkdb 는 큰 I/O 부하(전체 대상이 아니라 테이블을 지정) · 승인: DBA·업무 담당 · 백업/롤백: 점검은 읽기만 함 — 이후 어떤 복구든 이 backupdb 결과를 롤백 기준으로 삼는다 · -582 의 --check-file-tracker 는 -S(서버 정지) 모드에서 정기 점검 창에만 · 적용: CUBRID 10.x/11.x"
+    - do: (2차·승인 후) 복구 방식 결정·수행 — 인덱스 재생성 / HA 재구축 / 백업 복원
+      cmd: |
+        cubrid restoredb --list <db>
+      check: "성공: 선택한 복구 후 같은 작업 재실행 시 손상 오류 재발 없음, checkdb 불일치 0 · 실패: 복원·재생성 후에도 재발 → 스토리지 재점검과 3차(제조사) 의뢰"
+      note: "선택지: (1) -411 등 인덱스만 불일치면 인덱스 DDL 을 보관한 뒤 재생성(DROP/CREATE INDEX — 생성 중 테이블 잠금), (2) HA 면 정상 노드를 기준으로 손상 노드 재구축(매뉴얼 'CUBRID HA' 의 복제 재구축 절차), (3) 단일 구성이면 cubrid restoredb 로 마지막 정상 백업 복원 · 사전조건: 위 단계 backupdb 와 데이터·로그 디렉터리 전체 사본, 복원 시점(유실 범위) 업무 확인 · 영향: 재생성·복원 중 서비스 중단 또는 테이블 잠금, 복원은 백업 이후 변경분 유실 · 승인: DBA·서비스 담당·업무 책임자(유실 범위) · 백업/롤백: 사전 사본으로 원복 · 적용: CUBRID 10.x/11.x"
+      verify_note: "미검증 — -21·-22·-50·-51·-52·-411 의 ER_ 이름과 메시지 원문을 매뉴얼 본문에서 확인하지 못함(소스 error_code.h·기존 코드 사전 설명 기준), HA 재구축 스크립트 이름·인자는 매뉴얼 원문으로 확인 못 해 명령을 적지 않음"
+  - stage: 3
+    steps:
+    - do: CUBRID 기술지원 의뢰 자료
+      cmd: |
+        cubrid_rel > cubrid_rel.txt ; cubrid spacedb <db> > spacedb.txt ; cubrid paramdump <db> > paramdump.txt
+        dmesg -T | grep -i -E "I/O error|medium error" | tail -50 > dmesg_io.txt
+        tar czf cubrid_corrupt_$(date +%Y%m%d).tgz $CUBRID/log/server/<db>_*.err cubrid_rel.txt spacedb.txt paramdump.txt dmesg_io.txt
+      check: "서버 .err(오류 전후)·checkdb 출력·spacedb·버전·OS I/O 오류"
+      note: "민감정보 마스킹: .err 의 사용자명·클라이언트 IP·호스트명, checkdb 출력의 업무 데이터 값을 가린 뒤 전달 · 전달 승인: DBA 확인 후 보안 담당 승인"
+
+- id: CUB-PROC-R6-HALOG
+  scope: id
+  products: [cubrid]
+  category: storage
+  match: ["-10", "-98", "-897", "-1028", "-1029", "-1030"]
+  title: HA 복제 로그 파일 열기·아카이브 생성·판독 실패 (CUBRID copylogdb·applylogdb)
+  source: "CUBRID 11.4 Manual 'CUBRID HA — cubrid_ha.conf(ha_copy_log_base), cubrid applyinfo(-L·-r·-a), cubrid heartbeat status·copylogdb/applylogdb start|stop, HA 오류 메시지표(-10 Cannot mount the disk volume·-98 Cannot create an archive log·-897 Decompression failure·-1028·-1029·-1030 log applier)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 복제 로그 경로·공간·권한 확인 (읽기 전용)
+      cmd: |
+        grep -n "ha_copy_log_base" $CUBRID/conf/cubrid_ha.conf
+        ls -ld <copylog_path> ; ls -lt <copylog_path>/ | head -20
+        df -h <copylog_path> ; df -i <copylog_path>
+      check: "경로가 없거나 CUBRID 실행 계정 소유가 아니면 -10 확정 · 사용률 100%·inode 고갈이면 -98 확정 · 크기가 0 이거나 다른 아카이브보다 눈에 띄게 작은 파일이 있으면 잘린 로그(-1028) 의심"
+      note: "적용: CUBRID HA 구성(9.x~11.4) · 권한: CUBRID 설치 OS 계정 · 실제 복제 로그 디렉터리는 <ha_copy_log_base>/<db>_<peer_host> 형태"
+    - do: 복제 반영 위치·오류 로그 확인 (읽기 전용)
+      cmd: |
+        cubrid heartbeat status
+        cubrid applyinfo -L <copylog_path> -r <peer_host> -a <db>
+        tail -50 $CUBRID/log/<db>@<node>_copylogdb.err
+        ls -t $CUBRID/log/*applylogdb*.err | head -3
+      check: "copylogdb .err 에 -10/-98 이면 파일·공간 문제 · applylogdb .err 에 -897/-1028/-1029/-1030 이 같은 LSA 에서 반복되면 복제 로그 손상 확정 · applyinfo 의 반영 지연이 계속 커지면 standby 데이터가 뒤처지는 중"
+      note: "적용: CUBRID HA 구성(9.x~11.4) · 권한: CUBRID 설치 OS 계정 · 오류 로그의 LSA·page·Trid 값은 그대로 기록(3차 자료)"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 경로·권한·공간을 바로잡고 해당 복제 프로세스만 다시 올림 (-10·-98)
+      cmd: |
+        cubrid heartbeat copylogdb stop <db> <peer_node> ; cubrid heartbeat copylogdb start <db> <peer_node>
+        cubrid heartbeat applylogdb stop <db> <peer_node> ; cubrid heartbeat applylogdb start <db> <peer_node>
+        cubrid heartbeat status
+      check: "성공: heartbeat status 에 copylogdb·applylogdb 가 registered/실행 상태, applyinfo 의 복사·반영 위치가 다시 증가 · 실패: 같은 오류 재발 → 경로·권한·공간 재확인, 반복되면 복제 재구축 단계로"
+      note: "사전조건: 변경 전 ls -ld·df 결과 기록, 공간 확보 시 정리할 파일은 다른 파일시스템으로 옮겨 보관(아카이브 로그 수동 삭제 금지), 현재 master 노드 확인 · 영향: 재시작 동안 복제 복사·반영이 잠시 멈춤(서비스 DB 는 계속) · 승인: DBA · 백업/롤백: 경로·소유자·권한은 기록해 둔 값으로 원복, 옮긴 파일은 원위치 · 적용: CUBRID HA 9.x~11.4"
+    - do: (2차·승인 후) 같은 LSA 에서 판독 오류가 반복되면 standby 복제 재구축 (-897·-1028·-1029·-1030)
+      cmd: |
+        cubrid backupdb -D <백업 경로> <db>      # 재구축 전 standby DB 백업
+      check: "성공: 재구축 후 applyinfo 반영 지연 0 근처 유지·같은 오류 재발 없음 · 실패: 재구축 중 오류 → 기존 standby 를 백업본으로 되돌리고 3차"
+      note: "사전조건: master 노드 정상·업무 영향 없는 시간, standby 백업과 copylog 디렉터리 사본 확보 · 영향: 재구축 동안 HA 이중화 없음(master 단독 운영), 네트워크·디스크 부하 · 승인: DBA·서비스 담당 · 백업/롤백: 재구축 전 standby backupdb 로 원복 가능 · 적용: CUBRID HA 9.x~11.4"
+      verify_note: "미검증 — 복제 재구축 스크립트(매뉴얼 'CUBRID HA' 복제 재구축 절)의 이름·인자를 원문으로 확인하지 못해 명령을 적지 않음 — 매뉴얼 절차를 따른다"
+  - stage: 3
+    steps:
+    - do: CUBRID 기술지원 의뢰 자료
+      cmd: |
+        cubrid applyinfo -L <copylog_path> -r <peer_host> -a <db> > applyinfo.txt ; cubrid heartbeat status > hb.txt
+        tar czf cubrid_halog_$(date +%Y%m%d).tgz $CUBRID/log/*copylogdb*.err $CUBRID/log/*applylogdb*.err applyinfo.txt hb.txt $CUBRID/conf/cubrid_ha.conf
+      check: "copylogdb/applylogdb 오류 로그·applyinfo·HA 상태·cubrid_ha.conf"
+      note: "민감정보 마스킹: 호스트명·IP, 오류 메시지 안의 key 값(업무 데이터)을 가린 뒤 전달 · 전달 승인: DBA 확인 후 보안 담당 승인"
+
+- id: CUB-PROC-R6-LOGVOL
+  scope: id
+  products: [cubrid]
+  category: storage
+  match: ["-82"]
+  title: 로그 볼륨 마운트 실패로 DB 기동 불가 (CUBRID)
+  source: "CUBRID 11.4 Manual 'Database Volume — databases.txt, 로그 볼륨(<db>_lgat·<db>_lginf·<db>_lgar*)'·'cubrid Utilities — cubrid server start·restoredb' · ER_LOG_MOUNT_FAIL(src/base/error_code.h)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 로그 경로·파일·파일시스템 확인 (읽기 전용)
+      cmd: |
+        cat $CUBRID_DATABASES/databases.txt
+        ls -l <로그 경로>/<db>_lgat <로그 경로>/<db>_lginf ; ls -lt <로그 경로>/<db>_lgar* | head -5
+        df -h <로그 경로> ; mount | grep <마운트 지점> ; id
+      check: "databases.txt 의 로그 경로와 실제 위치가 다르거나, _lgat 가 없거나, CUBRID 실행 계정이 읽고 쓸 수 없거나, 파일시스템이 마운트되지 않았으면 원인 확정 · 모두 정상인데 실패하면 로그 파일 손상 의심"
+      note: "적용: CUBRID 9.x~11.4 · 권한: CUBRID 설치 OS 계정 · 서버를 반복 기동해 보지 않는다(로그 상태를 덮어쓸 수 있음)"
+    - do: 기동 실패 오류 기록 (읽기 전용)
+      cmd: |
+        ls -lt $CUBRID/log/server/ | head -5
+        grep -n -E "CODE = -82([^0-9]|$)" $CUBRID/log/server/<db>_*.err | tail -10
+      check: "오류 메시지의 로그 볼륨 경로가 databases.txt 와 같은지 대조 — 다르면 설정·이동 이력 문제"
+      note: "적용: CUBRID 9.x~11.4 · 권한: CUBRID 설치 OS 계정"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 경로·마운트·소유자 원인 정정 후 기동
+      cmd: |
+        cubrid server start <db>
+        cubrid server status
+      check: "성공: server status 에 <db> 표시·브로커 접속 정상 · 실패: 같은 -82 → 로그 파일 손상·유실로 보고 백업 복원 단계로"
+      note: "사전조건: 데이터·로그 디렉터리 전체 사본 확보, 파일시스템 마운트·소유자 정정은 시스템 담당과 함께, databases.txt 수정 전 사본 · 영향: 기동 전까지 서비스 불가 · 승인: DBA·시스템 담당 · 백업/롤백: databases.txt·권한은 사본·기록값으로 원복 · 적용: CUBRID 9.x~11.4"
+    - do: (2차·승인 후) 로그 파일이 손상·유실됐으면 백업으로 복원
+      cmd: |
+        cubrid restoredb --list <db>
+        cubrid restoredb <db>
+      check: "성공: 복원 후 서버 기동·cubrid checkdb 정상·업무 조회 정상 · 실패: 백업 볼륨 누락·손상 → 이전 백업으로 재시도하거나 3차"
+      note: "사전조건: 서버 정지, 현재 데이터·로그 디렉터리 전체 사본, 사용할 백업 레벨·시점 확인 · 영향: 백업 이후 변경분 유실 가능, 복원 동안 서비스 중단 · 승인: DBA·서비스 담당·업무 책임자(유실 범위) · 백업/롤백: 사전 사본 디렉터리로 원복 · 적용: CUBRID 10.x/11.x (특정 시점은 -d 옵션)"
+  - stage: 3
+    steps:
+    - do: CUBRID 기술지원 의뢰 자료
+      cmd: |
+        ls -l <로그 경로>/ > logdir.txt ; cp -p $CUBRID_DATABASES/databases.txt . ; cubrid_rel > cubrid_rel.txt
+        tar czf cubrid_logvol_$(date +%Y%m%d).tgz $CUBRID/log/server/<db>_*.err logdir.txt databases.txt cubrid_rel.txt
+      check: "서버 .err·로그 디렉터리 목록·databases.txt·버전"
+      note: "민감정보 마스킹: databases.txt·경로의 호스트명, .err 의 사용자명·IP 를 가린 뒤 전달 · 전달 승인: DBA 확인 후 보안 담당 승인"
+
+- id: CUB-PROC-R6-BACKUP
+  scope: id
+  products: [cubrid]
+  category: storage
+  match: ["-100"]
+  title: 데이터베이스 백업 실패 (CUBRID backupdb)
+  source: "CUBRID 11.4 Manual 'cubrid Utilities — backupdb(-D 백업 경로, 기본은 로그 디렉터리), 백업 정보 파일 <db>_bkvinf' · ER_LOG_DBBACKUP_FAIL(src/base/error_code.h)"
+  stages:
+  - stage: 1
+    steps:
+    - do: -100 앞의 실제 원인 오류 확인 (읽기 전용)
+      cmd: |
+        grep -n "ERROR CODE" $CUBRID/log/server/<db>_*.err | tail -20
+        tail -50 <백업 작업 출력 로그>
+      check: "-100 바로 앞의 오류 코드가 실제 원인 — 공간 부족(-9·-15 계열)·I/O 오류(-13/-14)·파일 열기 실패 등으로 갈라 판단"
+      note: "적용: CUBRID 9.x~11.4 · 권한: CUBRID 설치 OS 계정"
+    - do: 백업 경로 공간·권한·직전 백업 확인 (읽기 전용)
+      cmd: |
+        df -h <백업 경로> ; ls -ld <백업 경로>
+        ls -lt <백업 경로>/ | head -10 ; ls -l <로그 경로>/<db>_bkvinf
+      check: "여유가 DB 크기보다 작거나 실행 계정이 쓸 수 없으면 확정 · 마지막 성공 백업 시각을 기록(복구 가능 시점 판단 자료)"
+      note: "적용: CUBRID 9.x~11.4 · 권한: CUBRID 설치 OS 계정 · -D 를 주지 않으면 databases.txt 의 로그 디렉터리에 만들어짐"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 원인 해소 뒤 백업 재수행
+      cmd: |
+        cubrid backupdb -D <백업 경로> <db>
+        ls -l <로그 경로>/<db>_bkvinf ; ls -lt <백업 경로>/ | head -5
+      check: "성공: 명령이 오류 없이 끝나고 <db>_bkvinf·백업 파일 시각 갱신 · 실패: 같은 앞선 오류 재발 → 원인 오류의 절차(공간·I/O)로, I/O 오류면 볼륨 손상 의심 절차로"
+      note: "사전조건: 백업 경로 여유 확보(필요 시 다른 파일시스템 지정), 업무 영향이 적은 시간 · 영향: 백업 동안 I/O 부하 · 승인: DBA·백업 담당 · 백업/롤백: 실패한 백업 조각은 지우지 말고 다른 위치로 옮겨 보관, 기존 정상 백업은 새 백업 성공 확인 전까지 유지 · 적용: CUBRID 9.x~11.4"
+  - stage: 3
+    steps:
+    - do: CUBRID 기술지원 의뢰 자료
+      cmd: |
+        df -h > df.txt ; cubrid_rel > cubrid_rel.txt
+        tar czf cubrid_backup_$(date +%Y%m%d).tgz $CUBRID/log/server/<db>_*.err df.txt cubrid_rel.txt
+      check: "서버 .err·백업 출력·공간 현황·버전"
+      note: "민감정보 마스킹: 경로·호스트명·사용자명을 가린 뒤 전달 · 전달 승인: DBA 확인 후 보안 담당 승인"
+
+- id: CUB-PROC-R6-CASFILE
+  scope: id
+  products: [cubrid]
+  category: storage
+  match: ["-10014"]
+  title: CAS 파일 열기 실패 (CUBRID 브로커 로그·임시 파일)
+  source: "CUBRID 11.4 Manual 'Controlling CUBRID Processes — CAS 오류 코드표(-10014 CAS_ER_OPEN_FILE), cubrid broker status -f, cubrid broker reset'·'System Parameters — cubrid_broker.conf LOG_DIR·ERROR_LOG_DIR·SQL_LOG'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 브로커 로그 경로의 권한·공간 확인 (읽기 전용)
+      cmd: |
+        grep -n -E "^\[|LOG_DIR|ERROR_LOG_DIR|SQL_LOG" $CUBRID/conf/cubrid_broker.conf
+        ls -ld $CUBRID/log/broker/sql_log $CUBRID/log/broker/error_log ; id
+        df -h $CUBRID/log ; df -i $CUBRID/log
+      check: "로그 디렉터리 소유자가 CUBRID 실행 계정과 다르거나 쓰기 권한이 없거나 공간·inode 가 100% 면 확정"
+      note: "적용: CUBRID 9.x~11.4 · 권한: CUBRID 설치 OS 계정 · LOG_DIR 를 바꾼 설치면 그 경로를 대상으로"
+    - do: CAS 열린 파일 수 한도 확인 (읽기 전용)
+      cmd: |
+        cubrid broker status -f <broker> | head -40
+        ulimit -n ; ls /proc/<CAS PID>/fd | wc -l
+      check: "열린 파일 수가 ulimit -n 에 가까우면 한도 초과가 원인 · 특정 브로커만 실패하면 그 브로커 설정·경로 문제"
+      note: "적용: Linux · CUBRID 9.x~11.4 · 권한: CUBRID 설치 OS 계정"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 권한·공간·한도 정정 뒤 해당 브로커만 재연결
+      config:
+        file: 로그 디렉터리 소유자·권한 · /etc/security/limits.conf(nofile)
+        snippet: |
+          # 소유자/권한을 설치 기준과 같게(CUBRID 실행 계정), 공간은 오래된 sql_log 를 다른 파일시스템으로 옮겨 확보
+          <cubrid 계정> soft nofile <값>
+      cmd: |
+        cubrid broker reset <broker>
+        cubrid broker status -f <broker> | head -20
+      check: "성공: 같은 요청에서 -10014 재발 없음·CAS 상태 정상 · 실패: 재발 → 대상 파일 경로를 error_log 에서 다시 확인, nofile 은 브로커 재시작 후에 반영되므로 일정 협의"
+      note: "사전조건: 변경 전 ls -ld·ulimit 결과 기록, 옮길 로그 파일 목록 확인 · 영향: broker reset 은 해당 브로커의 CAS 연결을 다시 맺음(진행 중 요청 실패 가능) · 승인: DBA·시스템 담당 · 백업/롤백: 권한·limits.conf 는 기록값·사본으로 원복, 옮긴 로그는 원위치 가능 · 적용: CUBRID 9.x~11.4"
+  - stage: 3
+    steps:
+    - do: CUBRID 기술지원 의뢰 자료
+      cmd: |
+        cubrid broker status -b -f > broker.txt ; ulimit -a > ulimit.txt
+        tar czf cubrid_casfile_$(date +%Y%m%d).tgz broker.txt ulimit.txt $CUBRID/log/broker/error_log/ $CUBRID/conf/cubrid_broker.conf
+      check: "브로커 상태·error_log·설정·한도"
+      note: "민감정보 마스킹: 클라이언트 IP·호스트명·계정명 가림 · 전달 승인: DBA 확인 후 보안 담당 승인"
+
+- id: CUB-PROC-R6-DISK
+  scope: id
+  products: [cubrid]
+  category: disk
+  match: ["-15"]
+  title: 파일시스템 공간 부족으로 페이지 쓰기 실패 (CUBRID)
+  source: "CUBRID 11.4 Manual 'Database Volume — databases.txt·볼륨 파일'·'System Parameters — log_max_archives' · ER_IO_WRITE_OUT_OF_SPACE(src/base/error_code.h)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 대상 파일시스템 공간·inode 확인 (읽기 전용)
+      cmd: |
+        grep -n -A1 -E "CODE = -15([^0-9]|$)" $CUBRID/log/server/<db>_*.err | tail -10
+        df -h <파일시스템> ; df -i <파일시스템>
+      check: "사용률 100% 또는 inode 고갈이면 확정 · 메시지의 볼륨 경로가 데이터·로그 중 어디인지 기록"
+      note: "적용: CUBRID 10.x/11.x · 권한: CUBRID 설치 OS 계정"
+    - do: 공간을 차지한 대상 식별 (읽기 전용)
+      cmd: |
+        du -xsh <파일시스템>/* 2>/dev/null | sort -rh | head -15
+        ls -lt <로그 경로>/<db>_lgar* | head -10
+        dmesg -T | tail -20
+      check: "백업·덤프·오래된 로그 파일이 대부분이면 정리 대상, 아카이브 로그(<db>_lgar*)가 대부분이면 DBA 판단 대상 · 디스크 오류가 함께 있으면 시스템 담당 호출"
+      note: "적용: Linux(-x 로 다른 파일시스템 제외) · 권한: CUBRID 설치 OS 계정(타 계정 디렉터리는 root 필요할 수 있음) · 삭제는 1차에서 하지 않는다"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 백업·덤프 파일 이전 또는 파일시스템 증설
+      cmd: |
+        df -h <다른 파일시스템>
+        cp -p <정리 대상 파일> <다른 파일시스템>/ && ls -l <다른 파일시스템>/<정리 대상 파일>
+      check: "성공: 사용률 85% 이하로 내려가고 같은 작업 재실행 시 -15 재발 없음 · 실패: 여유가 부족 → 파일시스템 증설 요청(시스템 담당)"
+      note: "사전조건: 정리 대상 소유자·용도 확인, 복사 성공 확인 뒤에만 원본 정리 · 영향: 대용량 복사 중 I/O 부하 · 승인: DBA·시스템 담당 · 백업/롤백: 옮긴 파일은 원위치 가능하게 보관 · 아카이브 로그는 수동 삭제 금지(시점 복구 범위 손실) — 줄이려면 최신 backupdb 확인 후 log_max_archives 조정을 DBA 가 결정 · 적용: CUBRID 10.x/11.x"
+  - stage: 3
+    steps:
+    - do: CUBRID 기술지원 의뢰 자료
+      cmd: |
+        df -h > df.txt ; cubrid spacedb <db> > spacedb.txt
+        tar czf cubrid_disk_$(date +%Y%m%d).tgz $CUBRID/log/server/<db>_*.err df.txt spacedb.txt
+      check: "서버 .err·디스크 현황·spacedb"
+      note: "민감정보 마스킹: 경로의 사용자명·호스트명 가림 · 전달 승인: DBA 확인 후 보안 담당 승인"
+
+- id: CUB-PROC-R6-SQL
+  scope: id
+  products: [cubrid]
+  category: internal
+  match: ["-493"]
+  title: SQL 구문 오류 — 애플리케이션 SQL 확인 (CUBRID)
+  source: "CUBRID 11.4 Manual 'Broker Logs — SQL 로그(sql_log)'·'CUBRID SQL 문법' · ER_PT_SYNTAX(src/base/error_code.h)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 실패 SQL·호출 모듈·시작 시각 확인 (읽기 전용)
+      cmd: |
+        grep -n -E "\-493|Syntax" <애플리케이션 로그> | tail -20
+        grep -n "<SQL 일부>" $CUBRID/log/broker/sql_log/<broker>_<n>.sql.log | tail -10
+      check: "오류 위치 표시 부분이 예약어·따옴표·버전별 문법 차이면 애플리케이션 SQL 원인(DB 장애 아님) · 배포 직후 급증이면 배포 변경이 원인"
+      note: "적용: CUBRID 9.x~11.4 · 권한: 애플리케이션 로그 읽기, CUBRID 설치 OS 계정 · SQL 로그가 꺼져 있으면 애플리케이션 로그로만 판단"
+    - do: 서버 버전 확인 (읽기 전용)
+      cmd: |
+        cubrid_rel
+      check: "개발·검증 환경과 운영 버전이 다르면 버전별 문법 차이 의심"
+      note: "적용: CUBRID 9.x~11.4 · 권한: 일반 사용자"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) SQL 수정 또는 직전 배포 되돌리기 — DB 설정은 바꾸지 않음
+      cmd: |
+        csql -u <user> <검증용 db>      # 검증 DB 에서 수정 SQL 실행 확인(비밀번호는 프롬프트로)
+      check: "성공: 수정 SQL 이 검증 DB 에서 오류 없이 실행되고 운영 반영 후 -493 사라짐 · 실패: 문법이 맞는데도 오류 → 버전 차이·드라이버 문제로 3차"
+      note: "사전조건: 개발 담당이 오류 SQL 과 수정본 확인 · 영향: 애플리케이션 재배포 필요 · 승인: 개발·배포 담당 · 백업/롤백: 직전 배포본 보관, 문제 시 직전 배포로 원복"
+  - stage: 3
+    steps:
+    - do: CUBRID 기술지원 의뢰 자료(문법이 매뉴얼과 맞는데 오류일 때만)
+      cmd: |
+        cubrid_rel > cubrid_rel.txt ; grep -n "<SQL 일부>" $CUBRID/log/broker/sql_log/<broker>_<n>.sql.log > sql_fail.txt
+      check: "실패 SQL·버전·드라이버 버전"
+      note: "민감정보 마스킹: SQL 의 리터럴·바인드 값(업무 데이터)·계정명 가림 · 전달 승인: 개발 담당·보안 담당"
+
+# ── GOLDILOCKS ──
+- id: GD-PROC-R6-RECOVERY
+  scope: id
+  products: [goldilocks]
+  category: storage
+  match: [ERR-14051, ERR-14056, ERR-14088, ERR-14094, ERR-14095]
+  title: 미디어·데이터파일 복구 필요, 컨트롤 파일·백업 파일 손상, 리두 적용 실패 (GOLDILOCKS)
+  source: "SUNJESOFT GOLDILOCKS 26c 매뉴얼 '오류 메시지 — 14051(ALTER DATABASE RECOVER TABLESPACE)·14056(nologging 이후 백업으로 다시 복구)·14088(백업 컨트롤 파일로 불완전 복구, Corrupted Control File)·14094(백업 데이터파일로 복구)·14095(Recovery Using Backup)'·'V$TABLESPACE·V$DATAFILE·V$CONTROLFILE·V$BACKUP'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 대상 테이블스페이스·데이터파일·직전 I/O 오류 기록 (읽기 전용)
+      cmd: |
+        grep -n -B2 -A3 -E "1405[16]|14088|1409[45]" $GOLDILOCKS_DATA/trc/system.trc | tail -40
+        dmesg -T | grep -i -E "I/O error|medium error" | tail -20
+      check: "OS 디스크 오류가 함께 있으면 스토리지 원인 우선(시스템 담당 동시 호출) · 14056 은 lsn·lpsn·physical id 를 그대로 기록 · 14095 는 손상 백업 파일명을 기록"
+      note: "적용: GOLDILOCKS 20c~26c · 권한: GOLDILOCKS 설치 OS 계정 · 일반 기동·복구를 반복 시도하지 않는다(매뉴얼: 14056 은 재시도 대신 다른 백업)"
+      verify_note: "미검증 — system.trc 기본 경로($GOLDILOCKS_DATA/trc/)를 26c 매뉴얼 원문으로 확인하지 못함(기존 절차 기준)"
+    - do: 테이블스페이스·데이터파일·컨트롤 파일·백업 상태 확인 (읽기 전용, 인스턴스가 열려 있을 때)
+      cmd: |
+        # gsql 로 DBA 접속 후(비밀번호는 프롬프트로)
+        SELECT TBS_NAME, IS_ONLINE, OFFLINE_STATE FROM V$TABLESPACE;
+        SELECT TBS_NAME, DATAFILE_NAME, FILE_SIZE FROM V$DATAFILE;
+        SELECT STATUS, CONTROLFILE_NAME, IS_PRIMARY FROM V$CONTROLFILE;
+        SELECT TBS_NAME, BACKUP_STATUS FROM V$BACKUP;
+      check: "OFFLINE 이고 OFFLINE_STATE 가 INCONSISTENT 면 복구 필요 확정(14051/14094) · 컨트롤 파일 STATUS 이상이면 14088 · 접속이 안 되면 ls -l 로 데이터파일·컨트롤 파일 존재·크기만 확인"
+      note: "적용: GOLDILOCKS 26c 매뉴얼 뷰·열(20c·22c 에서 열이 다르면 2차가 매뉴얼로 확인) · V$DATAFILE 에는 손상 페이지 열이 없음 · 권한: DBA"
+    - do: 복구에 쓸 백업·로그 연속성 확인 (읽기 전용)
+      cmd: |
+        ls -lt <백업 경로> | head -10 ; ls -lt <아카이브 로그 경로> | head -10
+        ls -l <백업 파일>
+      check: "최근 정상 백업과 그 이후 로그가 이어져 있으면 완전 복구 가능 · 백업 파일 크기가 0 이거나 같은 세트의 다른 파일보다 작으면 잘린 백업(14095) · 백업이 없거나 로그가 끊겼으면 즉시 2차·제조사 의뢰"
+      note: "적용: GOLDILOCKS 20c~26c · 권한: GOLDILOCKS 설치 OS 계정 · 백업·아카이브 경로는 운영 기준서 또는 V$PROPERTY 의 아카이브 관련 property 로 확인"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 원인(디스크·경로) 해소 뒤 테이블스페이스 복구·온라인 전환 (14051·14094)
+      cmd: |
+        # gsql 로 DBA 접속 후
+        ALTER DATABASE RECOVER TABLESPACE <TS>;
+        ALTER TABLESPACE <TS> ONLINE;
+        SELECT TBS_NAME, IS_ONLINE, OFFLINE_STATE FROM V$TABLESPACE WHERE TBS_NAME = '<TS>';
+      check: "성공: 해당 테이블스페이스 IS_ONLINE 이 참이고 업무 조회 정상, 같은 오류 재발 없음 · 실패: 복구 오류(로그 누락·14056) → 다른(nologging 이후) 백업으로 복구 계획, 3차"
+      note: "사전조건: 디스크 오류 해소, 현재 데이터파일·컨트롤 파일·로그 디렉터리 전체 사본 확보, 사용할 백업·로그 확인 · 영향: 복구 동안 그 테이블스페이스 객체 사용 불가 · 승인: DBA·서비스 담당 · 백업/롤백: 사전 사본으로 원복 · 적용: GOLDILOCKS 20c~26c(매뉴얼 RECOVER TABLESPACE → ONLINE 순서)"
+      verify_note: "미검증 — 데이터파일 단위 복구(14094) 문법과 테이블스페이스 OFFLINE 분리 옵션을 26c 매뉴얼 원문으로 확인하지 못함 — 매뉴얼 'Recovery Using Backup' 을 따른다"
+    - do: (2차·승인 후) 컨트롤 파일 손상·백업 손상·리두 적용 실패 — 제조사 절차로 복구 (14088·14095·14056)
+      check: "성공: 매뉴얼 절차(14088 'Corrupted Control File' 불완전 복구 후 재시작 / 14095 이전 정상 백업으로 복구 / 14056 nologging 작업 이후 만든 백업으로 다시 복구) 완료 후 기동·업무 조회 정상 · 실패: 남은 백업으로도 복구 불가 → 제조사 현장 지원"
+      note: "사전조건: 데이터파일·컨트롤 파일·로그 디렉터리 전체 사본, 불완전 복구 시 유실 범위를 업무 책임자와 확인 · 영향: 불완전 복구는 마지막 적용 로그 이후 변경분 유실, 작업 동안 서비스 중단 · 승인: DBA·서비스 담당·업무 책임자 · 백업/롤백: 사전 사본으로 원복, 복구 직후 새 전체 백업 수행"
+      verify_note: "미검증 — 백업 컨트롤 파일을 쓰는 불완전 복구 명령 형식을 26c 매뉴얼 원문으로 확인하지 못해 명령을 적지 않음"
+  - stage: 3
+    steps:
+    - do: SUNJESOFT 기술지원 의뢰 자료
+      cmd: |
+        ls -l <데이터 경로> > datafiles.txt ; ls -lt <백업 경로> > backups.txt ; dmesg -T | tail -200 > dmesg.txt
+        tar czf goldilocks_recovery_$(date +%Y%m%d).tgz $GOLDILOCKS_DATA/trc/ datafiles.txt backups.txt dmesg.txt
+      check: "system.trc·데이터파일·백업 목록·V$ 조회 결과·OS 로그"
+      note: "민감정보 마스킹: trc 의 사용자명·클라이언트 IP·SQL 바인드값, 경로의 호스트명을 가린 뒤 전달 · 전달 승인: DBA 확인 후 보안 담당 승인"
+
+- id: GD-PROC-R6-DISK
+  scope: id
+  products: [goldilocks]
+  category: disk
+  match: [ERR-14055, ERR-14106]
+  title: 쓰기 오류로 테이블스페이스 OFFLINE·세그먼트 손상 (GOLDILOCKS)
+  source: "SUNJESOFT GOLDILOCKS 26c 매뉴얼 '오류 메시지 — 14106(tablespace taken offline as the result of a write error: ALTER DATABASE RECOVER)·14055(segment is corrupted: 제조사 문의)'·'V$TABLESPACE·V$DATAFILE'"
+  stages:
+  - stage: 1
+    steps:
+    - do: OFFLINE 테이블스페이스·손상 세그먼트 기록 (읽기 전용)
+      cmd: |
+        grep -n -E "\((14055|14106)\)" $GOLDILOCKS_DATA/trc/system.trc | tail -20
+        # gsql 로 DBA 접속 후
+        SELECT TBS_NAME, IS_ONLINE, OFFLINE_STATE FROM V$TABLESPACE;
+        SELECT TBS_NAME, DATAFILE_NAME, FILE_SIZE FROM V$DATAFILE;
+      check: "14106: OFFLINE 테이블스페이스와 OFFLINE_STATE(CONSISTENT/INCONSISTENT) 기록 · 14055: physical id·발생 SQL·객체 기록, 같은 physical id 반복이면 손상 확정"
+      note: "적용: GOLDILOCKS 26c 매뉴얼 뷰 · 권한: DBA · 손상 객체를 대상으로 같은 SQL 을 반복 실행하지 않는다"
+    - do: 공간·디스크 오류 확인 (읽기 전용)
+      cmd: |
+        df -h <데이터파일 경로> ; df -i <데이터파일 경로>
+        dmesg -T | grep -i -E "I/O error|medium error" | tail -20
+      check: "공간 100% 면 쓰기 오류 원인 확정, I/O 오류 동반이면 스토리지 장애 — 시스템 담당 동시 호출"
+      note: "적용: Linux · 권한: GOLDILOCKS 설치 OS 계정"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 쓰기 오류 원인 해소 뒤 테이블스페이스 복구·온라인 전환 (14106)
+      cmd: |
+        # gsql 로 DBA 접속 후
+        ALTER DATABASE RECOVER TABLESPACE <TS>;
+        ALTER TABLESPACE <TS> ONLINE;
+      check: "성공: V$TABLESPACE 에서 IS_ONLINE 참·업무 조회 정상 · 실패: 복구 오류 → 백업 기반 복구(GD-PROC-R6-RECOVERY 의 2차) 또는 3차"
+      note: "사전조건: 공간 확보·디스크 오류 해소, 데이터파일 사본·최신 백업 확보 · 영향: 복구 동안 해당 테이블스페이스 객체 사용 불가 · 승인: DBA·서비스 담당 · 백업/롤백: 사전 사본·백업으로 원복 · 적용: GOLDILOCKS 20c~26c(매뉴얼 7장 예시 순서)"
+    - do: (2차·승인 후) 세그먼트 손상(14055)은 제조사 지시에 따라 객체 재생성 또는 백업 기반 복구
+      check: "성공: 재생성·복구 후 같은 physical id 오류 재발 없음 · 실패: 재발 → 스토리지 재점검·제조사 현장 지원"
+      note: "사전조건: 손상 객체 DDL·남은 데이터 범위 확인, 최신 백업과 데이터파일 사본 확보 · 영향: 재생성 동안 해당 객체 사용 불가, 손상 행은 유실 가능 · 승인: DBA·업무 책임자 · 백업/롤백: 사전 사본·백업으로 원복 — 매뉴얼은 14055 를 제조사 문의 대상으로 안내"
+  - stage: 3
+    steps:
+    - do: SUNJESOFT 기술지원 의뢰 자료
+      cmd: |
+        dmesg -T | tail -200 > dmesg.txt ; df -h > df.txt
+        tar czf goldilocks_segment_$(date +%Y%m%d).tgz $GOLDILOCKS_DATA/trc/ dmesg.txt df.txt
+      check: "system.trc·OS 로그·디스크 현황·V$ 조회 결과"
+      note: "민감정보 마스킹: trc 의 SQL 리터럴·사용자명·IP, 경로의 호스트명을 가린 뒤 전달 · 전달 승인: DBA 확인 후 보안 담당 승인"
+
+- id: GD-PROC-R6-CAPACITY
+  scope: id
+  products: [goldilocks]
+  category: capacity
+  match: [ERR-13024]
+  title: 최대 프로세스 수 초과 (GOLDILOCKS PROCESS_MAX_COUNT)
+  source: "SUNJESOFT GOLDILOCKS 26c 매뉴얼 '오류 메시지 — 13024(exceeded maximum number of processes: PROCESS_MAX_COUNT 수정)'·'Property — PROCESS_MAX_COUNT(기본 128, 운영 중 ALTER SYSTEM 변경 불가)'·'V$PROPERTY·V$SESSION'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 한도와 접속 형태·프로그램별 편중 확인 (읽기 전용)
+      cmd: |
+        # gsql 로 DBA 접속 후(접속 자체가 막히면 이미 열린 DBA 세션에서)
+        SELECT PROPERTY_NAME, PROPERTY_VALUE FROM V$PROPERTY WHERE PROPERTY_NAME IN ('PROCESS_MAX_COUNT', 'CLIENT_MAX_COUNT');
+        SELECT CONNECTION_TYPE, SERVER_TYPE, PROGRAM_NAME, COUNT(*) FROM V$SESSION GROUP BY CONNECTION_TYPE, SERVER_TYPE, PROGRAM_NAME ORDER BY 4 DESC;
+      check: "특정 프로그램 세션이 평시보다 크게 늘었으면 연결 누수·폭주 · 고르게 한도에 닿았으면 한도 과소"
+      note: "적용: GOLDILOCKS 20c~26c(26c 매뉴얼 뷰) · 권한: DBA · D/A·dedicated 모드는 접속마다 프로세스가 생긴다"
+    - do: 발생 시각·OS 프로세스 한도 확인 (읽기 전용)
+      cmd: |
+        grep -n "(13024)" $GOLDILOCKS_DATA/trc/system.trc | tail -10
+        ulimit -u ; ps -u <dbuser> --no-headers | wc -l
+      check: "발생 시작 시각을 배포·배치 일정과 대조 · OS nproc 한도도 근접하면 함께 조정 대상"
+      note: "적용: Linux · 권한: GOLDILOCKS 설치 OS 계정"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 연결 누수 정정 또는 PROCESS_MAX_COUNT 상향(재기동 필요)
+      config:
+        file: $GOLDILOCKS_DATA/conf/goldilocks.properties.conf
+        snippet: |
+          PROCESS_MAX_COUNT = <현재값보다 큰 값 — 메모리·OS nproc 한도 이내, 최대 65535>
+      cmd: |
+        # 정기 점검 시간에 표준 정지·기동 절차로 재기동한 뒤 gsql 에서 확인
+        SELECT PROPERTY_NAME, PROPERTY_VALUE FROM V$PROPERTY WHERE PROPERTY_NAME = 'PROCESS_MAX_COUNT';
+      check: "성공: 새 값 반영·13024 재발 없음 · 실패: 기동 실패(메모리·OS 한도) → 백업한 properties 로 원복 후 기동, 편중 프로그램이 있으면 커넥션 풀 최대값·반납 누락을 먼저 고침"
+      note: "사전조건: 편중 프로그램이 있으면 애플리케이션 담당이 풀 설정을 먼저 점검, properties 파일 사본, 서버 메모리·ulimit -u 여유 확인 · 영향: 재기동 동안 DB 전체 중단 · 승인: DBA·서비스 담당 · 백업/롤백: 사본 properties 로 원복 후 재기동 · 적용: GOLDILOCKS 20c~26c"
+  - stage: 3
+    steps:
+    - do: SUNJESOFT 기술지원 의뢰 자료
+      cmd: |
+        ulimit -a > ulimit.txt
+        tar czf goldilocks_proc_$(date +%Y%m%d).tgz $GOLDILOCKS_DATA/trc/ $GOLDILOCKS_DATA/conf/ ulimit.txt
+      check: "system.trc·properties·세션 집계 결과·한도"
+      note: "민감정보 마스킹: 프로그램명의 사용자 정보·IP·호스트명 가림 · 전달 승인: DBA 확인 후 보안 담당 승인"
+
+- id: GD-PROC-R6-PERFORMANCE
+  scope: id
+  products: [goldilocks]
+  category: performance
+  match: [ERR-13039]
+  title: 최대 질의 실행 시간(QUERY_TIMEOUT) 초과 (GOLDILOCKS)
+  source: "SUNJESOFT GOLDILOCKS 26c 매뉴얼 '오류 메시지 — 13039(Exceeded maximum query time: 질의 수정 또는 QUERY_TIMEOUT 조정)'·'V$PROPERTY·V$STATEMENT·V$LOCK_WAIT'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 한도와 초과 SQL·집중 시간대 확인 (읽기 전용)
+      cmd: |
+        grep -n "(13039)" $GOLDILOCKS_DATA/trc/system.trc | tail -10
+        # gsql 로 DBA 접속 후
+        SELECT PROPERTY_NAME, PROPERTY_VALUE, PROPERTY_SOURCE FROM V$PROPERTY WHERE PROPERTY_NAME = 'QUERY_TIMEOUT';
+        SELECT SESSION_ID, SQL_TEXT, START_TIME, TOTAL_EXEC_TIME FROM V$STATEMENT ORDER BY TOTAL_EXEC_TIME DESC;
+      check: "같은 SQL 만 초과하면 SQL·실행 계획 원인 · 여러 SQL 이 같은 시각 동시에 초과하면 잠금 대기·자원 부족 의심 · QUERY_TIMEOUT 은 초 단위(0=무제한)"
+      note: "적용: GOLDILOCKS 20c~26c(26c 매뉴얼 뷰) · 권한: DBA · V$STATEMENT 결과에는 SQL 리터럴이 보이므로 기록 시 업무 값 가림"
+    - do: 잠금 대기·OS 부하 확인 (읽기 전용)
+      cmd: |
+        # gsql 로 DBA 접속 후
+        SELECT GRANT_TRANS_ID, REQUEST_TRANS_ID FROM V$LOCK_WAIT;
+        vmstat 5 3
+      check: "잠금 대기 행이 있으면 잠금 원인(GD-PROC-R5-LOCK 확인) · CPU·I/O 대기가 높으면 자원 부족"
+      note: "적용: GOLDILOCKS 26c 매뉴얼 뷰·Linux · 권한: DBA"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) SQL·인덱스 개선 또는 QUERY_TIMEOUT 을 업무 기준에 맞게 조정
+      cmd: |
+        # gsql 로 DBA 접속 후 — 현재 값을 기록한 뒤 변경
+        ALTER SYSTEM SET QUERY_TIMEOUT = <초>;
+        SELECT PROPERTY_NAME, PROPERTY_VALUE FROM V$PROPERTY WHERE PROPERTY_NAME = 'QUERY_TIMEOUT';
+      check: "성공: 개선 SQL 수행 시간 감소 또는 새 한도 반영 후 13039 재발 없음 · 실패: 재발 → 실행 계획·통계 재검토, 3차"
+      note: "사전조건: 개발 담당과 대상 SQL·업무 SLA 확인, 한도 상향보다 SQL 개선 우선 · 영향: 한도 상향 시 느린 질의가 자원을 더 오래 점유 · 승인: DBA·개발 담당 · 백업/롤백: 변경 전 값 기록, 같은 문장으로 이전 값 복원"
+      verify_note: "미검증 — QUERY_TIMEOUT 의 ALTER SYSTEM 변경 가능 여부·적용 범위(SYSTEM/SESSION)를 26c 매뉴얼 원문으로 확인하지 못함(V$PROPERTY 의 변경 가능 여부 열로 먼저 확인)"
+  - stage: 3
+    steps:
+    - do: SUNJESOFT 기술지원 의뢰 자료
+      cmd: |
+        grep -n "(13039)" $GOLDILOCKS_DATA/trc/system.trc > timeout.txt ; vmstat 5 6 > vmstat.txt
+      check: "초과 SQL·발생 시각·부하 현황"
+      note: "민감정보 마스킹: SQL 리터럴·바인드 값·계정명 가림 · 전달 승인: DBA·개발 담당"
+
+- id: GD-PROC-R6-MEMORY
+  scope: id
+  products: [goldilocks]
+  category: memory
+  match: [ERR-13050]
+  title: 플랜 캐시 메모리 부족 (GOLDILOCKS)
+  source: "SUNJESOFT GOLDILOCKS 26c 매뉴얼 '오류 메시지 — 13050(insufficient plan cache memory: 서버 내부 오류, 제조사 문의)'·'Property — PLAN_CACHE·PLAN_CACHE_SIZE'·'V$PROPERTY'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 플랜 캐시 설정·발생 빈도 확인 (읽기 전용)
+      cmd: |
+        # gsql 로 DBA 접속 후
+        SELECT PROPERTY_NAME, PROPERTY_VALUE FROM V$PROPERTY WHERE PROPERTY_NAME IN ('PLAN_CACHE', 'PLAN_CACHE_SIZE');
+        grep -n "(13050)" $GOLDILOCKS_DATA/trc/system.trc | tail -10
+      check: "반복 발생이면 제조사 문의 대상(매뉴얼) · 한 번이고 이후 정상이면 기록만"
+      note: "적용: GOLDILOCKS 20c~26c · 권한: DBA"
+    - do: OS 메모리 여유 확인 (읽기 전용)
+      cmd: |
+        free -m ; ps -eo pid,rss,comm --sort=-rss | head -10
+      check: "OS 가용 메모리도 부족하면 GD-PROC-R5-MEMORY 의 메모리 점검을 함께"
+      note: "적용: Linux · 권한: 일반 사용자"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 제조사 확인을 받아 PLAN_CACHE_SIZE 조정 여부 결정
+      cmd: |
+        # gsql 로 DBA 접속 후 — 제조사가 권고한 값으로
+        ALTER SYSTEM SET PLAN_CACHE_SIZE = <제조사 권고값>;
+      check: "성공: 새 값 반영(V$PROPERTY)·13050 재발 없음 · 실패: 재발 또는 변경 불가 → 제조사 지시대로 properties 파일 수정 후 재기동 일정"
+      note: "사전조건: 제조사 답변 확보, 물리 메모리 여유 확인 · 영향: 캐시 확대만큼 메모리 사용 증가 · 승인: DBA · 백업/롤백: 변경 전 값 기록 후 같은 문장으로 이전 값 복원"
+      verify_note: "미검증 — PLAN_CACHE_SIZE 의 ALTER SYSTEM 온라인 변경 가능 여부를 26c 매뉴얼 원문으로 확인하지 못함(기존 코드 사전 기준, 기본 100MB)"
+  - stage: 3
+    steps:
+    - do: SUNJESOFT 기술지원 의뢰 자료
+      cmd: |
+        free -m > mem.txt ; tar czf goldilocks_plancache_$(date +%Y%m%d).tgz $GOLDILOCKS_DATA/trc/ $GOLDILOCKS_DATA/conf/ mem.txt
+      check: "system.trc·properties·메모리 현황"
+      note: "민감정보 마스킹: 호스트명·IP·SQL 리터럴 가림 · 전달 승인: DBA 확인 후 보안 담당 승인"
+
+- id: GD-PROC-R6-SQL
+  scope: id
+  products: [goldilocks]
+  category: internal
+  match: [ERR-16038, ERR-16040]
+  title: 무결성 제약조건 위반·테이블 또는 뷰 없음 — 애플리케이션 SQL·데이터 확인 (GOLDILOCKS)
+  source: "SUNJESOFT GOLDILOCKS 26c 매뉴얼 '오류 메시지 — 16038(integrity constraint violation: 위반하지 않도록 데이터 수정)·16040(table or view does not exist: 올바른 이름 사용)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 실패 SQL·제약조건·객체 이름 확인 (읽기 전용)
+      cmd: |
+        grep -n -E "16038|16040" <애플리케이션 로그> | tail -20
+        grep -c -E "16038|16040" <애플리케이션 로그>
+      check: "16038: 제약조건 이름(예 T1_PK)과 입력 키 확인 — 소수 건이면 업무 데이터·중복 요청 문제 · 16040: 객체 이름·스키마 누락·오타 확인, 배포 직후 급증이면 배포 누락 · 둘 다 DB 장애 아님"
+      note: "적용: GOLDILOCKS 20c~26c · 권한: 애플리케이션 로그 읽기"
+    - do: 객체 존재 확인 (읽기 전용)
+      cmd: |
+        # gsql 로 해당 업무 계정 접속 후
+        \DESC <schema>.<table>
+      check: "없으면 배포 누락 또는 다른 스키마 — 배포 담당에 공유, 있으면 접속 계정·스키마 지정 문제"
+      note: "적용: GOLDILOCKS gsql · 권한: 업무 계정"
+      verify_note: "미검증 — gsql 메타 명령 \\DESC 형식을 26c 매뉴얼 원문으로 확인하지 못함(기존 코드 사전 기준)"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 데이터 정정 또는 누락 객체 배포 — 업무·배포 담당 결정
+      cmd: |
+        # 승인된 스크립트만 실행 — 정정 전 대상 행을 백업 테이블로 복사
+        INSERT INTO <백업 테이블> SELECT * FROM <schema.table> WHERE <대상 조건>;
+      check: "성공: 같은 요청 재처리 시 16038/16040 재발 없음 · 실패: 재발 → 애플리케이션 재시도·채번(시퀀스) 로직 점검을 개발 담당에 요청"
+      note: "사전조건: 업무 담당이 정정 대상·값 확인, 객체 생성 DDL 은 배포 승인본 · 영향: 데이터 정정은 업무 결과에 직접 반영 · 승인: 업무 책임자·DBA · 백업/롤백: 백업 테이블로 원복, 새로 만든 객체는 DROP 으로 되돌림"
+  - stage: 3
+    steps:
+    - do: 의뢰 자료(제품 결함이 의심될 때만)
+      cmd: |
+        grep -n -E "16038|16040" <애플리케이션 로그> > sql_fail.txt
+      check: "실패 SQL·발생 시각·건수"
+      note: "민감정보 마스킹: 입력 키 값·SQL 리터럴(업무 데이터)·계정명 가림 · 전달 승인: 업무 책임자·보안 담당"
+
+- id: GD-PROC-R6-SECURITY
+  scope: id
+  products: [goldilocks]
+  category: security
+  match: [ERR-16309]
+  title: 계정 잠김 (GOLDILOCKS)
+  source: "SUNJESOFT GOLDILOCKS 26c 매뉴얼 '오류 메시지 — 16309(the account is locked: ALTER USER … ACCOUNT UNLOCK)'·'DBA_USERS'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 잠김 상태·시각 확인 (읽기 전용)
+      cmd: |
+        # gsql 로 DBA 접속 후 — 비밀번호 관련 열은 조회하지 않음
+        SELECT USERNAME, ACCOUNT_STATUS, LOCK_DATE FROM DBA_USERS WHERE USERNAME = '<USER>';
+      check: "ACCOUNT_STATUS 가 잠김이면 확정 · LOCK_DATE 를 접속 실패 로그 시각과 대조"
+      note: "적용: GOLDILOCKS 20c~26c · 권한: DBA"
+      verify_note: "미검증 — DBA_USERS 열 이름(ACCOUNT_STATUS·LOCK_DATE)을 26c 매뉴얼 원문으로 확인하지 못함 — 오류면 \\DESC DBA_USERS 로 열 확인"
+    - do: 잠김 직전 접속 시도 출처 확인 (읽기 전용)
+      cmd: |
+        grep -n -E "16309|16004" <애플리케이션 로그> | tail -30
+      check: "비밀번호 변경이 반영되지 않은 커넥션 풀이면 설정 문제 · 낯선 출처에서 짧은 시간 다발이면 무차별 대입 의심 → 보안 담당 즉시 통보"
+      note: "적용: GOLDILOCKS 20c~26c · 권한: 애플리케이션 로그 읽기 · 비밀번호 값은 기록하지 않음"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 원인 정리 뒤 계정 잠금 해제
+      cmd: |
+        # gsql 로 DBA 접속 후
+        ALTER USER <user> ACCOUNT UNLOCK;
+      check: "성공: 애플리케이션 재접속 성공·16309 재발 없음 · 실패: 곧바로 다시 잠김 → 잘못된 비밀번호를 쓰는 접속처를 먼저 정리"
+      note: "사전조건: 잘못된 비밀번호를 쓰는 접속처 정리, 공격 의심이면 보안 담당 판단 먼저 · 영향: 공격 중 해제하면 다시 잠기거나 침해 위험 · 승인: 보안 담당·계정 관리자 · 백업/롤백: 필요 시 ALTER USER <user> ACCOUNT LOCK 으로 원복"
+  - stage: 3
+    steps:
+    - do: 의뢰·보고 자료
+      cmd: |
+        grep -n -E "16309|16004" <애플리케이션 로그> > lock_fail.txt
+      check: "잠김 시각·실패 출처 목록"
+      note: "민감정보 마스킹: 계정명·IP 가림(비밀번호 포함 금지) · 전달 승인: 보안 담당"

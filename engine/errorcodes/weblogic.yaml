@@ -1,0 +1,53 @@
+product: weblogic
+layer: was
+codes:
+- code: BEA-000337
+  severity: error
+  category: thread
+  title: 설정시간 초과 busy·stuck 스레드
+  immediate:
+  - "`grep -n -A30 'BEA-000337' <DOMAIN_HOME>/servers/<server>/logs/<server>.log | tail -60` 으로 STUCK 스레드 이름·경과 시간·스택 상단 확인"
+  - "`jcmd <PID> Thread.print > td_$(date +%H%M%S).txt` 를 10초 간격 3회 확보(스레드 덤프, 프로세스는 유지) — 같은 스택이 반복되는 자원(DB·외부 호출·잠금)이 원인, STUCK 이 계속 늘면 2차 이관"
+  short:
+  - 블로킹 지점(외부 연동·DB) 분석
+  mid:
+  - StuckThreadMaxTime·워크매니저 조정
+  long:
+  - 지연이 긴 외부 연동 작업을 비동기(JMS·Work Manager 분리)로 전환
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/middleware/12213/related-docs/FMERR/chapter_bea_messages.htm)
+  note: Oracle 메시지 Type=ERROR, critical 과다
+  vendor_cause: 서버가 극도로 바쁘거나 스레드가 hang되어 StuckThreadMaxTime보다 오래 요청을 처리함
+  vendor_action: 해당 스레드가 실행 중인 메서드를 모니터링하거나 Administration Console execute request 기능 또는 thread dump 사용
+  vendor_url: https://docs.oracle.com/middleware/12213/related-docs/FMERR/chapter_bea_messages.htm
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: Stuck thread 감지 문구 — 9.0 이후 동일
+- code: BEA-000802
+  severity: error
+  category: internal
+  title: ExecuteRequest 처리 오류 (BEA-000802)
+  immediate:
+  - '`grep -n -A 30 "BEA-000802" <DOMAIN_HOME>/servers/<server>/logs/<server>.log | head -60` 으로 처리되지 않은 예외 클래스와 실행 스레드 확인'
+  - 반복 여부 `grep -c "BEA-000802" <DOMAIN_HOME>/servers/<server>/logs/<server>.log` 와 직전 배포·패치 이력 대조 — 스택에 애플리케이션 클래스가 있으면 애플리케이션 결함
+  short:
+  - 스택의 애플리케이션 클래스 담당에 수정 요청, WebLogic 내부 클래스만 있으면 서버 로그·config.xml 로 My Oracle Support 의뢰
+  mid:
+  - 재발 방지 회귀 테스트 케이스 보강
+  long:
+  - BEA-000802 발생 건수 경보 등록
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/middleware/1213/core/FMERR/chapter_bea_messages.htm)
+  note: ExecuteRequest failed, unhandled exception
+  vendor_cause: ExecuteRequest가 처리되지 않은 예외를 발생시킴
+  vendor_action: My Oracle Support에 문의
+  vendor_url: https://docs.oracle.com/middleware/1213/core/FMERR/chapter_bea_messages.htm
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 10.3.6·12.1.3·12.2.1.x·14.1.1·14.1.2 동일(EOS 된 10.3.6/12.1.3 도 동일 ID)

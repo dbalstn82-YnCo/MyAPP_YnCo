@@ -1,0 +1,6 @@
+# 아이디어 3(2026-10-16) — 제품 무관('*') 룰 중 기존 계층 공통 절차가 실제로 맞는 것만 '이 판정 전용'으로 잇는다(절차 파일은 고치지 않음).
+# 맞지 않는 룰(온도·팬·전원·네트워크 장비·FC HBA·VMware·KVM·JVM 네이티브 메모리)은 r6_common_procedures.yaml 의 전용 절차로 옮겼다.
+links:
+- procedure: COMMON-PROC-HARDWARE
+  match: [LEG-GEN-WARN-HW, LEG-KW-HW-WARNING]
+  reviewed: "2026-10-16 판정 적합성 확인 — 부품을 특정하지 않는 하드웨어 WARNING(팬·전원·메모리·디스크·RAID·센서)이라 SEL/SDR·RAID·SMART·EDAC 를 한꺼번에 조회해 결함 부품을 찾는 이 절차가 맞음(2차 디스크 격리는 디스크/RAID 로 확인될 때만, 온도·전원으로 확인되면 OSC-PROC-R6-THERMAL/POWER 참고)"

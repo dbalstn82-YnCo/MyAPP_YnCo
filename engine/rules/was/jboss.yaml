@@ -1,0 +1,228 @@
+# WAS — JBoss EAP / WildFly 시그니처 (룰 학습 1차 2026-10-13: Claude 초안 → 기계 검증 → GPT 벤더 문서 대조, 근거 URL 은 version_note)
+rules:
+- id: WAS-JB-010
+  layer: was
+  product:
+  - jboss
+  match:
+    regex: \bIJ000453\b|\bIJ000655\b|Unable to get managed connection for java:|No managed connections available within configured blocking timeout
+  severity: error
+  category: connection
+  verdict: 데이터소스 연결 획득 실패 — 풀 고갈·DB 지연 의심(원인 구분 필요)
+  immediate:
+  - 같은 시각 DB 상태·장시간 점유 SQL·연결 누수 확인
+  - "`$JBOSS_HOME/bin/jboss-cli.sh -c '/subsystem=datasources/data-source=<DS>/statistics=pool:read-resource(include-runtime=true)'` 로 ActiveCount·MaxWaitCount 확인(statistics-enabled=true 필요, 읽기 전용), `nc -zvw3 <db_host> <db_port>`"
+  short:
+  - 풀 사용량 확인(CLI :read-resource(include-runtime=true)), 원인 해소
+  - "(2차·승인 후, 롤백: 이전 값 복원) 누수면 미반납 위치 수정, 풀 max-pool-size·blocking-timeout-wait-millis 조정은 DB 세션 한도 안에서"
+  mid:
+  - max-pool-size·blocking-timeout 검토, 누수 감지 사용
+  long:
+  - DB 연결 관리 표준
+  - "풀 사용률 80% 경보와 statistics-enabled 상시 운영"
+  versions:
+  - JBoss EAP 6.4
+  - JBoss EAP 7.2
+  - JBoss EAP 7.4
+  - JBoss EAP 8.0
+  - WildFly 10~30
+  version_note: IronJacamar 메시지 — 반복·업무 실패 다수면 critical 로 본다 — https://access.redhat.com/solutions/2081223
+- id: WAS-JB-011
+  layer: was
+  product:
+  - jboss
+  match:
+    regex: '\bWFLYCTL0412\b|\bWFLYCTL0186\b|\bJBAS014775\b|Required services that are not installed|Services which failed to start|New missing/unsatisfied dependencies|(?:WFLYCTL0013|JBAS014612): Operation \("(?:deploy|add)"\) failed|started \(with errors\)'
+  severity: error
+  category: internal
+  verdict: 배포·서비스 기동 실패(서버는 오류와 함께 기동)
+  immediate:
+  - 누락·실패 서비스 목록과 첫 원인 예외 확인
+  - "`grep -n -A10 -E 'WFLYCTL0412|WFLYCTL0186|WFLYCTL0013|JBAS014775' $JBOSS_HOME/standalone/log/server.log | tail -30` 와 `jboss-cli.sh -c '/core-service=management:read-boot-errors'`(EAP 7+, 읽기 전용)로 실패 서비스·최초 원인 확인"
+  short:
+  - "(2차·승인 후, 롤백: standalone.xml·배포본 백업) 누락 의존(데이터소스·드라이버·모듈) 설정 바로잡은 뒤 재배포 또는 :reload"
+  mid:
+  - "배포 전 검증 환경 기동 시험과 의존 자원(데이터소스·모듈) 사전 점검"
+  long:
+  - 배포 자동화
+  - "기동 후 read-boot-errors·배포 상태 자동 점검"
+  versions:
+  - JBoss EAP 6.4
+  - JBoss EAP 7.2
+  - JBoss EAP 7.4
+  - JBoss EAP 8.0
+  - WildFly 10~30
+  version_note: EAP 6 = JBAS, EAP 7·WildFly = WFLY 접두 — https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/7.3/mgmt_model/log-message-reference.html
+- id: WAS-JB-012
+  layer: was
+  product:
+  - jboss
+  match:
+    regex: \bARJUNA012117\b|\bARJUNA012121\b
+  severity: warn
+  category: performance
+  verdict: 트랜잭션 제한 시간 초과로 취소 처리
+  immediate:
+  - 같은 시각 느린 SQL·잠금 대기·외부 연동 지연 확인
+  - "`$JBOSS_HOME/bin/jboss-cli.sh -c '/subsystem=transactions:read-attribute(name=default-timeout)'` 로 현재 기본 타임아웃(초) 확인(읽기 전용), `grep -c ARJUNA012117 server.log` 로 빈도 집계"
+  short:
+  - 지연 원인 해소, 트랜잭션 타임아웃(default-timeout) 검토
+  - "(2차·승인 후, 롤백: 이전 값 복원) default-timeout 변경은 `/subsystem=transactions:write-attribute(name=default-timeout,value=<초>)` 후 영향 확인"
+  mid:
+  - "장시간 트랜잭션 분리와 트랜잭션 타임아웃 > 쿼리 타임아웃 순서 정렬"
+  long:
+  - 트랜잭션 설계 표준
+  - "업무별 트랜잭션 처리 시간·타임아웃 건수 감시"
+  versions:
+  - JBoss EAP 6.4
+  - JBoss EAP 7.2
+  - JBoss EAP 7.4
+  - JBoss EAP 8.0
+  - WildFly 10~30
+  version_note: Narayana 문구는 판마다 달라 코드로만 — https://github.com/jbosstm/narayana/blob/main/ArjunaCore/arjuna/classes/com/arjuna/ats/arjuna/logging/arjunaI18NLogger.java
+- id: WAS-JB-013
+  layer: was
+  product:
+  - jboss
+  match:
+    regex: \bWFLYUT0082\b|Address already in use(?:\s*:\s*bind|\s*/\S+)?|Failed to start service (?:(?:org\.wildfly\.|jboss\.)undertow\.listener|jboss\.web\.connector)
+  severity: critical
+  category: connection
+  verdict: HTTP 수신 리스너 기동 실패 — 포트 충돌·바인드 주소 오류
+  immediate:
+  - 같은 포트를 쓰는 프로세스·바인드 주소(-b, port-offset) 확인
+  - "`ss -ltnp | grep ':<port> '` 로 점유 PID 확인 후 `ps -fp <PID>` 로 같은 서버의 이전 인스턴스인지 다른 서비스인지 구분"
+  short:
+  - "(2차·승인 후, 롤백: 기동 인자·standalone.xml 백업) 남은 인스턴스 정리(소유자 확인 후 정상 정지 우선)·포트 오프셋 조정"
+  mid:
+  - 기동 전 포트 점유 확인
+  long:
+  - "인스턴스별 포트·port-offset 배정 대장 운영"
+  versions:
+  - JBoss EAP 6.4
+  - JBoss EAP 7.2
+  - JBoss EAP 7.4
+  - JBoss EAP 8.0
+  - WildFly 10~30
+  version_note: WFLYUT0082 Could not start listener — https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/7.3/mgmt_model/log-message-reference.html
+- id: WAS-JB-014
+  layer: was
+  product:
+  - jboss
+  match:
+    regex: \bWFLYSRV0056\b|Server boot has failed in an unrecoverable manner
+  severity: critical
+  category: internal
+  verdict: 서버 부팅 실패(복구 불가) — 프로세스 종료
+  immediate:
+  - 직전의 첫 ERROR(원인) 확인 — 설정 파일·포트·권한
+  - "`grep -n -E 'ERROR|Caused by' $JBOSS_HOME/standalone/log/server.log | head -20` 로 첫 원인, `ls -lt $JBOSS_HOME/standalone/configuration/standalone_xml_history/` 로 최근 설정 변경 확인"
+  short:
+  - "(2차·승인 후, 롤백: 현재 설정 별도 보관) 원인 해소 또는 standalone_xml_history 의 직전 정상 설정으로 되돌린 뒤 기동"
+  mid:
+  - "설정 변경은 CLI batch 로 검증 환경 시험 후 반영"
+  long:
+  - "standalone.xml 형상 관리와 기동 실패 경보"
+  versions:
+  - JBoss EAP 7.2
+  - JBoss EAP 7.4
+  - JBoss EAP 8.0
+  - WildFly 10~30
+  version_note: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/7.3/mgmt_model/log-message-reference.html
+- id: WAS-JB-015
+  layer: was
+  product:
+  - jboss
+  match:
+    regex: \bUT005016\b|Error writing access log
+  severity: error
+  category: disk
+  verdict: 접근 로그 쓰기 실패 — 디스크 부족·권한 문제
+  immediate:
+  - "`$JBOSS_HOME/bin/jboss-cli.sh -c '/subsystem=undertow/server=default-server/host=default-host/setting=access-log:read-resource'` 로 directory(기본 ${jboss.server.log.dir})·prefix 확인(읽기 전용)"
+  - "`df -h $JBOSS_HOME/standalone/log` 와 `df -i` 로 공간·inode, `ls -ld $JBOSS_HOME/standalone/log` 로 실행 계정 쓰기 권한 확인 — 95% 이상·권한 불일치면 원인 확정"
+  short:
+  - "(2차·승인 후, 롤백: 정리 전 압축본을 다른 볼륨에 보관·변경 전 소유자 기록) 오래된 access_log·server.log 회전본 압축·이동으로 공간 확보, 권한 바로잡기"
+  mid:
+  - "access-log rotate(일 단위) 와 OS logrotate 보관 주기로 로그 보관·순환 정책 적용"
+  long:
+  - "로그 볼륨 분리와 사용률 85%/95% 감시"
+  versions:
+  - JBoss EAP 7.2
+  - JBoss EAP 7.4
+  - JBoss EAP 8.0
+  - WildFly 10~30
+  version_note: 디스크 부족 전용 아님 — https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/7.3/mgmt_model/log-message-reference.html
+- id: WAS-JB-016
+  layer: was
+  product:
+  - jboss
+  match:
+    regex: '\bWFLYUT0098\b|Unexpected Authentication Error:'
+  severity: error
+  category: security
+  verdict: 인증 처리 중 예기치 않은 오류 — 보안 영역 설정·연동 문제
+  immediate:
+  - 같은 시각 인증 연동(LDAP·DB) 상태 확인
+  - "`grep -n -A10 'WFLYUT0098' $JBOSS_HOME/standalone/log/server.log | grep 'Caused by' | head` 로 원인 예외 확인, 인증 저장소에 `nc -zvw3 <ldap_or_db_host> <port>`"
+  short:
+  - security-domain·elytron 설정 확인
+  - "(2차·승인 후, 롤백: standalone.xml 백업 복원) 인증 저장소 장애 해소 또는 elytron realm·security-domain 설정 수정 후 :reload"
+  mid:
+  - "인증 저장소(LDAP·DB) 이중화와 연결 타임아웃 설정"
+  long:
+  - "보안 도메인 구성 표준과 인증 오류 건수 감시"
+  versions:
+  - JBoss EAP 7.2
+  - JBoss EAP 7.4
+  - JBoss EAP 8.0
+  - WildFly 10~30
+  version_note: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/7.3/mgmt_model/log-message-reference.html
+- id: WAS-JB-017
+  layer: was
+  product:
+  - jboss
+  match:
+    regex: \bUT005031\b|Proxy request to .{1,300}? could not connect to backend server
+  severity: error
+  category: upstream
+  verdict: 프록시 대상(백엔드) 연결 실패
+  immediate:
+  - "`grep -n 'UT005031' $JBOSS_HOME/standalone/log/server.log | tail -10` 로 연결 실패 백엔드 주소 확인 후 `nc -zvw3 <backend_host> <port>` 로 도달성 확인 — 거부면 백엔드 미기동, 시간 초과면 네트워크"
+  - "`$JBOSS_HOME/bin/jboss-cli.sh -c '/subsystem=undertow/configuration=handler:read-children-resources(child-type=reverse-proxy,recursive=true)'` 로 프록시 대상(host) 목록 확인(읽기 전용, mod_cluster 면 해당 하위시스템)"
+  short:
+  - "(2차) 백엔드 원인 해소를 대상 담당에 요청, 폐기된 대상이면 승인 후 reverse-proxy host 제거(롤백: standalone.xml 백업)"
+  mid:
+  - "헬스체크·자동 제외 구성(reverse-proxy problem-server-retry 등)"
+  long:
+  - "백엔드 이중화와 대상별 연결 실패 감시"
+  versions:
+  - JBoss EAP 7.2
+  - JBoss EAP 7.4
+  - JBoss EAP 8.0
+  - WildFly 10~30
+  version_note: Undertow mod_cluster/리버스 프록시 — https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/7.3/mgmt_model/log-message-reference.html
+- id: WAS-JB-018
+  layer: was
+  product:
+  - jboss
+  match:
+    regex: \bUT005027\b|Timing out request to
+  severity: warn
+  category: performance
+  verdict: 프록시 요청 시간 초과 — 백엔드 응답 지연
+  immediate:
+  - "`grep -c 'UT005027' $JBOSS_HOME/standalone/log/server.log` 와 대상 백엔드·URI 집계로 반복 여부 확인 — 단발이면 개별 느린 요청"
+  - "같은 시각 백엔드 응답 지연·부하 확인 — 백엔드 서버의 CPU·스레드·DB 대기, 프록시 설정 max-request-time 은 `jboss-cli.sh -c '/subsystem=undertow/configuration=handler/reverse-proxy=<name>:read-attribute(name=max-request-time)'` 로 확인(읽기 전용)"
+  short:
+  - "(2차·승인 후, 롤백: 이전 값 복원) 백엔드 지연 원인 해소가 우선, 업무상 긴 요청이면 reverse-proxy max-request-time 조정"
+  mid:
+  - "백엔드의 느린 API 개선과 프록시·백엔드 타임아웃 정렬"
+  long:
+  - "응답 시간 목표(SLO) 관리와 프록시 시간 초과 건수 감시"
+  versions:
+  - JBoss EAP 7.2
+  - JBoss EAP 7.4
+  - JBoss EAP 8.0
+  - WildFly 10~30
+  version_note: 반복 여부로 등급 판단 — https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/7.3/mgmt_model/log-message-reference.html

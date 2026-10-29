@@ -1,0 +1,353 @@
+product: hpux
+layer: os
+note: GPT 협업 수집분 — 벤더 공식 문서와 대조 후 확정
+codes:
+- code: HPUX-DISK-FULL
+  severity: critical
+  category: disk
+  title: 디스크 가득참
+  vendor_cause: 파일시스템(HFS/VxFS)의 블록이 소진되어 쓰기가 실패하는 상태('file system full'). 로그·코어·크래시
+    덤프 누적, 삭제했지만 프로세스가 열고 있는 파일이 흔한 원인.
+  immediate:
+  - '`bdf` 로 %used 95% 이상 파일시스템 식별, `du -kx <mount> | sort -rn | head -15` 로 큰 디렉터리
+    확인'
+  - '`find <mount> -xdev -type f -size +2097152 -exec ls -l {} \; | head` 로 1GB 이상
+    파일과 소유자 식별(삭제는 2차)'
+  short:
+  - '(2차·승인 후, 롤백: 정리 대상 tar 보관) 담당자 확인 후 로그·코어 정리, 열린 파일은 `fuser -cu <mount>` 로 소유
+    프로세스 확인 후 재시작 일정과 함께 비우기'
+  mid:
+  - OnlineJFS 가 있으면 `lvextend -L <새크기MB> /dev/<vg>/<lv>` 후 `fsadm -F vxfs -b <새크기>M
+    <mount>` 로 온라인 증설, 없으면 umount 후 extendfs(정지 창 필요)
+  long:
+  - bdf 사용률 85%/95% 감시 임계와 증가율 기반 증설 계획
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - HP-UX 11i v1 (11.11)
+  - HP-UX 11i v2 (11.23)
+  - HP-UX 11i v3 (11.31)
+  version_note: syslog.log 문구 기반 — 11i v1~v3 공통(형식 동일)
+- code: HPUX-TMP-FULL
+  severity: error
+  category: disk
+  title: /tmp 가득참
+  vendor_cause: /tmp(기본 vg00 의 VxFS)의 블록 또는 inode 가 소진되어 임시 파일을 만들 수 없는 상태. 애플리케이션
+    임시 파일·코어·설치 잔여물 누적이 흔한 원인.
+  immediate:
+  - '`bdf /tmp` 와 `bdf -i /tmp` 로 블록·inode 사용률 확인 — 95% 이상이면 확정'
+  - '`find /tmp -xdev -type f -size +102400 -exec ls -l {} \;` 로 큰 파일과 소유자 식별(삭제는
+    2차·담당자 승인 후)'
+  short:
+  - '(2차·승인 후, 롤백: 정리 전 tar 보관) 소유 프로세스 확인(`fuser -cu /tmp`) 뒤 불필요 파일 정리, 열린 파일은 해당
+    서비스 재시작 일정과 함께'
+  mid:
+  - /tmp 를 lvextend + fsadm -b(OnlineJFS) 또는 extendfs(오프라인)로 증설, 애플리케이션 임시 경로를 /var/tmp
+    외 별도 FS 로 분리
+  long:
+  - bdf 사용률 85%/95% 감시 임계 등록, 임시 파일 보존 주기(cron 정리) 표준화
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - HP-UX 11i v1 (11.11)
+  - HP-UX 11i v2 (11.23)
+  - HP-UX 11i v3 (11.31)
+  version_note: syslog.log 문구 기반 — 11i v1~v3 공통(형식 동일)
+- code: HPUX-SSH-FAIL
+  severity: error
+  category: security
+  title: SSH 인증 실패 반복
+  vendor_cause: HP-UX Secure Shell(sshd) 인증 실패가 반복된 상태. 비밀번호 오입력·만료·계정 잠금, 키 파일 권한
+    오류, 외부 무차별 대입이 흔한 원인.
+  immediate:
+  - '`grep sshd /var/adm/syslog/syslog.log | grep -i -E ''fail|invalid'' | tail -30`
+    으로 계정·출발지 IP·시각 확인'
+  - '`lastb | head -20` 으로 실패 로그인 이력(/var/adm/btmp) 확인, Trusted 모드면 `/usr/lbin/getprpw
+    -m lockout <user>` 로 잠금 확인'
+  short:
+  - '(2차·승인 후, 롤백: 차단 규칙 제거) 외부 반복 시도면 출발지 차단(방화벽/IPFilter), 정상 사용자면 본인 확인 후 잠금 해제(Trusted
+    모드 `modprpw -k <user>`)'
+  mid:
+  - /opt/ssh/etc/sshd_config 의 PermitRootLogin no·MaxAuthTries·AllowUsers 정비, /etc/default/security
+    의 AUTH_MAXTRIES 설정
+  long:
+  - 계정·IP 별 인증 실패 임계 감시와 월 1회 접근 이력 점검
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - HP-UX 11i v1 (11.11)
+  - HP-UX 11i v2 (11.23)
+  - HP-UX 11i v3 (11.31)
+  version_note: syslog.log 문구 기반 — 11i v1~v3 공통(형식 동일)
+- code: HPUX-SUDO-FAIL
+  severity: warn
+  category: security
+  title: sudo 실패
+  vendor_cause: sudo 실행이 거부되었거나 비밀번호 인증에 실패한 상태. sudoers 에 없는 명령, 비밀번호 오입력, sudoers
+    문법 오류가 흔한 원인.
+  immediate:
+  - '`grep sudo /var/adm/syslog/syslog.log | tail -30` 으로 사용자·명령·''not in sudoers''/''incorrect
+    password'' 문구 확인'
+  - '`sudo -l -U <user>` (root 로) 로 해당 사용자에게 허용된 명령 확인'
+  short:
+  - '(2차·승인 후, 롤백: sudoers 백업 복원) 정당한 업무면 `visudo` 로 최소 권한 규칙 추가, 아니면 보안 담당에 오남용 보고'
+  mid:
+  - sudoers 를 역할별 Cmnd_Alias 로 정리하고 변경 이력 관리
+  long:
+  - sudo 거부 건수 감시와 분기별 권한 재검토
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - HP-UX 11i v1 (11.11)
+  - HP-UX 11i v2 (11.23)
+  - HP-UX 11i v3 (11.31)
+  version_note: syslog.log 문구 기반 — 11i v1~v3 공통(형식 동일)
+- code: HPUX-DNS-FAIL
+  severity: error
+  category: connection
+  title: DNS 해석 실패
+  vendor_cause: 이름 해석이 DNS 서버 응답을 받지 못했거나 이름 없음 응답을 받은 상태. DNS 서버 장애·방화벽, /etc/resolv.conf
+    오류, /etc/nsswitch.conf 해석 순서가 흔한 원인.
+  immediate:
+  - '`cat /etc/resolv.conf` 와 `grep hosts /etc/nsswitch.conf` 로 nameserver·해석 순서 확인'
+  - '`nslookup <host> <nameserver>` 로 서버별 응답, `ping <nameserver> -n 3` 으로 도달성 확인'
+  short:
+  - '(2차·승인 후, 롤백: 원본 파일 백업 복원) 장애 서버를 resolv.conf 뒤로 돌리거나 핵심 호스트를 /etc/hosts 에 임시
+    등록'
+  mid:
+  - DNS 서버 2대 이상 지정, 핵심 호스트 hosts 파일 관리 기준 수립
+  long:
+  - 주요 이름 해석 시간·실패 주기 점검 감시
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - HP-UX 11i v1 (11.11)
+  - HP-UX 11i v2 (11.23)
+  - HP-UX 11i v3 (11.31)
+  version_note: syslog.log 문구 기반 — 11i v1~v3 공통(형식 동일)
+- code: HPUX-CRON-FAIL
+  severity: warn
+  category: internal
+  title: 크론 작업 실패
+  vendor_cause: cron 이 예약 작업을 실행하지 못했거나 작업이 0 이 아닌 코드로 끝난 상태. cron.allow/deny 권한,
+    환경 변수(PATH) 차이, 스크립트 오류, cron 데몬 정지가 흔한 원인.
+  immediate:
+  - '`tail -50 /var/adm/cron/log` 에서 해당 작업의 시작(>)·종료(<) 줄과 rc= 값 확인 — rc 가 0 이 아니면
+    스크립트 오류'
+  - '`ps -ef | grep cron | grep -v grep` 으로 데몬 동작, `crontab -l <user>`(root) 와 /var/adm/cron/cron.allow·cron.deny
+    로 권한 확인'
+  short:
+  - (2차) 같은 사용자·최소 환경(`env -i /usr/bin/sh -c <스크립트>`)으로 시험 실행해 오류 재현, 스크립트에 PATH 명시
+  mid:
+  - 배치 스크립트에 로그 파일·종료 코드 기록 표준화, 실패 시 알림 추가
+  long:
+  - 중요 배치의 실행 여부·rc 감시 등록
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - HP-UX 11i v1 (11.11)
+  - HP-UX 11i v2 (11.23)
+  - HP-UX 11i v3 (11.31)
+  version_note: syslog.log 문구 기반 — 11i v1~v3 공통(형식 동일)
+- code: HPUX-CPU-HIGH
+  severity: warn
+  category: capacity
+  title: CPU 부하 과다
+  vendor_cause: CPU 사용률이 지속적으로 높아 응답이 지연되는 상태. 특정 프로세스 폭주, 배치 작업 겹침, run queue 적체가
+    흔한 원인.
+  immediate:
+  - '`sar -u 2 5` 로 %usr+%sys·%wio 확인, `sar -q 2 5` 의 runq-sz 가 CPU 수보다 계속 크면 과부하'
+  - '`UNIX95= ps -eo pid,pcpu,vsz,user,comm | sort -k2 -rn | head -10` 으로 CPU 상위 프로세스
+    확인(종료는 2차)'
+  short:
+  - '(2차·승인 후, 롤백: 우선순위 원복) 폭주 프로세스는 담당자 확인 후 `renice` 또는 배치 일정 조정, GlancePlus 가 있으면
+    `glance` 로 스레드별 원인 확인'
+  mid:
+  - 업무 시간대 배치 분산, vPar/nPar CPU 재배분 또는 증설 검토
+  long:
+  - sar 상시 수집(sa1/sa2 cron)과 CPU 80% 지속 감시 임계
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - HP-UX 11i v1 (11.11)
+  - HP-UX 11i v2 (11.23)
+  - HP-UX 11i v3 (11.31)
+  version_note: syslog.log 문구 기반 — 11i v1~v3 공통(형식 동일)
+- code: HPUX-PROCESS-KILLED
+  severity: error
+  category: internal
+  title: 프로세스 강제 종료
+  vendor_cause: 프로세스가 신호로 비정상 종료된 상태. 운영자·스크립트의 kill, 스왑 예약 실패 등 자원 부족, 애플리케이션 자체
+    abort 가 흔한 원인.
+  immediate:
+  - '`grep -i -E ''signal|core|swap'' /var/adm/syslog/syslog.log | tail -20` 과 `swapinfo
+    -tam` 으로 같은 시각 자원 부족 여부 확인'
+  - 애플리케이션 로그와 `last | head -20` 으로 그 시각 운영자 접속·작업 여부를 대조
+  short:
+  - (2차·승인 후) 자원 부족이면 스왑·메모리 조치 계획, 운영자 작업이면 작업 절차 재확인 후 서비스 재기동 일정 수립
+  mid:
+  - 애플리케이션 생존 감시·자동 재기동 구성, 스왑·메모리 재산정
+  long:
+  - 핵심 프로세스 생존 감시 등록
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - HP-UX 11i v1 (11.11)
+  - HP-UX 11i v2 (11.23)
+  - HP-UX 11i v3 (11.31)
+  version_note: syslog.log 문구 기반 — 11i v1~v3 공통(형식 동일)
+- code: HPUX-FS-MOUNT-FAIL
+  severity: error
+  category: storage
+  title: 파일시스템 마운트 실패
+  vendor_cause: mount 가 파일시스템을 붙이지 못한 상태. VG 미활성, LV 장치 파일 부재, /etc/fstab 오류, fsck
+    가 필요한 손상(dirty) 상태, 마운트 지점 사용 중이 흔한 원인.
+  immediate:
+  - '`grep <mount> /etc/fstab` 으로 장치·유형·옵션 확인, `vgdisplay <vg> | grep -i status` 로
+    VG 활성 여부 확인'
+  - '`fstyp /dev/<vg>/<lv>` 로 실제 파일시스템 유형, `tail -50 /var/adm/syslog/syslog.log` 로
+    mount 오류 문구 확인'
+  short:
+  - '(2차·승인 후, 롤백: 변경 전 상태 기록) VG 미활성이면 `vgchange -a y <vg>`, dirty 면 `fsck -F vxfs
+    -o full -y /dev/<vg>/r<lv>`(언마운트 상태), fstab 오류면 백업 후 수정'
+  mid:
+  - 부팅 시 자동 마운트 순서·VG 자동 활성(/etc/lvmrc) 구성 표준화
+  long:
+  - 재부팅·변경 작업 후 mount 결과와 /etc/fstab 대조 점검
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - HP-UX 11i v1 (11.11)
+  - HP-UX 11i v2 (11.23)
+  - HP-UX 11i v3 (11.31)
+  version_note: syslog.log 문구 기반 — 11i v1~v3 공통(형식 동일)
+- code: HPUX-TAPE-ERROR
+  severity: error
+  category: hardware
+  title: 테이프 장치 오류
+  vendor_cause: 테이프 드라이브 또는 매체 읽기/쓰기·하드웨어 오류가 syslog 에 기록된 상태. 매체 불량, 헤드 오염, 드라이브
+    고장, SCSI/FC 경로 오류가 흔한 원인.
+  immediate:
+  - '`grep -i -E ''tape|stape|rmt'' /var/adm/syslog/syslog.log | tail -20` 으로 오류 장치·시각
+    확인'
+  - '`ioscan -kfnC tape` 로 드라이브 CLAIMED 여부와 장치 파일 확인(11i v3 는 `ioscan -kfnNC tape`
+    로 영구 장치 파일 확인)'
+  short:
+  - (2차·승인 후) 백업 작업이 없는 시간에 `mt -f /dev/rmt/<N>mn status` 와 클리닝 카트리지 투입, 다른 매체로 재시도해
+    매체/드라이브 원인 구분
+  mid:
+  - 반복 시 HPE 또는 유지보수 업체에 드라이브 교체 의뢰, 노후 매체 폐기 기준 운영
+  long:
+  - 백업 결과와 테이프 오류 건수 일 단위 감시
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - HP-UX 11i v1 (11.11)
+  - HP-UX 11i v2 (11.23)
+  - HP-UX 11i v3 (11.31)
+  version_note: syslog.log 문구 기반 — 11i v1~v3 공통(형식 동일)
+- code: HPUX-DUMP-FAIL
+  severity: warn
+  category: internal
+  title: 크래시 덤프 저장 실패
+  vendor_cause: "시스템 크래시 후 savecrash 가 덤프를 저장 디렉터리(SAVECRASH_DIR, 기본 /var/adm/crash)로 저장하지 못한 상태. 저장 디렉터리 공간 부족, 덤프 장치 크기 부족(부분 덤프), savecrash 비활성(SAVECRASH=0)·LOG_ONLY=1 설정이 흔한 원인."
+  immediate:
+  - "`grep -E '^(SAVECRASH|SAVECRASH_DIR|LOG_ONLY|SAVE_PART)=' /etc/rc.config.d/savecrash` 로 저장 설정 확인 — SAVECRASH=0 또는 LOG_ONLY=1 이면 설정상 덤프 미저장, SAVECRASH_DIR 가 비어 있으면 기본 /var/adm/crash"
+  - "`crashconf -v` 로 덤프 장치·포함 범위, `bdf <SAVECRASH_DIR>` 로 저장 경로 여유 공간 확인 — 여유가 덤프 크기(포함 범위의 메모리)보다 작으면 공간 부족 확정"
+  - "`ls -l <SAVECRASH_DIR>` 와 `tail -10 /etc/shutdownlog` 로 기존 crash.N·마지막 패닉 기록 확인 (11i v1~v3, coreadm 은 프로세스 core 용이라 커널 덤프와 무관)"
+  verify_note: "미검증 — /etc/rc.config.d/savecrash 변수(SAVECRASH·SAVECRASH_DIR·LOG_ONLY·SAVE_PART)는 설정 파일 사본·HPE 커뮤니티로 확인, HPE savecrash(1M) 원문 미대조"
+  short:
+  - '(2차·승인 후, 롤백: 설정 파일 백업 복원) 덤프가 덤프 장치에 남아 있으면 공간 확보 후 `savecrash` 수동 실행(기본 저장
+    /var/adm/crash), 덤프 장치 추가·영구 반영은 crashconf(1M) 절차대로 변경 관리로'
+  mid:
+  - 메모리 크기 대비 덤프 장치·/var/adm/crash 용량 재산정
+  long:
+  - 덤프 설정(crashconf -v) 정기 점검과 /var/adm/crash 사용률 감시
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - HP-UX 11i v1 (11.11)
+  - HP-UX 11i v2 (11.23)
+  - HP-UX 11i v3 (11.31)
+  version_note: syslog.log 문구 기반 — 11i v1~v3 공통(형식 동일)
+- code: HPUX-LICENSE-EXPIRE
+  severity: error
+  category: security
+  title: 라이선스 만료
+  vendor_cause: 'HP-UX 위의 소프트웨어(예: GlancePlus 평가판, 라이선스 키 기반 제품)가 라이선스 만료를 보고한 상태.
+    운영체제 자체보다 부가 소프트웨어의 기간제 키 만료가 흔한 원인.'
+  immediate:
+  - 로그 원문에서 만료를 보고한 제품명·라이선스 서버를 확인하고 `swlist -l product | grep -i <제품>` 으로 설치 버전
+    확인
+  - '`grep -i licen /var/adm/syslog/syslog.log | tail -20` 으로 최초 경고 시각과 반복 여부 확인'
+  short:
+  - (2차·승인 후) 구매·자산 담당에 갱신 키 요청, 새 키 적용은 제품 매뉴얼 절차대로 변경 작업으로 진행
+  mid:
+  - 기간제 라이선스 목록(제품·만료일·담당자)을 자산 대장에 등록, 만료 60일 전 갱신
+  long:
+  - 라이선스 만료일 30/14/7일 전 알림 감시
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - HP-UX 11i v1 (11.11)
+  - HP-UX 11i v2 (11.23)
+  - HP-UX 11i v3 (11.31)
+  version_note: syslog.log 문구 기반 — 11i v1~v3 공통(형식 동일)
+- code: HPUX-SYSLOG-FULL
+  severity: warn
+  category: disk
+  title: syslog 가득참
+  vendor_cause: syslog.log 가 커져 /var 공간을 압박하는 상태. HP-UX 기본 구성은 syslog.log 를 부팅 때만
+    OLDsyslog.log 로 돌리므로 장기 가동 시스템에서 계속 커지며, 반복 오류 메시지 폭주가 흔한 원인.
+  immediate:
+  - '`ls -l /var/adm/syslog/` 와 `bdf /var` 로 syslog.log 크기와 /var 사용률 확인'
+  - '`tail -2000 /var/adm/syslog/syslog.log | awk ''{print $5}'' | sed ''s/[[].*//''
+    | sort | uniq -c | sort -rn | head` 로 폭주 중인 메시지 발생원 식별'
+  short:
+  - '(2차·승인 후, 롤백: 복사본 보관) `cp -p syslog.log syslog.log.$(date +%Y%m%d)` 후 압축 보관하고
+    `cat /dev/null > syslog.log` 로 비우기(파일 핸들 유지), 폭주 원인 조치'
+  mid:
+  - cron 으로 주기적 순환(복사·압축·비우기) 스크립트 운영, /etc/syslog.conf 의 과도한 레벨(debug) 정리
+  long:
+  - /var 사용률과 syslog.log 크기 감시 임계 등록
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - HP-UX 11i v1 (11.11)
+  - HP-UX 11i v2 (11.23)
+  - HP-UX 11i v3 (11.31)
+  version_note: syslog.log 문구 기반 — 11i v1~v3 공통(형식 동일)
+- code: HPUX-ONLINE-DIAG
+  severity: error
+  category: hardware
+  title: 온라인 진단 경보
+  vendor_cause: 온라인 진단(STM·EMS 모니터, 11i v3 는 SFM)이 하드웨어 이상을 보고한 상태. 디스크·메모리·CPU·전원·팬
+    등 FRU 결함 또는 예측 장애가 원인.
+  immediate:
+  - '`tail -100 /var/opt/resmon/log/event.log` 로 EMS 이벤트(장치·심각도·권고 조치) 확인'
+  - 11i v3 SFM 사용 시 `evweb eventviewer -L | head -30` 으로 보관 이벤트 목록 확인, v1/v2 는 STM(`cstm`,
+    대화형)의 장치 정보 로그로 확인
+  short:
+  - (2차) 이벤트의 하드웨어 경로·FRU 정보를 HPE 지원에 접수하고 교체 일정 수립
+  mid:
+  - FRU 교체 후 이벤트 재발 여부 확인, SFM/EMS 모니터 구성(알림 수신자) 점검
+  long:
+  - EMS/SFM 이벤트를 운영 감시로 연동
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - HP-UX 11i v1 (11.11)
+  - HP-UX 11i v2 (11.23)
+  - HP-UX 11i v3 (11.31)
+  version_note: STM(Support Tools Manager) 은 v1/v2 기본, v3 는 SysFaultMgmt(SFM)·EVWEB
+    로 대체(STM 병행 가능)
+  vendor_url: https://support.hpe.com/hpesc/public/docDisplay?docId=kc0104692en_us&docLocale=en_US
+- code: HPUX-IPC-EXHAUSTED
+  severity: critical
+  category: capacity
+  title: IPC 자원 고갈
+  vendor_cause: 공유 메모리·세마포어·메시지 큐 식별자 또는 총량이 커널 한도(shmmni·semmni·msgmni 등)에 도달해 IPC
+    생성이 실패한 상태. DB·미들웨어 설치 요구값 미반영, 비정상 종료 후 남은 IPC 자원이 흔한 원인.
+  immediate:
+  - '`ipcs -a | head -60` 으로 IPC 자원 수·소유자·생성 프로세스(CPID/LPID) 확인'
+  - '`kctune shmmni shmmax semmni semmns msgmni` 로 한도 확인(11i v2+), 11i v1 은 `kmtune
+    -q <파라미터>`'
+  short:
+  - '(2차·승인 후, 롤백: 정리 전 ipcs 출력 보관) 소유 프로세스가 없는 잔여 IPC 만 담당자 확인 후 `ipcrm -m <id>`/`ipcrm
+    -s <id>` 로 정리'
+  mid:
+  - DB·미들웨어 설치 가이드 요구값으로 `kctune <파라미터>=<값>` 조정(동적 여부 확인, 정적이면 재부팅 필요 — 변경 관리)
+  long:
+  - ipcs 자원 수(한도 대비 80%) 감시
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - HP-UX 11i v1 (11.11)
+  - HP-UX 11i v2 (11.23)
+  - HP-UX 11i v3 (11.31)
+  version_note: syslog.log 문구 기반 — 11i v1~v3 공통(형식 동일)

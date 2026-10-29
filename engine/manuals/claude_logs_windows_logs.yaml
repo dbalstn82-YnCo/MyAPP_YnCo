@@ -1,0 +1,87 @@
+product: windows
+layer: os
+title: windows 로그 종류 카탈로그 (GPT 수집 — 벤더 문서 대조 필요)
+source: GPT 수집(벤더 문서 대조 필요)
+sources: []
+logtypes:
+- name: System 이벤트
+  path: Event Viewer > Windows Logs > System (%SystemRoot%\System32\winevt\Logs\System.evtx)
+  format: EVTX(분석기 투입은 CSV/텍스트 내보내기)·로컬시각
+  check: Service Control Manager 7000/7009/7031/7034·Disk 7/11/51·NTFS 55/57·Kernel-Power 41·WHEA
+  sample: Error,2026-09-09 14:02:11,Service Control Manager,7034,"The Tomcat9 service terminated unexpectedly."
+- name: Application 이벤트
+  path: Event Viewer > Windows Logs > Application (Application.evtx)
+  format: EVTX·로컬시각
+  check: Application Error 1000·.NET Runtime 1026·MSSQLSERVER·WAS 5002/5009·SQL 18456
+  sample: 'Error,2026-09-09 14:02:11,Application Error,1000,"Faulting application name: w3wp.exe"'
+- name: Security 이벤트
+  path: Event Viewer > Windows Logs > Security (Security.evtx)
+  format: EVTX·로컬시각
+  check: 4625 로그온 실패·4740 계정 잠금·4672 특권 로그온·4720 계정 생성·1102 감사 로그 삭제
+  sample: Audit Failure,2026-09-09 14:00:01,Microsoft-Windows-Security-Auditing,4625,"An account failed to log on."
+- name: Setup 이벤트
+  path: Event Viewer > Windows Logs > Setup
+  format: EVTX
+  check: 패치(KB) 설치 성공/실패 시각 — 장애 직전 변경 확인
+  sample: Information,2026-09-08 23:10:11,Microsoft-Windows-Servicing,2,"Package KB5031234 was successfully changed to the Installed state."
+- name: 클러스터 로그
+  path: Get-ClusterLog → C:\Windows\Cluster\Reports\Cluster.log
+  format: 텍스트·UTC
+  check: 1069 리소스 실패·1135 노드 제거·5120 CSV 일시 중지·쿼럼 손실
+  sample: 00000a1c.00001b2c::2026/09/09-05:02:11.123 ERR [RES] ... failed
+- name: HTTP.sys 오류(HTTPERR)
+  path: C:\Windows\System32\LogFiles\HTTPERR\httperr*.log
+  format: W3C 텍스트·UTC
+  check: Connection_Abandoned_By_AppPool·QueueFull·AppOffline·Timer_ConnectionIdle
+  sample: 2026-09-09 05:02:11 10.0.0.5 51234 10.0.0.10 80 HTTP/1.1 GET /api 503 1 QueueFull DefaultAppPool
+- name: 메모리 덤프
+  path: '%SystemRoot%\MEMORY.DMP · %SystemRoot%\Minidump\*.dmp'
+  format: 바이너리(WinDbg)
+  check: BSOD 버그체크 코드·원인 드라이버
+  sample: BugCheck 0x000000D1 (DRIVER_IRQL_NOT_LESS_OR_EQUAL)
+- name: 성능 카운터
+  path: Performance Monitor 데이터 수집기 세트 (*.blg)
+  format: 바이너리(relog로 CSV)
+  check: 장애 시각 CPU·메모리·디스크 큐·네트워크
+  sample: '"09/09/2026 14:02:11.000","95.3","1024","12.5"'
+- name: Windows Update
+  path: Get-WindowsUpdateLog → WindowsUpdate.log
+  format: 텍스트·로컬시각
+  check: 재부팅 유발 패치·설치 실패
+  sample: 2026/09/08 23:10:11.1234567 Agent  Installed KB5031234
+- name: PowerShell 작업
+  path: Event Viewer > Applications and Services > Microsoft-Windows-PowerShell/Operational
+  format: EVTX
+  check: 4104 스크립트 블록(의심 스크립트)·원격 실행
+  sample: Warning,4104,"Creating Scriptblock text..."
+sections:
+- heading: 로그 종류 카탈로그 (전수)
+  body: 'System 이벤트: Event Viewer > Windows Logs > System (%SystemRoot%\System32\winevt\Logs\System.evtx) · Application 이벤트: Event Viewer > Windows Logs > Application (Application.evtx) · Security 이벤트:
+    Event Viewer > Windows Logs > Security (Security.evtx) · Setup 이벤트: Event Viewer > Windows Logs > Setup · 클러스터 로그: Get-ClusterLog → C:\Windows\Cluster\Reports\Cluster.log · HTTP.sys 오류(HTTPERR): C:\Windows\System32\LogFiles\HTTPERR\httperr*.log
+    · 메모리 덤프: %SystemRoot%\MEMORY.DMP · %SystemRoot%\Minidump\*.dmp · 성능 카운터: Performance Monitor 데이터 수집기 세트 (*.blg) · Windows Update: Get-WindowsUpdateLog → WindowsUpdate.log · PowerShell 작업: Event Viewer
+    > Applications and Services > Microsoft-Windows-PowerShell/Operational'
+- heading: '로그: System 이벤트'
+  body: 경로 Event Viewer > Windows Logs > System (%SystemRoot%\System32\winevt\Logs\System.evtx) / 형식 EVTX(분석기 투입은 CSV/텍스트 내보내기)·로컬시각 / 확인 Service Control Manager 7000/7009/7031/7034·Disk 7/11/51·NTFS 55/57·Kernel-Power
+    41·WHEA / 샘플 Error,2026-09-09 14:02:11,Service Control Manager,7034,"The Tomcat9 service terminated unexpectedly."
+- heading: '로그: Application 이벤트'
+  body: '경로 Event Viewer > Windows Logs > Application (Application.evtx) / 형식 EVTX·로컬시각 / 확인 Application Error 1000·.NET Runtime 1026·MSSQLSERVER·WAS 5002/5009·SQL 18456 / 샘플 Error,2026-09-09 14:02:11,Application
+    Error,1000,"Faulting application name: w3wp.exe"'
+- heading: '로그: Security 이벤트'
+  body: 경로 Event Viewer > Windows Logs > Security (Security.evtx) / 형식 EVTX·로컬시각 / 확인 4625 로그온 실패·4740 계정 잠금·4672 특권 로그온·4720 계정 생성·1102 감사 로그 삭제 / 샘플 Audit Failure,2026-09-09 14:00:01,Microsoft-Windows-Security-Auditing,4625,"An
+    account failed to log on."
+- heading: '로그: Setup 이벤트'
+  body: 경로 Event Viewer > Windows Logs > Setup / 형식 EVTX / 확인 패치(KB) 설치 성공/실패 시각 — 장애 직전 변경 확인 / 샘플 Information,2026-09-08 23:10:11,Microsoft-Windows-Servicing,2,"Package KB5031234 was successfully changed
+    to the Installed state."
+- heading: '로그: 클러스터 로그'
+  body: 경로 Get-ClusterLog → C:\Windows\Cluster\Reports\Cluster.log / 형식 텍스트·UTC / 확인 1069 리소스 실패·1135 노드 제거·5120 CSV 일시 중지·쿼럼 손실 / 샘플 00000a1c.00001b2c::2026/09/09-05:02:11.123 ERR [RES] ... failed
+- heading: '로그: HTTP.sys 오류(HTTPERR)'
+  body: 경로 C:\Windows\System32\LogFiles\HTTPERR\httperr*.log / 형식 W3C 텍스트·UTC / 확인 Connection_Abandoned_By_AppPool·QueueFull·AppOffline·Timer_ConnectionIdle / 샘플 2026-09-09 05:02:11 10.0.0.5 51234 10.0.0.10
+    80 HTTP/1.1 GET /api 503 1 QueueFull DefaultAppPool
+- heading: '로그: 메모리 덤프'
+  body: 경로 %SystemRoot%\MEMORY.DMP · %SystemRoot%\Minidump\*.dmp / 형식 바이너리(WinDbg) / 확인 BSOD 버그체크 코드·원인 드라이버 / 샘플 BugCheck 0x000000D1 (DRIVER_IRQL_NOT_LESS_OR_EQUAL)
+- heading: '로그: 성능 카운터'
+  body: 경로 Performance Monitor 데이터 수집기 세트 (*.blg) / 형식 바이너리(relog로 CSV) / 확인 장애 시각 CPU·메모리·디스크 큐·네트워크 / 샘플 "09/09/2026 14:02:11.000","95.3","1024","12.5"
+- heading: '로그: Windows Update'
+  body: 경로 Get-WindowsUpdateLog → WindowsUpdate.log / 형식 텍스트·로컬시각 / 확인 재부팅 유발 패치·설치 실패 / 샘플 2026/09/08 23:10:11.1234567 Agent  Installed KB5031234
+- heading: '로그: PowerShell 작업'
+  body: 경로 Event Viewer > Applications and Services > Microsoft-Windows-PowerShell/Operational / 형식 EVTX / 확인 4104 스크립트 블록(의심 스크립트)·원격 실행 / 샘플 Warning,4104,"Creating Scriptblock text..."

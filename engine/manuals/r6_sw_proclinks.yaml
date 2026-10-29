@@ -1,0 +1,37 @@
+# 아이디어 3(2026-10-16) SW 묶음 — '같은 제품·유형'·'계층 공통'으로만 붙던 판정 가운데 기존 절차가 실제로 맞는 것만 '이 판정 전용'으로 잇는다.
+# 맞지 않는 판정은 r6_sw_procedures.yaml 에 전용 절차를 따로 만들었다(여기에 넣지 않음). 절차 파일 자체는 고치지 않는다.
+# 참고: sw_procedures.yaml 의 match 에 소문자 클래스명(java.lang.OutOfMemoryError 등)으로 적힌 항목은 코드 ID(대문자)와 글자가 달라 ID 매칭이 되지 않았다 — 여기서 대문자 ID 로 잇는다.
+links:
+- procedure: JAVA-PROC-MEMORY
+  match: [JAVA.LANG.OUTOFMEMORYERROR]
+  reviewed: "2026-10-16 판정 적합성 확인 — 1차 grep 문구(heap space·Metaspace·native thread·Direct buffer)별 원인 판정·jstat/GC.heap_info(JDK 9+ 표기)·스레드 덤프, 2차 힙 덤프·-Xmx/Metaspace/ulimit 조정이 OOM 종류 전부를 다룸(원래 match 의 소문자 ID 가 대문자 코드와 어긋나 있던 것)"
+- procedure: JAVA-PROC-CONNECTION
+  match: [JAVA.NET.CONNECTEXCEPTION]
+  reviewed: "2026-10-16 판정 적합성 확인 — 1차 getent·nc·curl 와 ConnectException grep 이 refused(대상 미기동)/timed out(방화벽·지연) 구분 그대로, DB 대상이면 2차 풀·CONNECT_TIMEOUT 조정이 맞음(원래 match 의 소문자 ID 를 대문자로)"
+- procedure: JAVA-PROC-CONNECTION
+  match: [JAVA.SQL.SQLRECOVERABLEEXCEPTION, ORG.SPRINGFRAMEWORK.DAO.DATAACCESSRESOURCEFAILUREEXCEPTION, ORG.SPRINGFRAMEWORK.JDBC.CANNOTGETJDBCCONNECTIONEXCEPTION]
+  reviewed: "2026-10-16 판정 적합성 확인 — JDBC 연결 단절·풀 획득 실패 판정: 1차 DB 도달(nc)·풀 상태(Thread.print getConnection·'Connection is not available'), 2차 Hikari 풀 크기·connection-timeout·max-lifetime(방화벽 유휴 끊김보다 짧게)·leak-detection 이 원인별 조치와 일치"
+- procedure: JAVA-PROC-SECURITY
+  match: [JAVAX.NET.SSL.SSLHANDSHAKEEXCEPTION, JAVAX.NET.SSL.SSLEXCEPTION, JAVAX.NET.SSL.SSLPEERUNVERIFIEDEXCEPTION]
+  reviewed: "2026-10-16 판정 적합성 확인 — TLS 계열 판정: 1차 openssl s_client 로 상대 인증서 기간·체인·프로토콜, cacerts 조회·PKIX/handshake_failure 구분, 2차 CA 반입·jdk.tls.disabledAlgorithms(백업/롤백 포함)이 핸드셰이크·일반 SSL·상대 인증서 미검증 원인을 그대로 다룸"
+- procedure: JAVA-PROC-R5-APP
+  match: [JAVA.LANG.EXCEPTIONININITIALIZERERROR]
+  reviewed: "2026-10-16 판정 적합성 확인 — static 초기화 실패는 소스·설정 결함: 1차 최초 예외 프레임·빈도·배포 정보 확인, 2차 수정 배포(재기동 포함 — 실패한 클래스는 재기동 전까지 NoClassDefFoundError)·직전 판 원복이 맞는 조치"
+- procedure: MESIM-PROC-UPSTREAM
+  match: [LEG-MESIM-ESB-PROVIDER-RESPONSE-CODE-X-D-D-39DE, LEG-MESIM-APIG-PROVIDER-RESPONSE-CODE-X-D-D-A700]
+  reviewed: "2026-10-16 판정 적합성 확인 — Provider 4xx/5xx 응답: 1차 PROVIDER/HTTP CALL ERROR grep·제공자 health 확인으로 제공자 장애 판정, 2차 제공자 복구 후 서킷·타임아웃·재시도 조정(멱등 확인)이 맞음(400 단독 판정은 전용 MESIM-PROC-R6-FAULT)"
+- procedure: MESIM-PROC-UPSTREAM
+  match: [SW-ESB-004]
+  reviewed: "2026-10-16 판정 적합성 확인 — 거래 타임아웃(mesim-esb·apig·eai 공통 룰): 1차 'Read timed out' 등과 제공자 도달·응답 확인, 2차 Hystrix/Camel timeout·재시도 조정(제공자 복구 전 확대 금지)이 지연 구간 판별·조치와 일치"
+- procedure: MESIM-PROC-CAPACITY
+  match: [APIG-QOS-DEGRADE, ESB-TRANSACTION-DELAY]
+  reviewed: "2026-10-16 판정 적합성 확인 — 품질 저하·거래 지연: 1차 큐 포화·RejectedExecution·qtp/Camel 스레드 수·연결 수로 처리 용량 부족 여부 판정, 2차 Jetty/SEDA 스레드·큐·유량 조정(메모리·제공자 여유 확인)이 맞음"
+- procedure: MESIM-PROC-INTERNAL
+  match: [APIG-OPENAPI-PROCESS-FAIL, LEG-MESIM-ESB-APIGSERVICE-ERROR-2C3C, LEG-MESIM-APIG-APIGSERVICE-ERROR-9CCC, LEG-MESIM-ESB-MESIM-001-727D]
+  reviewed: "2026-10-16 판정 적합성 확인 — 게이트웨이/ESB 내부 예외·서비스 오류 응답·MESIM 오류 코드: 1차 프로세스·리슨 포트·내부 예외(CamelJettyServer·변환) 확인, 2차 재기동·실패 메시지 재처리(중복 확인)·매핑 수정이 원인별 조치와 일치"
+- procedure: MESIM-PROC-INTERNAL
+  match: [APIG-EVENT-ALERT]
+  reviewed: "2026-10-16 판정 적합성 확인 — APIG 이벤트 경보는 게이트웨이 내부 이상(다운·예외)의 알림: 이 절차 1차(프로세스·예외 확인)가 경보 뒤 확인할 일 그대로이고 경보만 있고 예외가 없으면 조치 불필요로 판정됨"
+- procedure: IND-PROC-UPSTREAM
+  match: [LEG-IND-013, LEG-IND-014, LEG-IND-015]
+  reviewed: "2026-10-16 판정 적합성 확인 — 오퍼레이션 시작·응답 Body 수신·SA 매핑 시작/종료는 정상 흐름 표지(info): 짝 불일치·null 응답·건수 급변이 보이면 이 절차 1차(인터셉터 예외·대상 WSDL 확인)와 2차(번들 재시작·엔드포인트 timeout)로 그대로 이어짐"

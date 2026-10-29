@@ -1,0 +1,541 @@
+# OS 계층 조치 절차 카탈로그 — RHEL 8/9 · AIX 7 · Windows Server 2019 · Solaris 11 · HP-UX 11i v3 공식 문서 기준 (2026-09-11)
+# 2026-10-16 강화(GPT 45차 관문): 1차 = 읽기 전용·출력 제한·적용 버전/권한 표기, 2차 = 사전조건·영향·승인·백업/롤백 + 성공/실패 판단, 3차 = 민감정보 마스킹·전달 승인
+procedures:
+# ── Linux ──
+- id: LNX-PROC-MEMORY
+  products: [linux, rhel, centos, rocky, ubuntu]
+  category: memory
+  match: [OS-LNX-003, LNX-OOM-KILLER, LNX-SWAP-FULL, LEG-COM-JAVA-OOM]
+  title: OOM killer 발생·메모리 고갈
+  source: "RHEL 9 'Monitoring and managing system status and performance › Configuring an operating system to optimize memory access'·'Managing memory (vm.overcommit_memory, vm.swappiness)'·systemd-cgtop / journalctl"
+  stages:
+  - stage: 1
+    steps:
+    - do: OOM 발생 내역·희생 프로세스 확인 (읽기 전용)
+      cmd: |
+        journalctl -k --since "-2 hours" | grep -i -A 3 "Out of memory\|oom-killer\|Killed process" | tail -40
+        dmesg -T | grep -i "Out of memory\|Killed process" | tail -10
+        free -m ; vmstat 1 5 ; ps -eo pid,rss,vsz,pcpu,cmd --sort=-rss | head -10
+      check: "'Killed process <pid> (<name>)' 의 프로세스가 WAS/DB 면 해당 담당 통보. available 이 수백 MB 이하·si/so(스왑) 지속이면 메모리 고갈 · 정상: OOM 기록 없음, available 이 총량 10% 이상"
+      note: "적용: RHEL 7/8/9·Rocky·CentOS 7+·Ubuntu 18.04+ (journalctl 은 systemd 배포판) · 권한: root 또는 systemd-journal 그룹(dmesg 는 kernel.dmesg_restrict=1 인 Ubuntu 에서 root 필요) · ps 의 cmd 열에 인자(비밀번호 등)가 보일 수 있어 화면 공유 주의"
+    - do: 메모리 압박 원인 프로세스와 cgroup 한도 확인 (읽기 전용)
+      cmd: |
+        systemd-cgtop -m -n 2 | head -15
+        systemctl show <service> -p MemoryMax -p MemoryCurrent
+        cat /proc/meminfo | egrep "MemTotal|MemAvailable|Committed_AS|CommitLimit|HugePages_Total"
+      check: "Committed_AS > CommitLimit 이면 오버커밋 한계. 서비스 MemoryCurrent 가 MemoryMax 에 도달했으면 cgroup 제한 · 정상: MemoryMax=infinity 또는 여유 20% 이상"
+      note: "적용: MemoryMax 는 cgroup v2(RHEL 9·Ubuntu 22.04+) — RHEL 7/8(cgroup v1)은 -p MemoryLimit 로 조회 · 권한: 일반 사용자 조회 가능(systemd-cgtop 전체 보기는 root)"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 해당 서비스 재기동 후 메모리 한도·커널 파라미터 조정
+      cmd: |
+        systemctl restart <service>
+        sysctl -w vm.swappiness=10 ; sysctl -w vm.overcommit_memory=0 ; sysctl -w vm.min_free_kbytes=262144
+      config:
+        file: /etc/sysctl.d/90-memory.conf (영구) · /etc/systemd/system/<service>.service.d/override.conf
+        snippet: |
+          vm.swappiness = 10
+          vm.min_free_kbytes = 262144
+          vm.overcommit_memory = 0
+          # override.conf → [Service] MemoryMax=12G  OOMScoreAdjust=-500   (중요 서비스 보호)
+      check: "성공: sysctl -p 반영값 일치, 재기동 후 서비스 active·journal 에 OOM 미발생(24시간) · 실패: 재기동 실패(systemctl status 오류)·OOM 재발 → 원 설정으로 롤백 후 3차. JVM 이면 -Xmx 를 물리 메모리 60% 이내로 조정(WAS 절차 참조)"
+      note: "사전조건: 1차 자료(journalctl·ps 출력) 보존, 서비스 담당과 재기동 시각 합의 · 영향: 재기동 동안 서비스 중단, vm.min_free_kbytes 를 크게 잡으면 사용 가능 메모리 감소 · 승인: 시스템 담당·서비스 담당(변경 관리) · 백업/롤백: sysctl -a > /var/tmp/sysctl_before.txt 로 현재값 보관, 문제 시 이전 값으로 sysctl -w 재적용·추가한 /etc/sysctl.d 파일 제거 · 적용: RHEL 7/8/9 공통(override.conf 의 MemoryMax 는 RHEL 9, RHEL 7/8 은 MemoryLimit)"
+    - do: (2차·승인 후) 스왑 부족 시 스왑 파일 추가 (임시)
+      cmd: |
+        dd if=/dev/zero of=/swapfile bs=1M count=8192 && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile && echo '/swapfile none swap defaults 0 0' >> /etc/fstab
+      check: "성공: free -m 의 Swap total 이 8GB 증가, swapon --show 에 /swapfile 표시 · 실패: 'swapfile has holes'·디스크 부족 오류 → 파일 삭제 후 다른 파일시스템에서 재시도"
+      note: "사전조건: 대상 파일시스템 여유 8GB 이상(df -h /) 확인, /etc/fstab 사본 보관 · 영향: dd 수행 중 디스크 I/O 증가, 스왑 사용 시 성능 저하(근본 원인 해결 아님) · 승인: 시스템 담당 · 백업/롤백: cp /etc/fstab /etc/fstab.bak, 롤백은 swapoff /swapfile → fstab 줄 제거 → rm /swapfile · 적용: RHEL 7(XFS)은 fallocate 로 만든 파일이 'holes' 오류로 거부되므로 dd 사용(Red Hat 문서 방식), RHEL 8/9 도 dd 권장"
+  - stage: 3
+    steps:
+    - do: 벤더(Red Hat) 케이스 자료 (sos report)
+      cmd: |
+        sos report --batch --tmp-dir /var/tmp   # RHEL 8.3+(sos 4.x). RHEL 7: sosreport --batch --tmp-dir /var/tmp
+        journalctl -k --since "-1 day" > kernel_$(date +%Y%m%d).log ; sar -r -s 00:00:00 > sar_mem_$(date +%Y%m%d).txt
+      check: sosreport·커널 로그·sar 메모리 이력·서비스 설정(JVM 옵션)
+      note: "민감정보 마스킹: 호스트명·IP·사용자 계정·프로세스 명령줄 인자(비밀번호·토큰)를 가린 뒤 전달(sos 4.x 는 --clean 으로 호스트명·IP 난독화 가능) · 전달 승인: 시스템 담당 확인 후 보안 담당 승인을 받아 Red Hat 케이스에 첨부"
+
+- id: LNX-PROC-DISK
+  products: [linux, rhel, centos, rocky, ubuntu]
+  category: disk
+  match: [LNX-NO-SPACE, LNX-EXT4-ERROR, LNX-EXT3-ERROR, LNX-FS-INODE-FULL]
+  title: 파일시스템 가득참·inode 고갈·파일시스템 오류
+  source: "RHEL 9 'Managing file systems (df, du, xfs_repair/e2fsck, lvextend, xfs_growfs)'·'Configuring and managing logical volumes'·journald/logrotate"
+  stages:
+  - stage: 1
+    steps:
+    - do: 가득 찬 파일시스템·큰 디렉터리 확인 (읽기 전용)
+      cmd: |
+        df -hT ; df -i
+        du -xsh /var/log /var/lib /tmp /home /opt 2>/dev/null | sort -rh | head
+        find /var/log -xdev -type f -size +500M -printf '%s %p\n' 2>/dev/null | sort -rn | head
+        lsof +L1 2>/dev/null | head   # 삭제됐지만 열려 있어 공간이 반환되지 않은 파일
+      check: "Use% 95% 이상 또는 IUse% 95% 이상이면 확정. lsof +L1 결과가 있으면 프로세스 재시작 전엔 공간 미반환 · 정상: Use%·IUse% 85% 미만"
+      note: "적용: RHEL 7/8/9·Ubuntu 공통 · 권한: root(다른 사용자 디렉터리 du·lsof) · du 는 -x 로 같은 파일시스템만 보며, 파일 수가 매우 많은 디렉터리(/var/lib 의 DB 데이터 등)는 시간이 걸리므로 업무 부하 시간대에는 /var/log·/tmp 만 먼저 확인"
+    - do: 파일시스템 오류 메시지 확인 (읽기 전용)
+      cmd: |
+        journalctl -k --since "-1 day" | grep -i "EXT4-fs error\|XFS (.*): .*error\|I/O error\|remount.*read-only" | tail -20
+      check: "오류·read-only 전환이 보이면 하드웨어/파일시스템 손상 — 2차·3차 · 정상: 출력 없음"
+      note: "적용: systemd 배포판(RHEL 7+), 그 외는 /var/log/messages · 권한: root 또는 systemd-journal 그룹"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 로그·임시 파일 정리 (열려 있는 파일은 비우기)
+      cmd: |
+        journalctl --vacuum-size=500M
+        find /var/log -name "*.gz" -mtime +14 -delete ; find /tmp -xdev -type f -atime +7 -delete
+        : > /var/log/<큰 로그 파일>      # 열려 있는 로그는 삭제 대신 비우기
+        logrotate -f /etc/logrotate.conf
+      check: "성공: df -h Use% 90% 이하, 서비스 로그 기록 정상 · 실패: 사용률 변화 없음 → lsof +L1 로 열린 삭제 파일 확인(해당 프로세스 재시작은 별도 승인), 그래도 부족하면 LVM 확장"
+      note: "사전조건: 지울 로그의 보존 의무(감사·장애 분석) 확인, 장애 시각 전후 로그는 먼저 다른 위치로 보관 · 영향: 삭제·비운 로그는 되돌릴 수 없음, logrotate -f 는 서비스 reload 를 일으킬 수 있음 · 승인: 시스템 담당·로그 소유 서비스 담당 · 백업/롤백: 정리 전 tar czf /backup/logs_$(date +%Y%m%d).tgz <대상> 로 보관(롤백은 보관본 복원만 가능) · 적용: journalctl --vacuum-size 는 systemd 219+(RHEL 7.x 이상)"
+    - do: (2차·승인 후) LVM 볼륨 확장 (여유 PE 또는 디스크 추가 후)
+      cmd: |
+        vgs ; lvs
+        lvextend -r -L +20G /dev/<vg>/<lv>      # -r: 파일시스템(xfs/ext4) 동시 확장
+      check: "성공: df -h 용량 증가·lvs 크기 반영 · 실패: 'Insufficient free space' → 디스크 추가(pvcreate·vgextend) 요청, fsadm 오류면 파일시스템 확장 수동 수행(xfs_growfs / resize2fs)"
+      note: "사전조건: vgs 의 VFree 가 확장량 이상, 최근 백업 존재 · 영향: 온라인 확장으로 서비스 중단 없음(짧은 I/O 지연) · 승인: 시스템 담당(변경 관리) · 백업/롤백: XFS 는 축소 불가라 롤백 불가 — 확장량을 신중히 결정, ext4 축소는 언마운트 필요 · 적용: RHEL 7/8/9 (lvextend -r 은 fsadm 사용)"
+    - do: (2차·승인 후) 파일시스템 오류 시 점검·복구 (언마운트 가능 시, 백업 후)
+      cmd: |
+        umount /<mount> && xfs_repair /dev/<vg>/<lv>    # XFS
+        umount /<mount> && e2fsck -f -y /dev/<vg>/<lv>  # ext4
+      check: "성공: 복구 도구 종료 코드 0, 재마운트 후 journalctl 에 오류 미발생 · 실패: xfs_repair 가 로그 재생 요구('mount the filesystem to replay the log') 또는 e2fsck 종료 코드 4 이상 → 중단하고 3차(백업 복원 검토)"
+      note: "사전조건: 서비스 중지·언마운트 가능 시간 확보, 먼저 xfs_repair -n / e2fsck -n 으로 읽기 전용 점검 결과 확인, 가능하면 블록 장치 이미지(dd) 백업 · 영향: 언마운트 동안 해당 파일시스템 서비스 중단, 복구 중 손상 파일이 lost+found 로 이동·유실될 수 있음 · 승인: 시스템 담당·서비스 담당 · 백업/롤백: 복구는 되돌릴 수 없으므로 사전 백업/스냅샷이 유일한 롤백 수단 · 적용: RHEL 7/8/9 (xfs_repair -L 은 로그 폐기라 제조사 지침 없이 금지)"
+  - stage: 3
+    steps:
+    - do: 벤더 케이스 자료
+      cmd: |
+        sos report --batch ; smartctl -a /dev/<sdX> > smart_<sdX>_$(date +%Y%m%d).txt 2>/dev/null ; journalctl -k > kernel.log
+      check: sosreport·SMART·커널 로그·df/lvs 출력
+      note: "RHEL 7 은 sosreport --batch · <sdX> 는 오류가 난 파일시스템의 실제 디스크(lsblk -s /dev/<vg>/<lv> 또는 df 의 장치로 역추적 — sda 고정 아님) · 민감정보 마스킹: 호스트명·IP·사용자 계정·마운트 경로의 업무명을 가린 뒤 전달(sos --clean 활용) · 전달 승인: 시스템 담당 확인 후 보안 담당 승인"
+
+- id: LNX-PROC-CAPACITY
+  products: [linux, rhel, centos, rocky, ubuntu]
+  category: capacity
+  match: [LNX-CONNTRACK-FULL, LNX-IPCONNTRACK-FULL, LNX-TOO-MANY-OPEN-FILES, LNX-TCP-SYN-FLOOD]
+  title: conntrack 테이블·파일 디스크립터·SYN 큐 한도
+  source: "RHEL 9 'Configuring and managing networking (nf_conntrack_max, net.core.somaxconn, tcp_max_syn_backlog)'·'Tuning file descriptors (fs.file-max, limits.conf, systemd LimitNOFILE)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 현재 사용량·한도 확인 (읽기 전용)
+      cmd: |
+        sysctl net.netfilter.nf_conntrack_count net.netfilter.nf_conntrack_max 2>/dev/null
+        cat /proc/sys/fs/file-nr ; ulimit -n ; cat /proc/<PID>/limits | grep "open files" ; ls /proc/<PID>/fd | wc -l
+        ss -s ; sysctl net.core.somaxconn net.ipv4.tcp_max_syn_backlog
+        journalctl -k --since "-2 hours" | grep -i "conntrack: table full\|SYN flooding\|Too many open files" | tail
+      check: "conntrack_count ≈ max, fd 사용 ≈ 한도, 'possible SYN flooding' 반복이면 해당 한도 초과 · 정상: 각 사용량이 한도의 80% 미만"
+      note: "적용: RHEL 7/8/9·Ubuntu (nf_conntrack 모듈이 없으면 첫 줄은 출력 없음) · 권한: /proc/<PID>/fd 는 프로세스 소유자 또는 root"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 커널·프로세스 한도 상향
+      config:
+        file: /etc/sysctl.d/90-net.conf · /etc/security/limits.d/90-nofile.conf · systemd override
+        snippet: |
+          net.netfilter.nf_conntrack_max = 1048576
+          net.netfilter.nf_conntrack_tcp_timeout_established = 3600
+          net.core.somaxconn = 4096
+          net.ipv4.tcp_max_syn_backlog = 8192
+          net.ipv4.tcp_syncookies = 1
+          fs.file-max = 2097152
+          # limits.d: * soft nofile 65535 / * hard nofile 65535   ·  systemd: [Service] LimitNOFILE=65535
+      cmd: |
+        sysctl --system ; systemctl daemon-reload ; systemctl restart <service>
+      check: "성공: conntrack_count/max 여유, 서비스 프로세스 limits 의 open files 65535, 2시간 동안 오류 미발생 · 실패: sysctl --system 출력에 'unknown key'(모듈 미적재) 또는 재기동 실패 → 추가한 파일 제거 후 sysctl --system 재적용"
+      note: "사전조건: 현재값 보관(sysctl -a > /var/tmp/sysctl_before.txt), conntrack 1건당 커널 메모리 약 300바이트로 메모리 여유 확인, SYN flood 가 공격이면 보안 담당 먼저 통보 · 영향: 서비스 재기동 동안 중단, somaxconn 은 애플리케이션 listen backlog 도 함께 올려야 효과 · 승인: 시스템 담당·서비스 담당(변경 관리) · 백업/롤백: 추가한 /etc/sysctl.d·limits.d·override 파일 삭제 → sysctl --system·daemon-reload 로 원복 · 적용: limits.d 는 PAM 로그인 세션, systemd 서비스는 LimitNOFILE 만 적용(RHEL 7/8/9)"
+  - stage: 3
+    steps:
+    - do: 벤더 케이스 자료
+      cmd: |
+        sos report --batch ; ss -s > ss_$(date +%Y%m%d).txt ; sysctl -a > sysctl_$(date +%Y%m%d).txt
+      check: sosreport·네트워크 통계·커널 파라미터·SYN flood 출처(접근 로그)
+      note: "RHEL 7 은 sosreport --batch · 민감정보 마스킹: 호스트명·IP(접속 출처 포함)·사용자 계정을 가린 뒤 전달 · 전달 승인: 시스템 담당 확인 후 보안 담당 승인(공격 정황이 있으면 보안 담당이 전달 범위 결정)"
+
+- id: LNX-PROC-HARDWARE
+  products: [linux, rhel, centos, rocky, ubuntu]
+  category: hardware
+  match: [LNX-SCSI-ERROR, LNX-MCE-HARDWARE, LNX-NMI-WATCHDOG, LNX-SOFT-LOCKUP, LNX-HUNG-TASK, LNX-LINK-DOWN]
+  title: 디스크 I/O 오류·MCE·soft lockup·경로 장애
+  source: "RHEL 9 'Managing storage devices (multipath -ll, DM Multipath)'·'Kernel crash dump guide (kdump)'·rasdaemon(ras-mc-ctl)·smartmontools"
+  stages:
+  - stage: 1
+    steps:
+    - do: 하드웨어 오류 메시지·장치 상태 확인 (읽기 전용)
+      cmd: |
+        journalctl -k --since "-1 day" | grep -i "I/O error\|SCSI error\|Machine check\|soft lockup\|hung_task\|link down\|failed path" | tail -30
+        multipath -ll 2>/dev/null | head -40 ; lsblk -d -o NAME,TYPE,SIZE,MODEL ; smartctl -H /dev/<sdX> 2>/dev/null ; ras-mc-ctl --errors 2>/dev/null | tail
+        ipmitool sel elist 2>/dev/null | tail -20
+      check: "반복 I/O 오류·MCE·SEL 경고가 있으면 하드웨어 결함 — 2차·3차(제조사) 대상. 다중경로 failed 경로 수 기록 · 정상: 오류 없음, multipath 모든 경로 active ready"
+      note: "적용: RHEL 7/8/9 (ras-mc-ctl 은 rasdaemon, ipmitool 은 ipmi 드라이버 필요 — 없으면 해당 줄 생략) · <sdX> 는 커널 로그의 I/O error 에 찍힌 장치명 또는 lsblk 로 확인한 실제 디스크(sda 고정 아님), 멀티패스·RAID 뒤 디스크는 SMART 가 응답하지 않을 수 있음 · 권한: root"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 장애 경로 격리·서비스 우회
+      cmd: |
+        multipathd -k"show paths" ; multipathd -k"fail path <sdX>"   # 불안정 경로 수동 격리
+        echo offline > /sys/block/<sdX>/device/state              # 완전 실패 디스크(RAID/멀티패스 보호 시)
+      check: "성공: multipath -ll 에서 남은 경로 active 유지, I/O 오류 중단 · 실패: 남은 경로가 없음(no path)·I/O 오류 지속 → 즉시 원복(reinstate) 후 3차"
+      note: "사전조건: multipath -ll 로 다른 경로가 active 인지 확인(마지막 경로는 절대 격리 금지), 스토리지 담당과 SAN 상태 공유 · 영향: 격리 경로만큼 대역폭 감소, 잘못 격리하면 볼륨 접근 불가 · 승인: 시스템 담당·스토리지 담당 · 백업/롤백: 원복은 multipathd -k\"reinstate path <sdX>\" 와 echo running > /sys/block/<sdX>/device/state · 적용: RHEL 7/8/9 (RHEL 8+ 는 multipathd fail path <sdX> 형식도 가능)"
+    - do: (2차·승인 후) kdump 활성화로 다음 lockup 시 원인 확보
+      config:
+        file: /etc/kdump.conf · GRUB crashkernel
+        snippet: |
+          path /var/crash
+          core_collector makedumpfile -l --message-level 7 -d 31
+          # RHEL 7/8: grubby --update-kernel=ALL --args="crashkernel=auto"  → 재부팅 후 systemctl enable --now kdump
+          # RHEL 9: crashkernel=auto 미지원 — kdumpctl reset-crashkernel --kernel=ALL → 재부팅 후 systemctl enable --now kdump
+      check: "성공: kdumpctl status 'Kdump is operational'(RHEL 8+) 또는 active, cat /proc/cmdline 에 crashkernel= 표시 · 실패: 'No memory reserved for crash kernel' → crashkernel 값·재부팅 여부 확인"
+      note: "사전조건: /var/crash 에 물리 메모리 크기 이상 여유(덤프 -d 31 은 보통 수 GB), 재부팅 일정 확보 · 영향: crashkernel 예약으로 사용 가능 메모리 감소(수백 MB), 반영에 재부팅 필요 · 승인: 시스템 담당(변경 관리)·서비스 담당(재부팅) · 백업/롤백: cp /etc/kdump.conf /etc/kdump.conf.bak, 롤백은 grubby --update-kernel=ALL --remove-args=crashkernel 후 재부팅 · 적용: crashkernel=auto 는 RHEL 7/8, RHEL 9 는 kdumpctl reset-crashkernel"
+  - stage: 3
+    steps:
+    - do: 제조사(서버·스토리지) 케이스 자료
+      cmd: |
+        sos report --batch ; ipmitool sel elist > sel.txt 2>/dev/null ; ls /var/crash/ ; multipath -ll > mpath.txt 2>/dev/null
+        smartctl -a /dev/<sdX> > smart_<sdX>.txt 2>/dev/null
+      check: sosreport·SEL·vmcore(있으면)·multipath·SMART·펌웨어 버전
+      note: "RHEL 7 은 sosreport --batch · 민감정보 마스킹: 호스트명·IP·WWN/시리얼 외 사용자 계정을 가림(vmcore 는 메모리 내용 전체라 비밀번호·개인정보가 들어 있을 수 있어 별도 승인) · 전달 승인: 시스템 담당 확인 후 보안 담당 승인(vmcore 전달은 보안 담당 필수)"
+
+- id: LNX-PROC-SECURITY
+  products: [linux, rhel, centos, rocky, ubuntu, auditd]
+  category: security
+  match: [LNX-SSH-AUTH-FAIL, LNX-SUDO-FAIL, LNX-SELINUX-DENIAL]
+  title: 인증 실패 반복·SELinux 거부
+  source: "RHEL 9 'Using SELinux (ausearch, audit2allow, setsebool)'·'Configuring authentication (pam_faillock, faillock)'·'Security hardening (sshd_config)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 실패 계정·출처·SELinux 거부 내역 확인 (읽기 전용)
+      cmd: |
+        journalctl -u sshd --since "-2 hours" | grep -i "Failed password\|Invalid user" | awk '{print $(NF-3)}' | sort | uniq -c | sort -rn | head
+        faillock --user <user> ; lastb | head
+        ausearch -m AVC,USER_AVC -ts recent 2>/dev/null | tail -20 ; getenforce
+      check: "외부 IP 다수 실패면 침해 시도(보안 담당 통보·차단은 보안 담당). AVC 거부가 서비스 실패 시각과 일치하면 SELinux 원인 · 정상: 소수의 내부 오입력만 있음, AVC 없음"
+      note: "적용: RHEL 7/8/9 (Ubuntu 는 유닛명 ssh, SELinux 대신 AppArmor — journalctl -k | grep apparmor) · 권한: root · 출력에 계정·출처 IP 가 보이므로 결과 공유는 보안 담당 범위로 제한"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 계정 잠금 해제 / SELinux 정책 보정 (비활성화 대신)
+      cmd: |
+        faillock --user <user> --reset
+        ausearch -m AVC -ts recent | audit2allow -M local_<svc> && semodule -i local_<svc>.pp
+        setsebool -P httpd_can_network_connect on     # 예: 웹서버 → WAS 연결 거부 시
+      check: "성공: 서비스 정상, ausearch -m AVC -ts recent 신규 거부 없음, 해당 계정 로그인 성공 · 실패: AVC 지속 → 모듈 제거 후 정책 담당과 재검토, 잠금 재발이면 공격 여부 보안 담당 확인"
+      note: "사전조건: 잠금 해제 대상이 본인 요청인지 확인, audit2allow 가 만든 local_<svc>.te 를 읽어 과도한 허용(예: 모든 파일 쓰기)이 없는지 검토 · 영향: 정책 모듈·boolean 은 보안 수준을 낮춤 · 승인: 보안 담당·시스템 담당 · 백업/롤백: semodule -l > /var/tmp/semodule_before.txt 보관, 롤백은 semodule -r local_<svc>·setsebool -P <bool> off · 적용: RHEL 7/8/9 (faillock 은 pam_faillock 사용 시 — RHEL 7 의 pam_tally2 환경은 pam_tally2 -u <user> -r)"
+    - do: (2차·승인 후) 공격 출처 차단 (보안 담당 승인)
+      cmd: |
+        firewall-cmd --permanent --add-rich-rule='rule family=ipv4 source address=<IP> reject' && firewall-cmd --reload
+      check: "성공: firewall-cmd --list-rich-rules 에 규칙 표시, 해당 출처 실패 시도 중단 · 실패: 정상 사용자 접속 불가 신고 → 즉시 규칙 제거"
+      note: "사전조건: 차단 IP 가 내부 관리망·NAT 게이트웨이가 아닌지 확인 · 영향: 같은 IP 를 쓰는 정상 사용자도 차단 · 승인: 보안 담당 · 백업/롤백: firewall-cmd --list-all > /var/tmp/fw_before.txt 보관, 롤백은 --remove-rich-rule='<같은 규칙>' 후 --reload · 적용: firewalld 사용 RHEL 7/8/9 (Ubuntu 는 ufw)"
+  - stage: 3
+    steps:
+    - do: 보안 담당·벤더 자료
+      cmd: |
+        ausearch -ts <start> -te <end> > audit_$(date +%Y%m%d).txt ; journalctl -u sshd --since "-1 day" > sshd.log ; last -F | head -50
+      check: audit 로그·sshd 로그·로그인 이력
+      note: "민감정보 마스킹: 사용자 계정·출처/목적지 IP·호스트명·명령줄(audit EXECVE 의 인자)을 가린 뒤 전달 · 전달 승인: 보안 담당 승인(침해 의심 건은 보안 담당이 직접 전달)"
+
+# ── AIX ──
+- id: AIX-PROC-STORAGE
+  products: [aix]
+  category: storage
+  match: [AIX-FS-FULL]
+  title: 파일시스템·페이징 공간 부족
+  source: "IBM AIX 7.2 'Operating system and device management (chfs -a size, extendlv, chps)'·'Logical Volume Manager'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 파일시스템·페이징 사용률 확인 (읽기 전용)
+      cmd: |
+        df -g ; lsps -a ; lsvg rootvg | grep -i -e "FREE PPs" -e "PP SIZE" ; lsvg -l rootvg
+        du -gs /var/adm/* /tmp/* 2>/dev/null | sort -rn | head
+      check: "%Used 95% 이상 파일시스템, 페이징 %Used 80% 이상이면 조치. VG FREE PPs 로 확장 가능 여부 판단 · 정상: %Used 85% 미만, 페이징 70% 미만"
+      note: "적용: AIX 6.1/7.1/7.2/7.3 · 권한: 일반 사용자 조회 가능(du 의 다른 사용자 디렉터리는 root)"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 파일시스템 확장 (VG 여유 PP 범위 내)
+      cmd: |
+        chfs -a size=+2G /var          # 또는 chfs -a size=10G /var (jfs2)
+        extendlv <lvname> 16 ; chfs -a size=+4G /<mount>
+      check: "성공: df -g 에 늘어난 크기 반영 · 실패: '0516-404 allocp: not enough resources'(VG 여유 PP 부족) → 디스크 추가(extendvg) 요청"
+      note: "사전조건: lsvg <vg> 의 FREE PPs × PP SIZE 가 확장량 이상, mksysb/파일시스템 백업 최신 · 영향: 온라인 확장으로 중단 없음 · 승인: 시스템 담당(변경 관리) · 백업/롤백: JFS2 는 AIX 6.1+ 에서 chfs -a size=-<크기> 로 축소 가능하나 데이터 배치에 따라 실패할 수 있어 사실상 되돌리기 어려움 — 확장량 신중히 · 적용: JFS2(AIX 5.3+), JFS(구형)는 축소 불가"
+    - do: (2차·승인 후) 페이징 공간 확장
+      cmd: |
+        chps -s 16 hd6     # 16 LP 추가 (PP 크기 확인)
+        lsps -a
+      check: "성공: lsps -a 의 Size 증가, 페이징 %Used 70% 이하 · 실패: VG 여유 부족 오류 → 다른 VG 에 mkps 로 추가 페이징 공간 생성 검토"
+      note: "사전조건: rootvg FREE PPs 확인, 페이징 고갈의 원인 프로세스(svmon -P) 파악 · 영향: 온라인 반영, rootvg 공간 감소 · 승인: 시스템 담당 · 백업/롤백: 축소는 chps -d <LP수> hd6(AIX 5.1+, 사용 중 공간이면 실패) · 적용: AIX 6.1~7.3"
+  - stage: 3
+    steps:
+    - do: IBM 케이스 자료 (snap)
+      cmd: |
+        snap -gc ; ls -l /tmp/ibmsupt/snap.pax.Z
+      check: snap.pax.Z·df/lsps 출력·errpt
+      note: "민감정보 마스킹: snap 에는 호스트명·IP·사용자 목록(/etc/passwd 계열)·네트워크 설정이 들어 있으므로 사내 규정상 가릴 항목 확인 후 전달 · 전달 승인: 시스템 담당 확인 후 보안 담당 승인"
+
+- id: AIX-PROC-HARDWARE
+  products: [aix]
+  category: hardware
+  match: [OS-AIX-ERRPT-001, AIX-MPIO-PATH-FAIL, AIX-MEMORY-ERROR, AIX-LVM-IO-FAIL, B6267342, C1348779, 52715FA5]
+  title: errpt 하드웨어 오류 (디스크·경로·메모리)
+  source: "IBM AIX 7.2 'Error logging (errpt -a, errclear)'·'MPIO (lspath, chpath)'·'diag' / IBM Support 'Collecting data: snap'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 오류 로그·경로 상태 확인 (읽기 전용)
+      cmd: |
+        errpt | head -30 ; errpt -a -j <IDENTIFIER> | head -80
+        lspath | grep -v Enabled ; lsdev -Cc disk | grep -v Available
+        lsattr -El hdisk0 -a reserve_policy -a queue_depth 2>/dev/null
+      check: "PERM 유형(예: SC_DISK_ERR2 B6267342·DISK_ERR4) 반복·경로 Failed/Missing 이면 하드웨어/SAN 경로 장애 · 정상: 최근 PERM H 유형 없음, 모든 경로 Enabled"
+      note: "적용: AIX 6.1~7.3 (MPIO 기본 드라이버, SDDPCM·PowerPath 는 각 도구 사용) · 권한: errpt 는 일반 사용자 가능, lsattr 는 일반 사용자 조회 가능 · errclear 는 증거 삭제이므로 금지"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 실패 경로 복구 시도 (SAN 복구 후)
+      cmd: |
+        chpath -l hdisk<N> -p fscsi<N> -s enable
+        cfgmgr -l fscsi<N> ; lspath -l hdisk<N>
+      check: "성공: lspath 에 모든 경로 Enabled, errpt 신규 경로 오류 없음 · 실패: 다시 Failed → SAN(스위치·스토리지 포트) 점검 요청 후 3차"
+      note: "사전조건: 스토리지·SAN 담당이 포트/존 복구 완료를 확인 · 영향: cfgmgr 는 장치 재탐색으로 짧은 부하, 경로 활성화 직후 오류가 반복될 수 있음 · 승인: 시스템 담당·스토리지 담당 · 백업/롤백: lspath > /tmp/lspath_before.txt 보관, 롤백은 chpath -l hdisk<N> -p fscsi<N> -s disable · 적용: AIX MPIO(6.1~7.3)"
+    - do: (2차·승인 후) 결함 디스크 교체 절차(미러 rootvg)
+      cmd: |
+        unmirrorvg rootvg hdisk<bad> ; reducevg rootvg hdisk<bad> ; rmdev -dl hdisk<bad>
+        # 교체 후: cfgmgr ; extendvg rootvg hdisk<new> ; mirrorvg rootvg hdisk<new> ; bosboot -ad /dev/hdisk<new> ; bootlist -m normal hdisk0 hdisk<new>
+      check: "성공: lsvg -p rootvg 모든 PV active, lsvg rootvg 의 STALE PPs 0, bootlist -m normal -o 에 두 디스크 · 실패: unmirrorvg/reducevg 오류(LV 가 bad 디스크에만 존재) → 중단하고 IBM 지원"
+      note: "사전조건: lsvg -l rootvg 로 모든 LV 가 미러(PPs = 2×LPs)인지 확인, mksysb 백업 최신, 교체 부품·IBM CE 일정 확보 · 영향: 미러 해제 동안 단일 디스크 운영(이중화 상실), mirrorvg 동기화 중 I/O 부하 · 승인: 시스템 담당(변경 관리)·IBM CE · 백업/롤백: mksysb 로 복구, 미러 재구성은 mirrorvg 로 · 적용: AIX 6.1~7.3"
+    - do: (2차·승인 후, IBM 지시가 있을 때) 의심 디스크 진단 실행
+      cmd: |
+        diag -d hdisk<N> -c 2>/dev/null | tee /tmp/diag_hdisk<N>.txt
+      check: "성공: 진단이 끝나고 결과(문제 없음 또는 SRN/교체 대상 FRU)가 출력됨 — 결과 파일을 IBM 케이스에 첨부 · 실패: 진단 중 오류 증가·I/O 지연 심화 → 즉시 중단(Ctrl-C)하고 IBM 지원과 교체 일정 협의"
+      note: "사전조건: errpt·lspath 로 대상 hdisk 와 위치 코드 확인, 업무 부하 낮은 시간 확보 · 영향: diag 는 장치에 실제 진단 I/O 를 보내는 실행(수집이 아님) — 사용 중 디스크는 비파괴 시험만 하지만 그 동안 응답 지연이 생길 수 있음 · 승인: 시스템 담당·IBM CE(진단 요청 주체) · 백업/롤백: 진단은 데이터를 바꾸지 않지만 결함 디스크에 부하가 더해지므로 미러/백업 상태를 먼저 확인, 되돌릴 설정 변경은 없음 · 적용: AIX 6.1~7.3"
+  - stage: 3
+    steps:
+    - do: IBM 케이스 자료 (수집만 — 진단 실행은 2차)
+      cmd: |
+        snap -gc ; errpt -a > errpt_$(date +%Y%m%d).txt ; lsmcode -A > lsmcode_$(date +%Y%m%d).txt 2>/dev/null
+        ls -l /tmp/ibmsupt/snap.pax.Z
+      check: snap.pax.Z·errpt 상세·펌웨어(lsmcode -A)·2차에서 진단을 돌렸다면 그 결과 파일
+      note: "민감정보 마스킹: snap·errpt 의 호스트명·IP·사용자 계정을 가린 뒤 전달(장치 시리얼·위치 코드는 IBM 분석에 필요하므로 유지) · 전달 승인: 시스템 담당 확인 후 보안 담당 승인"
+
+# ── Windows ──
+- id: WIN-PROC-DISK
+  products: [windows]
+  category: disk
+  match: [OS-WIN-002, '2013']
+  title: 디스크 공간 부족·NTFS/디스크 오류 (이벤트 2013 · 51 · 55)
+  source: "Microsoft Learn 'Storage Spaces / Disk Management'·'chkdsk'·'Storage Sense · cleanmgr'·'Event ID 51/55 troubleshooting'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 드라이브 사용률·디스크 이벤트 확인 (읽기 전용 PowerShell)
+      cmd: |
+        Get-PSDrive -PSProvider FileSystem | Select Name,@{n='UsedGB';e={[math]::Round($_.Used/1GB,1)}},@{n='FreeGB';e={[math]::Round($_.Free/1GB,1)}}
+        Get-WinEvent -FilterHashtable @{LogName='System'; Id=51,55,2013; StartTime=(Get-Date).AddDays(-1)} -MaxEvents 30 -ErrorAction SilentlyContinue | Select TimeCreated,Id,Message | Format-List
+      check: "FreeGB 가 드라이브 용량의 5% 미만이면 정리 대상. 이벤트 51/55 반복이면 디스크·컨트롤러 결함(하드웨어 절차) · 정상: 여유 15% 이상, 이벤트 없음"
+      note: "적용: Windows Server 2012 R2/2016/2019/2022 (PowerShell 4.0+) · 권한: 일반 사용자 조회 가능(System 로그는 Event Log Readers 그룹 또는 관리자) · 전체 폴더 크기 조사(C:\\ 재귀)는 부하가 커서 2차로 옮김"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후, 업무 외 시간) 큰 폴더 식별 — C 드라이브 재귀 크기 조사(읽기 전용이지만 디스크 부하 큼)
+      cmd: |
+        Get-ChildItem C:\ -Directory | ForEach-Object { [pscustomobject]@{Dir=$_.FullName; GB=[math]::Round((Get-ChildItem $_.FullName -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum/1GB,1)} } | Sort GB -Desc | Select -First 8
+      check: "성공: 상위 8개 폴더와 크기 출력 → 정리 대상 결정 · 실패: 수십 분 이상 소요·디스크 대기열 급증 → Ctrl+C 로 중단하고 하위 폴더 단위로 나눠 조사"
+      note: "사전조건: 디스크 I/O 여유 시간대 선택 · 영향: 파일 수가 많으면 디스크 읽기 부하·CPU 사용 증가(자료 변경은 없음) · 승인: 시스템 담당 · 백업/롤백: 읽기 전용이라 백업 불요, 롤백은 중단(Ctrl+C)으로 충분 · 적용: Windows Server 2012 R2+"
+    - do: (2차·승인 후) 임시 파일·오래된 로그 정리
+      cmd: |
+        Remove-Item "$env:TEMP\*" -Recurse -Force -ErrorAction SilentlyContinue ; Remove-Item C:\Windows\Temp\* -Recurse -Force -ErrorAction SilentlyContinue
+        Get-ChildItem C:\inetpub\logs\LogFiles -Recurse -File | Where LastWriteTime -lt (Get-Date).AddDays(-30) | Remove-Item -Force
+        cleanmgr /sagerun:1
+      check: "성공: FreeGB 가 용량의 10% 이상 · 실패: 여유 변화 없음 → 1단계 큰 폴더 조사 결과로 대상 재선정 또는 볼륨 확장"
+      note: "사전조건: IIS 로그 보존 의무(감사) 확인, 사용 중인 임시 파일은 자동으로 건너뜀, cleanmgr /sagerun:1 은 미리 cleanmgr /sageset:1 로 항목을 정해 둬야 함(Server 2012 R2 이하는 데스크톱 경험 기능 필요) · 영향: 삭제 파일은 휴지통을 거치지 않아 되돌릴 수 없음 · 승인: 시스템 담당·IIS/애플리케이션 담당 · 백업/롤백: 지울 로그는 Compress-Archive 로 다른 드라이브에 보관 후 삭제(롤백은 보관본 복원) · 적용: Windows Server 2012 R2/2016/2019/2022"
+    - do: (2차·승인 후) NTFS 오류 점검·볼륨 확장
+      cmd: |
+        chkdsk D: /scan ; Repair-Volume -DriveLetter D -Scan
+        Resize-Partition -DriveLetter D -Size (Get-PartitionSupportedSize -DriveLetter D).SizeMax   # 디스크 확장 후
+      check: "성공: Repair-Volume 결과 NoErrorsFound, Get-Volume 의 Size 증가 · 실패: 오류 발견(chkdsk 가 /spotfix 필요 안내) → 오프라인 복구 일정 잡고 3차, Resize-Partition 오류(뒤쪽 미할당 공간 없음) → 디스크 확장 먼저"
+      note: "사전조건: 볼륨 백업·VM 스냅샷, 확장 시 하이퍼바이저/스토리지에서 디스크 크기 먼저 증가 · 영향: /scan 은 온라인 점검(I/O 부하), /spotfix·/f 는 볼륨 잠금(서비스 중단)이라 별도 승인 · 승인: 시스템 담당(변경 관리) · 백업/롤백: 파티션 축소는 Resize-Partition 으로 가능하나 이동 불가 파일 때문에 실패할 수 있어 스냅샷이 롤백 수단 · 적용: chkdsk /scan·Repair-Volume 은 Windows Server 2012 이상"
+  - stage: 3
+    steps:
+    - do: Microsoft/하드웨어 벤더 자료
+      cmd: |
+        wevtutil epl System C:\Temp\System_$(Get-Date -Format yyyyMMdd).evtx ; Get-PhysicalDisk | Select FriendlyName,HealthStatus,OperationalStatus ; Get-StorageReliabilityCounter -PhysicalDisk (Get-PhysicalDisk) | Select DeviceId,ReadErrorsTotal,WriteErrorsTotal,Temperature
+      check: System evtx·디스크 상태·SMART 카운터
+      note: "민감정보 마스킹: evtx 에는 컴퓨터 이름·도메인 계정·IP 가 들어 있으므로 요약본(필요 이벤트만 CSV)으로 가리거나 전달 범위 제한 · 전달 승인: 시스템 담당 확인 후 보안 담당 승인 · C:\\Temp 폴더가 없으면 먼저 생성"
+
+- id: WIN-PROC-INTERNAL
+  products: [windows]
+  category: internal
+  match: [OS-WIN-003, '7031', '7034', '7000', '1000']
+  title: 서비스 비정상 종료·시작 실패·응용 프로그램 크래시 (7031 · 7034 · 1000)
+  source: "Microsoft Learn 'Service Control Manager events (7000/7011/7031/7034)'·'Windows Error Reporting (LocalDumps)'·'ProcDump'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 실패 서비스·원인 이벤트 확인 (읽기 전용)
+      cmd: |
+        Get-WinEvent -FilterHashtable @{LogName='System'; ProviderName='Service Control Manager'; Id=7000,7011,7031,7034; StartTime=(Get-Date).AddHours(-6)} -MaxEvents 30 -ErrorAction SilentlyContinue | Select TimeCreated,Id,Message | Format-List
+        Get-WinEvent -FilterHashtable @{LogName='Application'; Id=1000,1001; StartTime=(Get-Date).AddHours(-6)} -MaxEvents 20 -ErrorAction SilentlyContinue | Select TimeCreated,Id,ProviderName,Message | Format-List | Out-String -Width 300
+        Get-Service <ServiceName> | Select Name,Status,StartType ; Get-Process <exe> -ErrorAction SilentlyContinue | Select Id,StartTime,WS
+      check: "7031/7034 의 서비스명과 1000(Faulting module) 기록. 7011(timeout) 은 기동 지연 · 정상: 해당 이벤트 없음, 서비스 Running · 1001 은 출처로 구분: Application 로그의 Windows Error Reporting 1001 은 1000 크래시 뒤에 남는 오류 보고(Fault bucket·덤프 경로) 기록이라 이 절차로 본다. System 로그의 WER-SystemErrorReporting 1001(BugCheck)은 OS 가 버그체크로 멈춘 뒤 재부팅된 것 — 이 절차가 아니라 예기치 않은 재부팅 절차(WIN-PROC-R6-UNEXPECTED-REBOOT)로 간다"
+      note: "적용: Windows Server 2012 R2/2016/2019/2022 · 위 두 번째 명령은 Application 로그만 보므로 BugCheck 1001 은 나오지 않는다(ProviderName 으로 출처 확인) · 권한: 일반 사용자 조회 가능(System 로그는 Event Log Readers 그룹 또는 관리자)"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 서비스 재시작·복구 옵션 설정
+      cmd: |
+        Restart-Service <ServiceName> -Force
+        sc.exe failure <ServiceName> reset= 86400 actions= restart/60000/restart/60000/""/0
+        sc.exe qfailure <ServiceName>
+      check: "성공: Get-Service Status Running, sc.exe qfailure 에 RESTART 동작 2회 표시 · 실패: 재시작 실패(7000/7009 이벤트) → 1차 이벤트의 오류 코드로 원인(계정·의존 서비스) 확인 후 3차"
+      note: "사전조건: 1차 이벤트·덤프 보존, 서비스 담당과 재시작 시각 합의, 의존 서비스(-Force 로 함께 재시작) 확인 · 영향: 재시작 동안 서비스와 의존 서비스 중단, 자동 재시작은 근본 원인을 가릴 수 있음 · 승인: 서비스 담당·시스템 담당 · 백업/롤백: sc.exe qfailure <ServiceName> 결과를 먼저 보관, 롤백은 sc.exe failure <ServiceName> reset= 0 actions= \"\"/0 로 복구 동작 제거 · 적용: Windows Server 2012 R2+ (sc.exe 는 PowerShell 에서 sc 별칭과 겹치므로 .exe 필수)"
+    - do: (2차·승인 후) 기동 타임아웃(7011) 조정 및 크래시 덤프 수집 설정
+      config:
+        file: 레지스트리
+        snippet: |
+          HKLM\SYSTEM\CurrentControlSet\Control  ServicesPipeTimeout (DWORD) = 120000
+          HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps  DumpFolder=C:\Dumps, DumpType=2, DumpCount=5
+      cmd: |
+        reg add "HKLM\SYSTEM\CurrentControlSet\Control" /v ServicesPipeTimeout /t REG_DWORD /d 120000 /f
+        reg add "HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps" /v DumpFolder /t REG_EXPAND_SZ /d C:\Dumps /f ; reg add "HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps" /v DumpType /t REG_DWORD /d 2 /f
+      check: "성공: 재부팅 후 reg query 값 일치, 다음 크래시 시 C:\\Dumps 에 .dmp 생성 · 실패: 덤프 미생성 → WER 서비스 상태·폴더 권한·디스크 여유 확인"
+      note: "사전조건: 레지스트리 내보내기 백업, C:\\Dumps 드라이브 여유(전체 덤프는 프로세스 메모리 크기 × DumpCount) · 영향: ServicesPipeTimeout 은 재부팅 후 반영·모든 서비스 기동 대기 시간 증가, 전체 덤프에는 메모리 내 비밀번호·개인정보가 포함될 수 있음 · 승인: 시스템 담당(변경 관리)·보안 담당(덤프 보관) · 백업/롤백: reg export \"HKLM\\SYSTEM\\CurrentControlSet\\Control\" C:\\Temp\\control_before.reg 보관, 롤백은 reg delete 로 추가한 값 삭제 후 재부팅 · 적용: LocalDumps 는 Windows Server 2008 이상"
+  - stage: 3
+    steps:
+    - do: Microsoft/제품 벤더 케이스 자료
+      cmd: |
+        wevtutil epl System C:\Temp\System.evtx ; wevtutil epl Application C:\Temp\Application.evtx ; Get-ChildItem C:\Dumps ; msinfo32 /report C:\Temp\msinfo.txt
+      check: evtx·덤프·msinfo·서비스 실행 파일 버전
+      note: "민감정보 마스킹: evtx·msinfo 의 컴퓨터 이름·도메인 계정·IP 를 가리고, 덤프(.dmp)는 메모리 내용(비밀번호·개인정보 가능)이라 원본 전달 전 별도 검토 · 전달 승인: 시스템 담당 확인 후 보안 담당 승인(덤프는 보안 담당 필수)"
+
+# ── Solaris ──
+- id: SOL-PROC-STORAGE
+  products: [solaris]
+  category: storage
+  match: [OS-SOL-002, SOL-ZPOOL-DEGRADED, SOL-FS-FULL]
+  title: ZFS 풀 용량 부족·DEGRADED
+  source: "Oracle Solaris 11.4 'Managing ZFS File Systems (zpool status/list, zfs set quota, zpool clear/replace)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 풀·데이터셋 사용률과 상태 확인 (읽기 전용)
+      cmd: |
+        zpool list ; zpool status -x ; zfs list -o name,used,avail,refer,mountpoint -s used | tail -15
+        zfs list -t snapshot -o name,used -s used | tail -10
+      check: "CAP 90% 이상·상태 DEGRADED/FAULTED 면 조치. 스냅샷이 대량 점유하면 정리 대상 · 정상: CAP 80% 미만, zpool status -x 가 'all pools are healthy'"
+      note: "적용: Solaris 10(ZFS)·11.x · 권한: 일반 사용자 조회 가능"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 스냅샷 정리·쿼터 조정
+      cmd: |
+        zfs destroy <pool>/<ds>@<snapshot>
+        zfs set quota=none <pool>/<ds> ; zfs set refreservation=none <pool>/<ds>
+      check: "성공: zfs list 의 avail 증가, zpool list CAP 하락 · 실패: 'snapshot has dependent clones' → 클론 확인(zfs get origin) 후 중단, avail 변화 없음 → 다른 스냅샷·예약 확인"
+      note: "사전조건: 삭제할 스냅샷이 백업·복구 지점으로 쓰이지 않는지 백업 담당 확인(zfs destroy -nv 로 회수량 미리 보기), 현재 속성값 기록(zfs get quota,refreservation <pool>/<ds>) · 영향: 스냅샷 삭제는 되돌릴 수 없음, 쿼터 해제 시 한 데이터셋이 풀 전체를 채울 수 있음 · 승인: 시스템 담당·백업 담당 · 백업/롤백: 스냅샷은 삭제 전 zfs send 로 다른 풀에 보관 가능, 쿼터는 기록한 값으로 zfs set quota=<원래값> · 적용: Solaris 11.x"
+    - do: (2차·승인 후) DEGRADED 디스크 교체·풀 복구
+      cmd: |
+        zpool clear <pool> ; zpool status <pool>
+        zpool replace <pool> <old-disk> <new-disk> ; zpool status <pool>   # resilver 진행 확인
+      check: "성공: zpool status ONLINE, 'errors: No known data errors', resilver 완료 · 실패: clear 후 바로 다시 DEGRADED → 디스크 결함 확정, replace 실패 → 새 디스크 크기·경로 확인 후 3차"
+      note: "사전조건: 풀이 중복(mirror/raidz)인지 확인, 교체 디스크 크기 ≥ 기존, 중요 데이터 백업 · 영향: resilver 중 I/O 부하·성능 저하, 중복 없는 풀에서 디스크 결함이면 데이터 손실 위험 · 승인: 시스템 담당(변경 관리)·Oracle/하드웨어 CE · 백업/롤백: replace 는 되돌릴 수 없음 — 백업이 유일한 롤백, clear 는 오류 계수만 지움(fmdump 기록은 유지) · 적용: Solaris 11.x"
+  - stage: 3
+    steps:
+    - do: Oracle SR 자료 (Explorer)
+      cmd: |
+        /usr/lib/explorer/bin/explorer -q 2>/dev/null ; zpool status -v > zpool_$(date +%Y%m%d).txt ; fmdump -eV | tail -50 > fmdump.txt
+      check: Explorer·zpool status·fmdump
+      note: "미검증 — Solaris 11.4 에서 Explorer 경로·대체 도구(supportdata) 여부를 공식 문서로 확인 못 함, 경로가 없으면 Oracle 지원 안내대로 수집 · 민감정보 마스킹: Explorer 결과의 호스트명·IP·사용자 계정(/etc/passwd 계열)·zpool status -v 의 손상 파일 경로(업무명) 가림 · 전달 승인: 시스템 담당 확인 후 보안 담당 승인"
+
+- id: SOL-PROC-HARDWARE
+  products: [solaris]
+  category: hardware
+  match: [OS-SOL-001, SOL-FMA-FAULT, SOL-MEMORY-ECC, SOL-CPU-FAULT]
+  title: FMA 결함·디스크/CPU/메모리 오류
+  source: "Oracle Solaris 11.4 'Managing Faults, Defects and Alerts (fmadm faulty, fmdump -eV, fmadm repaired)'·'cfgadm'"
+  stages:
+  - stage: 1
+    steps:
+    - do: FMA 결함·오류 이벤트 확인 (읽기 전용)
+      cmd: |
+        fmadm faulty ; fmdump -eV -t 1day | tail -60
+        iostat -En | grep -B1 -A4 "Errors: [1-9]" ; cfgadm -al | grep -v ok
+        egrep -i "SCSI|WARNING|panic" /var/adm/messages | tail -20
+      check: "fmadm faulty 에 FAULT 항목이 있으면 하드웨어 결함(3차). 특정 디스크 Hard/Transport Errors 증가 기록 · 정상: fmadm faulty 출력 없음, 오류 계수 0"
+      note: "적용: Solaris 10/11.x (fmdump -t 1day = 1일 전부터, 11.3 이하의 /usr/bin/grep 은 -A/-B 미지원이면 /usr/gnu/bin/grep 사용) · 권한: fmadm·fmdump 는 root(또는 solaris.* 권한 프로파일)"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 결함 부품 격리·교체 후 결함 기록 정리
+      cmd: |
+        cfgadm -c unconfigure <ap_id>   # 교체 대상 장치
+        fmadm repaired <FRU-fmri|label> ; fmadm faulty   # UUID 단위 오진 해제는 fmadm acquit <UUID>
+      check: "성공: 교체 후 fmadm faulty 비어 있음, 장치 정상 인식(cfgadm -al 의 condition ok) · 실패: unconfigure 'device busy' → 사용 중(ZFS·멀티패스) 해제 먼저, faulty 재등장 → 부품 결함 지속으로 3차"
+      note: "사전조건: 교체 부품 준비·CE 일정, unconfigure 대상이 사용 중이 아닌지(zpool status·mount) 확인, fmadm faulty 출력 보관 · 영향: unconfigure 한 장치는 즉시 사용 불가, repaired 를 교체 전에 실행하면 결함 기록이 사라져 재진단 지연 · 승인: 시스템 담당·Oracle/하드웨어 CE · 백업/롤백: unconfigure 는 cfgadm -c configure <ap_id> 로 원복, fmadm repaired 는 되돌릴 수 없으므로 교체 완료 후에만 실행 · 적용: Solaris 11.x (Solaris 10 은 fmadm repair <fmri|uuid>)"
+  - stage: 3
+    steps:
+    - do: Oracle SR 자료
+      cmd: |
+        /usr/lib/explorer/bin/explorer -q ; fmdump -eV > fmdump_$(date +%Y%m%d).txt ; prtdiag -v > prtdiag.txt
+      check: Explorer·fmdump·prtdiag·ILOM SEL
+      note: "미검증 — Solaris 11.4 Explorer 경로 확인 못 함 · 민감정보 마스킹: 호스트명·IP·사용자 계정을 가림(하드웨어 시리얼·FRU 정보는 분석에 필요하므로 유지) · 전달 승인: 시스템 담당 확인 후 보안 담당 승인"
+
+# ── HP-UX ──
+- id: HPUX-PROC-STORAGE
+  products: [hpux]
+  category: storage
+  match: [HPUX-VXFS-FULL]
+  title: 파일시스템(VxFS/LVM) 공간 부족
+  source: "HP-UX 11i v3 'LVM Volume Manager (lvextend, extendfs)'·'VxFS Administrator's Guide (fsadm -b)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 사용률·VG 여유 확인 (읽기 전용)
+      cmd: |
+        bdf ; vgdisplay -v vg00 | grep -i -e "Free PE" -e "PE Size"
+        du -sk /var/adm/* /tmp/* 2>/dev/null | sort -rn | head
+      check: "95% 이상 파일시스템, Free PE × PE Size 로 확장 가능 여부 · 정상: 사용률 85% 미만"
+      note: "적용: HP-UX 11i v1~v3 (HP-UX grep 은 \\| 대안을 지원하지 않아 -e 반복) · 권한: vgdisplay 는 root, bdf·du 는 일반 사용자 가능"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 논리 볼륨·파일시스템 확장 (OnlineJFS 는 온라인 확장)
+      cmd: |
+        lvextend -L 8192 /dev/vg00/lvol8            # MB 단위 새 크기
+        fsadm -b 8192M /var                          # OnlineJFS
+        # OnlineJFS 없으면: umount /var ; extendfs /dev/vg00/rlvol8 ; mount /var
+      check: "성공: bdf 에 늘어난 크기 반영 · 실패: lvextend 'Not enough free physical extents' → 디스크 추가(vgextend) 요청, fsadm 'license' 오류 → OnlineJFS 없음, 오프라인 extendfs 일정 필요"
+      note: "사전조건: Free PE × PE Size ≥ 확장량, OnlineJFS 설치 여부(swlist | grep -i OnlineJFS), 최근 백업(make_tape_recovery/make_net_recovery 또는 파일 백업) · 영향: OnlineJFS 는 무중단, extendfs 경로는 umount 로 서비스 중단 · 승인: 시스템 담당(변경 관리) · 백업/롤백: LV 축소(lvreduce)는 데이터 손실 위험이 커서 사실상 롤백 불가 — 확장량 신중히 · 적용: HP-UX 11i v2/v3 (VxFS 4.1+)"
+  - stage: 3
+    steps:
+    - do: HPE 케이스 자료
+      cmd: |
+        /opt/hpservices/bin/nickel 2>/dev/null ; bdf > bdf.txt ; vgdisplay -v > vg.txt ; tail -500 /var/adm/syslog/syslog.log > syslog_tail.txt
+      check: nickel 출력·bdf/vgdisplay·syslog
+      note: "미검증 — nickel 은 HPE 가 배포하는 수집 스크립트로 설치 경로가 현장마다 다름(경로 확인 후 실행) · 민감정보 마스킹: 호스트명·IP·사용자 계정을 가린 뒤 전달 · 전달 승인: 시스템 담당 확인 후 보안 담당 승인"
+
+- id: HPUX-PROC-HARDWARE
+  products: [hpux]
+  category: hardware
+  match: [OS-HPUX-001, HPUX-EMS-ALERT]
+  title: 디스크·경로·메모리 하드웨어 오류 (EMS)
+  source: "HP-UX 11i v3 'Native Multi-Pathing (scsimgr, ioscan -P health)'·HP 'EMS Hardware Monitors User's Guide'(B6191-90029, 표 2-13 기본 TEXTLOG /var/opt/resmon/log/event.log)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 장치 상태·EMS 이벤트 확인 (읽기 전용)
+      cmd: |
+        ioscan -P health -C disk | grep -v online ; scsimgr get_info -D /dev/rdisk/disk<N> | grep -i -e status -e path
+        tail -50 /var/opt/resmon/log/event.log ; grep -i -e LVM -e SCSI -e "I/O error" /var/adm/syslog/syslog.log | tail -20
+      check: "health 가 offline/limited, EMS SERIOUS/CRITICAL 이면 하드웨어 결함(3차) · 정상: 모든 디스크 health online, 최근 SERIOUS 이상 이벤트 없음"
+      note: "적용: HP-UX 11i v3(11.31) — ioscan -P health·scsimgr·/dev/rdisk 는 11.31 전용, 11i v2 는 ioscan -fnC disk 와 /dev/rdsk · 권한: root"
+    - do: 메모리 하드웨어 이벤트 확인 (메모리 경보·페이지 할당 해제일 때, 읽기 전용)
+      cmd: |
+        tail -50 /var/opt/resmon/log/event.log ; grep -i -e memory -e dealloc /var/adm/syslog/syslog.log | tail -20
+        machinfo | grep -i memory ; vmstat 1 2
+      check: "같은 DIMM 위치의 EMS 메모리 이벤트·페이지 할당 해제가 반복되면 HPE 교체 판단(3차) · machinfo 는 물리 메모리 구성(설치 용량)이고 여유 메모리는 vmstat 의 free·po 로 본다 · 정상: 최근 SERIOUS 이상 메모리 이벤트 없음, po 0 근처"
+      note: "적용: HP-UX 11i v2+(machinfo), 11i v1 은 dmesg 의 Physical 줄 · 11i v3 SFM 사용 시 evweb eventviewer -L 병행 · 권한: root"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 경로 복구·격리
+      cmd: |
+        scsimgr enable -H <hw_path>     # 복구된 경로 활성화
+        scsimgr disable -H <hw_path>    # 또는: 불안정 경로 격리 (둘 중 하나만)
+        ioscan -fnC disk ; insf -e
+      check: "성공: ioscan -P health 에서 대상 경로 online(활성화) 또는 disabled 로 표시되고 나머지 경로 online, syslog 신규 I/O 오류 없음 · 실패: 남은 경로 없음·I/O 오류 지속 → 즉시 원복 후 3차"
+      note: "사전조건: 같은 LUN 의 다른 경로가 online 인지 확인(마지막 경로 격리 금지), 스토리지 담당과 SAN 상태 공유 · 영향: 격리 경로만큼 대역폭 감소, insf -e 는 장치 파일 재생성으로 짧은 부하 · 승인: 시스템 담당·스토리지 담당 · 백업/롤백: ioscan -P health > /tmp/health_before.txt 보관, 롤백은 반대 명령(scsimgr enable/disable -H <hw_path>) · 적용: HP-UX 11i v3(11.31)"
+  - stage: 3
+    steps:
+    - do: HPE 케이스 자료
+      cmd: |
+        /opt/hpservices/bin/nickel ; cstm -e 2>/dev/null ; ioscan -P health > ioscan_health.txt
+      check: nickel·cstm 로그·EMS event.log·syslog
+      note: "미검증 — cstm 의 -e 옵션과 nickel 설치 경로를 공식 문서로 확인 못 함(현장 HPE 안내 우선) · 민감정보 마스킹: 호스트명·IP·사용자 계정을 가린 뒤 전달(하드웨어 경로·시리얼은 유지) · 전달 승인: 시스템 담당 확인 후 보안 담당 승인"

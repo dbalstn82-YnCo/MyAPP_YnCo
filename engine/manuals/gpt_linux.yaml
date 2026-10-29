@@ -1,0 +1,15 @@
+product: linux
+title: Linux(RHEL/Rocky/CentOS/Ubuntu) 운영 참고 (GPT 수집 — 벤더 문서 대조 필요)
+sections:
+- heading: 로그 위치
+  body: systemd 계열은 journal이 핵심이며 journalctl -k, journalctl -u <service>로 본다. 배포판
+    설정에 따라 /var/log/messages, /var/log/syslog, /var/log/kern.log도 사용한다.
+- heading: 장애 시 수집 방법
+  body: RHEL 계열은 sudo sos report로 표준 진단자료를 수집한다. 추가로 journalctl, dmesg, vmstat, iostat,
+    ss, df, free, /proc 상태와 필요 시 kdump vmcore를 보존한다.
+- heading: 대표 장애 신호
+  body: OOM killer, kernel panic, soft lockup, hung task, Buffer I/O error, EXT4/XFS
+    오류, read-only filesystem, conntrack full, NETDEV WATCHDOG와 MCE를 우선 확인한다.
+- heading: 1차 확인 명령
+  body: uptime; free -m; vmstat 1 5; df -h; df -i; ss -s; systemctl --failed; journalctl
+    -p err -b; dmesg -T | tail -100 으로 자원·서비스·커널 오류를 확인한다.

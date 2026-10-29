@@ -1,0 +1,100 @@
+product: linux
+layer: os
+title: linux 로그 종류 카탈로그 (GPT 수집 — 벤더 문서 대조 필요)
+source: GPT 수집(벤더 문서 대조 필요)
+sources: []
+logtypes:
+- name: 시스템 메시지
+  path: /var/log/messages(RHEL·Rocky·CentOS) · /var/log/syslog(Ubuntu)
+  format: 텍스트·RFC3164 'Mon DD HH:MM:SS host proc[pid]:' 또는 RFC5339 ISO
+  check: 'kernel: 오류·OOM·segfault·I/O error·link down·systemd 실패'
+  sample: 'Sep  9 14:02:11 web1 kernel: Out of memory: Killed process 1234 (java)'
+- name: journald 저널
+  path: /var/log/journal/<machine-id>/*.journal · journalctl -xe
+  format: 바이너리(journalctl로 텍스트 출력)·ISO
+  check: 유닛 실패·재기동·커널 메시지·부팅 이력(journalctl --list-boots)
+  sample: 'Sep 09 14:02:11 web1 systemd[1]: tomcat.service: Main process exited, code=killed, status=9/KILL'
+- name: 커널 링버퍼
+  path: dmesg · /var/log/dmesg
+  format: 텍스트·[초.마이크로초] 부팅 기준 상대시각(dmesg -T로 절대시각)
+  check: 하드웨어·드라이버·디스크 I/O·NIC·OOM·RCU stall
+  sample: '[123456.789012] sd 0:0:0:1: [sdb] Unhandled error code'
+- name: 인증·보안
+  path: /var/log/secure(RHEL계) · /var/log/auth.log(Ubuntu)
+  format: 텍스트·RFC3164
+  check: sshd Failed password·Invalid user·sudo 실패·pam_unix 인증 실패·계정 잠금
+  sample: 'Sep  9 14:00:01 web1 sshd[2211]: Failed password for root from 10.0.0.5 port 51234 ssh2'
+- name: 감사 로그
+  path: /var/log/audit/audit.log
+  format: '텍스트·type=XXX msg=audit(epoch.ms:serial): key=value'
+  check: USER_LOGIN res=failed·ANOM_ABEND·AVC denied·SERVICE_STOP·USER_ACCT
+  sample: 'type=USER_LOGIN msg=audit(1757394131.123:4567): pid=2211 uid=0 auid=4294967295 ses=4294967295 msg=''op=login acct="root" exe="/usr/sbin/sshd" hostname=? addr=10.0.0.5 terminal=ssh res=failed'''
+- name: 크론
+  path: /var/log/cron(RHEL계) · syslog 내 CRON(Ubuntu)
+  format: 텍스트·RFC3164
+  check: 배치 실행 시각·실패·중복 실행
+  sample: 'Sep  9 02:00:01 db1 CROND[3344]: (oracle) CMD (/home/oracle/backup.sh)'
+- name: 부팅 로그
+  path: /var/log/boot.log · journalctl -b -1
+  format: 텍스트
+  check: 서비스 기동 실패·마운트 실패·fsck
+  sample: '[FAILED] Failed to mount /data.'
+- name: 패키지 변경
+  path: /var/log/dnf.log · /var/log/yum.log · /var/log/apt/history.log
+  format: 텍스트·ISO
+  check: 장애 직전 패치·커널 업데이트 이력
+  sample: '2026-09-08T23:10:11+0900 INFO Upgraded: kernel-5.14.0-503.el9.x86_64'
+- name: OOM·메모리
+  path: 'dmesg · /var/log/messages(kernel: Out of memory)'
+  format: 텍스트
+  check: OOM Killer 대상 프로세스·oom_score·cgroup
+  sample: 'kernel: oom-kill:constraint=CONSTRAINT_NONE,...,task=java,pid=1234'
+- name: sar 성능 이력
+  path: /var/log/sa/saDD (sar -f)
+  format: 바이너리(sar로 텍스트)
+  check: 장애 시각 CPU·메모리·swap·I/O·네트워크 추세
+  sample: 14:00:01 all 12.3 0.0 3.1 45.2 0.0 39.4
+- name: 커널 크래시 덤프
+  path: /var/crash/<시각>/vmcore · vmcore-dmesg.txt
+  format: 바이너리+텍스트
+  check: 커널 패닉 원인(crash 유틸리티·vmcore-dmesg)
+  sample: '[ 4321.000000] Kernel panic - not syncing: Fatal exception'
+- name: 컨테이너 런타임
+  path: /var/log/messages 내 dockerd/containerd · journalctl -u docker
+  format: 텍스트
+  check: 컨테이너 OOM·재시작 루프·이미지 pull 실패
+  sample: 'dockerd[999]: ... level=error msg="OOM killed container"'
+sections:
+- heading: 로그 종류 카탈로그 (전수)
+  body: '시스템 메시지: /var/log/messages(RHEL·Rocky·CentOS) · /var/log/syslog(Ubuntu) · journald 저널: /var/log/journal/<machine-id>/*.journal · journalctl -xe · 커널 링버퍼: dmesg · /var/log/dmesg · 인증·보안: /var/log/secure(RHEL계)
+    · /var/log/auth.log(Ubuntu) · 감사 로그: /var/log/audit/audit.log · 크론: /var/log/cron(RHEL계) · syslog 내 CRON(Ubuntu) · 부팅 로그: /var/log/boot.log · journalctl -b -1 · 패키지 변경: /var/log/dnf.log · /var/log/yum.log
+    · /var/log/apt/history.log · OOM·메모리: dmesg · /var/log/messages(kernel: Out of memory) · sar 성능 이력: /var/log/sa/saDD (sar -f) · 커널 크래시 덤프: /var/crash/<시각>/vmcore · vmcore-dmesg.txt · 컨테이너 런타임: /var/log/messages
+    내 dockerd/containerd · journalctl -u docker'
+- heading: '로그: 시스템 메시지'
+  body: '경로 /var/log/messages(RHEL·Rocky·CentOS) · /var/log/syslog(Ubuntu) / 형식 텍스트·RFC3164 ''Mon DD HH:MM:SS host proc[pid]:'' 또는 RFC5339 ISO / 확인 kernel: 오류·OOM·segfault·I/O error·link down·systemd 실패
+    / 샘플 Sep  9 14:02:11 web1 kernel: Out of memory: Killed process 1234 (java)'
+- heading: '로그: journald 저널'
+  body: '경로 /var/log/journal/<machine-id>/*.journal · journalctl -xe / 형식 바이너리(journalctl로 텍스트 출력)·ISO / 확인 유닛 실패·재기동·커널 메시지·부팅 이력(journalctl --list-boots) / 샘플 Sep 09 14:02:11 web1 systemd[1]: tomcat.service:
+    Main process exited, code=killed, status=9/KILL'
+- heading: '로그: 커널 링버퍼'
+  body: '경로 dmesg · /var/log/dmesg / 형식 텍스트·[초.마이크로초] 부팅 기준 상대시각(dmesg -T로 절대시각) / 확인 하드웨어·드라이버·디스크 I/O·NIC·OOM·RCU stall / 샘플 [123456.789012] sd 0:0:0:1: [sdb] Unhandled error code'
+- heading: '로그: 인증·보안'
+  body: '경로 /var/log/secure(RHEL계) · /var/log/auth.log(Ubuntu) / 형식 텍스트·RFC3164 / 확인 sshd Failed password·Invalid user·sudo 실패·pam_unix 인증 실패·계정 잠금 / 샘플 Sep  9 14:00:01 web1 sshd[2211]: Failed password
+    for root from 10.0.0.5 port 51234 ssh2'
+- heading: '로그: 감사 로그'
+  body: '경로 /var/log/audit/audit.log / 형식 텍스트·type=XXX msg=audit(epoch.ms:serial): key=value / 확인 USER_LOGIN res=failed·ANOM_ABEND·AVC denied·SERVICE_STOP·USER_ACCT / 샘플 type=USER_LOGIN msg=audit(1757394131.123:4567):
+    pid=2211 uid=0 auid=4294967295 ses=4294967295 msg=''op=login acct="root" exe="/usr/sbin/sshd" hostname=? addr=10.0.0.5 terminal=ssh res=failed'''
+- heading: '로그: 크론'
+  body: '경로 /var/log/cron(RHEL계) · syslog 내 CRON(Ubuntu) / 형식 텍스트·RFC3164 / 확인 배치 실행 시각·실패·중복 실행 / 샘플 Sep  9 02:00:01 db1 CROND[3344]: (oracle) CMD (/home/oracle/backup.sh)'
+- heading: '로그: 부팅 로그'
+  body: 경로 /var/log/boot.log · journalctl -b -1 / 형식 텍스트 / 확인 서비스 기동 실패·마운트 실패·fsck / 샘플 [FAILED] Failed to mount /data.
+- heading: '로그: 패키지 변경'
+  body: '경로 /var/log/dnf.log · /var/log/yum.log · /var/log/apt/history.log / 형식 텍스트·ISO / 확인 장애 직전 패치·커널 업데이트 이력 / 샘플 2026-09-08T23:10:11+0900 INFO Upgraded: kernel-5.14.0-503.el9.x86_64'
+- heading: '로그: OOM·메모리'
+  body: '경로 dmesg · /var/log/messages(kernel: Out of memory) / 형식 텍스트 / 확인 OOM Killer 대상 프로세스·oom_score·cgroup / 샘플 kernel: oom-kill:constraint=CONSTRAINT_NONE,...,task=java,pid=1234'
+- heading: '로그: sar 성능 이력'
+  body: 경로 /var/log/sa/saDD (sar -f) / 형식 바이너리(sar로 텍스트) / 확인 장애 시각 CPU·메모리·swap·I/O·네트워크 추세 / 샘플 14:00:01 all 12.3 0.0 3.1 45.2 0.0 39.4
+- heading: '로그: 커널 크래시 덤프'
+  body: '경로 /var/crash/<시각>/vmcore · vmcore-dmesg.txt / 형식 바이너리+텍스트 / 확인 커널 패닉 원인(crash 유틸리티·vmcore-dmesg) / 샘플 [ 4321.000000] Kernel panic - not syncing: Fatal exception'
+- heading: '로그: 컨테이너 런타임'
+  body: '경로 /var/log/messages 내 dockerd/containerd · journalctl -u docker / 형식 텍스트 / 확인 컨테이너 OOM·재시작 루프·이미지 pull 실패 / 샘플 dockerd[999]: ... level=error msg="OOM killed container"'

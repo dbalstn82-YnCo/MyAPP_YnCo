@@ -1,0 +1,971 @@
+product: windows
+layer: os
+note: GPT 협업 수집분 — 벤더 공식 문서와 대조 후 확정
+codes:
+- code: '7'
+  severity: error
+  category: disk
+  title: 디스크 불량 블록
+  immediate:
+  - 'Disk 7 발생 장치·빈도 확인: `Get-WinEvent -FilterHashtable @{LogName="System"; Id=7} -MaxEvents 20 | fl TimeCreated,ProviderName,Message` — 원본이 disk 이고 본문의 \Device\HarddiskN\DRn 으로 디스크 번호 식별 (2008 R2+)'
+  - '`Get-PhysicalDisk | ft DeviceId,FriendlyName,MediaType,HealthStatus,OperationalStatus` 와 `Get-PhysicalDisk | Get-StorageReliabilityCounter | ft DeviceId,ReadErrorsTotal,ReadErrorsUncorrected,Wear` 로 디스크 상태·오류 누계 확인 (2012+, 하드웨어 RAID 뒤는 벤더 도구)'
+  - 해당 볼륨의 최근 백업 성공 여부 확인(`wbadmin get versions` 또는 백업 솔루션 콘솔) — 검사·수리는 2차
+  short:
+  - '(2차·승인 후, 롤백: 백업에서 복원) 백업 확보 후 업무 중단 시간에 `chkdsk <드라이브>: /r` 로 불량 섹터 검사·복구, 하드웨어 RAID 면 벤더 진단(iLO/iDRAC·스토리지 관리 도구) 우선'
+  mid:
+  - 불량 블록이 반복되는 디스크 교체(RAID 재구성 완료 확인), 컨트롤러 펌웨어·드라이버를 벤더 호환표 기준으로 갱신
+  long:
+  - Disk 7/11/51/153 이벤트 경보와 Get-StorageReliabilityCounter 오류 누계 추세 감시, 디스크 예방 교체 기준 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/windows-server/backup-and-storage/iscsi-storage-connectivity-troubleshooting)
+  note: 공식 Learn 확인
+  vendor_cause: 'System 로그 원본 disk 이벤트 7 "The device, \Device\HarddiskN\DRn, has a bad block." — 디스크 드라이버가 해당 디스크의 블록을 읽거나 쓰다가 매체 오류(불량 블록)를 돌려받았다는 뜻으로, 그 블록의 데이터가 손상·유실됐을 수 있다. 흔한 원인은 HDD/SSD 매체 노화·불량 섹터이며 케이블·컨트롤러 이상에서도 나오고, 장치가 CdRom 이면 광학 매체 문제다.'
+  verify_note: 미검증 — 이벤트 7 메시지 원문은 Microsoft Q&A 사례로만 확인, Microsoft Learn 공식 참조 문서(Q&A 제외)에서 disk 7 정의 본문을 찾지 못함. vendor_url(iSCSI 연결 문서)은 간접 근거
+  vendor_action: 디스크·컨트롤러를 교체하고 제조사 진단 도구로 저장장치 상태를 검사
+  vendor_url: https://learn.microsoft.com/en-us/troubleshoot/windows-server/backup-and-storage/iscsi-storage-connectivity-troubleshooting
+  versions:
+  - Windows Server 2003
+  - 2008/R2
+  - 2012/R2
+  - '2016'
+  - '2019'
+  - '2022'
+  - '2025'
+  version_note: 이벤트 ID 전 버전 공통(2003 포함). CSV 내보내기는 2008 R2+ Get-WinEvent, 2003/2008 은 wevtutil/Get-EventLog
+- code: '11'
+  severity: error
+  category: disk
+  title: 컨트롤러 오류
+  immediate:
+  - 'Disk 11 대상 장치·빈도 확인: `Get-WinEvent -FilterHashtable @{LogName="System"; Id=11} -MaxEvents 20 | fl TimeCreated,ProviderName,Message` (2008 R2+)'
+  - '같은 시각 Storport 129(리셋)·Disk 153(재시도)·Disk 51 동반 확인: `Get-WinEvent -FilterHashtable @{LogName="System"; Id=129,153,51; StartTime=(Get-Date).AddHours(-6)} | fl TimeCreated,Id,ProviderName,Message`'
+  - '`Get-PhysicalDisk | ft FriendlyName,BusType,HealthStatus,OperationalStatus` (2012+) 와 MPIO 환경은 `mpclaim -s -d` 로 경로 상태 확인'
+  short:
+  - '(2차) `Get-CimInstance Win32_SCSIController | ft Name,DriverName,Status` 로 컨트롤러 드라이버 확인 후 (승인 후, 롤백: 이전 드라이버로 롤백) 벤더 권장 드라이버·펌웨어 적용, 케이블·SFP 점검'
+  mid:
+  - 반복 컨트롤러·HBA 교체, 서드파티 DSM 이면 공급업체 지원 버전으로 정비
+  long:
+  - Disk 11·Storport 129 이벤트 감시와 스토리지 펌웨어·드라이버 버전 대장 관리
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/windows-server/backup-and-storage/windows-server-mpio-troubleshooting)
+  note: 공식 Learn 확인
+  vendor_cause: 디스크 드라이버가 \Device\HarddiskN\DRn 또는 포트 장치에서 컨트롤러 오류를 감지했다고 보고한 상태 — HBA/RAID 컨트롤러·케이블·SAN 경로·디스크 펌웨어 문제나 스토리지 드라이버(서드파티 DSM 포함) 결함이 흔한 원인.
+  vendor_action: 물리·논리 스토리지 경로를 확인하고 스토리지 펌웨어·드라이버를 갱신; 서드파티 DSM이면 해당 공급업체 확인
+  vendor_url: https://learn.microsoft.com/en-us/troubleshoot/windows-server/backup-and-storage/windows-server-mpio-troubleshooting
+  versions:
+  - Windows Server 2003
+  - 2008/R2
+  - 2012/R2
+  - '2016'
+  - '2019'
+  - '2022'
+  - '2025'
+  version_note: 이벤트 ID 전 버전 공통(2003 포함). CSV 내보내기는 2008 R2+ Get-WinEvent, 2003/2008 은 wevtutil/Get-EventLog
+- code: '15'
+  severity: error
+  category: disk
+  title: 장치 준비 안됨
+  immediate:
+  - 'Disk 15 대상 장치·발생 시각 확인: `Get-WinEvent -FilterHashtable @{LogName="System"; Id=15} -MaxEvents 20 | fl TimeCreated,ProviderName,Message` (2008 R2+)'
+  - '`Get-Disk | ft Number,FriendlyName,OperationalStatus,HealthStatus,IsOffline` 로 디스크 Online/Offline 상태 확인 (2012+)'
+  - iSCSI 면 `Get-IscsiSession | ft TargetNodeAddress,IsConnected` (2012+), MPIO 면 `mpclaim -s -d` 로 경로 연결 확인
+  short:
+  - '(2차·승인 후, 롤백: 원래 경로 구성 유지) 스토리지·SAN 담당과 경로(케이블·스위치 존·타깃 포트) 복구 후 `Get-Disk` Online 확인 — 클러스터 디스크는 장애 조치 클러스터 관리자에서만 온라인 전환'
+  mid:
+  - 스토리지 경로 이중화(MPIO)와 iSCSI/FC 타임아웃 값을 벤더 권장값으로 정비
+  long:
+  - Disk 15·153·Storport 129 경보와 스토리지 경로 상태 정기 점검
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/windows-server/performance/registry-troubleshooting-advanced-users)
+  note: Disk 15 존재 확인, 현재 의미 유지
+  vendor_cause: 'System 로그 원본 disk 이벤트 15 "The device, \Device\HarddiskN\DRn, is not ready for access yet." — OS 가 디스크에 I/O 를 보냈는데 장치가 아직 접근 준비가 안 됐다(Not Ready)고 응답한 상태. 흔한 원인은 SAN·iSCSI 경로 끊김이나 LUN 미응답, 디스크 기동 지연, 컨트롤러·드라이버 구성 오류이며, 이벤트 9·11 과 함께 반복되면 저장장치 하드웨어 문제 신호다(Microsoft KB 822705).'
+  verify_note: 미검증 — 이벤트 15 메시지 원문은 Microsoft Q&A 사례로만 확인, Microsoft Learn 공식 문서에는 '9·11·15 는 하드웨어 문제 신호' 라는 언급(KB 822705)만 있고 15 단독 정의 본문은 없음
+  vendor_action: 해당 디스크에 chkdsk /r을 실행하고 컨트롤러 펌웨어·드라이버와 시스템 BIOS를 최신화
+  vendor_url: https://learn.microsoft.com/en-us/troubleshoot/windows-server/performance/registry-troubleshooting-advanced-users
+  versions:
+  - Windows Server 2003
+  - 2008/R2
+  - 2012/R2
+  - '2016'
+  - '2019'
+  - '2022'
+  - '2025'
+  version_note: 이벤트 ID 전 버전 공통(2003 포함). CSV 내보내기는 2008 R2+ Get-WinEvent, 2003/2008 은 wevtutil/Get-EventLog
+- code: '51'
+  severity: warn
+  category: disk
+  title: 페이징 작업 중 오류
+  immediate:
+  - 'Disk 51 대상 장치 확인: `Get-WinEvent -FilterHashtable @{LogName="System"; Id=51} -MaxEvents 20 | fl TimeCreated,Message` — 이벤트 XML(세부 정보)의 NTSTATUS·SCSI Sense 값 기록 (2008 R2+)'
+  - '`Get-CimInstance Win32_PageFileUsage | ft Name,AllocatedBaseSize,CurrentUsage` 로 페이지 파일이 해당 디스크에 있는지 확인'
+  - 같은 시각 Disk 7·11·153 동반 여부와 `Get-PhysicalDisk | ft FriendlyName,HealthStatus` 확인 — 이동식/USB 미디어면 영향 낮음
+  short:
+  - (2차) Learn "Event ID 51" 문서 기준으로 이벤트 데이터의 NTSTATUS·SCSI Sense 를 해석해 매체/경로 원인 구분, (승인 후) 하드웨어 진단 의뢰
+  mid:
+  - 결함 디스크·경로 교체, 페이지 파일을 안정적인 디스크로 이전(재부팅 필요·승인 후)
+  long:
+  - Disk 51 반복 경보와 디스크 오류 누계 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/windows-server/backup-and-storage/event-id-51-information)
+  note: Event Type Warning
+  vendor_cause: 디스크와 메모리 사이의 페이징 또는 버퍼 I/O 중 일반적인 디스크 오류가 발생함
+  vendor_action: 이벤트 데이터의 NTSTATUS·SCSI 상태와 대상 디스크를 해석해 원인을 식별; 무해한 특정 이동식 미디어 사례는 조치 불필요
+  vendor_url: https://learn.microsoft.com/en-us/troubleshoot/windows-server/backup-and-storage/event-id-51-information
+  versions:
+  - Windows Server 2003
+  - 2008/R2
+  - 2012/R2
+  - '2016'
+  - '2019'
+  - '2022'
+  - '2025'
+  version_note: 이벤트 ID 전 버전 공통(2003 포함). CSV 내보내기는 2008 R2+ Get-WinEvent, 2003/2008 은 wevtutil/Get-EventLog
+- code: '57'
+  severity: error
+  category: storage
+  title: NTFS 데이터 플러시 실패
+  vendor_cause: NTFS 가 트랜잭션 로그로 데이터를 플러시하지 못해 "Corruption may occur" 를 남긴 경고 — 외장/USB 디스크 비정상 제거, SAN·iSCSI 경로 단절, 스토리지 응답 지연(Device Busy)·디스크 고장이 흔한 원인이며 이후 NTFS 손상(55)으로 이어질 수 있다.
+  immediate:
+  - 'Ntfs 57 의 볼륨·장치 확인: `Get-WinEvent -FilterHashtable @{LogName="System"; Id=57} -MaxEvents 20 | fl TimeCreated,ProviderName,Message` (2008 R2+)'
+  - '같은 시각 저장 경로 이벤트 확인: `Get-WinEvent -FilterHashtable @{LogName="System"; Id=129,153,157; StartTime=(Get-Date).AddHours(-6)} | fl TimeCreated,Id,ProviderName,Message`'
+  - '`fsutil dirty query <드라이브>:` 와 `Get-Volume | ft DriveLetter,FileSystem,HealthStatus,SizeRemaining` (2012+) 로 볼륨 dirty·상태 확인'
+  short:
+  - '(2차·승인 후, 롤백: 백업 복원) 저장 경로 복구 후 `chkdsk <드라이브>: /scan` (2012+, 수정 없이 온라인 검사), 손상 발견 시 업무 중단 시간에 `chkdsk <드라이브>: /spotfix` 또는 `/f`'
+  mid:
+  - 외장 디스크는 안전 제거 절차 적용, SAN/iSCSI 는 MPIO·타임아웃 값 정비
+  long:
+  - Ntfs 55/57/98·Disk 153 이벤트 경보와 백업 복구 훈련
+  source: GPT 수집·공식 문서 미확인(보류)(https://learn.microsoft.com/en-us/answers/questions/1065891/event-57-on-2008r2)
+  note: Learn Q&A만 확인, 공식문서 미확인
+  versions:
+  - Windows Server 2003
+  - 2008/R2
+  - 2012/R2
+  - '2016'
+  - '2019'
+  - '2022'
+  - '2025'
+  version_note: 이벤트 ID 전 버전 공통(2003 포함). CSV 내보내기는 2008 R2+ Get-WinEvent, 2003/2008 은 wevtutil/Get-EventLog
+  verify_note: 미검증 — Microsoft Learn 공식 문서(Q&A 제외)에서 Ntfs 57 정의 본문을 찾지 못함, 메시지 문구와 Q&A 사례 기준으로 작성
+- code: '134'
+  severity: warn
+  category: connection
+  title: Time-Service NTP DNS실패
+  immediate:
+  - '`w32tm /query /status` 와 `w32tm /query /peers` 로 현재 시간원·마지막 동기 시각·Stratum 확인'
+  - '`w32tm /query /configuration` 의 NtpServer 값 확인 후 `Resolve-DnsName <NTP서버>` (2012+) 또는 `nslookup <NTP서버>` 로 이름 해석 확인'
+  - '`w32tm /stripchart /computer:<NTP서버> /samples:3 /dataonly` 로 UDP 123 응답·오프셋 확인 — 오류면 방화벽·서버 NTP 광고 상태 확인'
+  short:
+  - '(2차·승인 후, 롤백: 이전 NtpServer 값 복원) 도메인 구성원은 도메인 계층(NT5DS) 사용 확인, PDC 에뮬레이터·독립 서버는 `w32tm /config /manualpeerlist:"<서버>,0x8" /syncfromflags:manual /update` 후 `w32tm /resync`'
+  mid:
+  - NTP 서버 이름의 DNS 등록과 UDP 123 방화벽 정책 문서화, 도메인에서는 PDC 에뮬레이터만 기준 시간원 사용
+  long:
+  - w32tm 오프셋 정기 측정과 Time-Service 경고 이벤트 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/windows-server/active-directory/error-message-run-w32tm-resync-no-time-data-available)
+  note: Critical→Warning, DNS 실패로 유형 수정
+  vendor_cause: NTP 서버 DNS 해석 실패·잘못된 이름/IP, UDP 123 차단 또는 서버가 NTP를 광고하지 않음
+  vendor_action: NTPServer 이름·IP와 DNS를 확인하고 UDP 123 트래픽을 점검하며 대상 서버의 NTP 광고 상태를 확인
+  vendor_url: https://learn.microsoft.com/en-us/troubleshoot/windows-server/active-directory/error-message-run-w32tm-resync-no-time-data-available
+  versions:
+  - Windows Server 2003
+  - 2008/R2
+  - 2012/R2
+  - '2016'
+  - '2019'
+  - '2022'
+  - '2025'
+  version_note: 이벤트 ID 전 버전 공통(2003 포함). CSV 내보내기는 2008 R2+ Get-WinEvent, 2003/2008 은 wevtutil/Get-EventLog
+- code: '1000'
+  severity: error
+  category: internal
+  title: 애플리케이션 오류
+  immediate:
+  - '`Get-WinEvent -FilterHashtable @{LogName="Application"; Id=1000} -MaxEvents 20 | fl TimeCreated,Message` 로 실패 애플리케이션·모듈·예외 코드·발생 빈도 확인 (2008 R2+)'
+  - 'WER 보고서 확인: `Get-ChildItem C:\ProgramData\Microsoft\Windows\WER\ReportArchive | Sort-Object LastWriteTime -Descending | Select-Object -First 5`'
+  - 해당 서비스면 `Get-Service <서비스> | fl Name,Status,StartType` 로 현재 기동 상태 확인 — 재기동은 2차
+  short:
+  - '(2차) 실패 모듈이 서드파티 DLL 이면 공급업체 확인, 시스템 모듈이면 `sfc /verifyonly` 로 점검 후 (승인 후, 롤백: 백업·시스템 복원 지점) `sfc /scannow`, 덤프는 WinDbg `!analyze -v` 로 분석'
+  mid:
+  - '(2차·승인 후, 롤백: 추가한 키 삭제) WER LocalDumps(HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps) 로 크래시 덤프 수집 설정, 결함 버전 패치'
+  long:
+  - Application Error 1000 발생 횟수 감시(프로세스별 일 1회 이상 경보)와 패치 회귀 시험
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/windows-client/shell-experience/microsoft-store-apps-fail-to-start)
+  note: 공식 Learn 확인
+  vendor_cause: Application Error — 애플리케이션 프로세스가 처리되지 않은 예외로 비정상 종료됨. 본문의 실패 애플리케이션·실패 모듈·예외 코드(예 0xc0000005 접근 위반)가 원인 단서이며, 문서 사례로 레지스트리·파일 권한이 기본값에서 바뀌어 초기화 중 Access Denied 가 나는 경우가 있다.
+  vendor_action: '문서 사례: ALL APPLICATION PACKAGES에 필요한 권한을 복원하고 권한을 변경하는 그룹 정책도 수정'
+  vendor_url: https://learn.microsoft.com/en-us/troubleshoot/windows-client/shell-experience/microsoft-store-apps-fail-to-start
+  versions:
+  - Windows Server 2003
+  - 2008/R2
+  - 2012/R2
+  - '2016'
+  - '2019'
+  - '2022'
+  - '2025'
+  version_note: 이벤트 ID 전 버전 공통(2003 포함). CSV 내보내기는 2008 R2+ Get-WinEvent, 2003/2008 은 wevtutil/Get-EventLog
+- code: '1002'
+  severity: error
+  category: internal
+  title: 애플리케이션 응답 없음
+  vendor_cause: Application Hang — 프로그램이 응답하지 않아 Windows 가 응답 없음으로 기록한 상태(사용자 또는 시스템이 종료). 잠금 대기, 네트워크·디스크 I/O 지연, 무한 루프가 흔한 원인.
+  immediate:
+  - '`Get-WinEvent -FilterHashtable @{LogName="Application"; Id=1002} -MaxEvents 20 | fl TimeCreated,Message` 로 행 프로그램·버전·발생 시각 확인 (2008 R2+)'
+  - '같은 시각 CPU·디스크 지연 확인: `Get-Counter "\Processor(_Total)\% Processor Time","\PhysicalDisk(_Total)\Avg. Disk sec/Transfer" -SampleInterval 2 -MaxSamples 5`'
+  - 현재도 응답 없으면 작업 관리자 "덤프 파일 만들기" 또는 `procdump -h <PID>` (Sysinternals 반입 시)로 덤프 확보 — 프로세스 종료는 2차
+  short:
+  - (2차) 확보한 덤프를 WinDbg `!analyze -v -hang` 로 분석해 대기 스레드 식별, (승인 후) 프로세스 재기동
+  mid:
+  - 행 원인(잠금·외부 호출 타임아웃) 애플리케이션 수정과 외부 연동 타임아웃 설정
+  long:
+  - Application Hang 1002 발생 감시와 응답 시간 모니터링
+  source: GPT 수집·공식 문서 미확인(보류)(https://learn.microsoft.com/en-us/answers/questions/3263388/event-1002-application-hang)
+  note: Learn Q&A만 확인, 공식문서 미확인
+  versions:
+  - Windows Server 2003
+  - 2008/R2
+  - 2012/R2
+  - '2016'
+  - '2019'
+  - '2022'
+  - '2025'
+  version_note: 이벤트 ID 전 버전 공통(2003 포함). CSV 내보내기는 2008 R2+ Get-WinEvent, 2003/2008 은 wevtutil/Get-EventLog
+  verify_note: 미검증 — Microsoft Learn 공식 문서에서 Application Hang 1002 정의 본문 미확인(Q&A 만), 메시지 문구 기준 작성
+- code: '1014'
+  severity: warn
+  category: connection
+  title: DNS 이름 확인 시간 초과
+  vendor_cause: DNS Client 가 이름 해석 요청에 대해 구성된 DNS 서버 중 어느 것도 시간 안에 응답하지 않았음을 기록 — DNS 서버 장애·과부하, UDP/TCP 53 차단, 잘못된 DNS 서버 설정, 존재하지 않는 이름(isatap·wpad 등) 반복 조회가 흔한 원인.
+  immediate:
+  - '`Get-WinEvent -FilterHashtable @{LogName="System"; Id=1014} -MaxEvents 20 | fl TimeCreated,Message` 로 해석 실패 이름·빈도 확인 (2008 R2+)'
+  - '`Get-DnsClientServerAddress -AddressFamily IPv4 | ft InterfaceAlias,ServerAddresses` (2012+) 또는 `ipconfig /all` 로 설정된 DNS 서버 확인'
+  - '`Resolve-DnsName <이름> -Server <DNS서버> -DnsOnly` (2012+) 또는 `nslookup <이름> <DNS서버>` 로 서버별 응답 확인'
+  short:
+  - '(2차·승인 후, 롤백: 이전 서버 목록 복원) 무응답 DNS 를 목록에서 내리거나 `Set-DnsClientServerAddress -InterfaceAlias <NIC> -ServerAddresses <주>,<보조>` 로 정정, 방화벽 53 허용 확인'
+  mid:
+  - DNS 서버 이중화·응답 시간 점검, 불필요한 이름 조회(isatap 등) 발생원 정리
+  long:
+  - DNS 응답 실패율·1014 발생 건수 감시
+  source: GPT 수집·공식 문서 미확인(보류)(https://learn.microsoft.com/en-us/answers/questions/2468567/source-dns-client-events-event-id-1014-level-warning-name-resolution-for-the-name-isatap-home-timed-out-after-none-of-the-configured-dns-servers-responded)
+  note: Learn Q&A만 확인, 공식문서 미확인
+  versions:
+  - Windows Server 2008/R2
+  - 2012/R2
+  - '2016'
+  - '2019'
+  - '2022'
+  - '2025'
+  version_note: DNS Client Events 1014 는 2008 이후
+  verify_note: 미검증 — Microsoft Learn 공식 문서에서 DNS Client 1014 정의 본문 미확인(Q&A 만), 메시지 문구 기준 작성
+- code: '1069'
+  severity: error
+  category: internal
+  title: FailoverCluster 리소스 실패
+  immediate:
+  - '`Get-ClusterResource | Where-Object State -ne "Online" | ft Name,ResourceType,OwnerGroup,OwnerNode,State` 로 실패 리소스·소유 노드 확인 (2008 R2+ FailoverClusters 모듈)'
+  - '`Get-WinEvent -FilterHashtable @{LogName="System"; Id=1069; ProviderName="Microsoft-Windows-FailoverClustering"} -MaxEvents 20 | fl TimeCreated,Message` 로 실패 시각·리소스 확인'
+  - '`Get-ClusterLog -Destination <경로> -TimeSpan 60` 으로 최근 60분 클러스터 로그를 파일로 생성해 1069 시각 전후 디스크·네트워크·IP 오류 확인'
+  short:
+  - '(2차·승인 후, 롤백: 원래 소유 노드로 이동) 원인(디스크·IP·서비스) 해소 후 `Start-ClusterResource <리소스>` 또는 `Move-ClusterGroup <역할> -Node <노드>` — 업무 영향 공지 후'
+  mid:
+  - 리소스 종속성·재시작 정책(RestartThreshold·RetryPeriodOnFailure) 정비와 클러스터 유효성 검사 보고서 검토
+  long:
+  - FailoverClustering 1069/1146/1135 이벤트 경보와 분기 장애 조치 훈련
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/windows-server/high-availability/troubleshoot-cannot-bring-resource-online-guidance)
+  note: Critical→Error
+  vendor_cause: 'System 로그 FailoverClustering 이벤트 1069(RCM_RESOURCE_FAILURE) "Cluster resource ''<리소스>'' of type ''<종류>'' in clustered role ''<역할>'' failed." — 클러스터 리소스(디스크·IP 주소·네트워크 이름·서비스 등)가 실패해, 실패 정책에 따라 같은 노드에서 다시 온라인을 시도하거나 역할을 다른 노드로 옮겨 재시작한다는 뜻. 실제 원인은 리소스 종류별(디스크 경로 끊김·DNS 등록 실패·IP 충돌·서비스 기동 실패)이라 같은 시각 System 로그와 클러스터 로그로 가린다.'
+  vendor_action: System 로그의 동시 오류를 확인하고 Get-ClusterLog로 1069 시점의 디스크·DNS·NIC·리소스 오류를 조사
+  vendor_url: https://learn.microsoft.com/en-us/troubleshoot/windows-server/high-availability/troubleshoot-cannot-bring-resource-online-guidance
+  versions:
+  - Windows Server 2003
+  - 2008/R2
+  - 2012/R2
+  - '2016'
+  - '2019'
+  - '2022'
+  - '2025'
+  version_note: FailoverClustering(2008+)·MSCS(2003) 모두 1069 리소스 실패
+- code: '1135'
+  severity: critical
+  category: connection
+  title: 클러스터 노드 제거됨
+  immediate:
+  - '`Get-ClusterNode | ft Name,State` 와 `Get-ClusterNetwork | ft Name,State,Role` 로 노드·클러스터 네트워크 상태 확인 (2008 R2+)'
+  - '`Get-ClusterLog -Destination <경로> -TimeSpan 60` 으로 클러스터 로그 생성 후 1135 시각 전후 heartbeat·lost 항목 확인'
+  - '`Get-NetAdapter | ft Name,Status,LinkSpeed` 와 `Get-NetAdapterStatistics | ft Name,ReceivedDiscardedPackets,OutboundDiscardedPackets` 로 NIC 상태·폐기 패킷 확인 (2012+)'
+  short:
+  - '(2차·승인 후, 롤백: 원래 값 복원) 네트워크 담당과 하트비트 경로(스위치·NIC 팀) 점검, 일시 지연 환경이면 `(Get-Cluster).SameSubnetThreshold` 등 하트비트 임계 조정 검토'
+  mid:
+  - 클러스터 네트워크 검증(`Test-Cluster -Include "Network"`, 운영 중 스토리지 테스트 제외)과 NIC 드라이버·펌웨어 갱신
+  long:
+  - 노드 제거 이벤트 경보와 하트비트 네트워크 이중화 점검 정례화
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/windows-server/high-availability/troubleshoot-cluster-event-id-1135)
+  note: 클러스터 통신 단절 시 노드 제거
+  vendor_cause: 노드 간 heartbeat 손실·지연, NIC 드라이버/펌웨어 문제, NIC·스위치 오구성 또는 패킷 손실이 발생함
+  vendor_action: 클러스터 네트워크 검증을 실행하고 NIC 드라이버·펌웨어, 스위치·NIC teaming·네트워크 혼잡을 점검
+  vendor_url: https://learn.microsoft.com/en-us/troubleshoot/windows-server/high-availability/troubleshoot-cluster-event-id-1135
+  versions:
+  - Windows Server 2008/R2
+  - 2012/R2
+  - '2016'
+  - '2019'
+  - '2022'
+  - '2025'
+  version_note: FailoverClustering 2008 이후
+- code: '1146'
+  severity: critical
+  category: internal
+  title: FailoverCluster RHS 중단
+  immediate:
+  - '`Get-WinEvent -FilterHashtable @{LogName="System"; Id=1146,1230,1069} -MaxEvents 30 | fl TimeCreated,Id,Message` 로 RHS 중단 시각과 직전 리소스 시간 초과·실패 리소스 확인'
+  - '`Get-ClusterResource | ft Name,ResourceType,State,OwnerNode` 와 `Get-ClusterResource <리소스> | fl Name,SeparateMonitor` 로 별도 RHS 사용 여부 확인'
+  - '`Get-ClusterLog -Destination <경로> -TimeSpan 60` 으로 클러스터 로그 생성 후 IsAlive·deadlock 항목 확인'
+  short:
+  - '(2차·승인 후, 롤백: SeparateMonitor 원복) 반복 실패 리소스를 `(Get-ClusterResource <리소스>).SeparateMonitor = 1` 로 별도 RHS 에 격리(리소스 오프라인/온라인 필요), 리소스 DLL 공급업체 확인'
+  mid:
+  - 원인 리소스 DLL·서드파티 에이전트 갱신, 리소스 IsAlive/LooksAlive 간격 검토
+  long:
+  - RHS 1146 발생 경보와 클러스터 리소스 변경 관리
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/windows-server/high-availability/troubleshoot-unexpected-cluster-failover-issue)
+  note: RHS 비정상 종료, Critical로 수정
+  vendor_cause: 'System 로그 FailoverClustering 이벤트 1146(RCM_EVENT_RESMON_DIED) "The cluster Resource Hosting Subsystem (RHS) process was terminated and will be restarted." — 리소스 DLL 을 실행하는 RHS 프로세스가 종료되어 다시 시작된다는 뜻으로, 보통 클러스터 상태 검사가 리소스 응답 없음을 감지해 복구하는 과정이다. 직전에 1230(리소스 시간 초과 — 저장소·네트워크·서비스 응답 지연)이 함께 나오는 경우가 많고, 어느 리소스·DLL 인지는 System 로그에서 확인한다.'
+  vendor_action: 발생 시각의 클러스터 로그에서 선행 오류와 실패한 리소스의 IsAlive·Online 동작을 확인해 실제 원인을 식별
+  vendor_url: https://learn.microsoft.com/en-us/troubleshoot/windows-server/high-availability/troubleshoot-unexpected-cluster-failover-issue
+  versions:
+  - Windows Server 2008/R2
+  - 2012/R2
+  - '2016'
+  - '2019'
+  - '2022'
+  - '2025'
+  version_note: RHS 2008 이후
+- code: '1500'
+  severity: error
+  category: internal
+  title: UserProfile 프로필 로드 실패
+  immediate:
+  - '`Get-WinEvent -FilterHashtable @{LogName="Application"; Id=1500} -MaxEvents 10 | fl TimeCreated,ProviderName,Message` 로 대상 사용자·발생 시각 확인 후 같은 시각 User Profile Service 오류 확인'
+  - '`Get-CimInstance Win32_UserProfile | ft LocalPath,SID,Loaded,Special` 로 프로필 경로·로드 상태 확인'
+  - HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList 의 해당 SID(.bak 중복 여부)와 `icacls C:\Users\<user>` 로 폴더 권한 확인 — 수정은 2차
+  short:
+  - '(2차·승인 후, 롤백: 내보낸 레지스트리 키 복원) ProfileList 중복·.bak 키 정리 또는 데이터 백업 후 프로필 재생성, App-V 5.0 SP2 환경이면 문서의 핫픽스 적용'
+  mid:
+  - 프로필 디스크 공간·권한 표준 점검과 로밍/프로필 솔루션 정합성 확인
+  long:
+  - User Profile Service 오류 이벤트 감시와 오래된 프로필 정리 정책
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/windows-server/user-profiles-and-logon/user-profiles-may-fail-load)
+  note: Security→Internal
+  vendor_cause: 'User Profile Service 1500 — 사용자 프로필을 불러오지 못해 로그온이 거부되거나 임시 프로필로 로그온된 상태. 프로필 폴더·NTUSER.DAT 손상, 프로필 경로 권한, 로밍 프로필 네트워크 접근 실패, 레지스트리 ProfileList 의 .bak 항목 불일치가 흔한 원인이다. 예: App-V 5.0 SP2 설치 환경.'
+  vendor_action: '문서 사례: 문제가 발생한 컴퓨터에 App-V 5.0 SP2용 Hotfix Package 5를 설치'
+  vendor_url: https://learn.microsoft.com/en-us/troubleshoot/windows-server/user-profiles-and-logon/user-profiles-may-fail-load
+  versions:
+  - Windows Server 2003
+  - 2008/R2
+  - 2012/R2
+  - '2016'
+  - '2019'
+  - '2022'
+  - '2025'
+  version_note: userenv(2003)·User Profile Service(2008+) 모두 1500
+- code: '2004'
+  severity: warn
+  category: memory
+  title: 자원고갈 저가상메모리 감지
+  immediate:
+  - '`Get-WinEvent -FilterHashtable @{LogName="System"; Id=2004} -MaxEvents 5 | fl TimeCreated,Message` 로 가상 메모리 상위 소비 프로그램 목록 확인'
+  - '`Get-Counter "\Memory\Committed Bytes","\Memory\Commit Limit","\Memory\Available MBytes"` 로 커밋 사용률 확인 — Committed/Limit 90% 이상이면 확정'
+  - '`Get-Process | Sort-Object PagedMemorySize64 -Descending | Select-Object -First 10 Name,Id,PagedMemorySize64,WorkingSet64` 와 `Get-CimInstance Win32_PageFileUsage` 로 상위 프로세스·페이지 파일 확인'
+  short:
+  - '(2차·승인 후, 롤백: 이전 페이지 파일 설정 복원) 누수 프로세스 재기동 일정 협의, 페이지 파일 자동 관리 또는 크기 상향(재부팅 필요)'
+  mid:
+  - 메모리 증설(VM 은 할당 확대)과 애플리케이션 메모리 한도 재산정
+  long:
+  - 커밋 사용률(80% 경고)·프로세스별 Private Bytes 추세 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/windows-client/installing-updates-features-roles/error-0x8007000e-0x800705aa-insufficient-virtual-memory)
+  note: Critical→Warning
+  vendor_cause: 서드파티 앱의 대량 가상메모리 사용 또는 수동 페이지파일 설정으로 가용 가상메모리가 부족함
+  vendor_action: 페이지파일 자동 관리를 활성화하고 재부팅 후 메모리를 모니터링; VM이면 사용 가능한 메모리 증설 고려
+  vendor_url: https://learn.microsoft.com/en-us/troubleshoot/windows-client/installing-updates-features-roles/error-0x8007000e-0x800705aa-insufficient-virtual-memory
+  versions:
+  - Windows Server 2008/R2
+  - 2012/R2
+  - '2016'
+  - '2019'
+  - '2022'
+  - '2025'
+  version_note: Resource-Exhaustion-Detector 2008 이후
+- code: '2011'
+  severity: error
+  category: capacity
+  title: 서버 IRPStackSize 부족
+  immediate:
+  - '`Get-WinEvent -FilterHashtable @{LogName="System"; Id=2011} -MaxEvents 10 | fl TimeCreated,ProviderName,Message` 로 발생 빈도 확인(원본 srv)'
+  - '`Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters" -Name IRPStackSize -ErrorAction SilentlyContinue` 로 현재 설정 확인 — 값이 없으면 기본값 사용 중'
+  - '`fltmc filters` 로 파일 시스템 필터 드라이버(백신·백업 에이전트) 확인 — 최근 설치된 필터가 있으면 원인 후보'
+  short:
+  - '(2차·승인 후, 롤백: 값 삭제 또는 이전 값) LanmanServer\Parameters 의 DWORD IRPStackSize 를 단계적으로 상향 후 Server 서비스 재시작 또는 재부팅'
+  mid:
+  - 파일 시스템 필터 드라이버(백신·백업) 정리와 공급업체 권장 버전 적용
+  long:
+  - srv 2011 이벤트 감시와 필터 드라이버 변경 관리
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/system-center/dpm/troubleshoot-dpm-protection-agent-installation-issues)
+  note: IRPStackSize 부족 관련 공식 확인
+  vendor_cause: Server 서비스의 IRPStackSize 설정값이 로컬 장치 사용에 필요한 크기보다 작음
+  vendor_action: IRPStackSize 구성 매개변수 값을 증가
+  vendor_url: https://learn.microsoft.com/en-us/troubleshoot/system-center/dpm/troubleshoot-dpm-protection-agent-installation-issues
+  versions:
+  - Windows Server 2003
+  - 2008/R2
+  - 2012/R2
+  - '2016'
+  - '2019'
+  - '2022'
+  - '2025'
+  version_note: 이벤트 ID 전 버전 공통(2003 포함). CSV 내보내기는 2008 R2+ Get-WinEvent, 2003/2008 은 wevtutil/Get-EventLog
+- code: '2012'
+  severity: error
+  category: connection
+  title: 서버 네트워크 오류
+  vendor_cause: Server(srv) 서비스가 데이터 송수신 중 네트워크 오류를 만난 상태 — 간헐 발생은 정상 범위이나 다량이면 NIC 드라이버·오프로드 설정, 스위치·케이블, 클라이언트 비정상 연결 종료를 의심.
+  immediate:
+  - '`Get-WinEvent -FilterHashtable @{LogName="System"; Id=2012} -MaxEvents 20 | fl TimeCreated,ProviderName,Message` 로 빈도 확인 — 시간당 다수면 이상 (2008 R2+)'
+  - '`Get-NetAdapterStatistics | ft Name,ReceivedPacketErrors,OutboundPacketErrors,ReceivedDiscardedPackets` 와 `Get-NetAdapter | ft Name,Status,LinkSpeed,DriverVersion` 로 NIC 오류 확인 (2012+)'
+  - '`(Get-SmbSession | Measure-Object).Count` 와 `Get-SmbServerConfiguration | fl EnableSMB1Protocol,EnableSMB2Protocol` 로 SMB 세션 수·프로토콜 기록 (2012+)'
+  short:
+  - '(2차·승인 후, 롤백: 원래 고급 속성 값 복원) NIC 드라이버 갱신, `Get-NetAdapterAdvancedProperty` 확인 후 Large Send Offload 등 오프로드 조정 검토'
+  mid:
+  - 스위치 포트 오류 카운터와 속도/듀플렉스 정합 점검, NIC 팀 구성 정비
+  long:
+  - srv 2012 발생량과 NIC 오류 카운터 추세 감시
+  source: GPT 수집·공식 문서 미확인(보류)
+  note: 현행 Microsoft Learn 공식문서 미확인
+  versions:
+  - Windows Server 2003
+  - 2008/R2
+  - 2012/R2
+  - '2016'
+  - '2019'
+  - '2022'
+  - '2025'
+  version_note: 이벤트 ID 전 버전 공통(2003 포함). CSV 내보내기는 2008 R2+ Get-WinEvent, 2003/2008 은 wevtutil/Get-EventLog
+  verify_note: 미검증 — Microsoft Learn 공식 문서에서 srv 2012 정의 본문 미확인, 메시지 문구 기준 작성
+- code: '3013'
+  severity: error
+  category: disk
+  title: 리디렉터 시간 초과
+  vendor_cause: SMB 리디렉터(클라이언트)가 원격 서버로 보낸 요청이 시간 안에 응답을 받지 못해 타임아웃 처리한 상태 — 파일 서버 과부하·디스크 지연, 네트워크 손실·지연, 서버 측 필터 드라이버 지연이 흔한 원인.
+  immediate:
+  - '`Get-WinEvent -FilterHashtable @{LogName="System"; Id=3013} -MaxEvents 20 | fl TimeCreated,ProviderName,Message` 로 대상 서버·발생 빈도 확인 (2008 R2+)'
+  - '`Get-SmbConnection | ft ServerName,ShareName,Dialect,NumOpens` (2012+) 와 `Test-NetConnection <파일서버> -Port 445` (2012 R2+) 로 연결·응답 확인'
+  - 파일 서버 담당에 같은 시각 디스크 지연(Disk 153·Storport 129)·자원 부족 이벤트 확인 요청
+  short:
+  - '(2차·승인 후, 롤백: 추가한 값 삭제) 서버 측 지연 원인 해소 우선, 필요 시 LanmanWorkstation\Parameters 의 SessTimeout 상향 검토'
+  mid:
+  - 파일 서버 디스크·네트워크 성능 개선과 SMB 버전 표준화(SMB1 제거)
+  long:
+  - SMB 응답 시간과 3013 발생 감시
+  source: GPT 수집·공식 문서 미확인(보류)
+  note: 현행 Microsoft Learn 공식문서 미확인
+  versions:
+  - Windows Server 2003
+  - 2008/R2
+  - 2012/R2
+  - '2016'
+  - '2019'
+  - '2022'
+  - '2025'
+  version_note: 이벤트 ID 전 버전 공통(2003 포함). CSV 내보내기는 2008 R2+ Get-WinEvent, 2003/2008 은 wevtutil/Get-EventLog
+  verify_note: 미검증 — Microsoft Learn 공식 문서에서 리디렉터 3013 정의와 SessTimeout 권장값 본문 미확인
+- code: '4013'
+  severity: warn
+  category: upstream
+  title: DNS AD 디렉터리 시작 대기
+  immediate:
+  - '`Get-WinEvent -FilterHashtable @{LogName="DNS Server"; Id=4013} -MaxEvents 10 | fl TimeCreated,Message` 로 발생 시각 확인 — 부팅 직후 일시 발생인지, 계속 반복인지 구분'
+  - '`repadmin /replsummary` 와 `repadmin /showrepl <DC>` 로 초기 복제·파트너 오류 확인'
+  - '`dcdiag /test:dns` 와 `ipconfig /all` 로 DC 의 DNS 상태·DNS 서버 설정(자기 자신만 가리키는지) 확인'
+  short:
+  - '(2차·승인 후, 롤백: 이전 DNS 서버 목록 복원) DC 의 기본 DNS 를 다른 정상 DC 로, 보조를 자신(루프백)으로 구성 — 오래된 DC 메타데이터 정리는 AD 담당 승인 후'
+  mid:
+  - 실패·폐기된 DC 메타데이터 정리와 사이트별 DC 2대 이상 유지
+  long:
+  - AD 복제(`repadmin /replsummary`) 일일 점검과 DNS 4013 경보
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/windows-server/networking/troubleshoot-dns-event-id-4013)
+  note: Error→Warning, AD 의존성 반영
+  vendor_cause: DNS가 AD 초기 복제를 기다리고 NTDS도 DNS 이름 해석을 필요로 하는 상호 의존성과 DNSQueryTimeouts가 발생함
+  vendor_action: 오래된 DC 참조를 제거하고 장애 DC를 복구하며 DC가 여러 가용 DNS 서버를 사용하고 원본 DC를 정상 해석하도록 구성
+  vendor_url: https://learn.microsoft.com/en-us/troubleshoot/windows-server/networking/troubleshoot-dns-event-id-4013
+  versions:
+  - Windows Server 2003
+  - 2008/R2
+  - 2012/R2
+  - '2016'
+  - '2019'
+  - '2022'
+  - '2025'
+  version_note: 이벤트 ID 전 버전 공통(2003 포함). CSV 내보내기는 2008 R2+ Get-WinEvent, 2003/2008 은 wevtutil/Get-EventLog
+- code: '4625'
+  severity: error
+  category: security
+  title: Security 로그온 실패
+  immediate:
+  - '`Get-WinEvent -FilterHashtable @{LogName="Security"; Id=4625; StartTime=(Get-Date).AddHours(-1)} | Select-Object -First 30 TimeCreated,@{n="User";e={$_.Properties[5].Value}},@{n="Status";e={$_.Properties[7].Value}},@{n="LogonType";e={$_.Properties[10].Value}},@{n="IP";e={$_.Properties[19].Value}} | ft` 로 계정·출처 IP 확인 (관리자)'
+  - Status·Sub Status(예 0xC000006A 잘못된 비밀번호, 0xC0000064 없는 사용자, 0xC0000234 잠긴 계정)와 Logon Type(3 네트워크, 10 원격 데스크톱)으로 원인 구분
+  - 동일 IP 다수 실패면 보안 담당 통보, 서비스 계정이면 저장된 비밀번호 사용처(서비스·예약 작업·매핑 드라이브) 확인 — 차단은 2차
+  short:
+  - '(2차·보안 담당 승인 후, 롤백: 규칙 제거) 공격 출처는 Windows 방화벽/경계 장비에서 차단, 서비스 계정은 저장된 자격 증명 갱신'
+  mid:
+  - 계정 잠금 정책(임계값·기간)과 원격 접속 허용 IP 제한, NTLM 사용 축소 검토
+  long:
+  - 4625 실패 임계(예 5분 20회) 경보와 SIEM 연계, 정기 계정 점검
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/auditing/event-4625)
+  note: '감사 이벤트 Level=Information / 운영 심각도 정책: 감사 실패·계정 잠금은 error 로 취급'
+  vendor_cause: 로그온 시도가 실패했으며 구체적인 원인은 이벤트의 Failure Reason·Status·Sub Status에 기록됨
+  vendor_action: Status·Sub Status와 프로세스·원본 IP를 확인하고 중요·서비스·로컬 계정의 반복 실패나 비정상 출처를 모니터링
+  vendor_url: https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/auditing/event-4625
+  versions:
+  - Windows Server 2008/R2
+  - 2012/R2
+  - '2016'
+  - '2019'
+  - '2022'
+  - '2025'
+  version_note: 2008/Vista 이후 ID. 2003 은 529(로그온 실패)·530~537
+- code: '4740'
+  severity: error
+  category: security
+  title: Security 사용자 계정 잠금
+  immediate:
+  - '잠금 기록은 PDC 에뮬레이터에서 조회: `(Get-ADDomain).PDCEmulator` (RSAT AD 모듈) 확인 후 `Get-WinEvent -ComputerName <PDC> -FilterHashtable @{LogName="Security"; Id=4740} -MaxEvents 20 | fl TimeCreated,Message`'
+  - 본문의 Caller Computer Name(잠금 유발 컴퓨터) 기록 후 해당 컴퓨터의 4625/4771 기록 확인
+  - '`Get-ADUser <user> -Properties LockedOut,BadLogonCount,LastBadPasswordAttempt,PasswordLastSet` 로 상태 확인 — 잠금 해제는 2차'
+  short:
+  - (2차·승인 후) 잠금 유발 원천(오래된 비밀번호를 쓰는 서비스·예약 작업·모바일 기기·매핑 드라이브) 정리 후 `Unlock-ADAccount <user>` — 원천 제거 전 해제하면 재잠금
+  mid:
+  - 서비스 계정은 gMSA 전환 검토, 잠금 임계·관찰 창 정책 재검토
+  long:
+  - 중요·서비스 계정 4740 실시간 경보와 잠금 원천 추적 절차 문서화
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/auditing/event-4740)
+  note: '감사 이벤트 Level=Information / 운영 심각도 정책: 감사 실패·계정 잠금은 error 로 취급'
+  vendor_cause: 사용자 계정이 잠겼으며 Caller Computer Name에 잠금을 유발한 로그온 시도의 컴퓨터가 기록됨
+  vendor_action: 중요 계정의 모든 4740과 예상하지 않은 Caller Computer·도메인 외 컴퓨터에서 발생한 잠금을 모니터링·경고
+  vendor_url: https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/auditing/event-4740
+  versions:
+  - Windows Server 2008/R2
+  - 2012/R2
+  - '2016'
+  - '2019'
+  - '2022'
+  - '2025'
+  version_note: 2003 은 644(계정 잠금)
+- code: '5120'
+  severity: error
+  category: storage
+  title: FailoverCluster CSV I/O대기
+  immediate:
+  - '`Get-ClusterSharedVolume | ft Name,State,OwnerNode` 와 `Get-ClusterSharedVolumeState | ft Name,Node,StateInfo,FileSystemRedirectedIOReason,BlockRedirectedIOReason` 로 CSV 상태·리디렉션 사유 확인 (2012+)'
+  - '`Get-WinEvent -FilterHashtable @{LogName="System"; Id=5120,5142; ProviderName="Microsoft-Windows-FailoverClustering"} -MaxEvents 20 | fl TimeCreated,Id,Message` 로 STATUS 코드·노드 확인'
+  - 같은 시각 Storport 129·Disk 153·MPIO 경로 오류와 클러스터 네트워크 상태(`Get-ClusterNetwork | ft Name,State,Role`) 확인
+  short:
+  - '(2차·승인 후, 롤백: 원래 어댑터 설정) 클러스터 어댑터의 Client for Microsoft Networks·File and Printer Sharing 바인딩 확인·복구, 스토리지 경로 복구'
+  mid:
+  - CSV 소유 노드 분산·MPIO 정비와 백업 솔루션(VSS)의 CSV 호환 버전 확인
+  long:
+  - CSV 상태(Redirected 포함)와 5120 이벤트 경보
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/windows-server/backup-and-storage/event-5120-5142-access-clusterstorage-folder)
+  note: Critical→Error
+  vendor_cause: CSV I/O가 사용하는 클러스터 네트워크 어댑터에서 SMB에 필요한 프로토콜이 비활성화됨
+  vendor_action: 클러스터가 사용할 모든 어댑터에서 Client for Microsoft Networks와 File and Printer Sharing을 활성화
+  vendor_url: https://learn.microsoft.com/en-us/troubleshoot/windows-server/backup-and-storage/event-5120-5142-access-clusterstorage-folder
+  versions:
+  - Windows Server 2008/R2
+  - 2012/R2
+  - '2016'
+  - '2019'
+  - '2022'
+  - '2025'
+  version_note: CSV 2008 R2 이후
+- code: '7000'
+  severity: error
+  category: internal
+  title: SCM 서비스 시작 실패
+  immediate:
+  - '`Get-WinEvent -FilterHashtable @{LogName="System"; Id=7000; ProviderName="Service Control Manager"} -MaxEvents 20 | fl TimeCreated,Message` 로 서비스명·오류 문구(파일 없음·로그온 실패 등) 확인'
+  - '`sc.exe qc <서비스>` 로 BINARY_PATH_NAME·START_TYPE·DEPENDENCIES·SERVICE_START_NAME 확인 후 `Test-Path "<실행 파일 경로>"` 로 파일 존재 확인'
+  - '`Get-WinEvent -FilterHashtable @{LogName="System"; Id=7038,7009,7001} -MaxEvents 10 | fl TimeCreated,Id,Message` 로 계정·시간 초과·종속성 동반 원인 확인'
+  short:
+  - '(2차·승인 후, 롤백: `sc.exe config` 이전 값 복원) 원인(실행 파일·계정·종속성) 수정 후 `Start-Service <서비스>`, 제품 파일 누락은 해당 제품 설치 복구'
+  mid:
+  - 서비스 구성(경로·계정·복구 옵션 `sc.exe failure`) 표준화와 변경 이력 관리
+  long:
+  - SCM 7000/7001/7009/7034 경보와 자동 시작 서비스 기동 점검
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/sql/database-engine/startup-shutdown/event-id-7000-fail-start)
+  note: Critical→Error
+  vendor_cause: 'Service Control Manager 가 "The <service> service failed to start due to the following error: <오류>" 를 기록한 상태 — 서비스를 시작하지 못했으며 본문 오류가 원인을 가리킨다: 실행 파일 없음(2), 액세스 거부(5), 서비스 로그온 실패(1069), 시간 내 응답 없음(1053), 종속 서비스 실패 등. 예: 서비스 실행 파일(Sqlservr.exe)이 이름 변경·삭제되어 찾지 못한 사례'
+  vendor_action: '문서 사례: 서비스 실행 파일 존재 여부를 확인하고 해당 제품의 설치 복구 절차를 실행'
+  vendor_url: https://learn.microsoft.com/en-us/troubleshoot/sql/database-engine/startup-shutdown/event-id-7000-fail-start
+  versions:
+  - Windows Server 2003
+  - 2008/R2
+  - 2012/R2
+  - '2016'
+  - '2019'
+  - '2022'
+  - '2025'
+  version_note: 이벤트 ID 전 버전 공통(2003 포함). CSV 내보내기는 2008 R2+ Get-WinEvent, 2003/2008 은 wevtutil/Get-EventLog
+- code: '7001'
+  severity: error
+  category: internal
+  title: 종속 서비스 시작 실패
+  immediate:
+  - '`Get-WinEvent -FilterHashtable @{LogName="System"; Id=7001,7000} -MaxEvents 20 | fl TimeCreated,Id,Message` 로 실패한 종속 서비스 이름 확인'
+  - '`sc.exe qc <서비스>` 의 DEPENDENCIES 와 `Get-Service <서비스> -RequiredServices | ft Name,Status,StartType` 로 종속 서비스 상태 확인'
+  - '`Get-Service <종속서비스> | fl Status,StartType` 로 Disabled 여부 확인 — 시작 유형 변경은 2차'
+  short:
+  - '(2차·승인 후, 롤백: 이전 시작 유형 복원) 종속 서비스의 시작 유형·구성 복구 후 기동, 시스템 파일 누락 의심 시 `sfc /verifyonly` 점검 후 승인 받아 `sfc /scannow`'
+  mid:
+  - 보안 강화 템플릿·GPO 로 비활성화된 필수 서비스 목록 점검
+  long:
+  - 자동 시작 서비스 기동 실패 경보와 서비스 종속성 문서화
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/windows-server/windows-security/troubleshoot-netlogon-service-startup-failures)
+  note: 공식 Learn 확인
+  vendor_cause: 서비스가 의존하는 서비스가 비활성화·오구성되었거나 필수 DLL·실행 파일이 없어서 시작 실패함
+  vendor_action: 실패한 종속 서비스를 찾아 시작 유형과 구성을 수정하고 누락 DLL·실행 파일은 SFC·백업·OS 복구로 복원
+  vendor_url: https://learn.microsoft.com/en-us/troubleshoot/windows-server/windows-security/troubleshoot-netlogon-service-startup-failures
+  versions:
+  - Windows Server 2003
+  - 2008/R2
+  - 2012/R2
+  - '2016'
+  - '2019'
+  - '2022'
+  - '2025'
+  version_note: 이벤트 ID 전 버전 공통(2003 포함). CSV 내보내기는 2008 R2+ Get-WinEvent, 2003/2008 은 wevtutil/Get-EventLog
+- code: '7009'
+  severity: error
+  category: internal
+  title: 서비스 시작 시간 초과
+  vendor_cause: 서비스 제어 관리자(SCM)가 서비스 프로세스의 연결(시작 보고)을 ServicesPipeTimeout(이벤트 문구상 기본 30000ms) 동안 기다렸으나 응답이 없어 시간 초과를 기록 — 부팅 시 디스크·CPU 부하, 서비스 초기화 지연(외부 연결·DB 대기), 종속 서비스 지연이 흔한 원인.
+  immediate:
+  - '`Get-WinEvent -FilterHashtable @{LogName="System"; Id=7009,7000} -MaxEvents 20 | fl TimeCreated,Id,Message` 로 서비스명·시간 초과(ms) 확인 — 부팅 직후에만 발생하는지 확인'
+  - '`Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Control -Name ServicesPipeTimeout -ErrorAction SilentlyContinue` 로 현재 타임아웃 설정 확인(없으면 기본값)'
+  - '`Get-Service <서비스> | fl Status,StartType` 와 `sc.exe qc <서비스>` 로 현재 상태·종속성 확인'
+  short:
+  - '(2차·승인 후, 롤백: 값 삭제) 원인 조사 후 HKLM\SYSTEM\CurrentControlSet\Control 에 DWORD ServicesPipeTimeout 을 60000 부터 단계적으로 상향(재부팅 필요) — 느린 초기화 원인 조치 병행'
+  mid:
+  - 해당 서비스 시작 유형을 자동(지연된 시작)으로 조정 검토, 부팅 시 디스크 부하 원인 정리
+  long:
+  - 부팅 후 자동 서비스 기동 점검 스크립트와 7009/7011 경보
+  source: GPT 수집·공식 문서 미확인(보류)(https://learn.microsoft.com/en-us/answers/questions/2444691/event-7009)
+  note: Learn Q&A만 확인, 공식문서 미확인
+  versions:
+  - Windows Server 2003
+  - 2008/R2
+  - 2012/R2
+  - '2016'
+  - '2019'
+  - '2022'
+  - '2025'
+  version_note: 이벤트 ID 전 버전 공통(2003 포함). CSV 내보내기는 2008 R2+ Get-WinEvent, 2003/2008 은 wevtutil/Get-EventLog
+  vendor_url: https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-server-2008-R2-and-2008/dd349435(v=ws.10)
+- code: '7011'
+  severity: error
+  category: thread
+  title: 서비스 응답 시간 초과
+  vendor_cause: SCM 이 서비스에 보낸 제어 요청에 대해 ServicesPipeTimeout(이벤트 문구상 기본 30000ms) 안에 트랜잭션 응답을 받지 못한 상태 — 서비스 행·과부하, 디스크/CPU 지연이 원인이며 Microsoft 는 다른 문제의 증상인지 함께 조사하도록 권고한다.
+  immediate:
+  - '`Get-WinEvent -FilterHashtable @{LogName="System"; Id=7011} -MaxEvents 20 | fl TimeCreated,Message` 로 서비스명·발생 시각·반복 여부 확인'
+  - '`Get-CimInstance Win32_Service -Filter "Name=''<서비스>''" | fl Name,State,ProcessId,StartName` 후 `Get-Process -Id <PID> | fl Name,CPU,WorkingSet64,HandleCount` 로 프로세스 상태 확인'
+  - '같은 시각 부하 확인: `Get-Counter "\Processor(_Total)\% Processor Time","\PhysicalDisk(_Total)\Avg. Disk sec/Transfer" -SampleInterval 2 -MaxSamples 5`'
+  short:
+  - '(2차) 응답 없는 서비스 프로세스 덤프(작업 관리자 "덤프 파일 만들기") 확보 후 공급업체 분석 의뢰, (승인 후, 롤백: 값 삭제) 필요 시 ServicesPipeTimeout 단계적 상향'
+  mid:
+  - 서비스 행 원인(외부 호출·잠금) 수정판 적용
+  long:
+  - 서비스 응답성(7011) 경보와 서비스 상태 주기 점검
+  source: GPT 수집·공식 문서 미확인(보류)(https://learn.microsoft.com/ko-kr/answers/questions/2464131/event-id-7011)
+  note: Learn Q&A만 확인, 공식문서 미확인
+  versions:
+  - Windows Server 2003
+  - 2008/R2
+  - 2012/R2
+  - '2016'
+  - '2019'
+  - '2022'
+  - '2025'
+  version_note: 이벤트 ID 전 버전 공통(2003 포함). CSV 내보내기는 2008 R2+ Get-WinEvent, 2003/2008 은 wevtutil/Get-EventLog
+  vendor_url: https://learn.microsoft.com/en-us/troubleshoot/windows-server/system-management-components/service-not-start-events-7000-7011-time-out-error
+  vendor_action: HKLM\SYSTEM\CurrentControlSet\Control 의 ServicesPipeTimeout(DWORD, ms)을 60000 등으로 조금씩 늘리고 재시작 — 단, 근본 원인이 다른 문제인지 함께 조사
+- code: '7022'
+  severity: error
+  category: internal
+  title: SCM 서비스 시작 중 멈춤
+  immediate:
+  - '`Get-WinEvent -FilterHashtable @{LogName="System"; Id=7022} -MaxEvents 20 | fl TimeCreated,Message` 로 시작 중 멈춘 서비스명·시각 확인'
+  - '`Get-Service <서비스> | fl Status,StartType` (StartPending 지속 여부) 와 `sc.exe queryex <서비스>` 로 PID·상태 확인'
+  - '`Get-Service <서비스> -RequiredServices | ft Name,Status` 로 종속 서비스 실행 여부 확인'
+  short:
+  - '(2차·승인 후, 롤백: 이전 시작 유형 복원) StartPending 으로 멈춘 프로세스 덤프 확보 후 프로세스 정리·재기동, 종속 서비스부터 순서대로 기동'
+  mid:
+  - 서비스 시작 로직(외부 의존 대기) 개선과 지연된 시작 유형 검토
+  long:
+  - StartPending 장시간 서비스 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/azure/virtual-machines/windows/azure-vm-nsi-not-starting)
+  note: 현재 의미 오기 수정
+  vendor_cause: 'Service Control Manager 7022 — ''<서비스> 서비스가 시작 중 응답이 없습니다(hung on starting)''. 서비스가 시작 제한 시간(기본 30초, ServicesPipeTimeout) 안에 실행 중 상태를 보고하지 못한 것으로, 종속 서비스 지연·초기화 중 외부 자원 대기·자원 부족·서비스 프로그램 결함이 흔한 원인이다. 예: NSI 서비스가 비활성화·정지된 경우.'
+  vendor_action: 해당 서비스 상태를 확인해 자동 시작으로 설정하고 시작·재시작하며 실패한 종속 서비스에도 같은 절차를 수행
+  vendor_url: https://learn.microsoft.com/en-us/troubleshoot/azure/virtual-machines/windows/azure-vm-nsi-not-starting
+  versions:
+  - Windows Server 2003
+  - 2008/R2
+  - 2012/R2
+  - '2016'
+  - '2019'
+  - '2022'
+  - '2025'
+  version_note: 이벤트 ID 전 버전 공통(2003 포함). CSV 내보내기는 2008 R2+ Get-WinEvent, 2003/2008 은 wevtutil/Get-EventLog
+- code: '7023'
+  severity: error
+  category: internal
+  title: 서비스 오류 종료
+  immediate:
+  - '`Get-WinEvent -FilterHashtable @{LogName="System"; Id=7023,7024} -MaxEvents 20 | fl TimeCreated,Id,Message` 로 서비스명·종료 오류 문구 확인'
+  - '오류 번호 의미 확인: `net helpmsg <Win32 오류 번호>` (예 5 = 액세스 거부, 2 = 파일 없음)'
+  - '같은 시각 Application 오류 확인: `Get-WinEvent -FilterHashtable @{LogName="Application"; Level=2; StartTime=(Get-Date).AddHours(-1)} | fl TimeCreated,ProviderName,Message`'
+  short:
+  - '(2차·승인 후, 롤백: 구성 원복) 오류 코드에 따라 권한(서비스 계정 폴더 ACL)·구성 파일·종속 자원 수정 후 기동'
+  mid:
+  - 서비스 복구 옵션(`sc.exe failure <서비스> reset= 86400 actions= restart/60000`)과 구성 변경 관리
+  long:
+  - 서비스 오류 종료 7023/7024/7031/7034 경보
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/windows/win32/api/winsvc/nf-winsvc-setservicestatus)
+  note: 공식 API 문서의 7023 예시 확인
+  vendor_cause: 서비스가 SERVICE_STOPPED 상태를 0이 아닌 Win32 종료 코드와 함께 Service Control Manager에 보고함
+  vendor_action: ''
+  vendor_url: https://learn.microsoft.com/en-us/windows/win32/api/winsvc/nf-winsvc-setservicestatus
+  versions:
+  - Windows Server 2003
+  - 2008/R2
+  - 2012/R2
+  - '2016'
+  - '2019'
+  - '2022'
+  - '2025'
+  version_note: 이벤트 ID 전 버전 공통(2003 포함). CSV 내보내기는 2008 R2+ Get-WinEvent, 2003/2008 은 wevtutil/Get-EventLog
+- code: '7034'
+  severity: error
+  category: internal
+  title: SCM 서비스 예기치 않은 종료
+  immediate:
+  - '`Get-WinEvent -FilterHashtable @{LogName="System"; Id=7034,7031} -MaxEvents 20 | fl TimeCreated,Id,Message` 로 서비스명·반복 횟수 확인'
+  - '같은 시각 Application Error 1000 확인: `Get-WinEvent -FilterHashtable @{LogName="Application"; Id=1000; StartTime=(Get-Date).AddHours(-2)} | fl TimeCreated,Message` — 실패 모듈·예외 코드 기록'
+  - '`Get-Service <서비스> | fl Status,StartType` 로 현재 상태 확인 — 재기동은 2차'
+  short:
+  - '(2차·승인 후, 롤백: 추가한 레지스트리 키 삭제) WER LocalDumps 로 크래시 덤프 수집 설정 후 분석, 문서 사례(OpenSSH 폴더 ACL)면 ACL 권장값 복원'
+  mid:
+  - 서비스 복구 옵션(재시작 횟수·간격) 설정과 결함 버전 패치
+  long:
+  - 7034 반복 경보와 서비스별 가동률 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/windows-server/system-management-components/error-1053-1067-7034-after-update-openssh-doesnt-start)
+  note: Critical→Error
+  vendor_cause: 'Service Control Manager 가 "The <service> service terminated unexpectedly. It has done this N time(s)." 를 기록한 상태 — 복구 동작이 설정되지 않은 서비스의 프로세스가 SCM 에 정지를 알리지 않고 끝났다(복구 동작이 있으면 7031). 애플리케이션 크래시(처리되지 않은 예외·접근 위반), 종속 서비스·자원 실패, 메모리·핸들 등 자원 고갈, 구성·권한 오류가 흔한 원인. 예: OpenSSH 서비스 데이터 폴더(C:\ProgramData\ssh) ACL 이 너무 제한적이거나 과도하게 허용된 사례'
+  vendor_action: '문서 사례: 서비스 폴더의 ACL을 권장값으로 복원하거나 관련 Windows 업데이트 적용'
+  vendor_url: https://learn.microsoft.com/en-us/troubleshoot/windows-server/system-management-components/error-1053-1067-7034-after-update-openssh-doesnt-start
+  versions:
+  - Windows Server 2003
+  - 2008/R2
+  - 2012/R2
+  - '2016'
+  - '2019'
+  - '2022'
+  - '2025'
+  version_note: 이벤트 ID 전 버전 공통(2003 포함). CSV 내보내기는 2008 R2+ Get-WinEvent, 2003/2008 은 wevtutil/Get-EventLog
+- code: '7043'
+  severity: warn
+  category: internal
+  title: 서비스 정상 종료 실패
+  vendor_cause: 서비스가 사전 종료(preshutdown) 제어를 받은 뒤 정해진 시간 안에 정상 종료하지 못했음을 SCM 이 기록 — 종료 처리 중 행·긴 정리 작업이 원인이며 시스템 종료·재부팅 지연과 함께 나타난다.
+  immediate:
+  - '`Get-WinEvent -FilterHashtable @{LogName="System"; Id=7043} -MaxEvents 20 | fl TimeCreated,Message` 로 서비스명·발생 시각(종료/재부팅 시점) 확인'
+  - '계획 종료 여부 대조: `Get-WinEvent -FilterHashtable @{LogName="System"; Id=1074,6006} -MaxEvents 10 | fl TimeCreated,Id,Message`'
+  - '`sc.exe qc <서비스>` 로 실행 파일·계정 확인 후 공급업체에 알려진 문제 여부 문의'
+  short:
+  - '(2차·승인 후, 롤백: 원래 설정) 서비스 공급업체 패치 적용, 필요 시 종료 순서·사전 종료 시간 조정 검토'
+  mid:
+  - 종료 지연 서비스 목록화와 계획 재부팅 전 서비스 순차 정리 절차 마련
+  long:
+  - 7043 발생 감시와 재부팅 소요 시간 추적
+  source: GPT 수집·공식 문서 미확인(보류)(https://learn.microsoft.com/en-us/answers/questions/4167990/bits-service-is-stopping-and-going-to-manual)
+  note: Learn Q&A만 확인, 공식문서 미확인
+  versions:
+  - Windows Server 2003
+  - 2008/R2
+  - 2012/R2
+  - '2016'
+  - '2019'
+  - '2022'
+  - '2025'
+  version_note: 이벤트 ID 전 버전 공통(2003 포함). CSV 내보내기는 2008 R2+ Get-WinEvent, 2003/2008 은 wevtutil/Get-EventLog
+  verify_note: 미검증 — Microsoft Learn 공식 문서에서 SCM 7043 정의 본문 미확인(Q&A 만), 메시지 문구 기준 작성
+- code: '10016'
+  severity: warn
+  category: security
+  title: DCOM 권한 오류
+  immediate:
+  - '`Get-WinEvent -FilterHashtable @{LogName="System"; Id=10016} -MaxEvents 10 | fl TimeCreated,Message` 로 CLSID·APPID·사용자 확인'
+  - 'CLSID 소유 구성 요소 확인: `Get-ItemProperty "Registry::HKEY_CLASSES_ROOT\CLSID\{<CLSID>}"` — Microsoft 구성 요소이고 기능 장애가 없으면 문서상 무시 가능'
+  - 같은 시각 실제 기능 장애(서비스·응용 오류)가 있는지 확인 — 없으면 조치 불필요로 종결
+  short:
+  - '(2차) 서드파티 구성 요소이고 기능 장애가 확인될 때만 공급업체 안내로 DCOM 권한 조정(승인 후, 롤백: dcomcnfg 이전 권한) — Microsoft 구성 요소 권한 변경 금지'
+  mid:
+  - 이벤트 뷰어 사용자 지정 보기로 알려진 무해 10016 필터링, 모니터링 예외 규칙 등록
+  long:
+  - 10016 은 기능 장애 동반 시에만 경보하도록 감시 규칙 정비
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/windows-client/application-management/event-10016-logged-when-accessing-dcom)
+  note: 정상 동작 중 기록될 수 있음
+  vendor_cause: Microsoft 구성 요소가 필요한 DCOM 권한 없이 첫 접근을 시도하는 설계된 동작으로 이벤트가 기록됨
+  vendor_action: 기능에 악영향이 없으므로 안전하게 무시하는 것이 권장되며 필요하면 Event Viewer 필터로 표시를 억제
+  vendor_url: https://learn.microsoft.com/en-us/troubleshoot/windows-client/application-management/event-10016-logged-when-accessing-dcom
+  versions:
+  - Windows Server 2003
+  - 2008/R2
+  - 2012/R2
+  - '2016'
+  - '2019'
+  - '2022'
+  - '2025'
+  version_note: DCOM 10016 전 버전
+- code: '10028'
+  severity: error
+  category: connection
+  title: DCOM 원격 서버 연결 실패
+  vendor_cause: DCOM 이 구성된 프로토콜로 대상 컴퓨터와 통신하지 못한 상태 — 대상 서버 꺼짐·이름 해석 실패·방화벽(RPC 135 및 동적 포트) 차단이 흔한 원인이며 관리·모니터링 도구가 폐기된 서버를 계속 조회할 때도 반복된다.
+  immediate:
+  - '`Get-WinEvent -FilterHashtable @{LogName="System"; Id=10028} -MaxEvents 20 | fl TimeCreated,Message` 로 대상 컴퓨터명·호출 프로세스 ID 확인'
+  - '`Resolve-DnsName <대상>` 과 `Test-NetConnection <대상> -Port 135` (2012 R2+) 로 이름 해석·RPC 엔드포인트 연결 확인'
+  - '`Get-Process -Id <PID> | fl Name,Path` 로 호출 프로그램 확인 — 관리·모니터링 도구면 대상 목록에 폐기 서버가 있는지 확인'
+  short:
+  - '(2차·승인 후, 롤백: 원래 목록·규칙 복원) 폐기 서버는 관리 도구 대상에서 제외, 운영 서버면 방화벽 RPC 동적 포트 허용 요청'
+  mid:
+  - 서버 인벤토리와 모니터링 대상 정합성 정비
+  long:
+  - DCOM 10028 반복 대상 주간 점검
+  source: GPT 수집·공식 문서 미확인(보류)(https://learn.microsoft.com/en-us/answers/questions/822362/dcom-event-id-10028)
+  note: Learn Q&A만 확인, 공식문서 미확인
+  versions:
+  - Windows Server 2003
+  - 2008/R2
+  - 2012/R2
+  - '2016'
+  - '2019'
+  - '2022'
+  - '2025'
+  version_note: 이벤트 ID 전 버전 공통(2003 포함). CSV 내보내기는 2008 R2+ Get-WinEvent, 2003/2008 은 wevtutil/Get-EventLog
+  verify_note: 미검증 — Microsoft Learn 공식 문서에서 DCOM 10028 정의 본문 미확인(Q&A 만), 메시지 문구 기준 작성
+- code: '12294'
+  severity: error
+  category: security
+  title: SAM 계정 잠금 처리 실패
+  immediate:
+  - DC 에서 `Get-WinEvent -FilterHashtable @{LogName="System"; Id=12294} -MaxEvents 20 | fl TimeCreated,Message` 로 대상 계정·오류 데이터 확인
+  - 대상이 기본 Administrator 등 잠기지 않는 계정이면 비밀번호 대입 시도 가능성 — 같은 시각 4625/4771 출처 확인
+  - '`repadmin /showobjmeta <DC> "<계정 DN>"` 으로 lockoutTime·badPwdCount 복제 메타데이터 확인'
+  short:
+  - '(2차·보안 담당 승인 후, 롤백: 규칙 제거) 공격 출처 차단과 대상 계정 비밀번호 변경, 디스크 쓰기 오류가 원인이면 DC 디스크 점검'
+  mid:
+  - 기본 Administrator 계정 이름 변경·사용 제한과 계정 잠금 정책 재검토
+  long:
+  - DC 의 12294·4625·4771 상관 경보
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/windows-server/active-directory/ntds-replication-warning-1083-1061-sam-error-12294)
+  note: 단순 잠금 시도가 아닌 잠금 처리 실패
+  vendor_cause: 여러 DC가 동일 AD 객체 속성을 동시에 변경해 업데이트 충돌이 발생하며 SAM 잠금 처리와 충돌할 수 있음
+  vendor_action: 오류 데이터를 확인하고 repadmin /showobjmeta로 복제 상태를 검증; AD가 일관된 lockoutTime·암호 충돌이면 무시 가능
+  vendor_url: https://learn.microsoft.com/en-us/troubleshoot/windows-server/active-directory/ntds-replication-warning-1083-1061-sam-error-12294
+  versions:
+  - Windows Server 2003
+  - 2008/R2
+  - 2012/R2
+  - '2016'
+  - '2019'
+  - '2022'
+  - '2025'
+  version_note: 이벤트 ID 전 버전 공통(2003 포함). CSV 내보내기는 2008 R2+ Get-WinEvent, 2003/2008 은 wevtutil/Get-EventLog
+- code: '36871'
+  severity: error
+  category: security
+  title: TLS 자격증명 생성 오류
+  immediate:
+  - '`Get-WinEvent -FilterHashtable @{LogName="System"; Id=36871; ProviderName="Schannel"} -MaxEvents 20 | fl TimeCreated,Message` 로 클라이언트/서버 자격 증명 구분과 내부 오류 상태(예 10013) 확인'
+  - '프로토콜 설정 확인: `Get-ChildItem "HKLM:\SYSTEM\CurrentControlSet\Control\SecurityProviders\SCHANNEL\Protocols" -Recurse | Get-ItemProperty | fl PSPath,Enabled,DisabledByDefault`'
+  - '서버 인증서 확인: `Get-ChildItem Cert:\LocalMachine\My | ft Subject,NotAfter,HasPrivateKey,Thumbprint` — 만료·개인 키 없음 여부'
+  short:
+  - '(2차·승인 후, 롤백: 내보낸 레지스트리 백업 복원) 상대 시스템과 공통 TLS 버전(1.2 이상)이 활성화되도록 SCHANNEL Protocols 정비 — 변경 후 재부팅 필요'
+  mid:
+  - 애플리케이션(.NET)·RDP 의 TLS 설정을 보안 기준과 일치시킴
+  long:
+  - TLS 구성 기준서 관리와 Schannel 오류 이벤트 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/azure/virtual-machines/windows/event-id-troubleshoot-vm-rdp-connecton)
+  note: 공식 Learn 확인
+  vendor_cause: 'Schannel 36871 — TLS 클라이언트/서버 자격 증명을 만드는 중 치명적 오류(내부 오류 상태 10013 등). 사용하려는 TLS 프로토콜·암호 제품군이 정책·레지스트리로 꺼져 있거나, 인증서 개인 키에 접근할 수 없거나 키 형식이 맞지 않는 경우가 흔하다. 예: TLS 1.0 비활성화 후 RDP 자격 증명 생성 실패.'
+  vendor_action: RDP의 TLS 프로토콜 설정을 확인하고 Microsoft의 RDP 인증 오류 문제 해결 절차를 수행
+  vendor_url: https://learn.microsoft.com/en-us/troubleshoot/azure/virtual-machines/windows/event-id-troubleshoot-vm-rdp-connecton
+  versions:
+  - Windows Server 2003
+  - 2008/R2
+  - 2012/R2
+  - '2016'
+  - '2019'
+  - '2022'
+  - '2025'
+  version_note: 이벤트 ID 전 버전 공통(2003 포함). CSV 내보내기는 2008 R2+ Get-WinEvent, 2003/2008 은 wevtutil/Get-EventLog
+- code: '36887'
+  severity: error
+  category: security
+  title: TLS 치명적 경고 수신
+  immediate:
+  - '`Get-WinEvent -FilterHashtable @{LogName="System"; Id=36887} -MaxEvents 20 | fl TimeCreated,Message` 로 TLS 경고 코드(40 handshake_failure, 42 bad_certificate, 46 certificate_unknown, 48 unknown_ca, 70 protocol_version) 확인'
+  - 상대 엔드포인트 식별을 위해 같은 시각 애플리케이션(IIS·SQL·RDP) 로그의 클라이언트 IP 확인
+  - '`(Get-ChildItem Cert:\LocalMachine\Root | Measure-Object).Count` 로 신뢰 루트 CA 개수 확인 — 과다하면 문서 사례(신뢰 목록 크기 한도) 의심'
+  short:
+  - '(2차·승인 후, 롤백: 내보낸 인증서 백업 복원) 경고 코드별 조치 — 46/48 은 신뢰 체인·중간 인증서 정비, 70 은 TLS 버전 정합, 불필요한 서드파티 루트 CA 정리'
+  mid:
+  - TLS 버전·암호군 정책을 통신 상대와 표준화
+  long:
+  - Schannel 36887 경고 코드별 집계 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/windows-server/windows-security/ssltls-communication-problems-after-install-kb931125)
+  note: 공식 Learn 확인
+  vendor_cause: 'Schannel 36887 — 상대 끝점에서 TLS 치명적 경고(fatal alert)를 받았다는 뜻. 메시지의 경고 코드에 따라 원인이 다르다: 40 handshake_failure(공통 프로토콜·암호 없음), 42/43 인증서 문제, 46/48 인증서 미지원·알 수 없는 CA, 70 프로토콜 버전. 예: 신뢰 루트 CA 가 너무 많아 CA 목록이 16KB 한도를 넘음.'
+  vendor_action: 추가 서드파티 루트 CA를 제거하고 필요 시 AuthRoot\Certificates 키를 백업 후 삭제해 신뢰 목록을 줄임
+  vendor_url: https://learn.microsoft.com/en-us/troubleshoot/windows-server/windows-security/ssltls-communication-problems-after-install-kb931125
+  versions:
+  - Windows Server 2003
+  - 2008/R2
+  - 2012/R2
+  - '2016'
+  - '2019'
+  - '2022'
+  - '2025'
+  version_note: 이벤트 ID 전 버전 공통(2003 포함). CSV 내보내기는 2008 R2+ Get-WinEvent, 2003/2008 은 wevtutil/Get-EventLog
+- code: '36888'
+  severity: error
+  category: security
+  title: TLS 치명적 경고 생성
+  immediate:
+  - '`Get-WinEvent -FilterHashtable @{LogName="System"; Id=36888} -MaxEvents 20 | fl TimeCreated,Message` 로 생성한 경고 코드와 내부 오류 상태 확인'
+  - 인증서 관련이면 `Get-ChildItem Cert:\LocalMachine\My | ft Subject,NotAfter,HasPrivateKey` 로 서버 인증서 확인
+  - '`Get-TlsCipherSuite | ft Name` (2016+) 로 활성 암호군 확인, 2012 R2 는 GPO "SSL 암호 그룹 순서" 적용 여부(`gpresult /h <파일>`) 확인'
+  short:
+  - '(2차·승인 후, 롤백: 이전 암호군 순서 복원) 문서 사례(TLS_DHE leading zero)면 양측 업데이트 적용 또는 TLS_DHE 암호군 비활성화, 그 외 상대와 TLS 버전·암호군 정합'
+  mid:
+  - TLS 버전·암호군 정책 표준화와 통신 상대 목록 관리
+  long:
+  - Schannel 36888 경고 코드별 집계 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/windows-server/certificates-and-public-key-infrastructure-pki/apps-forcibly-closed-tls-connection-errors)
+  note: 공식 Learn 확인
+  vendor_cause: 'Schannel 36888 — 이쪽에서 TLS 치명적 경고를 생성해 상대에게 보냈다는 뜻. 메시지의 경고 코드·오류 상태(예: 10, 40, 1205)로 원인을 가른다 — 공통 프로토콜·암호 제품군 없음, 상대 인증서 검증 실패, 잘못된 핸드셰이크 메시지가 흔하다. 예: TLS_DHE 키 교환에서 leading zero 계산 차이로 키 불일치.'
+  vendor_action: 클라이언트와 서버 모두 TLS_DHE leading-zero 수정 업데이트를 적용; 업데이트 불가 시 TLS_DHE 암호군 비활성화
+  vendor_url: https://learn.microsoft.com/en-us/troubleshoot/windows-server/certificates-and-public-key-infrastructure-pki/apps-forcibly-closed-tls-connection-errors
+  versions:
+  - Windows Server 2003
+  - 2008/R2
+  - 2012/R2
+  - '2016'
+  - '2019'
+  - '2022'
+  - '2025'
+  version_note: 이벤트 ID 전 버전 공통(2003 포함). CSV 내보내기는 2008 R2+ Get-WinEvent, 2003/2008 은 wevtutil/Get-EventLog

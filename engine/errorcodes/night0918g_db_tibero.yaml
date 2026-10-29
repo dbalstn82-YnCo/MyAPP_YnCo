@@ -1,0 +1,339 @@
+product: tibero
+layer: db
+note: GPT 협업 수집분 — 벤더 공식 문서와 대조 후 확정
+codes:
+- code: TBR-1070
+  severity: error
+  category: storage
+  title: 불완전 미디어 복구 완료
+  immediate:
+  - "현재 상태: tbsql `select status from v$instance;` — MOUNT 인지 확인"
+  - "복구 목표 시점이 승인된 시점과 같은지 복구 작업 기록과 대조 — 다르면 RESETLOGS 전에 2차 판단"
+  short:
+  - "(2차·승인 후, 롤백: RESETLOGS 이후에는 이전 백업으로 되돌릴 수 없음 — 직전 파일 사본 보관) `tbdown` 후 `tbboot -t RESETLOGS` 로 기동, 이어 정상 기동·전체 백업 수행"
+  mid:
+  - 기동 후 데이터파일 상태와 데이터베이스 정상 오픈 여부를 확인한다.
+  long:
+  - 불완전 복구에 필요한 백업과 아카이브 로그 보관 절차를 관리한다.
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://support.tibero.com/hc/en-us/articles/15438684840207-TTA-BMT-Function-Verification-Scenario-SINGLE-Configuration-Backup-Recovery)
+  vendor_cause: "불완전(시점) 미디어 복구가 끝났다는 알림 — 이후에는 RESETLOGS 모드(`tbboot -t RESETLOGS`)로 기동해야 함(관리자 안내서). 장애라기보다 다음 단계 안내."
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 복구 완료 후 RESETLOGS 필요
+- code: TBR-1147
+  severity: error
+  category: storage
+  title: 복구 로그 파일 필요
+  immediate:
+  - "요구 시퀀스: `grep -h \"TBR-1147\" $TB_HOME/instance/$TB_SID/log/slog/* | tail -5` (Tibero 6/7)"
+  - "아카이브 위치·존재: `grep -i \"ARCHIVE\" $TB_HOME/config/$TB_SID.tip` 후 `ls -l <archive_dir> | grep <sequence>`"
+  - "백업 매체(tbrmgr 백업·테이프)에 해당 시퀀스가 있는지 백업 담당에 확인"
+  short:
+  - "(2차·승인 후, 롤백: 해당 없음) 요구 로그를 백업에서 복원해 아카이브 경로에 두고 복구 계속, 로그가 없으면 불완전 복구 범위 승인"
+  mid:
+  - 누락 로그와 복구 대상 데이터파일 상태를 함께 점검한다.
+  long:
+  - 복구에 필요한 아카이브 로그가 백업과 함께 보존되도록 관리한다.
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://support.tibero.com/hc/en-us/articles/14577751794191-Restoring-Specific-Tablespaces-Using-Clone-DB)
+  vendor_cause: "미디어 복구를 계속하려면 오류에 표시된 thread·sequence 의 아카이브(또는 리두) 로그가 필요함 — 아카이브 경로에 없거나 백업에서 아직 복원하지 않은 상태."
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 복구에 특정 thread sequence 로그 필요
+- code: TBR-2048
+  severity: error
+  category: connection
+  title: 데이터소스 미발견
+  immediate:
+  - "별칭 존재: `echo $TB_HOME` 후 `grep -n -i \"<alias>\" $TB_HOME/client/config/tbdsn.tbr` — 없으면 확정"
+  - "JDBC 면 별칭 대신 URL(`jdbc:tibero:thin:@<host>:<port>:<db>`)을 쓰는지 확인"
+  short:
+  - "(2차·승인 후, 롤백: tbdsn.tbr 백업본 복원) 별칭 추가·수정 또는 클라이언트 환경변수(TB_HOME) 정정"
+  mid:
+  - 클라이언트 환경에서 동일 데이터소스가 정상 조회되는지 확인한다.
+  long:
+  - 접속 별칭과 데이터소스 파일 배포를 구성관리 대상으로 관리한다.
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://docs.tmaxsoft.com/ko/openframe_tacf/MSP_7.3/tacf-installation-guide/chapter-troubleshooting.html)
+  vendor_cause: "클라이언트가 지정한 데이터소스(접속 별칭)를 tbdsn.tbr 에서 찾지 못함 — 별칭 오타, TB_HOME 환경 차이, tbdsn.tbr 미배포가 흔한 원인."
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: Data source was not found
+- code: TBR-2131
+  severity: error
+  category: internal
+  title: 일반 입출력 오류
+  immediate:
+  - "같은 시각 서버 로그: `grep -h \"TBR-\" $TB_HOME/instance/$TB_SID/log/slog/* | grep \"<시:분>\" | tail -20` (Tibero 6/7)"
+  - "네트워크·OS: 클라이언트에서 `nc -zvw3 <db_host> <port>` 와 서버 `dmesg -T | tail -30`"
+  short:
+  - 로그에 기록된 파일이나 원격 연결의 원인을 먼저 조치한다.
+  mid:
+  - 재발 시 오류 발생 직전과 직후의 서버 로그를 함께 수집한다.
+  long:
+  - 반복 발생 원인이 확인되지 않으면 수집 자료와 함께 기술지원을 요청한다.
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://support.tibero.com/hc/en-us/articles/14353956780559-Tibero-Operation-Guide-for-Beginners-Trouble-Shooting)
+  vendor_cause: "Tibero 클라이언트·서버 통신이나 파일 입출력에서 일반 I/O 오류가 발생함 — 네트워크 단절·상대 프로세스 종료·파일 접근 실패 등 하위 원인은 같은 시각 서버 로그에 남음."
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: Generic I/O error
+- code: TBR-7107
+  severity: error
+  category: capacity
+  title: 데이터파일 크기 초과
+  immediate:
+  - "블록 크기: tbsql `select name, value from v$parameters where name='DB_BLOCK_SIZE';` 와 실행 DDL 의 SIZE·MAXSIZE 대조"
+  - "기존 파일 크기: `select file_name, round(bytes/1024/1024) mb, round(maxbytes/1024/1024) max_mb from dba_data_files where tablespace_name='<TS>';`"
+  short:
+  - 허용되는 데이터파일 크기 범위 안으로 크기를 조정한다.
+  mid:
+  - 테이블스페이스의 데이터파일 크기와 증가 정책을 점검한다.
+  long:
+  - 블록 크기별 데이터파일 상한을 용량 설계 기준에 반영한다.
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://support.tibero.com/hc/en-us/articles/13805082457743-Issue-with-tablespace-creation-7107-error)
+  vendor_cause: "지정한 데이터파일 크기가 허용 범위를 벗어남 — 블록 크기에 따른 데이터파일 최대 크기를 넘거나 지나치게 작은 SIZE 를 지정한 경우(기존 근거: 테이블스페이스 생성 7107 사례)."
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: File size is out of range
+- code: TBR-11048
+  severity: error
+  category: upstream
+  title: DBLink 문자 변환 오류
+  immediate:
+  - "링크·대상: tbsql `select owner, db_link, host from dba_db_links;` 와 실패 SQL·대상 컬럼 길이"
+  - "원격 문자셋(원격 Oracle 예): `select value from nls_database_parameters where parameter='NLS_CHARACTERSET';` 를 원격 담당에 요청, Tibero 쪽 문자셋과 대조"
+  short:
+  - 공식 조치 조건에 해당하면 문자 변환 관련 설정을 적용해 재검증한다.
+  mid:
+  - 변환되는 데이터가 대상 컬럼의 길이와 문자셋 범위에 맞는지 확인한다.
+  long:
+  - DBLink 대상별 문자셋과 변환 정책을 인터페이스 기준으로 관리한다.
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://support.tibero.com/hc/ko/articles/14442121364495-TBR-11048-%EC%98%A4%EB%A5%98-%EC%A1%B0%EC%B9%98-%EB%B0%A9%EC%95%88-T-to-O-DB-link)
+  vendor_cause: "DB 링크(Tibero→원격, Gateway 경유)에서 문자셋 변환 중 오류 — 변환 뒤 길이가 늘어 대상 버퍼·컬럼을 넘거나 대상 문자셋에 없는 문자가 있는 경우(기존 근거: T→O 링크 데이터 길이 증가)."
+  verify_note: "미검증 — Tibero 쪽 DB 문자셋 조회 뷰 이름(NLS_DATABASE_PARAMETERS 제공 여부)을 공식 문서로 확인하지 못함"
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: DBLink 문자셋 변환 과정에서 데이터 길이 증가로 발생
+- code: TBR-12050
+  severity: error
+  category: connection
+  title: 다른 서버 접속 필요
+  immediate:
+  - "별칭 내용: `grep -n -A8 \"<alias>\" $TB_HOME/client/config/tbdsn.tbr` — 주소(HOST/PORT)가 2개 이상이면 확정"
+  - "대상 인스턴스 상태: tbsql `select status from v$instance;` (각 노드)"
+  short:
+  - MOUNT용 접속 별칭이 하나의 인스턴스를 가리키도록 수정한다.
+  mid:
+  - tbdsn.tbr의 관련 접속 별칭을 전체 점검한다.
+  long:
+  - MOUNT 운영용 접속 정보를 별도 구성으로 관리한다.
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://support.tibero.com/hc/en-us/articles/14654341545743-TBR-12050-Connection-error-Connect-to-a-different-server-Troubleshooting-Guide-for-the-Issue)
+  vendor_cause: "MOUNT 모드 접속에 쓴 별칭이 여러 인스턴스(TAC 노드)를 가리켜 다른 서버로 접속하라는 오류 — tbdsn.tbr 별칭에 주소가 둘 이상인 경우(기존 근거)."
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: MOUNT 모드에서 alias의 대상 instance가 복수일 때 발생
+- code: TBR-12126
+  severity: error
+  category: upstream
+  title: 원격 DB API 오류
+  immediate:
+  - "오류 전문(원격 메시지 포함)을 애플리케이션·slog 에서 확보: `grep -h \"TBR-12126\" $TB_HOME/instance/$TB_SID/log/slog/* | tail -10`"
+  - "링크 정의: tbsql `select owner, db_link, host from dba_db_links;` 와 원격 DB 에서 같은 객체 직접 조회 가능 여부(원격 담당)"
+  short:
+  - 원격 DB의 객체명과 식별자 규칙에 맞게 DBLink 쿼리를 수정한다.
+  mid:
+  - 원격 DB에서 동일 객체를 직접 조회해 정상 접근 여부를 확인한다.
+  long:
+  - DBLink 대상 제품별 객체명과 식별자 규칙을 표준화한다.
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://support.tibero.com/hc/en-us/articles/13864461891471-Error-in-Query-Due-to-Case-Sensitivity-of-Table-Names-When-Using-Tibero-to-Postgresql-DBLink)
+  vendor_cause: "DB 링크 대상 원격 DB 의 클라이언트 API 가 오류를 반환함 — 실제 원인은 함께 표시되는 원격 DB 메시지(객체 대소문자·권한·SQL 문법 차이)에 있음(기존 근거: Tibero→PostgreSQL 테이블명 대소문자)."
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: Remote database client API error
+- code: TBR-12130
+  severity: error
+  category: connection
+  title: 원격 DB 연결 실패
+  immediate:
+  - "링크·대상: tbsql `select owner, db_link, host from dba_db_links;` 후 `nc -zvw3 <원격 또는 gateway host> <port>`"
+  - "시간 초과 설정: `select name, value from v$parameters where name='DBLINK_CONN_TIMEOUT';` 와 Gateway 로그의 같은 시각 오류"
+  short:
+  - 연결 지연이 DBLINK_CONN_TIMEOUT을 초과하면 공식 설정값을 조정한다.
+  mid:
+  - 변경 후 Gateway와 DBLink를 재시험해 정상 연결을 확인한다.
+  long:
+  - 원격 DB 연결시간과 Gateway 장애를 지속적으로 감시한다.
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://support.tibero.com/hc/ko/articles/14644974745103-Tibero-Gateway-MS-SQL-Server-DB-Link-TLS-%EC%98%A4%EB%A5%98-%EC%A1%B0%EC%B9%98-%EB%B0%A9%EB%B2%95)
+  vendor_cause: "DB 링크 사용 시 Gateway 를 통해 원격 DB 에 연결하지 못함 — 원격 DB·Gateway 미기동, 네트워크·방화벽, 인증·TLS 설정, DBLINK_CONN_TIMEOUT 초과가 흔한 원인."
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: Unable to connect to remote database
+- code: TBR-130005
+  severity: error
+  category: security
+  title: 원격 인증 실패
+  immediate:
+  - "링크 계정: tbsql `select owner, db_link, username, host from dba_db_links;` (비밀번호는 조회·출력하지 않음)"
+  - "원격 계정 상태·로그인 실패 기록을 원격 담당에 요청, Gateway 측 `java -version` 과 JDBC jar 버전 확인"
+  short:
+  - 지원되는 JDBC 드라이버와 JDK 조합으로 맞춘 뒤 다시 인증한다.
+  mid:
+  - DBLink와 직접 JDBC 접속을 각각 시험해 실패 구간을 구분한다.
+  long:
+  - 원격 DB와 드라이버와 JDK의 지원 조합을 구성 기준으로 관리한다.
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://support.tibero.com/hc/en-us/articles/13837729051791-TBR-130005-Authentication-failed-error-occurs-when-performing-MSSQL-DBLink-in-Tibero)
+  vendor_cause: "Java Gateway(JDBC 기반 DB 링크)가 원격 DB 인증에 실패함 — 링크 계정·비밀번호 오류, 원격 계정 잠김, JDBC 드라이버·JDK 버전 비호환(TLS 협상)이 흔한 원인(기존 근거: MSSQL DBLink)."
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: Authentication failed
+- code: TBR-150008
+  severity: error
+  category: internal
+  title: Java 클래스명 오류
+  immediate:
+  - "경로 설정: `grep -i \"JAVA_CLASS_PATH\" $TB_HOME/config/$TB_SID.tip`"
+  - "클래스 파일: `ls -l <class_path>/<패키지 경로>/<Class>.class` — 모든 노드에서 같은지 확인"
+  short:
+  - 클래스명과 패키지 경로를 실제 배포 파일과 일치시킨다.
+  mid:
+  - 다중 노드 환경이면 각 노드에 동일 클래스가 있는지 확인한다.
+  long:
+  - External Procedure 파일의 노드별 배포 절차를 표준화한다.
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://support.tibero.com/hc/en-us/articles/14639894805647-Workaround-When-Using-Server-Dependent-Objects-External-Procedure-or-Table-in-a-TSC-Environment)
+  vendor_cause: "외부 프로시저(Java)에 지정한 클래스를 찾지 못하거나 이름이 잘못됨 — JAVA_CLASS_PATH 에 클래스가 없거나 패키지 경로 불일치, TAC 노드 일부에만 배포된 경우(기존 근거)."
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: Invalid class name이며 외부 시스템 장애가 아닌 클래스 배치 또는 해석 오류
+- code: TBR-17001
+  severity: error
+  category: security
+  title: 로그인 인증 실패
+  immediate:
+  - "접속 계정·대상 별칭을 애플리케이션 데이터소스 설정에서 확인 — 비밀번호 값은 화면·로그에 출력하지 않음"
+  - "계정 상태(관리자): tbsql `select username, account_status from dba_users where username=upper('<user>');`"
+  - "반복 실패 출처: `grep -h \"TBR-17001\" $TB_HOME/instance/$TB_SID/log/slog/* | tail -20`"
+  short:
+  - "(2차·승인 후, 롤백: 이전 설정 원복) 출처 애플리케이션의 자격정보를 바로잡고, 무차별 대입이 의심되면 보안 담당과 접속 차단 검토"
+  mid:
+  - 반복되면 계정 상태와 인증 설정을 확인한다.
+  long:
+  - DB 계정과 비밀번호 변경 절차를 애플리케이션 배포와 함께 관리한다.
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://support.tibero.com/hc/en-us/articles/14636551041679-How-to-Set-CLI-Log-Parameters-Windows)
+  vendor_cause: "사용자명 또는 비밀번호가 맞지 않아 로그인에 실패함 — 비밀번호 변경 후 애플리케이션 미반영, 대소문자, 다른 DB 로의 접속이 흔한 원인."
+  verify_note: "미검증 — Tibero DBA_USERS 의 ACCOUNT_STATUS·LOCK_DATE 컬럼 제공 여부를 공식 문서로 확인하지 못함"
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: Login failed invalid user name or password
+- code: TBR-20018
+  severity: error
+  category: lock
+  title: 객체 통계 잠금
+  immediate:
+  - "실패한 통계 수집 작업의 대상 스키마·테이블을 배치 로그에서 확인"
+  - "잠금 대상: tbsql `select owner, table_name, stattype_locked from dba_tab_statistics where stattype_locked is not null;`"
+  short:
+  - "(2차·승인 후, 롤백: `exec dbms_stats.lock_table_stats('<owner>','<table>');`) 고정 사유 확인 후 필요한 대상만 `dbms_stats.unlock_table_stats` 후 수집 — 의도된 고정이면 수집 대상에서 제외"
+  mid:
+  - 통계 수집을 다시 수행해 정상 완료 여부를 확인한다.
+  long:
+  - 통계 잠금 대상과 변경 사유를 운영 변경관리로 유지한다.
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://support.tibero.com/hc/en-us/articles/13733080786319-Error-20018-Occurs-When-Collecting-Statistical-Information)
+  vendor_cause: "대상 테이블·스키마의 통계가 잠겨 있어 통계 수집(DBMS_STATS.GATHER_*)을 할 수 없음 — 의도적으로 통계를 고정한 테이블에 일괄 통계 수집이 실행된 경우가 흔함."
+  verify_note: "미검증 — Tibero 에서 통계 잠금 여부 조회 컬럼(DBA_TAB_STATISTICS.STATTYPE_LOCKED)과 DBMS_STATS.UNLOCK_TABLE_STATS 지원을 공식 문서로 확인하지 못함"
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: Object statistics are locked
+- code: TBR-21025
+  severity: error
+  category: capacity
+  title: 세그먼트 확장 한계
+  immediate:
+  - "세그먼트: tbsql `select owner, segment_name, segment_type, extents, max_extents from dba_segments where segment_name=upper('<segment>');`"
+  - "테이블스페이스 여유: `select tablespace_name, round(sum(bytes)/1024/1024) free_mb from dba_free_space where tablespace_name='<TS>' group by tablespace_name;`"
+  short:
+  - 세그먼트가 추가 확장될 수 있도록 저장 구조와 공간을 조정한다.
+  mid:
+  - 대상 세그먼트의 증가 추세와 테이블스페이스 구성을 점검한다.
+  long:
+  - 세그먼트 확장 한계를 용량 계획과 사전 경보에 반영한다.
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://support.tibero.com/hc/en-us/articles/13875362263951-Difference-in-Number-of-Stored-Blocks-According-to-DB-Block-Size-Execution-Statistics-Execution-stat)
+  vendor_cause: "세그먼트가 최대 익스텐트 수에 도달해 더 확장할 수 없음 — MAXEXTENTS 가 지정된 세그먼트나 작은 익스텐트 크기로 급증한 테이블·인덱스에서 발생."
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: maximum number of extensions reached
+- code: TBR-24018
+  severity: critical
+  category: storage
+  title: CF DD 정합성 오류
+  immediate:
+  - "비교: tbsql `select file#, name, status from v$datafile;` 와 `select file_id, file_name from dba_data_files;` — 한쪽에만 있는 파일 확인"
+  - "오류: `grep -h \"TBR-24018\" $TB_HOME/instance/$TB_SID/log/slog/* | tail`"
+  short:
+  - "(2차·승인 후, 롤백: 복구 전 컨트롤파일·데이터파일 사본 보관) 누락 데이터파일 복원 후 미디어 복구 — 절차는 TmaxTibero 기술 문서(백업 이후 추가 파일 복구) 기준"
+  mid:
+  - 데이터파일 정리 후 필요한 미디어 복구 절차를 수행한다.
+  long:
+  - 복구 시 데이터파일 추가 삭제 이력을 포함해 CF DD 정합성을 검증한다.
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://support.tibero.com/hc/en-us/articles/14659205868047-How-to-Recover-Data-Files-Added-After-Hot-Backup-Following-Incomplete-Recovery)
+  vendor_cause: "컨트롤파일(CF)과 데이터 사전(DD)의 데이터파일 정보가 서로 다름 — 불완전 복구, 백업 이후 추가·삭제된 데이터파일 미반영이 흔한 원인(기존 근거: hot backup 후 추가 파일 복구)."
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 잘못된 CF DD 정보 또는 복구 중 데이터파일 변경으로 보정 필요

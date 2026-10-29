@@ -1,0 +1,99 @@
+product: postgresql
+layer: db
+title: postgresql 로그 종류 카탈로그 (GPT 수집 — 벤더 문서 대조 필요)
+source: GPT 수집(벤더 문서 대조 필요)
+sources: []
+logtypes:
+- name: Server stderr 로그
+  path: log_directory/log_filename, 현재 파일은 current_logfiles
+  format: 텍스트·log_line_prefix, 보통 %m 밀리초 timestamp
+  check: ERROR·FATAL·PANIC·SQLSTATE·checkpoint·connection
+  sample: '2026-09-09 12:00:00.123 KST [1234] ERROR: message 형식'
+- name: CSV 로그
+  path: log_directory/*.csv, log_destination=csvlog
+  format: CSV·timestamp with milliseconds
+  check: SQLSTATE·severity·user·db·pid·query·detail·hint
+  sample: CSV 20여 컬럼 레코드 형식
+- name: JSON 로그
+  path: log_directory/*.json, log_destination=jsonlog
+  format: JSON·timestamp with milliseconds
+  check: SQLSTATE·ERROR/FATAL/PANIC·query·backend_type·pid
+  sample: '{"timestamp":"...","pid":1234,"error_severity":"ERROR",...} 형식'
+- name: Syslog
+  path: syslog 설정 경로, 예 /var/log/postgresql
+  format: syslog 텍스트·시스템 timestamp
+  check: postgres severity·authentication·backend crash·archive 오류
+  sample: 'postgres[PID]: ERROR: ... 형식'
+- name: Windows Event 로그
+  path: Windows Event Viewer Application, log_destination=eventlog
+  format: EVTX·Windows timestamp
+  check: FATAL·PANIC·startup·authentication·connection
+  sample: PostgreSQL event source message 형식
+- name: SQL Statement 로그
+  path: Server 로그와 동일 경로, log_statement
+  format: 설정된 server log 형식·timestamp
+  check: DDL/MOD/ALL SQL·ERROR statement·민감 SQL 주의
+  sample: 'LOG: statement: SELECT ... 형식'
+- name: Slow Query 로그
+  path: Server 로그와 동일, log_min_duration_statement
+  format: 텍스트/CSV/JSON·timestamp
+  check: duration:·장기 SQL·lock 대기·Rows 처리 병목
+  sample: 'LOG: duration: 1234.567 ms statement: SELECT ... 형식'
+- name: 접속·종료 로그
+  path: Server 로그와 동일, log_connections,log_disconnections
+  format: 설정된 server log 형식·timestamp
+  check: authentication failed·connection authorized·disconnect duration
+  sample: 'LOG: connection authorized: user=... database=... 형식'
+- name: Checkpoint 로그
+  path: Server 로그와 동일, log_checkpoints
+  format: 설정된 server log 형식·timestamp
+  check: checkpoint 시작/완료·buffers written·write/sync time
+  sample: 'LOG: checkpoint complete: wrote ... buffers ... 형식'
+- name: Replication 명령 로그
+  path: Server 로그와 동일, log_replication_commands=on
+  format: 설정된 server log 형식·timestamp
+  check: IDENTIFY_SYSTEM·START_REPLICATION·replication protocol 오류
+  sample: 'LOG: statement: START_REPLICATION ... 형식'
+- name: Archive 오류 로그
+  path: Server 로그와 동일, archive_command stderr 포함
+  format: 설정된 server log 형식·timestamp
+  check: archive command failed·WAL archive retry·disk/network 오류
+  sample: 'LOG: archive command failed with exit code ... 형식'
+- name: WAL
+  path: $PGDATA/pg_wal/*
+  format: 바이너리·LSN/WAL record
+  check: crash recovery·replication·PITR·WAL 누락·archive 지연
+  sample: 바이너리 WAL record·LSN 기반
+sections:
+- heading: 로그 종류 카탈로그 (전수)
+  body: 'Server stderr 로그: log_directory/log_filename, 현재 파일은 current_logfiles · CSV 로그: log_directory/*.csv, log_destination=csvlog · JSON 로그: log_directory/*.json, log_destination=jsonlog · Syslog: syslog
+    설정 경로, 예 /var/log/postgresql · Windows Event 로그: Windows Event Viewer Application, log_destination=eventlog · SQL Statement 로그: Server 로그와 동일 경로, log_statement · Slow Query 로그: Server 로그와 동일, log_min_duration_statement
+    · 접속·종료 로그: Server 로그와 동일, log_connections,log_disconnections · Checkpoint 로그: Server 로그와 동일, log_checkpoints · Replication 명령 로그: Server 로그와 동일, log_replication_commands=on · Archive 오류 로그: Server
+    로그와 동일, archive_command stderr 포함 · WAL: $PGDATA/pg_wal/*'
+- heading: '로그: Server stderr 로그'
+  body: '경로 log_directory/log_filename, 현재 파일은 current_logfiles / 형식 텍스트·log_line_prefix, 보통 %m 밀리초 timestamp / 확인 ERROR·FATAL·PANIC·SQLSTATE·checkpoint·connection / 샘플 2026-09-09 12:00:00.123 KST [1234]
+    ERROR: message 형식'
+- heading: '로그: CSV 로그'
+  body: 경로 log_directory/*.csv, log_destination=csvlog / 형식 CSV·timestamp with milliseconds / 확인 SQLSTATE·severity·user·db·pid·query·detail·hint / 샘플 CSV 20여 컬럼 레코드 형식
+- heading: '로그: JSON 로그'
+  body: 경로 log_directory/*.json, log_destination=jsonlog / 형식 JSON·timestamp with milliseconds / 확인 SQLSTATE·ERROR/FATAL/PANIC·query·backend_type·pid / 샘플 {"timestamp":"...","pid":1234,"error_severity":"ERROR",...}
+    형식
+- heading: '로그: Syslog'
+  body: '경로 syslog 설정 경로, 예 /var/log/postgresql / 형식 syslog 텍스트·시스템 timestamp / 확인 postgres severity·authentication·backend crash·archive 오류 / 샘플 postgres[PID]: ERROR: ... 형식'
+- heading: '로그: Windows Event 로그'
+  body: 경로 Windows Event Viewer Application, log_destination=eventlog / 형식 EVTX·Windows timestamp / 확인 FATAL·PANIC·startup·authentication·connection / 샘플 PostgreSQL event source message 형식
+- heading: '로그: SQL Statement 로그'
+  body: '경로 Server 로그와 동일 경로, log_statement / 형식 설정된 server log 형식·timestamp / 확인 DDL/MOD/ALL SQL·ERROR statement·민감 SQL 주의 / 샘플 LOG: statement: SELECT ... 형식'
+- heading: '로그: Slow Query 로그'
+  body: '경로 Server 로그와 동일, log_min_duration_statement / 형식 텍스트/CSV/JSON·timestamp / 확인 duration:·장기 SQL·lock 대기·Rows 처리 병목 / 샘플 LOG: duration: 1234.567 ms statement: SELECT ... 형식'
+- heading: '로그: 접속·종료 로그'
+  body: '경로 Server 로그와 동일, log_connections,log_disconnections / 형식 설정된 server log 형식·timestamp / 확인 authentication failed·connection authorized·disconnect duration / 샘플 LOG: connection authorized: user=...
+    database=... 형식'
+- heading: '로그: Checkpoint 로그'
+  body: '경로 Server 로그와 동일, log_checkpoints / 형식 설정된 server log 형식·timestamp / 확인 checkpoint 시작/완료·buffers written·write/sync time / 샘플 LOG: checkpoint complete: wrote ... buffers ... 형식'
+- heading: '로그: Replication 명령 로그'
+  body: '경로 Server 로그와 동일, log_replication_commands=on / 형식 설정된 server log 형식·timestamp / 확인 IDENTIFY_SYSTEM·START_REPLICATION·replication protocol 오류 / 샘플 LOG: statement: START_REPLICATION ... 형식'
+- heading: '로그: Archive 오류 로그'
+  body: '경로 Server 로그와 동일, archive_command stderr 포함 / 형식 설정된 server log 형식·timestamp / 확인 archive command failed·WAL archive retry·disk/network 오류 / 샘플 LOG: archive command failed with exit code ... 형식'
+- heading: '로그: WAL'
+  body: 경로 $PGDATA/pg_wal/* / 형식 바이너리·LSN/WAL record / 확인 crash recovery·replication·PITR·WAL 누락·archive 지연 / 샘플 바이너리 WAL record·LSN 기반

@@ -1,0 +1,609 @@
+product: goldilocks
+layer: db
+note: GPT 협업 수집분 — 벤더 공식 문서와 대조 후 확정
+codes:
+- code: ERR-11011
+  severity: error
+  category: disk
+  title: 파일 읽기 실패
+  immediate:
+  - "`grep -n -A2 \"11011\" $GOLDILOCKS_DATA/trc/system.trc | tail -20` 으로 읽기 실패한 파일 경로·OS 오류 확인 — 같은 파일이 반복되면 해당 파일 문제"
+  - "`ls -l <파일 경로>` 와 `id` (DB 실행 계정)로 존재·읽기 권한 확인 — 파일 없음·권한 불일치면 설정·운영 문제"
+  - "`dmesg -T | grep -i -E \"I/O error|medium error\" | tail -20` 으로 OS 디스크 오류 동반 여부 확인 — 동반되면 스토리지 장애(Linux)"
+  short:
+  - 파일 손상과 OS I/O 오류 및 스토리지 경로를 분석
+  mid:
+  - 결함 디스크나 경로를 복구하고 파일 무결성을 검증
+  long:
+  - 파일 읽기 오류와 스토리지 상태를 상시 모니터링
+  source: GPT 수집·벤더 문서 대조 완료(https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4)
+  note: 일반 파일 읽기 실패로 단독 코드만으로 서비스 전체 중단이나 데이터 위험을 뜻하지 않음
+  vendor_cause: 파일 읽기 권한 부족, 디스크 I/O 오류 또는 파일 손상이 발생함
+  vendor_action: 파일 권한과 디스크 상태를 확인하고 파일 무결성 검사를 수행
+  vendor_url: https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4
+  versions:
+  - GOLDILOCKS 3.1
+  - GOLDILOCKS 20c.1
+  - GOLDILOCKS 22c.1
+  - GOLDILOCKS 26c.1
+  version_note: 실로그 표기는 ERR-<SQLSTATE>(내부번호) 예 ERR-HY000(13011) — 사전은 내부번호 기준이며 파서가 괄호 안 번호로 대응. 3.1(과거)·20c.1·22c.1·26c.1 공통(버전별 재편 근거 없음 — GPT B)
+- code: ERR-11012
+  severity: error
+  category: disk
+  title: 파일 쓰기 실패
+  immediate:
+  - "`grep -n -A2 \"11012\" $GOLDILOCKS_DATA/trc/system.trc | tail -20` 으로 쓰기 실패한 파일 경로·OS 오류 확인 — 같은 경로가 반복되면 해당 파일시스템 문제"
+  - "`df -h <파일 경로>`·`df -i <파일 경로>` 와 `ls -ld <디렉터리>` 로 공간·inode·쓰기 권한 확인 — 100% 또는 `mount | grep <마운트 지점>` 에 ro 가 보이면 확정"
+  - "`dmesg -T | grep -i -E \"I/O error|medium error\" | tail -20` 으로 OS 디스크 오류 동반 여부 확인(Linux)"
+  short:
+  - 파일시스템 full과 디스크 오류 및 마운트 상태를 분석
+  mid:
+  - 저장공간을 증설하거나 결함 스토리지를 복구
+  long:
+  - 디스크 사용률과 쓰기 오류 임계치 경보를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4)
+  note: 일반 파일 쓰기 실패로 단독 코드만으로 서비스 전체 중단이나 데이터 위험을 뜻하지 않음
+  vendor_cause: 파일 쓰기 권한 부족, 디스크 공간 부족 또는 디스크 I/O 오류가 발생함
+  vendor_action: 파일 권한과 사용 가능한 디스크 공간을 확인하고 디스크 상태를 점검
+  vendor_url: https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4
+  versions:
+  - GOLDILOCKS 3.1
+  - GOLDILOCKS 20c.1
+  - GOLDILOCKS 22c.1
+  - GOLDILOCKS 26c.1
+  version_note: 실로그 표기는 ERR-<SQLSTATE>(내부번호) 예 ERR-HY000(13011) — 사전은 내부번호 기준이며 파서가 괄호 안 번호로 대응. 3.1(과거)·20c.1·22c.1·26c.1 공통(버전별 재편 근거 없음 — GPT B)
+- code: ERR-11024
+  severity: critical
+  category: thread
+  title: 스레드 생성 실패
+  immediate:
+  - "`grep -n -A2 \"11024\" $GOLDILOCKS_DATA/trc/system.trc | tail -20` 으로 실패 시각과 OS 오류 번호 확인 — EAGAIN 계열이면 스레드·프로세스 한도"
+  - "DB 실행 계정으로 `ulimit -u` 와 `ps -L -u <DB계정> --no-headers | wc -l` 을 비교하고 `cat /proc/sys/kernel/threads-max` 확인 — 사용 수가 한도의 90% 이상이면 한도 도달(Linux)"
+  - "`free -m` 으로 가용 메모리 확인 — available 이 거의 없으면 메모리 부족에 의한 생성 실패"
+  short:
+  - "(2차·업무 담당 승인 후, 롤백: 보류한 배치·접속을 원래대로 재개) 신규 접속·배치 유입 조절"
+  - 프로세스와 스레드 한도 및 메모리 사용량을 분석
+  mid:
+  - OS thread limit과 서버 자원 구성을 워크로드 기준으로 조정
+  long:
+  - 스레드 수와 자원 포화 임계치를 상시 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4)
+  vendor_cause: 시스템 자원이 부족하거나 최대 스레드 수에 도달해 스레드 생성에 실패함
+  vendor_action: 시스템 스레드 제한 설정과 메모리 사용량을 확인
+  vendor_url: https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4
+  versions:
+  - GOLDILOCKS 3.1
+  - GOLDILOCKS 20c.1
+  - GOLDILOCKS 22c.1
+  - GOLDILOCKS 26c.1
+  version_note: 실로그 표기는 ERR-<SQLSTATE>(내부번호) 예 ERR-HY000(13011) — 사전은 내부번호 기준이며 파서가 괄호 안 번호로 대응. 3.1(과거)·20c.1·22c.1·26c.1 공통(버전별 재편 근거 없음 — GPT B)
+- code: ERR-11030
+  severity: critical
+  category: memory
+  title: 공유메모리 할당 실패
+  immediate:
+  - "`grep -n -A2 \"11030\" $GOLDILOCKS_DATA/trc/system.trc | tail -20` 으로 요청한 공유메모리 크기와 OS 오류 확인 — 기동 시점이면 설정 크기 문제 가능성"
+  - "`ipcs -lm` 과 `sysctl kernel.shmmax kernel.shmall` 로 커널 공유메모리 한도, `ipcs -m | head -30` 으로 현재 세그먼트 확인 — 요청 크기가 한도보다 크면 확정(Linux)"
+  - "`free -m` 과 DB 실행 계정 `ulimit -a` 로 가용 메모리·계정 제한 확인"
+  short:
+  - SHARED_MEMORY 설정과 OS IPC 자원 및 메모리 사용량을 분석
+  mid:
+  - 공유메모리 설정과 물리 메모리를 재산정하고 권한을 정비
+  long:
+  - 공유메모리 용량과 시스템 메모리 헤드룸을 지속 관리
+  source: GPT 수집·벤더 문서 대조 완료(https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4)
+  vendor_cause: 권한 또는 메모리 부족으로 공유 메모리 생성에 실패함
+  vendor_action: 시스템의 공유 메모리 제한과 권한 설정을 확인
+  vendor_url: https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4
+  versions:
+  - GOLDILOCKS 3.1
+  - GOLDILOCKS 20c.1
+  - GOLDILOCKS 22c.1
+  - GOLDILOCKS 26c.1
+  version_note: 실로그 표기는 ERR-<SQLSTATE>(내부번호) 예 ERR-HY000(13011) — 사전은 내부번호 기준이며 파서가 괄호 안 번호로 대응. 3.1(과거)·20c.1·22c.1·26c.1 공통(버전별 재편 근거 없음 — GPT B)
+- code: ERR-11031
+  severity: critical
+  category: memory
+  title: 공유메모리 연결 실패
+  immediate:
+  - "`grep -n -A2 \"11031\" $GOLDILOCKS_DATA/trc/system.trc | tail -20` 으로 연결 실패한 공유메모리 key·segment ID 확인 — 기록해 두고 ipcs 와 대조"
+  - "`ipcs -m` 에서 해당 key·shmid 의 owner·perms·nattch 확인 — 세그먼트가 없거나 소유자가 DB 실행 계정이 아니면 확정, `ps -ef | grep -i goldilocks | grep -v grep` 로 인스턴스 생존 확인"
+  short:
+  - 잔존 IPC와 GOLDILOCKS 인스턴스 및 shared memory 상태를 분석
+  mid:
+  - 잘못된 IPC 자원을 정리하고 기동 절차와 권한을 표준화
+  long:
+  - 공유메모리 attach 실패와 잔존 IPC를 정기 점검
+  source: GPT 수집·벤더 문서 대조 완료(https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4)
+  vendor_cause: 잘못된 공유 메모리 세그먼트 ID로 공유 메모리 연결에 실패함
+  vendor_action: 공유 메모리 세그먼트 ID와 프로세스 권한을 확인
+  vendor_url: https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4
+  versions:
+  - GOLDILOCKS 3.1
+  - GOLDILOCKS 20c.1
+  - GOLDILOCKS 22c.1
+  - GOLDILOCKS 26c.1
+  version_note: 실로그 표기는 ERR-<SQLSTATE>(내부번호) 예 ERR-HY000(13011) — 사전은 내부번호 기준이며 파서가 괄호 안 번호로 대응. 3.1(과거)·20c.1·22c.1·26c.1 공통(버전별 재편 근거 없음 — GPT B)
+- code: ERR-11034
+  severity: critical
+  category: capacity
+  title: 세마포어 생성 실패
+  immediate:
+  - "`grep -n -A2 \"11034\" $GOLDILOCKS_DATA/trc/system.trc | tail -20` 으로 실패 시각과 OS 오류 확인 — ENOSPC 계열이면 세마포어 한도"
+  - "`ipcs -ls` 와 `sysctl kernel.sem` 으로 세마포어 한도(SEMMNI·SEMMNS), `ipcs -s | wc -l` 로 현재 사용 수 비교 — 한도에 근접하면 확정(Linux)"
+  - "`ipcs -s` 의 owner 별 세트와 `ps -ef | grep -i goldilocks | grep -v grep` 를 대조해 소유 프로세스 없는 잔여 세트 여부 확인(정리는 2차)"
+  short:
+  - "(2차·승인 후, 롤백: 정리 전 `ipcs -s` 결과 보관 — 인스턴스 중지·소유 프로세스 부재 확인 세트만) 잔여 세마포어 `ipcrm -s <semid>` 정리 또는 kernel.sem 상향"
+  - 세마포어 한도와 프로세스 상태 및 자원 누수를 분석
+  mid:
+  - IPC 커널 한도를 워크로드 기준으로 조정하고 잔존 자원을 정리
+  long:
+  - 세마포어 사용량과 IPC 자원 포화를 상시 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4)
+  vendor_cause: 시스템 자원 부족으로 세마포어 생성에 실패함
+  vendor_action: 시스템 세마포어 제한을 확인하고 IPC 자원을 정리
+  vendor_url: https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4
+  versions:
+  - GOLDILOCKS 3.1
+  - GOLDILOCKS 20c.1
+  - GOLDILOCKS 22c.1
+  - GOLDILOCKS 26c.1
+  version_note: 실로그 표기는 ERR-<SQLSTATE>(내부번호) 예 ERR-HY000(13011) — 사전은 내부번호 기준이며 파서가 괄호 안 번호로 대응. 3.1(과거)·20c.1·22c.1·26c.1 공통(버전별 재편 근거 없음 — GPT B)
+- code: ERR-11035
+  severity: critical
+  category: lock
+  title: 세마포어 획득 실패
+  immediate:
+  - "`grep -n -A2 \"11035\" $GOLDILOCKS_DATA/trc/system.trc | tail -20` 으로 획득 실패 시각과 대상 확인 — 짧은 시간에 반복되면 경합 또는 소유 프로세스 이상"
+  - "`ipcs -s` 와 `ps -ef | grep -i goldilocks | grep -v grep` 로 세마포어 소유 프로세스 생존 확인 — 소유 프로세스는 없는데 세트가 남아 있으면 잔여 자원 문제"
+  short:
+  - "(2차·업무 담당 승인 후, 롤백: 보류한 작업을 원래 일정으로 재개) 영향 배치·세션 작업 일시 보류"
+  - 프로세스 간 semaphore 획득 순서와 대기 상태를 분석
+  mid:
+  - 동기화 구조와 잠금 순서를 개선하고 필요 시 벤더 패치를 검토
+  long:
+  - 세마포어 대기와 교착 징후를 지속 모니터링
+  source: GPT 수집·벤더 문서 대조 완료(https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4)
+  vendor_cause: 세마포어 획득 실패로 교착상태가 발생함
+  vendor_action: 세마포어 사용 패턴을 확인하고 교착상태를 방지하도록 로직을 구현
+  vendor_url: https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4
+  versions:
+  - GOLDILOCKS 3.1
+  - GOLDILOCKS 20c.1
+  - GOLDILOCKS 22c.1
+  - GOLDILOCKS 26c.1
+  version_note: 실로그 표기는 ERR-<SQLSTATE>(내부번호) 예 ERR-HY000(13011) — 사전은 내부번호 기준이며 파서가 괄호 안 번호로 대응. 3.1(과거)·20c.1·22c.1·26c.1 공통(버전별 재편 근거 없음 — GPT B)
+- code: ERR-11042
+  severity: critical
+  category: memory
+  title: 시스템 메모리 부족
+  immediate:
+  - "`free -m` 와 `ps -eo pid,rss,comm --sort=-rss | head -15` 로 OS 가용 메모리와 GOLDILOCKS 프로세스 사용량 확인"
+  - "gsql 에서 `SELECT SESSION_ID, SUM(USED_SIZE) FROM V$SESSION_MEM_USAGE GROUP BY SESSION_ID ORDER BY 2 DESC;` 로 세션별 메모리 사용 상위 확인(26c 매뉴얼 뷰) — 비필수 부하 조정은 2차에 요청"
+  short:
+  - "(2차·승인 후) 메모리 상위 세션의 업무 확인 뒤 배치 보류·세션 정리(롤백: 정리된 작업은 업무 담당이 재실행)"
+  - "swap과 프로세스별 메모리 및 누수 가능성을 분석"
+  mid:
+  - 물리 메모리와 DB 메모리 설정을 워크로드 기준으로 재산정
+  long:
+  - 메모리 헤드룸과 할당 실패 조기경보를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4)
+  vendor_cause: 메모리 할당 한도에 도달해 시스템 메모리가 부족함
+  vendor_action: 시스템 메모리 사용을 확인하고 불필요한 프로세스를 종료하거나 메모리 증설을 고려
+  vendor_url: https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4
+  versions:
+  - GOLDILOCKS 3.1
+  - GOLDILOCKS 20c.1
+  - GOLDILOCKS 22c.1
+  - GOLDILOCKS 26c.1
+  version_note: 실로그 표기는 ERR-<SQLSTATE>(내부번호) 예 ERR-HY000(13011) — 사전은 내부번호 기준이며 파서가 괄호 안 번호로 대응. 3.1(과거)·20c.1·22c.1·26c.1 공통(버전별 재편 근거 없음 — GPT B)
+- code: ERR-11043
+  severity: critical
+  category: disk
+  title: 파일시스템 공간 부족
+  immediate:
+  - "`df -h $GOLDILOCKS_DATA` 와 system.trc 에 찍힌 경로의 `df -h <경로>`·`df -i <경로>` 확인 — 100% 또는 inode 소진이면 확정"
+  - "`du -xsh $GOLDILOCKS_DATA/* 2>/dev/null | sort -h | tail` 으로 증가한 디렉터리(trc·로그·백업) 식별 — 삭제·이동은 2차"
+  short:
+  - "(2차·승인 후, 롤백: 정리 대상은 먼저 다른 파일시스템으로 옮겨 보관) 보관 기간 지난 trc·백업 파일 정리 — 아카이브 로그는 백업 완료 확인 전 손대지 않음"
+  - 로그와 백업 및 임시파일 증가 원인을 분석
+  mid:
+  - 파일시스템을 증설하고 보존기간과 로그정책을 재설계
+  long:
+  - 디스크 증가율 기반 선제 증설과 용량 경보를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4)
+  vendor_cause: "File system is full — 데이터파일·로그·임시 파일을 쓰려는 파일시스템에 남은 공간이 없다는 뜻(GOLDILOCKS 오류 메시지 매뉴얼: 불필요 파일 정리 또는 스토리지 확장). 아카이브 로그·trc·백업 파일 누적이 흔한 원인."
+  vendor_action: 불필요한 파일을 삭제해 공간을 확보하거나 스토리지 확장을 고려
+  vendor_url: https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4
+  versions:
+  - GOLDILOCKS 3.1
+  - GOLDILOCKS 20c.1
+  - GOLDILOCKS 22c.1
+  - GOLDILOCKS 26c.1
+  version_note: 실로그 표기는 ERR-<SQLSTATE>(내부번호) 예 ERR-HY000(13011) — 사전은 내부번호 기준이며 파서가 괄호 안 번호로 대응. 3.1(과거)·20c.1·22c.1·26c.1 공통(버전별 재편 근거 없음 — GPT B)
+- code: ERR-11067
+  severity: error
+  category: connection
+  title: 호스트 소켓 접속 실패
+  immediate:
+  - "`grep -n -A2 \"11067\" $GOLDILOCKS_DATA/trc/system.trc | tail -20` 으로 접속 대상 host·port 와 시각 확인 — 같은 대상이 반복되면 해당 경로 문제"
+  - "`ping -c 5 <host>` 와 `nc -zvw3 <host> <port>` 로 도달 확인, 대상 서버에서 `glsnr --status` 와 `ss -lnt | grep <port>` 로 리스너 대기 확인 — 포트 닫힘이면 리스너·프로세스 문제, 시간 초과면 방화벽·네트워크 경로 문제"
+  short:
+  - 방화벽과 라우팅 및 socket 오류 errno를 분석
+  mid:
+  - 네트워크 경로와 접속 설정 및 장애전환 구성을 개선
+  long:
+  - 대상 노드 연결 성공률과 네트워크 상태를 상시 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4)
+  note: 특정 호스트로의 소켓 연결 실패이므로 서비스 전체 중단 수준의 critical보다 error가 타당함
+  vendor_cause: 대상 서버에 도달할 수 없어 소켓을 통한 호스트 연결에 실패함
+  vendor_action: 대상 서버와 네트워크 상태를 확인하고 방화벽 설정을 점검
+  vendor_url: https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4
+  versions:
+  - GOLDILOCKS 3.1
+  - GOLDILOCKS 20c.1
+  - GOLDILOCKS 22c.1
+  - GOLDILOCKS 26c.1
+  version_note: 실로그 표기는 ERR-<SQLSTATE>(내부번호) 예 ERR-HY000(13011) — 사전은 내부번호 기준이며 파서가 괄호 안 번호로 대응. 3.1(과거)·20c.1·22c.1·26c.1 공통(버전별 재편 근거 없음 — GPT B)
+- code: ERR-11080
+  severity: error
+  category: connection
+  title: 통신컨텍스트 연결실패
+  immediate:
+  - "`grep -n -A2 \"11080\" $GOLDILOCKS_DATA/trc/system.trc | tail -20` 으로 연결 대상 서버·port 와 시각 확인 — 같은 대상이 반복되면 해당 경로 문제"
+  - "`ping -c 5 <host>` 와 `nc -zvw3 <host> <port>` 로 도달 확인, 대상 서버에서 `glsnr --status` 와 `ss -lnt | grep <port>` 로 리스너 대기 확인 — 포트 닫힘이면 리스너·프로세스 문제, 시간 초과면 방화벽·네트워크 경로 문제"
+  short:
+  - 네트워크 설정과 대상 프로세스 및 선행 통신 오류를 분석
+  mid:
+  - 통신 설정과 재연결 절차를 개선하고 버전 호환성을 검증
+  long:
+  - 통신 context 연결 오류와 노드 상태를 지속 모니터링
+  source: GPT 수집·벤더 문서 대조 완료(https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4)
+  vendor_cause: "fail to connect communication context — 서버 프로세스 간(또는 클러스터 노드 간) 통신 컨텍스트 연결에 실패했다는 뜻(오류 메시지 매뉴얼: 네트워크 연결과 대상 서버 상태 확인). 대상 프로세스 정지·네트워크 단절·포트 차단이 흔한 원인."
+  vendor_action: 네트워크 연결과 대상 서버 상태를 확인
+  vendor_url: https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4
+  versions:
+  - GOLDILOCKS 3.1
+  - GOLDILOCKS 20c.1
+  - GOLDILOCKS 22c.1
+  - GOLDILOCKS 26c.1
+  version_note: 실로그 표기는 ERR-<SQLSTATE>(내부번호) 예 ERR-HY000(13011) — 사전은 내부번호 기준이며 파서가 괄호 안 번호로 대응. 3.1(과거)·20c.1·22c.1·26c.1 공통(버전별 재편 근거 없음 — GPT B)
+- code: ERR-13010
+  severity: critical
+  category: memory
+  title: Static 영역 부족
+  immediate:
+  - "gsql 로 DBA 접속 후 `SELECT PROPERTY_NAME, PROPERTY_VALUE FROM V$PROPERTY WHERE PROPERTY_NAME LIKE 'SHARED_MEMORY%' OR PROPERTY_NAME LIKE 'LOG_BUFFER%' OR PROPERTY_NAME LIKE 'PLAN_CACHE%';` 로 정적 영역 크기와 로그 버퍼·플랜 캐시 설정 확인 (V$ 뷰·칼럼은 26c 매뉴얼 기준 — 20c·22c 에서 칼럼이 다르면 `SELECT *` 로 확인)"
+  - "`grep -n -A2 \"13010\" $GOLDILOCKS_DATA/trc/system.trc | tail -20` 으로 발생 시각과 요청 크기 확인 — 기동 시점 발생이면 설정값 조합이 SHARED_MEMORY_STATIC_SIZE 를 넘는 문제 가능성"
+  short:
+  - SSA 구성요소별 메모리 증가와 설정 변경 이력을 분석
+  mid:
+  - 필요 크기에 맞게 SHARED_MEMORY_STATIC_SIZE를 재산정
+  long:
+  - SSA 사용량과 설정 변경 시 메모리 영향 검증을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4)
+  vendor_cause: "Insufficient static area — 공유 메모리 static 영역 부족. 26c 오류 메시지 매뉴얼에는 deprecated 로 표기되어 발생 시 고객지원 문의를 권고한다. 구버전에서는 SHARED_MEMORY_STATIC_SIZE 대비 사용량 초과가 원인."
+  vendor_action: 고객 서비스 부서에 문의
+  vendor_url: https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4
+  versions:
+  - GOLDILOCKS 3.1
+  - GOLDILOCKS 20c.1
+  - GOLDILOCKS 22c.1
+  - GOLDILOCKS 26c.1
+  version_note: 실로그 표기는 ERR-<SQLSTATE>(내부번호) 예 ERR-HY000(13011) — 사전은 내부번호 기준이며 파서가 괄호 안 번호로 대응. 3.1(과거)·20c.1·22c.1·26c.1 공통(버전별 재편 근거 없음 — GPT B)
+- code: ERR-13011
+  severity: error
+  category: memory
+  title: 메모리 할당 한도 초과
+  immediate:
+  - "`grep -n -A2 \"13011\" $GOLDILOCKS_DATA/trc/system.trc | tail -20` 으로 메시지의 MAX·TOTAL·ALLOC 값과 대상 메모리 영역 확인 — TOTAL+ALLOC 이 MAX 를 넘으면 한도 도달 확정"
+  - "gsql 로 DBA 접속 후 `SELECT * FROM V$SESSION_MEM_USAGE;` 로 세션별 메모리 사용 상위, `SELECT PROPERTY_NAME, PROPERTY_VALUE FROM V$PROPERTY WHERE PROPERTY_NAME LIKE '%MEMORY%';` 로 관련 한도 확인 (V$ 뷰·칼럼은 26c 매뉴얼 기준 — 20c·22c 에서 칼럼이 다르면 `SELECT *` 로 확인)"
+  short:
+  - PRIVATE_STATIC_AREA_SIZE 등 관련 메모리 property와 SQL 사용량을 분석
+  mid:
+  - 고메모리 SQL을 개선하고 관련 메모리 한도를 재산정
+  long:
+  - 세션별 메모리 사용량과 할당 한도 도달률을 상시 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4)
+  note: 세션 PSA 등 개별 메모리 영역의 확장 실패에도 발생하므로 단독 코드의 심각도는 error가 타당함
+  vendor_cause: "Unable to extend memory [MAX/TOTAL/ALLOC] — 해당 메모리 영역(세션 PSA 등)이 할당 한도에 도달해 더 늘릴 수 없다는 뜻(매뉴얼: 쿼리 수정 또는 관련 메모리 property 증가). 대량 정렬·해시를 쓰는 SQL 이 흔한 원인."
+  vendor_action: 쿼리를 수정하거나 관련 메모리 속성 값을 증가
+  vendor_url: https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4
+  versions:
+  - GOLDILOCKS 3.1
+  - GOLDILOCKS 20c.1
+  - GOLDILOCKS 22c.1
+  - GOLDILOCKS 26c.1
+  version_note: 실로그 표기는 ERR-<SQLSTATE>(내부번호) 예 ERR-HY000(13011) — 사전은 내부번호 기준이며 파서가 괄호 안 번호로 대응. 3.1(과거)·20c.1·22c.1·26c.1 공통(버전별 재편 근거 없음 — GPT B)
+- code: ERR-13059
+  severity: error
+  category: capacity
+  title: 클러스터 패킷 할당시간 초과
+  immediate:
+  - "`grep -n -A2 \"13059\" $GOLDILOCKS_DATA/trc/system.trc | tail -20` 으로 발생 노드와 시각 확인 — 특정 노드만이면 해당 노드 자원·네트워크 문제"
+  - "gsql 로 DBA 접속 후 `SELECT * FROM V$CLUSTER_MEMBER;` 로 멤버 상태, `SELECT PROPERTY_NAME, PROPERTY_VALUE FROM V$PROPERTY WHERE PROPERTY_NAME LIKE 'CLUSTER%';` 로 클러스터 관련 설정 확인(클러스터 구성) (V$ 뷰·칼럼은 26c 매뉴얼 기준 — 20c·22c 에서 칼럼이 다르면 `SELECT *` 로 확인)"
+  - "오류 노드에서 `free -m` 으로 가용 메모리 확인 — available 이 거의 없으면 메모리 부족"
+  short:
+  - CLUSTER_PACKET_ALLOCATION_TIMEOUT과 메모리 압박 상태를 분석
+  mid:
+  - 패킷 메모리 용량과 timeout을 부하 기준으로 재산정
+  long:
+  - 클러스터 패킷 할당지연과 메모리 사용률을 상시 모니터링
+  source: GPT 수집·벤더 문서 대조 완료(https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4)
+  note: 패킷 할당량 초과가 아니라 원격 전송용 패킷 메모리를 지정 시간 내 할당하지 못한 오류임
+  vendor_cause: 클러스터에서 원격 전송용 패킷 메모리를 지정 시간 내 할당하지 못함
+  vendor_action: CLUSTER_PACKET_ALLOCATION_TIMEOUT 속성 값을 늘린 뒤 작업을 재시도
+  vendor_url: https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4
+  versions:
+  - GOLDILOCKS 3.1
+  - GOLDILOCKS 20c.1
+  - GOLDILOCKS 22c.1
+  - GOLDILOCKS 26c.1
+  version_note: 실로그 표기는 ERR-<SQLSTATE>(내부번호) 예 ERR-HY000(13011) — 사전은 내부번호 기준이며 파서가 괄호 안 번호로 대응. 3.1(과거)·20c.1·22c.1·26c.1 공통(버전별 재편 근거 없음 — GPT B)
+- code: ERR-14002
+  severity: error
+  category: capacity
+  title: 테이블스페이스 데이터파일 한도
+  immediate:
+  - "gsql 로 DBA 접속 후 `SELECT TBS_NAME, TOTAL_EXT_COUNT, USED_DATA_EXT_COUNT, FREE_EXT_COUNT, EXTENT_SIZE FROM V$TABLESPACE_STAT;` 로 테이블스페이스별 여유 extent 확인 — FREE_EXT_COUNT 가 0 에 가까우면 공간 부족 동반 (V$ 뷰·칼럼은 26c 매뉴얼 기준 — 20c·22c 에서 칼럼이 다르면 `SELECT *` 로 확인)"
+  - "`grep -n -A2 \"14002\" $GOLDILOCKS_DATA/trc/system.trc | tail -20` 으로 대상 tablespace 와 한도 값 확인 — 기록해 두고 datafile 수와 대조, `SELECT * FROM V$DATAFILE;` 로 해당 tablespace 의 datafile 수 확인 — 한도와 같으면 확정"
+  short:
+  - 기존 datafile 크기와 tablespace 배치 구조를 분석
+  verify_note: "미검증 — V$DATAFILE 뷰 칼럼과 tablespace 당 datafile 최대 개수 설정 이름을 26c 매뉴얼로 확인 못 함(SELECT * 로 대체)"
+  mid:
+  - 불필요한 파일 분할을 줄이고 tablespace 구조를 재설계
+  long:
+  - datafile 수와 용량 증가율을 함께 관리
+  source: GPT 수집·벤더 문서 대조 완료(https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4)
+  note: 데이터파일 추가 작업이 최대 개수 제한으로 실패하는 오류이므로 단독 코드의 심각도는 error가 타당함
+  vendor_cause: 테이블스페이스에 추가하려는 데이터파일 수가 제한을 초과함
+  vendor_action: GOLDILOCKS 제한으로 데이터파일은 최대 1024개까지만 생성 가능
+  vendor_url: https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4
+  versions:
+  - GOLDILOCKS 3.1
+  - GOLDILOCKS 20c.1
+  - GOLDILOCKS 22c.1
+  - GOLDILOCKS 26c.1
+  version_note: 실로그 표기는 ERR-<SQLSTATE>(내부번호) 예 ERR-HY000(13011) — 사전은 내부번호 기준이며 파서가 괄호 안 번호로 대응. 3.1(과거)·20c.1·22c.1·26c.1 공통(버전별 재편 근거 없음 — GPT B)
+- code: ERR-14003
+  severity: error
+  category: storage
+  title: 테이블스페이스 가득참
+  immediate:
+  - "gsql 로 DBA 접속 후 `SELECT TBS_NAME, TOTAL_EXT_COUNT, USED_DATA_EXT_COUNT, FREE_EXT_COUNT, EXTENT_SIZE FROM V$TABLESPACE_STAT;` 로 테이블스페이스별 여유 extent 확인 — 대상 tablespace 의 FREE_EXT_COUNT 가 0 이면 확정 (V$ 뷰·칼럼은 26c 매뉴얼 기준 — 20c·22c 에서 칼럼이 다르면 `SELECT *` 로 확인)"
+  - "`grep -n -A2 \"14003\" $GOLDILOCKS_DATA/trc/system.trc | tail -20` 으로 대상 tablespace 와 시각 확인 — 같은 tablespace 반복이면 공간 부족 지속, DB 실행 계정 `ulimit -n` 과 `ls /proc/<PID>/fd | wc -l` 로 열린 파일 수 한도 근접 여부 확인(PID 는 `ps -ef | grep -i goldilocks | grep -v grep`, Linux)"
+  short:
+  - 파일 한도와 tablespace 구성 및 시스템 자원 상태를 분석
+  mid:
+  - 필요 자원과 tablespace 구성을 재산정하고 OS 한도를 조정
+  long:
+  - tablespace와 FD 사용률 임계치를 상시 모니터링
+  source: GPT 수집·벤더 문서 대조 완료(https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4)
+  note: 해당 테이블스페이스의 공간 할당 기능 실패이며 단독 코드만으로 서비스 전체 중단을 뜻하지 않음
+  vendor_cause: 시스템이 파일 디스크립터 한도에 도달함
+  vendor_action: 시스템 파일 디스크립터 한도를 증가
+  vendor_url: https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4
+  versions:
+  - GOLDILOCKS 3.1
+  - GOLDILOCKS 20c.1
+  - GOLDILOCKS 22c.1
+  - GOLDILOCKS 26c.1
+  version_note: 실로그 표기는 ERR-<SQLSTATE>(내부번호) 예 ERR-HY000(13011) — 사전은 내부번호 기준이며 파서가 괄호 안 번호로 대응. 3.1(과거)·20c.1·22c.1·26c.1 공통(버전별 재편 근거 없음 — GPT B)
+- code: ERR-14007
+  severity: error
+  category: lock
+  title: 교착상태 감지
+  immediate:
+  - "`grep -n -A2 \"14007\" $GOLDILOCKS_DATA/trc/system.trc | tail -20` 으로 교착 발생 시각과 관련 트랜잭션 확인 — 같은 업무 쌍이 반복되면 접근 순서 문제"
+  - "gsql 로 DBA 접속 후 `SELECT * FROM V$LOCK_WAIT;` 와 `SELECT * FROM V$TRANSACTION;` 으로 남은 잠금 대기·장기 트랜잭션 확인 — 대기가 없으면 교착은 한쪽 실패로 이미 해소 (V$ 뷰·칼럼은 26c 매뉴얼 기준 — 20c·22c 에서 칼럼이 다르면 `SELECT *` 로 확인)"
+  short:
+  - "(2차·애플리케이션 담당 승인 후, 롤백: 재처리 전 중복 반영 여부 확인) 실패한 트랜잭션 재처리"
+  - 상충 SQL과 객체별 잠금 획득 순서를 분석
+  mid:
+  - 트랜잭션 범위를 줄이고 잠금 순서를 통일
+  long:
+  - deadlock 발생률과 관련 SQL을 자동 수집하고 모니터링
+  source: GPT 수집·벤더 문서 대조 완료(https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4)
+  vendor_cause: 트랜잭션이 자원을 기다리는 중 교착상태에 도달함
+  vendor_action: 트랜잭션 내 객체 잠금 순서가 보장되도록 트랜잭션을 수정
+  vendor_url: https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4
+  versions:
+  - GOLDILOCKS 3.1
+  - GOLDILOCKS 20c.1
+  - GOLDILOCKS 22c.1
+  - GOLDILOCKS 26c.1
+  version_note: 실로그 표기는 ERR-<SQLSTATE>(내부번호) 예 ERR-HY000(13011) — 사전은 내부번호 기준이며 파서가 괄호 안 번호로 대응. 3.1(과거)·20c.1·22c.1·26c.1 공통(버전별 재편 근거 없음 — GPT B)
+- code: ERR-14015
+  severity: error
+  category: storage
+  title: 확장 가능한 데이터파일 없음
+  immediate:
+  - 대상 tablespace의 free space와 AUTOEXTEND 및 datafile MAXSIZE를 확인
+  short:
+  - datafile별 최대크기와 디스크 여유공간을 분석
+  mid:
+  - datafile 또는 memory를 추가하거나 AUTOEXTEND 정책을 조정
+  long:
+  - tablespace 증가율과 확장가능 공간을 상시 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4)
+  note: 테이블스페이스 확장 작업 실패이며 단독 코드만으로 서비스 전체 중단을 뜻하지 않음
+  vendor_cause: 테이블스페이스가 가득 찼고 auto extend 파일이 없거나 데이터파일이 MAXSIZE에 도달함
+  vendor_action: 데이터파일 또는 메모리를 추가하거나 데이터파일의 AUTOEXTEND 옵션을 활성화
+  vendor_url: https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4
+  versions:
+  - GOLDILOCKS 3.1
+  - GOLDILOCKS 20c.1
+  - GOLDILOCKS 22c.1
+  - GOLDILOCKS 26c.1
+  version_note: 실로그 표기는 ERR-<SQLSTATE>(내부번호) 예 ERR-HY000(13011) — 사전은 내부번호 기준이며 파서가 괄호 안 번호로 대응. 3.1(과거)·20c.1·22c.1·26c.1 공통(버전별 재편 근거 없음 — GPT B)
+- code: ERR-14039
+  severity: error
+  category: capacity
+  title: 세그먼트 MAXSIZE 초과
+  immediate:
+  - "오류 메시지의 MAXSIZE 값과 대상 인덱스 이름을 `grep -n \"14039\" $GOLDILOCKS_DATA/trc/system.trc | tail -10` 및 애플리케이션 로그에서 확인"
+  - "gsql 에서 `SELECT TBS_NAME, TOTAL_EXT_COUNT, USED_DATA_EXT_COUNT, FREE_EXT_COUNT, EXTENT_SIZE FROM V$TABLESPACE_STAT;` 로 테이블스페이스 여유 확인 — 대량 적재 작업 재실행은 보류하고 2차에 보고"
+  short:
+  - "(2차·승인 후) 매뉴얼 권고대로 `ALTER INDEX <index> STORAGE ( MAXSIZE <새크기> );` 로 세그먼트 MAXSIZE 상향(롤백: 이전 MAXSIZE 값 기록 — 이미 사용한 공간은 되돌릴 수 없어 계획 반영)"
+  - "인덱스 또는 세그먼트 증가 원인과 저장공간을 분석"
+  mid:
+  - 적절한 MAXSIZE로 조정하고 객체와 tablespace 용량을 재산정
+  long:
+  - 세그먼트 증가율과 MAXSIZE 도달률을 사전 경보
+  source: GPT 수집·벤더 문서 대조 완료(https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4)
+  note: 세그먼트 최대 크기 제한으로 해당 저장 작업이 실패하므로 error가 타당함
+  vendor_cause: 인덱스 저장용 세그먼트 공간이 부족해 MAXSIZE를 초과함
+  vendor_action: 인덱스를 저장하는 세그먼트의 MAXSIZE를 증가
+  vendor_url: https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4
+  versions:
+  - GOLDILOCKS 3.1
+  - GOLDILOCKS 20c.1
+  - GOLDILOCKS 22c.1
+  - GOLDILOCKS 26c.1
+  version_note: 실로그 표기는 ERR-<SQLSTATE>(내부번호) 예 ERR-HY000(13011) — 사전은 내부번호 기준이며 파서가 괄호 안 번호로 대응. 3.1(과거)·20c.1·22c.1·26c.1 공통(버전별 재편 근거 없음 — GPT B)
+- code: ERR-14051
+  severity: critical
+  category: storage
+  title: 미디어 복구 필요
+  immediate:
+  - "`grep -n -B2 -A3 \"14051\" $GOLDILOCKS_DATA/trc/system.trc | tail -30` 으로 대상 tablespace·datafile 과 직전 I/O 오류 확인"
+  - "gsql 로 DBA 접속 후 `SELECT TBS_NAME, TOTAL_EXT_COUNT, USED_DATA_EXT_COUNT, FREE_EXT_COUNT, EXTENT_SIZE FROM V$TABLESPACE_STAT;` 로 테이블스페이스별 여유 extent 확인 로 조회 가능 여부 확인, `ls -lt <백업 경로> | head` 와 `ls -lt <아카이브 로그 경로> | head` 로 최근 백업과 그 이후 로그 연속성 확인 — 백업이 없거나 로그가 이어지지 않으면 즉시 2차·제조사 의뢰 (V$ 뷰·칼럼은 26c 매뉴얼 기준 — 20c·22c 에서 칼럼이 다르면 `SELECT *` 로 확인)"
+  - "`dmesg -T | grep -i -E \"I/O error|medium error\" | tail -20` 으로 OS 디스크 오류 동반 여부 확인(Linux)"
+  short:
+  - "(2차·승인 후, 롤백: 복구 전 현재 datafile·컨트롤 파일 사본 보관) 제조사 절차에 따라 해당 tablespace 미디어 복구 수행"
+  - 손상 또는 offline 원인과 필요한 recovery 범위를 분석
+  mid:
+  - 공식 media recovery 절차로 tablespace를 복구하고 정합성을 검증
+  long:
+  - 백업 복구훈련과 recovery 가능성 자동검증을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4)
+  vendor_cause: 테이블스페이스를 ONLINE으로 전환할 때 복구가 필요한 상태임
+  vendor_action: ALTER DATABASE RECOVER TABLESPACE로 테이블스페이스를 복구
+  vendor_url: https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4
+  versions:
+  - GOLDILOCKS 3.1
+  - GOLDILOCKS 20c.1
+  - GOLDILOCKS 22c.1
+  - GOLDILOCKS 26c.1
+  version_note: 실로그 표기는 ERR-<SQLSTATE>(내부번호) 예 ERR-HY000(13011) — 사전은 내부번호 기준이며 파서가 괄호 안 번호로 대응. 3.1(과거)·20c.1·22c.1·26c.1 공통(버전별 재편 근거 없음 — GPT B)
+- code: ERR-14056
+  severity: critical
+  category: storage
+  title: 리두로그 적용 실패
+  immediate:
+  - "`grep -n \"14056\" $GOLDILOCKS_DATA/trc/system.trc | tail -10` 으로 실패 lsn·lpsn·physical id 를 기록·보존"
+  - "gsql 에서 `SELECT TBS_NAME, DATAFILE_NAME, FILE_SIZE FROM V$DATAFILE;` 로 데이터파일 경로 확인 후 그 경로의 `df -h`·OS I/O 오류와 대조(26c V$DATAFILE 에 손상 페이지 열은 없음) 확인 — 복구 재시도는 보류하고 제조사 문의(매뉴얼 권고)"
+  short:
+  - "(2차·승인 후) 제조사 지원 하에 정상 백업과 redo 로 복구(롤백: 복구 전 데이터파일·로그 사본 보관)"
+  - "redo log와 대상 segment 및 스토리지 손상 여부를 분석"
+  mid:
+  - 정상 백업과 redo로 복구하고 반복 시 벤더 진단을 수행
+  long:
+  - redo 무결성 검증과 복구시험 및 스토리지 감시를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4)
+  vendor_cause: 테이블스페이스·데이터파일 복구 중 nologged 페이지를 복구하려다 redo 적용에 실패함
+  vendor_action: nologging DML·DDL 실행 이후 생성된 백업을 사용해 다시 복구
+  vendor_url: https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4
+  versions:
+  - GOLDILOCKS 3.1
+  - GOLDILOCKS 20c.1
+  - GOLDILOCKS 22c.1
+  - GOLDILOCKS 26c.1
+  version_note: 실로그 표기는 ERR-<SQLSTATE>(내부번호) 예 ERR-HY000(13011) — 사전은 내부번호 기준이며 파서가 괄호 안 번호로 대응. 3.1(과거)·20c.1·22c.1·26c.1 공통(버전별 재편 근거 없음 — GPT B)
+- code: ERR-14088
+  severity: critical
+  category: storage
+  title: 컨트롤파일 손상
+  immediate:
+  - "gsql 에서 `SELECT STATUS, CONTROLFILE_NAME, IS_PRIMARY FROM V$CONTROLFILE;` 로 컨트롤 파일 상태 확인(인스턴스가 열려 있을 때) — 접속 불가면 `ls -l <controlfile 경로>` 로 파일 존재·크기만 확인"
+  - "`tail -100 $GOLDILOCKS_DATA/trc/system.trc` 로 손상 메시지·시각 기록, 백업 컨트롤 파일 보관 위치 확인 — 일반 기동 반복은 보류하고 2차에 보고"
+  short:
+  - "(2차·승인 후) 매뉴얼 'Corrupted Control File' 절차에 따라 백업 컨트롤 파일로 불완전 복구(롤백: 복구 전 현재 데이터파일·로그 디렉터리 전체 사본 보관)"
+  - "control file 손상 범위와 데이터파일 및 redo 상태를 검증"
+  mid:
+  - 백업 control file을 이용한 불완전 복구 절차를 수행
+  long:
+  - control file 다중화와 백업 무결성 검증을 정례화
+  source: GPT 수집·벤더 문서 대조 완료(https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4)
+  vendor_cause: "control file is corrupted — 모든 컨트롤 파일이 손상됨(매뉴얼: 백업 컨트롤 파일로 불완전 복구 후 재시작, 'Corrupted Control File' 절 참조). 스토리지 장애·비정상 종료 중 쓰기 중단이 흔한 원인."
+  vendor_action: 백업 컨트롤파일을 사용해 데이터베이스 불완전 복구를 수행한 후 재시작
+  vendor_url: https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4
+  versions:
+  - GOLDILOCKS 3.1
+  - GOLDILOCKS 20c.1
+  - GOLDILOCKS 22c.1
+  - GOLDILOCKS 26c.1
+  version_note: 실로그 표기는 ERR-<SQLSTATE>(내부번호) 예 ERR-HY000(13011) — 사전은 내부번호 기준이며 파서가 괄호 안 번호로 대응. 3.1(과거)·20c.1·22c.1·26c.1 공통(버전별 재편 근거 없음 — GPT B)
+- code: ERR-14094
+  severity: critical
+  category: storage
+  title: 데이터파일 복구 필요
+  immediate:
+  - "`grep -n -B2 -A3 \"14094\" $GOLDILOCKS_DATA/trc/system.trc | tail -30` 으로 손상 datafile·tablespace 와 직전 I/O 오류 확인"
+  - "`ls -l <datafile 경로>` 로 파일 존재·크기 확인, `dmesg -T | grep -i -E \"I/O error|medium error\" | tail -20` 으로 OS 디스크 오류 동반 여부 확인 — 파일 없음 또는 I/O 오류 동반이면 확정(Linux)"
+  short:
+  - "(2차·승인 후, 롤백: 복구 완료 뒤 ONLINE 으로 되돌림) 손상 tablespace 를 OFFLINE 으로 분리해 나머지 업무 유지 여부 결정, 이후 datafile 복구"
+  - 백업 datafile과 corruption 범위 및 redo 가용성을 검증
+  mid:
+  - 백업 파일로 datafile recovery를 수행하고 데이터 정합성을 확인
+  long:
+  - 데이터파일 checksum 감시와 복구훈련을 정례화
+  source: GPT 수집·벤더 문서 대조 완료(https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4)
+  vendor_cause: "datafile recovery required — 테이블스페이스의 데이터파일 일부 페이지가 손상됨(매뉴얼: 백업 데이터파일로 복구, ALTER DATABASE RECOVER 참조). 디스크 I/O 오류·스토리지 장애가 흔한 원인."
+  vendor_action: 백업 데이터파일을 사용해 데이터파일을 복구
+  vendor_url: https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4
+  versions:
+  - GOLDILOCKS 3.1
+  - GOLDILOCKS 20c.1
+  - GOLDILOCKS 22c.1
+  - GOLDILOCKS 26c.1
+  version_note: 실로그 표기는 ERR-<SQLSTATE>(내부번호) 예 ERR-HY000(13011) — 사전은 내부번호 기준이며 파서가 괄호 안 번호로 대응. 3.1(과거)·20c.1·22c.1·26c.1 공통(버전별 재편 근거 없음 — GPT B)
+- code: ERR-16351
+  severity: error
+  category: upstream
+  title: 클러스터 멤버 접속 실패
+  immediate:
+  - "gsql 로 DBA 접속 후 `SELECT * FROM V$CLUSTER_MEMBER;` 로 멤버별 상태 확인(클러스터 전용) — 대상 멤버가 INACTIVE 면 확정 (V$ 뷰·칼럼은 26c 매뉴얼 기준 — 20c·22c 에서 칼럼이 다르면 `SELECT *` 로 확인)"
+  - "`ping -c 5 <member_host>` 와 `nc -zvw3 <member_host> <port>` 로 도달 확인, 대상 노드에서 `ps -ef | grep -i goldilocks | grep -v grep` 로 프로세스 생존 확인"
+  short:
+  - location 정보와 방화벽 및 네트워크 도달성을 분석
+  mid:
+  - 올바른 노드 위치정보를 반영하고 네트워크와 장애전환 구성을 개선
+  long:
+  - 클러스터 멤버 연결상태와 포트 헬스체크를 상시 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4)
+  note: 특정 클러스터 멤버 접속 실패이므로 단독 코드만으로 서비스 전체 중단 수준의 critical은 아님
+  vendor_cause: 대상 노드가 실행 중이 아니거나 HOST 또는 PORT 값이 잘못 지정됨
+  vendor_action: 대상 노드 위치 정보를 확인하고 구문을 올바르게 수정한 뒤 재시도
+  vendor_url: https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4
+  versions:
+  - GOLDILOCKS 3.1
+  - GOLDILOCKS 20c.1
+  - GOLDILOCKS 22c.1
+  - GOLDILOCKS 26c.1
+  version_note: 실로그 표기는 ERR-<SQLSTATE>(내부번호) 예 ERR-HY000(13011) — 사전은 내부번호 기준이며 파서가 괄호 안 번호로 대응. 3.1(과거)·20c.1·22c.1·26c.1 공통(버전별 재편 근거 없음 — GPT B)
+- code: ERR-16354
+  severity: error
+  category: upstream
+  title: 클러스터 멤버 연결 단절
+  immediate:
+  - "`grep -n -A2 \"16354\" $GOLDILOCKS_DATA/trc/system.trc | tail -20` 으로 단절된 member 와 시각 확인 — 반복되면 네트워크 경로 불안정"
+  - "gsql 로 DBA 접속 후 `SELECT * FROM V$CLUSTER_MEMBER;` 로 현재 활성 멤버 확인(클러스터 전용) (V$ 뷰·칼럼은 26c 매뉴얼 기준 — 20c·22c 에서 칼럼이 다르면 `SELECT *` 로 확인)"
+  - "`ping -c 5 <member_host>` 와 `nc -zvw3 <member_host> <port>` 로 단절 멤버 도달 확인 — 응답 없음이면 노드·네트워크 장애"
+  short:
+  - 노드 장애와 네트워크 단절 및 cluster location 상태를 분석
+  mid:
+  - 문제 노드를 복구해 클러스터에 정상 연결하고 데이터 상태를 검증
+  long:
+  - 클러스터 연결 단절과 inactive member를 실시간 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4)
+  note: 특정 클러스터 멤버와의 연결 단절이므로 단독 코드의 심각도는 error가 타당함
+  vendor_cause: 특정 클러스터 멤버와의 연결이 끊어짐
+  vendor_action: 유효하고 연결 가능한 도메인을 지정하거나 CLUSTER_IGNORE_INACTIVE_MEMBER를 ON으로 설정
+  vendor_url: https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4
+  versions:
+  - GOLDILOCKS 3.1
+  - GOLDILOCKS 20c.1
+  - GOLDILOCKS 22c.1
+  - GOLDILOCKS 26c.1
+  version_note: 실로그 표기는 ERR-<SQLSTATE>(내부번호) 예 ERR-HY000(13011) — 사전은 내부번호 기준이며 파서가 괄호 안 번호로 대응. 3.1(과거)·20c.1·22c.1·26c.1 공통(버전별 재편 근거 없음 — GPT B)

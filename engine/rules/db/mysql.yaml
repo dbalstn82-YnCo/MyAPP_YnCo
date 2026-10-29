@@ -1,0 +1,176 @@
+# DBMS — MySQL/MariaDB 시그니처
+rules:
+- id: DB-MYS-001
+  layer: db
+  product:
+  - mysql
+  match:
+    regex: Too many connections
+  severity: critical
+  category: connection
+  verdict: 커넥션 한도 초과 (Too many connections)
+  immediate:
+  - "연결 수와 한도: `SHOW GLOBAL STATUS LIKE 'Threads_connected';` · `SHOW GLOBAL STATUS LIKE 'Max_used_connections';` · `SELECT @@max_connections;` (CONNECTION_ADMIN/SUPER 계정은 예비 1개 연결로 접속 가능, 읽기 전용)"
+  - "급증 출처: `SELECT SUBSTRING_INDEX(host,':',1) AS src, user, command, COUNT(*) FROM information_schema.PROCESSLIST GROUP BY 1,2,3 ORDER BY 4 DESC LIMIT 10;` — 특정 WAS 편중·Sleep 누적 여부"
+  short:
+  - "(2차·승인 후) 장시간 Sleep 세션은 소유 앱 확인 후 `KILL <id>` 로 정리, max_connections 상향은 `SET PERSIST max_connections=<n>` (8.0+, 5.7 은 SET GLOBAL + my.cnf) — 영향: 연결당 메모리 증가, 롤백: 이전 값 기록"
+  mid:
+  - "WAS 커넥션 풀 최대값 합계를 max_connections 의 80% 이내로 재산정"
+  long:
+  - "Threads_connected/max_connections 80% 경보와 커넥션 총량 관리 체계 수립"
+  versions:
+  - MySQL 5.5
+  - MySQL 5.6
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: 에러 로그 문구 — 5.5~9.x 공통(8.0 부터 [MY-nnnnnn] 코드 병기)
+- id: DB-MYS-002
+  layer: db
+  product:
+  - mysql
+  match:
+    regex: Deadlock found when trying to get lock
+  severity: critical
+  category: lock
+  verdict: InnoDB 데드락
+  immediate:
+  - "최근 데드락 상세: `SHOW ENGINE INNODB STATUS\\G` 의 LATEST DETECTED DEADLOCK 절(두 트랜잭션 SQL·잠금 인덱스) 기록 — 마지막 1건만 보존되므로 즉시 저장 (읽기 전용)"
+  - "반복 여부: `SELECT @@innodb_print_all_deadlocks;` — ON 이면 error log 에 전부 기록됨(`grep -c -i 'deadlock' <log_error 경로>`)"
+  short:
+  - "(2차·승인 후) 반복 데드락 SQL 을 개발팀에 통보, 분석 기간 `SET GLOBAL innodb_print_all_deadlocks=ON` 으로 전체 기록 — 롤백: OFF 로 원복"
+  mid:
+  - "인덱스 보강·테이블 접근 순서 통일로 잠금 경합 축소"
+  long:
+  - "데드락 발생 건수 감시와 트랜잭션 설계 표준화"
+  versions:
+  - MySQL 5.5
+  - MySQL 5.6
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: 에러 로그 문구 — 5.5~9.x 공통(8.0 부터 [MY-nnnnnn] 코드 병기)
+- id: DB-MYS-003
+  layer: db
+  product:
+  - mysql
+  match:
+    regex: 'Disk is full|Errcode: 28|No space left'
+  severity: critical
+  category: disk
+  verdict: 디스크 공간 고갈
+  immediate:
+  - "경로별 사용률: `SELECT @@datadir, @@tmpdir, @@log_bin_basename;` 후 `df -h <경로>` · `du -xsh <datadir>/* | sort -h | tail -20` (읽기 전용)"
+  - "binlog 목록·크기 `SHOW BINARY LOGS;` 와 복제본의 현재 적용 위치 확인 — 이 단계에서 파일을 지우지 않음(OS 에서 binlog 를 직접 지우면 복제·복구가 깨짐)"
+  short:
+  - "(2차·승인 후) 복제본 적용 위치 이전 것만 `PURGE BINARY LOGS BEFORE '<시각>';` 으로 정리, 덤프·임시파일은 소유자 확인 후 정리 — 롤백: 정리 대상 목록·백업 위치 기록"
+  mid:
+  - "binlog 보관 기간(binlog_expire_logs_seconds 8.0+ / expire_logs_days 5.7)과 데이터 아카이빙 정책"
+  long:
+  - "데이터·binlog 볼륨 85% 경보와 월별 증가량 기반 용량 계획"
+  versions:
+  - MySQL 5.5
+  - MySQL 5.6
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: 에러 로그 문구 — 5.5~9.x 공통(8.0 부터 [MY-nnnnnn] 코드 병기)
+- id: DB-MYS-004
+  layer: db
+  product:
+  - mysql
+  match:
+    regex: 'InnoDB: Database page corruption|InnoDB: Assertion failure'
+  severity: critical
+  category: internal
+  verdict: InnoDB 손상/어설션 실패
+  immediate:
+  - "error log 의 손상·어설션 줄(space id·page no·파일·라인)과 직후 스택을 별도 파일로 보존: `grep -B 5 -A 40 -E 'Database page corruption|Assertion failure' <log_error 경로> > /tmp/innodb_err_$(date +%Y%m%d).txt` (원본 변경 없음)"
+  - "크래시 반복 여부 `grep -c 'ready for connections' <log_error 경로>`, 같은 시각 디스크 오류 `dmesg -T | tail -50`, 최근 정상 백업 위치 확인 (읽기 전용)"
+  short:
+  - "(2차·승인 후) innodb_force_recovery 를 1부터 단계적으로 올려 기동하고 `mysqldump` 로 데이터 확보 후 재구축 — 영향: 4 이상은 데이터 손실 위험, 롤백: 작업 전 datadir 전체 사본 보관"
+  mid:
+  - "스토리지(디스크·컨트롤러·메모리) 진단과 결함 부품 교체"
+  long:
+  - "백업 복원 검증·복제본 운영으로 손상 시 전환 체계 점검"
+  versions:
+  - MySQL 5.5
+  - MySQL 5.6
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: 에러 로그 문구 — 5.5~9.x 공통(8.0 부터 [MY-nnnnnn] 코드 병기)
+# 룰 학습 2차(DB) 승격 — 2026-10-15 · 벤더 문서 대조 GPT 11차(collect/rules_learn_2026-10-13/gpt_review_batch2.md)
+- id: DB-MYS-005
+  layer: db
+  product:
+  - mysql
+  match:
+    regex: page_cleaner:\s*\d+ms intended loop took \d+ms|Page cleaner took \d+ms to flush \d+
+  severity: warn
+  category: performance
+  verdict: InnoDB 페이지 클리너 지연 — 디스크 쓰기 처리 부족(성능 저하)
+  immediate:
+  - "같은 시각 디스크 대기 `iostat -x 5 3` (await·%util)와 쓰기량 급증 작업(대량 적재·배치) 확인 (읽기 전용)"
+  - "반복 빈도(몇 분마다인지) 기록과 설정값 `SELECT @@innodb_io_capacity, @@innodb_io_capacity_max, @@innodb_page_cleaners;`"
+  short:
+  - "(2차·승인 후) innodb_io_capacity 를 스토리지 실측 IOPS 에 맞게 조정(`SET PERSIST`, 8.0+ / 5.7 은 SET GLOBAL + my.cnf) — 롤백: 이전 값 기록"
+  mid:
+  - "대량 쓰기 작업 시간대 분산과 배치 일정 조정"
+  long:
+  - "스토리지 성능(IOPS) 증설 검토와 디스크 대기 감시"
+  versions:
+  - MySQL 5.7
+  - MySQL 8.0
+  version_note: '5.7 ''page_cleaner: 1000ms intended loop took Nms'', 8.0 ''Page cleaner took Nms to flush N and evict N pages''(MY-011953) — 8.4 문구는 미확인이라 제외(GPT 11차)'
+- id: DB-MYS-007
+  layer: db
+  product:
+  - mysql
+  match:
+    regex: '[Ss]emaphore wait has lasted\s*>\s*\d+\s+seconds'
+  severity: critical
+  category: lock
+  verdict: InnoDB 내부 잠금(세마포어) 대기 한도 초과 — 서버가 스스로 종료(멈춤 판단)
+  immediate:
+  - "직전 '--Thread … has waited' 줄들과 마지막 SEMAPHORES 출력을 별도 파일로 보존: `grep -B 2 -A 30 'Semaphore wait has lasted' <log_error 경로> > /tmp/sema_$(date +%Y%m%d).txt` (원본 변경 없음)"
+  - "서버가 다시 올라왔는지와 crash recovery 완료 줄 확인: `grep -E 'ready for connections|crash recovery' <log_error 경로> | tail -10` (읽기 전용)"
+  short:
+  - "(2차) 대기 스레드가 기다린 잠금(파일·라인)과 같은 시각 디스크 지연을 분석해 제조사(Oracle 지원)에 전달 — 설정 변경은 승인·롤백 계획 후"
+  mid:
+  - "SHOW ENGINE INNODB STATUS 주기 수집과 디스크 지연 감시 강화"
+  long:
+  - "해당 버그 수정이 포함된 마이너 버전 업그레이드·구조 개선"
+  versions:
+  - MySQL 5.6
+  - MySQL 5.7
+  - MySQL 8.0
+  version_note: '''Semaphore wait has lasted > 600 seconds. We intentionally crash the server because it appears to be hung.'''
+- id: DB-MYS-008
+  layer: db
+  product:
+  - mysql
+  match:
+    regex: Database page corruption on disk or a failed\s+file read
+  severity: critical
+  category: storage
+  verdict: InnoDB 페이지 손상 또는 파일 읽기 실패 — 데이터 무결성 위험(디스크·파일시스템·DB 내부 원인 구분 필요)
+  immediate:
+  - "같은 시각 OS 디스크 I/O 오류 확인: `dmesg -T | tail -50` (Windows 는 시스템 이벤트 로그) (읽기 전용)"
+  - "error log 의 손상 페이지(space·page number)·파일 기록과 최근 백업 위치 확인"
+  short:
+  - "(2차·승인 후) 업무 외 시간 `CHECK TABLE` 로 손상 테이블 식별 후 백업 복원 또는 덤프·재적재 — 롤백: 작업 전 datadir 사본, 판단은 2차·제조사"
+  mid:
+  - "디스크·컨트롤러 점검과 결함 부품 교체"
+  long:
+  - 백업·복제 검증 주기 강화
+  versions:
+  - MySQL 5.6
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  version_note: '''Database page corruption on disk or a failed file read of page …'''

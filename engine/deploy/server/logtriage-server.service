@@ -1,0 +1,37 @@
+[Unit]
+Description=LogTriage application server (incident log triage analyzer, web UI behind nginx)
+After=network.target postgresql.service
+Wants=network.target
+
+[Service]
+Type=simple
+User=logtriage
+Group=logtriage
+# 12차(GPT 95차 P0): 작업 폴더 = import 경로 첫 자리 — 서비스가 쓸 수 없는 root 소유 import 전용 폴더(logtriage 링크 하나)
+WorkingDirectory=/opt/logtriage/venv/lt-import
+EnvironmentFile=-/etc/logtriage/server.env
+# 12차(GPT 96차): -E -s — PYTHONPATH 등 PYTHON* 환경 변수·사용자 site 를 무시(설정 파일에 누가 넣어도 import 경로가 바뀌지 않게)
+UnsetEnvironment=PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE PYTHONINSPECT
+ExecStart=/opt/logtriage/venv/bin/python -E -s -m logtriage.server --host ${LOGTRIAGE_HOST} --port ${LOGTRIAGE_PORT} --base /opt/logtriage --db ${LOGTRIAGE_DB} ${LOGTRIAGE_ALLOW}
+Restart=on-failure
+RestartSec=5
+# 12차: 큰 로그는 작업자 프로세스 여러 개로 나눠 해석한다(PC 실측: 작업자 12개 합 약 580MB). 작업자 수는 이 MemoryMax(cgroup)
+# 남은 몫과 MemAvailable 중 작은 값의 60% / 64MB 안으로 자동으로 줄어든다 — 한도를 넘겨 OOM 으로 죽지 않게
+MemoryMax=2G
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=full
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictRealtime=true
+LockPersonality=true
+CapabilityBoundingSet=
+ReadWritePaths=/opt/logtriage
+# --allow-dir 로 지정한 로그 디렉터리는 읽기만 하면 됨(ProtectSystem=full 아래 /usr /boot /etc 는 읽기 전용)
+
+[Install]
+WantedBy=multi-user.target

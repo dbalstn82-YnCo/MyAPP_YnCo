@@ -1,0 +1,101 @@
+product: iis
+layer: web
+title: iis 로그 종류 카탈로그 (GPT 수집 — 벤더 문서 대조 필요)
+source: GPT 수집(벤더 문서 대조 필요)
+sources: []
+logtypes:
+- name: 사이트 W3C 로그
+  path: '%SystemDrive%\inetpub\logs\LogFiles\W3SVC<SiteID>\'
+  format: W3C 텍스트·UTC YYYY-MM-DD HH:mm:ss
+  check: sc-status·sc-substatus·sc-win32-status·time-taken·URI
+  sample: 2026-09-09 03:00:00 10.0.0.1 GET / - 443 - 10.0.0.2 HTTP/1.1 200 0 0 15
+- name: Central W3C 로그
+  path: '%SystemDrive%\inetpub\logs\LogFiles'
+  format: W3C 텍스트·UTC YYYY-MM-DD HH:mm:ss
+  check: 다중 사이트 SiteName·HTTP 상태·Win32Status·TimeTaken
+  sample: 2026-09-09 03:00:00 W3SVC1 10.0.0.1 GET / 200 ...
+- name: Central Binary 로그
+  path: '%SystemDrive%\inetpub\logs\LogFiles'
+  format: Microsoft binary log·시간 레코드
+  check: 대규모 중앙 로깅·LogParser 분석·site/request 오류
+  sample: Microsoft central binary record
+- name: HTTPERR 로그
+  path: '%SystemRoot%\System32\LogFiles\HTTPERR\httperr<seq>.log'
+  format: W3C 계열 텍스트·UTC timestamp
+  check: HTTP.sys 거부·Connection_Dropped·Timer_*·RequestLength·503 queue
+  sample: HTTP/1.1 GET /time/ - 1 Connection_Dropped DefaultAppPool
+- name: FREB 실패요청 추적
+  path: '%SystemDrive%\inetpub\logs\FailedReqLogFiles\W3SVC<SiteID>\fr*.xml'
+  format: XML·trace event timestamp
+  check: 401·404·500·지연 요청·MODULE_SET_RESPONSE_ERROR_STATUS·모듈별 단계
+  sample: <failedRequest url="http://..." siteId="1" appPoolId="DefaultAppPool" ...>
+- name: URL Rewrite Trace
+  path: '%SystemDrive%\inetpub\logs\FailedReqLogFiles\...'
+  format: FREB XML·event timestamp
+  check: URL_REWRITE_START·rule evaluation·rewrite 결과·loop
+  sample: <EventData><Data Name="ContextId">...</Data>...URL_REWRITE_START...</EventData>
+- name: ARR Proxy 진단
+  path: 사이트 W3C 로그와 FREB
+  format: W3C/XML·UTC/event timestamp
+  check: 502.3·502.4·sc-win32-status=12002·upstream timeout/connection abort
+  sample: 502 3 12002 29889
+- name: Windows System 이벤트
+  path: '%SystemRoot%\System32\winevt\Logs\System.evtx'
+  format: EVTX·ISO/Windows event timestamp
+  check: WAS·W3SVC·HTTP Service·AppPool start/stop·Rapid-Fail Protection
+  sample: Provider=WAS Level=Error <application pool event message>
+- name: Windows Application 이벤트
+  path: '%SystemRoot%\System32\winevt\Logs\Application.evtx'
+  format: EVTX·Windows event timestamp
+  check: w3wp.exe crash·.NET Runtime·Application Error·IIS module 오류
+  sample: 'Faulting application name: w3wp.exe ...'
+- name: IIS 구성 이력
+  path: '%SystemDrive%\inetpub\history\CFGHISTORY_*'
+  format: XML 구성 snapshot·폴더 생성시각
+  check: 500.19·503 직전 applicationHost.config 변경·설정 롤백
+  sample: CFGHISTORY_0000000001\applicationHost.config
+- name: 사용자 정의 W3C 필드
+  path: 사이트 W3C 로그와 동일
+  format: W3C 텍스트·UTC
+  check: Request/Response Header·Server Variable·추가 장애 상관필드
+  sample: '#Fields: date time c-ip cs-method cs-uri-stem sc-status <custom-field>'
+- name: FTP Access 로그
+  path: '%SystemDrive%\inetpub\logs\LogFiles 기본 FTP 설정'
+  format: W3C·UTC timestamp
+  check: FTP 인증·명령·상태·접속 실패·전송 결과
+  sample: 2026-09-09 03:00:00 10.0.0.2 USER user ...
+sections:
+- heading: 로그 종류 카탈로그 (전수)
+  body: '사이트 W3C 로그: %SystemDrive%\inetpub\logs\LogFiles\W3SVC<SiteID>\ · Central W3C 로그: %SystemDrive%\inetpub\logs\LogFiles · Central Binary 로그: %SystemDrive%\inetpub\logs\LogFiles · HTTPERR 로그: %SystemRoot%\System32\LogFiles\HTTPERR\httperr<seq>.log
+    · FREB 실패요청 추적: %SystemDrive%\inetpub\logs\FailedReqLogFiles\W3SVC<SiteID>\fr*.xml · URL Rewrite Trace: %SystemDrive%\inetpub\logs\FailedReqLogFiles\... · ARR Proxy 진단: 사이트 W3C 로그와 FREB · Windows System
+    이벤트: %SystemRoot%\System32\winevt\Logs\System.evtx · Windows Application 이벤트: %SystemRoot%\System32\winevt\Logs\Application.evtx · IIS 구성 이력: %SystemDrive%\inetpub\history\CFGHISTORY_* · 사용자 정의 W3C
+    필드: 사이트 W3C 로그와 동일 · FTP Access 로그: %SystemDrive%\inetpub\logs\LogFiles 기본 FTP 설정'
+- heading: '로그: 사이트 W3C 로그'
+  body: 경로 %SystemDrive%\inetpub\logs\LogFiles\W3SVC<SiteID>\ / 형식 W3C 텍스트·UTC YYYY-MM-DD HH:mm:ss / 확인 sc-status·sc-substatus·sc-win32-status·time-taken·URI / 샘플 2026-09-09 03:00:00 10.0.0.1 GET / - 443
+    - 10.0.0.2 HTTP/1.1 200 0 0 15
+- heading: '로그: Central W3C 로그'
+  body: 경로 %SystemDrive%\inetpub\logs\LogFiles / 형식 W3C 텍스트·UTC YYYY-MM-DD HH:mm:ss / 확인 다중 사이트 SiteName·HTTP 상태·Win32Status·TimeTaken / 샘플 2026-09-09 03:00:00 W3SVC1 10.0.0.1 GET / 200 ...
+- heading: '로그: Central Binary 로그'
+  body: 경로 %SystemDrive%\inetpub\logs\LogFiles / 형식 Microsoft binary log·시간 레코드 / 확인 대규모 중앙 로깅·LogParser 분석·site/request 오류 / 샘플 Microsoft central binary record
+- heading: '로그: HTTPERR 로그'
+  body: 경로 %SystemRoot%\System32\LogFiles\HTTPERR\httperr<seq>.log / 형식 W3C 계열 텍스트·UTC timestamp / 확인 HTTP.sys 거부·Connection_Dropped·Timer_*·RequestLength·503 queue / 샘플 HTTP/1.1 GET /time/ - 1 Connection_Dropped
+    DefaultAppPool
+- heading: '로그: FREB 실패요청 추적'
+  body: 경로 %SystemDrive%\inetpub\logs\FailedReqLogFiles\W3SVC<SiteID>\fr*.xml / 형식 XML·trace event timestamp / 확인 401·404·500·지연 요청·MODULE_SET_RESPONSE_ERROR_STATUS·모듈별 단계 / 샘플 <failedRequest url="http://..."
+    siteId="1" appPoolId="DefaultAppPool" ...>
+- heading: '로그: URL Rewrite Trace'
+  body: 경로 %SystemDrive%\inetpub\logs\FailedReqLogFiles\... / 형식 FREB XML·event timestamp / 확인 URL_REWRITE_START·rule evaluation·rewrite 결과·loop / 샘플 <EventData><Data Name="ContextId">...</Data>...URL_REWRITE_START...</EventData>
+- heading: '로그: ARR Proxy 진단'
+  body: 경로 사이트 W3C 로그와 FREB / 형식 W3C/XML·UTC/event timestamp / 확인 502.3·502.4·sc-win32-status=12002·upstream timeout/connection abort / 샘플 502 3 12002 29889
+- heading: '로그: Windows System 이벤트'
+  body: 경로 %SystemRoot%\System32\winevt\Logs\System.evtx / 형식 EVTX·ISO/Windows event timestamp / 확인 WAS·W3SVC·HTTP Service·AppPool start/stop·Rapid-Fail Protection / 샘플 Provider=WAS Level=Error <application
+    pool event message>
+- heading: '로그: Windows Application 이벤트'
+  body: '경로 %SystemRoot%\System32\winevt\Logs\Application.evtx / 형식 EVTX·Windows event timestamp / 확인 w3wp.exe crash·.NET Runtime·Application Error·IIS module 오류 / 샘플 Faulting application name: w3wp.exe
+    ...'
+- heading: '로그: IIS 구성 이력'
+  body: 경로 %SystemDrive%\inetpub\history\CFGHISTORY_* / 형식 XML 구성 snapshot·폴더 생성시각 / 확인 500.19·503 직전 applicationHost.config 변경·설정 롤백 / 샘플 CFGHISTORY_0000000001\applicationHost.config
+- heading: '로그: 사용자 정의 W3C 필드'
+  body: '경로 사이트 W3C 로그와 동일 / 형식 W3C 텍스트·UTC / 확인 Request/Response Header·Server Variable·추가 장애 상관필드 / 샘플 #Fields: date time c-ip cs-method cs-uri-stem sc-status <custom-field>'
+- heading: '로그: FTP Access 로그'
+  body: 경로 %SystemDrive%\inetpub\logs\LogFiles 기본 FTP 설정 / 형식 W3C·UTC timestamp / 확인 FTP 인증·명령·상태·접속 실패·전송 결과 / 샘플 2026-09-09 03:00:00 10.0.0.2 USER user ...

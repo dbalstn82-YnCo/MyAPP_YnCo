@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LogTriage · 게시판</title>
+<link rel="stylesheet" href="/static/_srv_common.css">
+<style>
+/* ── 게시판 전용(서버형 공통 부품 위에 얹는다) ── */
+.wrap{max-width:1240px}
+.bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+.bar .grow{flex:1;min-width:0}
+.srch{position:relative;min-width:240px}
+.srch input{padding-left:32px}
+.srch svg{position:absolute;left:10px;top:50%;transform:translateY(-50%);width:15px;height:15px;pointer-events:none}
+
+.tbl tbody tr{cursor:pointer}
+.tbl tbody tr:hover{background:#F7FAFB}
+.tbl td{vertical-align:middle}
+.tbl .ti{font-weight:600;font-size:13.5px;display:flex;align-items:center;gap:8px;min-width:0}
+.tbl .ti span.txt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tbl .num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.tbl .when{white-space:nowrap;color:var(--muted);font-size:12.5px}
+.tbl .who{white-space:nowrap;max-width:150px;overflow:hidden;text-overflow:ellipsis}
+.pill.q{background:var(--accent-soft);color:var(--accent-ink)}
+.pill.s{background:var(--ok-soft);color:var(--ok)}
+.pill.r{background:var(--warn-soft);color:var(--warn)}
+.clip{display:inline-flex;align-items:center;gap:3px;font-size:11.5px;color:var(--accent-ink);
+  background:var(--accent-soft);border-radius:99px;padding:1px 8px;white-space:nowrap}
+
+/* 글 보기 */
+.post .hd{align-items:flex-start}
+.post .hd h2{margin:0;font-size:17.5px;line-height:1.5;letter-spacing:-.2px}
+.post .meta{display:flex;gap:14px;flex-wrap:wrap;color:var(--muted);font-size:12.5px;margin-top:7px}
+.post .meta b{color:var(--ink);font-weight:600}
+.post .text{white-space:pre-wrap;line-height:1.85;font-size:14px;margin:0;word-break:break-word}
+.att .hd{font-size:12.5px}
+.att .it{display:flex;align-items:center;gap:10px;padding:11px 16px;border-top:1px solid var(--line);flex-wrap:wrap}
+.att .it .nm{font-weight:600;font-size:13px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.att .it .id{font-family:Consolas,monospace;font-size:11.5px;color:var(--muted)}
+.att .it .go{margin-left:auto;display:flex;gap:6px;flex-wrap:wrap}
+.incbox{border-top:1px solid var(--line);background:#F9FBFC;padding:14px 16px}
+.incbox table{margin-top:8px}
+.incbox th{width:132px;background:transparent;text-transform:none;letter-spacing:0;font-size:11.5px}
+.incbox td{font-size:12.5px}
+.evt{max-height:280px;overflow:auto;border:1px solid var(--line);border-radius:8px;background:var(--surface);margin-top:10px}
+.evt table{font-size:12px}
+.evt td{word-break:break-word}
+.maskchip{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:700;color:var(--accent-ink);
+  background:var(--accent-soft);border-radius:99px;padding:2px 10px}
+
+/* 답글 */
+.reps{border-top:1px solid var(--line)}
+.rep{padding:14px 18px;border-bottom:1px solid var(--line)}
+.rep:last-of-type{border-bottom:0}
+.rep.best{background:var(--ok-soft)}
+.rep .top{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-bottom:6px}
+.rep .top b{font-size:13px}
+.rep .top .t{color:var(--muted);font-size:12px}
+.rep .top .r{margin-left:auto;display:flex;gap:6px}
+.rep .text{white-space:pre-wrap;line-height:1.8;font-size:13.5px;margin:0;word-break:break-word}
+
+/* 입력 부품 — 브라우저 기본 모양을 쓰지 않는다 */
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--surface)}
+.seg button{all:unset;cursor:pointer;padding:9px 18px;font-size:13px;color:var(--muted);border-right:1px solid var(--line);text-align:center}
+.seg button:last-child{border-right:0}
+.seg button:hover{background:#F2F7F9}
+.seg button.on{background:var(--accent);color:#fff;font-weight:700}
+.ck{display:inline-flex;align-items:flex-start;gap:10px;cursor:pointer;font-size:13.5px;line-height:1.6}
+.ck input{appearance:none;-webkit-appearance:none;width:18px;height:18px;flex:none;margin:1px 0 0;padding:0;
+  border:1.5px solid #C2CCD4;border-radius:5px;background:var(--surface);display:grid;place-content:center;
+  transition:background .12s,border-color .12s}
+.ck input::after{content:"";width:10px;height:10px;transform:scale(0);transition:transform .12s;background:#fff;
+  clip-path:polygon(14% 44%,0 65%,50% 100%,100% 16%,80% 0,43% 62%)}
+.ck input:checked{background:var(--accent);border-color:var(--accent)}
+.ck input:checked::after{transform:scale(1)}
+.ck input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.sw{display:flex;align-items:flex-start;gap:12px;cursor:pointer}
+.sw input{appearance:none;-webkit-appearance:none;width:42px;height:24px;flex:none;margin:0;padding:0;border:0;
+  border-radius:99px;background:#CBD5DC;position:relative;transition:background .15s}
+.sw input::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:99px;
+  background:#fff;box-shadow:0 1px 3px rgba(20,33,43,.3);transition:left .15s}
+.sw input:checked{background:var(--accent)}
+.sw input:checked::after{left:21px}
+.sw input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.sw .tx{font-size:13.5px;line-height:1.55}
+.sw .tx small{display:block;color:var(--muted);font-size:11.5px;margin-top:3px;line-height:1.6}
+
+.picks{border:1px solid var(--line);border-radius:8px;background:var(--surface);max-height:236px;overflow:auto}
+.picks .p{display:flex;align-items:center;gap:12px;padding:10px 13px;border-bottom:1px solid var(--line);cursor:pointer}
+.picks .p:last-child{border-bottom:0}
+.picks .p:hover{background:#F7FAFB}
+.picks .p.on{background:var(--accent-soft)}
+.picks .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:600}
+.picks .id{font-family:Consolas,monospace;font-size:11.5px;color:var(--muted);white-space:nowrap}
+.picks .dt{font-size:11.5px;color:var(--muted);white-space:nowrap}
+.cnt{float:right;font-size:11.5px;color:var(--muted);font-weight:400}
+.back{all:unset;cursor:pointer;color:var(--accent-ink);font-size:13px;font-weight:600;margin-bottom:12px;display:inline-flex;gap:6px;align-items:center}
+.back:hover{text-decoration:underline}
+.skel{padding:34px;text-align:center;color:var(--muted);font-size:13.5px}
+@media(max-width:900px){
+  .tbl .who,.tbl .num{display:none}
+  .bar .srch{min-width:0;flex:1}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="side">
+    <div class="logo">%LOGO%<span>Log<em>Triage</em><small>장애 로그 1차 대응 분석기</small></span></div>
+    <nav class="nav">
+      <a class="home" href="/" data-href="/"><span class="ic" data-icon="home"><svg viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="g_dash" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0B6E8A"/><stop offset="1" stop-color="#2BC5DB"/></linearGradient><linearGradient id="g_dash_h" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".28"/><stop offset=".55" stop-color="#fff" stop-opacity="0"/></linearGradient></defs><rect x="1" y="1" width="30" height="30" rx="8" fill="url(#g_dash)"/><rect x="1" y="1" width="30" height="30" rx="8" fill="url(#g_dash_h)"/><rect x="1.5" y="1.5" width="29" height="29" rx="7.5" fill="none" stroke="#fff" stroke-opacity=".22"/><rect x="7" y="7" width="8" height="8" rx="2" fill="#fff"/><rect x="17" y="7" width="8" height="5" rx="2" fill="#fff" opacity=".92"/><rect x="17" y="14" width="8" height="11" rx="2" fill="#fff" opacity=".92"/><rect x="7" y="17" width="8" height="8" rx="2" fill="#fff" opacity=".85"/></svg></span>홈</a>
+      <button type="button" class="grp" data-grp="analysis">분석</button>
+      <a href="/#dash" data-href="/#dash"><span class="ic" data-icon="all"><svg viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="g_all" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0B6E8A"/><stop offset="1" stop-color="#2BC5DB"/></linearGradient><linearGradient id="g_all_h" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".28"/><stop offset=".55" stop-color="#fff" stop-opacity="0"/></linearGradient></defs><rect x="1" y="1" width="30" height="30" rx="8" fill="url(#g_all)"/><rect x="1" y="1" width="30" height="30" rx="8" fill="url(#g_all_h)"/><rect x="1.5" y="1.5" width="29" height="29" rx="7.5" fill="none" stroke="#fff" stroke-opacity=".22"/><path d="M7 24V14M12.3 24V9M17.7 24V17M23 24V11" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/><path d="M6 27h20" stroke="#fff" stroke-width="2" stroke-linecap="round" opacity=".55"/></svg></span>전체 현황</a>
+      <a href="/#new" data-href="/#new"><span class="ic" data-icon="new"><svg viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="g_new" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0B6E8A"/><stop offset="1" stop-color="#2BC5DB"/></linearGradient><linearGradient id="g_new_h" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".28"/><stop offset=".55" stop-color="#fff" stop-opacity="0"/></linearGradient></defs><rect x="1" y="1" width="30" height="30" rx="8" fill="url(#g_new)"/><rect x="1" y="1" width="30" height="30" rx="8" fill="url(#g_new_h)"/><rect x="1.5" y="1.5" width="29" height="29" rx="7.5" fill="none" stroke="#fff" stroke-opacity=".22"/><path d="M8 9h13M8 13.5h9M8 18h6" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/><circle cx="20.5" cy="19" r="4.6" fill="none" stroke="#fff" stroke-width="2.4"/><path d="m24 22.5 2.5 2.5" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/><circle cx="20.5" cy="19" r="2.2" fill="#fff" opacity=".35"/></svg></span>로그분석</a>
+      <a href="/#report" data-href="/#report"><span class="ic" data-icon="report"><svg viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="g_report" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0B6E8A"/><stop offset="1" stop-color="#2BC5DB"/></linearGradient><linearGradient id="g_report_h" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".28"/><stop offset=".55" stop-color="#fff" stop-opacity="0"/></linearGradient></defs><rect x="1" y="1" width="30" height="30" rx="8" fill="url(#g_report)"/><rect x="1" y="1" width="30" height="30" rx="8" fill="url(#g_report_h)"/><rect x="1.5" y="1.5" width="29" height="29" rx="7.5" fill="none" stroke="#fff" stroke-opacity=".22"/><path d="M10 6h8l6 6v12a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z" fill="#fff" opacity=".92"/><path d="M18 6v6h6" fill="none" stroke="#0B6E8A" stroke-width="1.6" opacity=".55"/><path d="m12 18 2.6 2.6L20 15" fill="none" stroke="#0B6E8A" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>분석 리포트</a>
+      <button type="button" class="grp" data-grp="knowledge">조회 · 지식</button>
+      <a href="/#logsearch" data-href="/#logsearch"><span class="ic" data-icon="logsearch"><svg viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="g_logsearch" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4F52C9"/><stop offset="1" stop-color="#8F86F5"/></linearGradient><linearGradient id="g_logsearch_h" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".28"/><stop offset=".55" stop-color="#fff" stop-opacity="0"/></linearGradient></defs><rect x="1" y="1" width="30" height="30" rx="8" fill="url(#g_logsearch)"/><rect x="1" y="1" width="30" height="30" rx="8" fill="url(#g_logsearch_h)"/><rect x="1.5" y="1.5" width="29" height="29" rx="7.5" fill="none" stroke="#fff" stroke-opacity=".22"/><rect x="6" y="9" width="15" height="12" rx="2.5" fill="#fff" opacity=".9"/><path d="M9.5 13h8M9.5 17h5" stroke="#4F52C9" stroke-width="1.9" stroke-linecap="round" opacity=".8"/><circle cx="21.5" cy="20.5" r="4.2" fill="#fff" stroke="#4F52C9" stroke-width="2"/><path d="m24.6 23.6 2 2" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/></svg></span>로그 검색</a>
+      <a href="/#hist" data-href="/#hist"><span class="ic" data-icon="hist"><svg viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="g_hist" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4F52C9"/><stop offset="1" stop-color="#8F86F5"/></linearGradient><linearGradient id="g_hist_h" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".28"/><stop offset=".55" stop-color="#fff" stop-opacity="0"/></linearGradient></defs><rect x="1" y="1" width="30" height="30" rx="8" fill="url(#g_hist)"/><rect x="1" y="1" width="30" height="30" rx="8" fill="url(#g_hist_h)"/><rect x="1.5" y="1.5" width="29" height="29" rx="7.5" fill="none" stroke="#fff" stroke-opacity=".22"/><circle cx="16.5" cy="16.5" r="8.5" fill="none" stroke="#fff" stroke-width="2.6"/><path d="M16.5 11v5.5l3.6 2.4" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M7 12.5 6 8.6l3.9 1" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="16.5" cy="16.5" r="1.6" fill="#fff"/></svg></span>분석 이력</a>
+      <a href="/#rules" data-href="/#rules"><span class="ic" data-icon="rules"><svg viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="g_rules" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4F52C9"/><stop offset="1" stop-color="#8F86F5"/></linearGradient><linearGradient id="g_rules_h" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".28"/><stop offset=".55" stop-color="#fff" stop-opacity="0"/></linearGradient></defs><rect x="1" y="1" width="30" height="30" rx="8" fill="url(#g_rules)"/><rect x="1" y="1" width="30" height="30" rx="8" fill="url(#g_rules_h)"/><rect x="1.5" y="1.5" width="29" height="29" rx="7.5" fill="none" stroke="#fff" stroke-opacity=".22"/><path d="M16 9.5c-1.8-1.6-4.6-2.3-9-2.3v15c4.4 0 7.2.7 9 2.3 1.8-1.6 4.6-2.3 9-2.3v-15c-4.4 0-7.2.7-9 2.3z" fill="#fff" opacity=".92"/><path d="M16 9.5v15" stroke="#4F52C9" stroke-width="1.4" opacity=".5"/><path d="M11.5 12.5c-.9 0-1.3.5-1.3 1.3v1.2c0 .8-.5 1.4-1.3 1.4.8 0 1.3.6 1.3 1.4v1.2c0 .8.4 1.3 1.3 1.3M20.5 12.5c.9 0 1.3.5 1.3 1.3v1.2c0 .8.5 1.4 1.3 1.4-.8 0-1.3.6-1.3 1.4v1.2c0 .8-.4 1.3-1.3 1.3" fill="none" stroke="#4F52C9" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span>코드 조회</a>
+      <a href="/#forms" data-href="/#forms"><span class="ic" data-icon="forms"><svg viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="g_forms" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4F52C9"/><stop offset="1" stop-color="#8F86F5"/></linearGradient><linearGradient id="g_forms_h" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".28"/><stop offset=".55" stop-color="#fff" stop-opacity="0"/></linearGradient></defs><rect x="1" y="1" width="30" height="30" rx="8" fill="url(#g_forms)"/><rect x="1" y="1" width="30" height="30" rx="8" fill="url(#g_forms_h)"/><rect x="1.5" y="1.5" width="29" height="29" rx="7.5" fill="none" stroke="#fff" stroke-opacity=".22"/><path d="M9 6h8l6 6v12a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z" fill="#fff" opacity=".92"/><path d="M10.5 14h9M10.5 18h5" stroke="#4F52C9" stroke-width="1.8" stroke-linecap="round" opacity=".8"/><path d="m24.8 17.2 2.3 2.3-6.1 6.1-3 .7.7-3z" fill="#FFD166" stroke="#4F52C9" stroke-width="1.2" stroke-linejoin="round"/></svg></span>보고서 양식</a>
+      <button type="button" class="grp" data-grp="manage">관리</button>
+      <a href="/#pack" data-href="/#pack"><span class="ic" data-icon="pack"><svg viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="g_pack" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1E7D4B"/><stop offset="1" stop-color="#3FCB8F"/></linearGradient><linearGradient id="g_pack_h" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".28"/><stop offset=".55" stop-color="#fff" stop-opacity="0"/></linearGradient></defs><rect x="1" y="1" width="30" height="30" rx="8" fill="url(#g_pack)"/><rect x="1" y="1" width="30" height="30" rx="8" fill="url(#g_pack_h)"/><rect x="1.5" y="1.5" width="29" height="29" rx="7.5" fill="none" stroke="#fff" stroke-opacity=".22"/><path d="m16 6 9 5v10l-9 5-9-5V11z" fill="#fff" opacity=".28"/><path d="m16 6 9 5-9 5-9-5z" fill="#fff" opacity=".95"/><path d="m7 11 9 5v10l-9-5z" fill="#fff" opacity=".7"/><path d="m25 11-9 5v10l9-5z" fill="#fff" opacity=".85"/><path d="M16 22v-7m-3 3 3-3 3 3" fill="none" stroke="#1E7D4B" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>룰팩 업데이트</a>
+      <a href="/nms" data-href="/nms"><span class="ic" data-icon="nms"><svg viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="g_nms" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1E7D4B"/><stop offset="1" stop-color="#3FCB8F"/></linearGradient><linearGradient id="g_nms_h" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".28"/><stop offset=".55" stop-color="#fff" stop-opacity="0"/></linearGradient></defs><rect x="1" y="1" width="30" height="30" rx="8" fill="url(#g_nms)"/><rect x="1" y="1" width="30" height="30" rx="8" fill="url(#g_nms_h)"/><rect x="1.5" y="1.5" width="29" height="29" rx="7.5" fill="none" stroke="#fff" stroke-opacity=".22"/><rect x="6" y="7" width="20" height="14" rx="2.5" fill="#fff" opacity=".92"/><path d="M8.5 15.5h4l2-4 3 8 2.5-6 1.5 2h2.5" fill="none" stroke="#1E7D4B" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 25h8M16 21v4" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/></svg></span>모니터링</a>
+      <a href="/resources" data-href="/resources"><span class="ic" data-icon="inv"><svg viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="g_inv" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1E7D4B"/><stop offset="1" stop-color="#3FCB8F"/></linearGradient><linearGradient id="g_inv_h" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".28"/><stop offset=".55" stop-color="#fff" stop-opacity="0"/></linearGradient></defs><rect x="1" y="1" width="30" height="30" rx="8" fill="url(#g_inv)"/><rect x="1" y="1" width="30" height="30" rx="8" fill="url(#g_inv_h)"/><rect x="1.5" y="1.5" width="29" height="29" rx="7.5" fill="none" stroke="#fff" stroke-opacity=".22"/><ellipse cx="16" cy="9.5" rx="9" ry="3.6" fill="#fff"/><path d="M7 9.5v6c0 2 4 3.6 9 3.6s9-1.6 9-3.6v-6" fill="#fff" opacity=".8"/><path d="M7 15.5v6.5c0 2 4 3.6 9 3.6s9-1.6 9-3.6v-6.5" fill="#fff" opacity=".62"/><ellipse cx="16" cy="9.5" rx="6" ry="1.9" fill="#1E7D4B" opacity=".35"/></svg></span>자산 관리</a>
+      <a href="/automation" data-href="/automation"><span class="ic" data-icon="auto"><svg viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="g_auto" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4338CA"/><stop offset="1" stop-color="#8B7CFF"/></linearGradient><linearGradient id="g_auto_h" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".28"/><stop offset=".55" stop-color="#fff" stop-opacity="0"/></linearGradient></defs><rect x="1" y="1" width="30" height="30" rx="8" fill="url(#g_auto)"/><rect x="1" y="1" width="30" height="30" rx="8" fill="url(#g_auto_h)"/><rect x="1.5" y="1.5" width="29" height="29" rx="7.5" fill="none" stroke="#fff" stroke-opacity=".22"/><circle cx="14" cy="16" r="8.2" fill="#fff" opacity=".95"/><path d="M14 10.5V16l3.6 2.4" fill="none" stroke="#4338CA" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/><g transform="translate(23 22)"><circle r="4.6" fill="#fff"/><circle r="1.7" fill="#4338CA"/><path d="M0-6.4v2M0 4.4v2M-6.4 0h2M4.4 0h2M-4.5-4.5l1.4 1.4M3.1 3.1l1.4 1.4M-4.5 4.5l1.4-1.4M3.1-3.1l1.4-1.4" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/></g></svg></span>예약 · 자동화</a>
+      <button type="button" class="grp" data-grp="ops">운영 관리</button>
+      <a href="/hub" data-href="/hub"><span class="ic" data-icon="hub"><svg viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="g_hub" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0B6E8A"/><stop offset="1" stop-color="#6D5DF6"/></linearGradient><linearGradient id="g_hub_h" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".28"/><stop offset=".55" stop-color="#fff" stop-opacity="0"/></linearGradient></defs><rect x="1" y="1" width="30" height="30" rx="8" fill="url(#g_hub)"/><rect x="1" y="1" width="30" height="30" rx="8" fill="url(#g_hub_h)"/><rect x="1.5" y="1.5" width="29" height="29" rx="7.5" fill="none" stroke="#fff" stroke-opacity=".22"/><path d="M8 8.5 16 16M24 8.5 16 16M8 23.5 16 16M24 23.5 16 16" stroke="#fff" stroke-width="1.6" stroke-opacity=".75" stroke-linecap="round"/><circle cx="8" cy="8.5" r="2.6" fill="#fff" opacity=".9"/><circle cx="24" cy="8.5" r="2.6" fill="#fff" opacity=".9"/><circle cx="8" cy="23.5" r="2.6" fill="#fff" opacity=".9"/><circle cx="24" cy="23.5" r="2.6" fill="#fff" opacity=".9"/><rect x="11.2" y="11.2" width="9.6" height="9.6" rx="2.6" fill="#fff"/><path d="M13.6 17.6v-2M16 17.6v-3.6M18.4 17.6v-1.2" stroke="#4F46E5" stroke-width="1.5" stroke-linecap="round"/></svg></span>통합 현황</a>
+      <a href="/board" class="on" data-href="/board"><span class="ic"><svg viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="g_bd" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#9C1442"/><stop offset="1" stop-color="#E0446E"/></linearGradient></defs><rect x="1" y="1" width="30" height="30" rx="8" fill="url(#g_bd)"/><rect x="6.5" y="8" width="19" height="12" rx="3" fill="#fff"/><path d="M11 19.5 9.5 24l5-4.5z" fill="#fff"/><path d="M10 12h12M10 15.5h8" stroke="#9C1442" stroke-width="2" stroke-linecap="round"/></svg></span>게시판</a>
+      <a href="/admin" class="srv" data-href="/admin"><span class="ic" data-icon="admin"><svg viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="g_admin" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5B21B6"/><stop offset="1" stop-color="#C084FC"/></linearGradient><linearGradient id="g_admin_h" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".28"/><stop offset=".55" stop-color="#fff" stop-opacity="0"/></linearGradient></defs><rect x="1" y="1" width="30" height="30" rx="8" fill="url(#g_admin)"/><rect x="1" y="1" width="30" height="30" rx="8" fill="url(#g_admin_h)"/><rect x="1.5" y="1.5" width="29" height="29" rx="7.5" fill="none" stroke="#fff" stroke-opacity=".22"/><path d="M16 5.2l8.2 3.1v6.9c0 5.3-3.5 9.6-8.2 11.3-4.7-1.7-8.2-6-8.2-11.3V8.3z" fill="#fff" opacity=".95"/><circle cx="16" cy="13.4" r="2.9" fill="#7C3AED"/><path d="M11.4 21.3c.9-2.8 2.7-4.2 4.6-4.2s3.7 1.4 4.6 4.2" fill="#7C3AED"/></svg></span>사용자 · 권한</a>
+    </nav>
+    <div class="foot">
+            <span class="mono">전사 · 계정 관리</span>
+    </div>
+  </aside>
+  <div class="main">
+    <div class="topbar">
+      <div class="ttl"><h1>게시판</h1><p class="psub">질문 · 분석 공유 · 분석 요청</p></div>
+      <span class="chip" id="topchip">불러오는 중</span>
+      <span class="chip" id="buildchip" title="이 화면을 내려 준 서버의 빌드">–</span>
+    </div>
+    <div class="content">
+      <div class="wrap"><div id="view"><div class="skel">불러오는 중…</div></div></div>
+    </div>
+  </div>
+</div>
+<script>
+const $=(s,r=document)=>r.querySelector(s);
+const $$=(s,r=document)=>[...r.querySelectorAll(s)];
+const esc=s=>String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const KIND={question:["질문","q"],share:["분석 공유","s"],request:["분석 요청","r"]};
+const ICON_SEARCH='<svg viewBox="0 0 24 24" fill="none" stroke="#8A97A3" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m16.5 16.5 4 4"/></svg>';
+const SVG=(d,c)=>`<svg viewBox="0 0 24 24" width="23" height="23" fill="none" stroke="${c}" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+const IC_POSTS=SVG('<path d="M20 15a2 2 0 0 1-2 2H8l-4 4V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2z"/><path d="M8 8h8M8 12h5"/>','#0E7490');
+const IC_OPEN=SVG('<circle cx="12" cy="12" r="9"/><path d="M9.6 9.2a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.1-2.4 3.6"/><path d="M12 17.2h.01"/>','#B26A00');
+const IC_REP=SVG('<path d="M9 14 4 9l5-5"/><path d="M4 9h9a7 7 0 0 1 7 7v3"/>','#1E7D4B');
+const IC_CLIP='<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11.5 12.3 19a4.6 4.6 0 0 1-6.5-6.5l8-8a3 3 0 0 1 4.3 4.3l-8 8a1.5 1.5 0 0 1-2.1-2.1l7.2-7.2"/></svg>';
+let ME={}, STATE={kind:"",q:"",mine:"",sel:0,auto:false};
+const SPLIT=()=>window.matchMedia("(min-width:1600px)").matches;   /* 넓은 화면 = 목록 | 선택한 글 */
+const stCell=p=>p.kind==="share"?'<span class="dim">—</span>':p.solved?'<span class="sev ok">채택됨</span>':'<span class="sev warn">미해결</span>';
+
+const api=async(p,body)=>{
+  let r;
+  try{
+    r=await fetch(p,body?{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify(body),credentials:"same-origin"}:{credentials:"same-origin"});
+  }catch(e){ return {error:"서버에 연결하지 못했습니다 — 잠시 후 다시 시도하십시오"}; }
+  if(r.status===401){location.href="/login";return{error:"로그인이 필요합니다"};}
+  if(r.status===403){return{error:"이 작업을 할 권한이 없습니다"};}
+  try{ return await r.json(); }catch(e){ return {error:"응답을 읽지 못했습니다("+r.status+")"}; }
+};
+const when=t=>{if(!t)return"";const d=new Date(t*1000),p=n=>String(n).padStart(2,"0");
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;};
+const kindPill=k=>{const[n,c]=KIND[k]||[k,"mute"];return `<span class="pill ${c}">${esc(n)}</span>`;};
+const SEVC={CRIT:"crit",CRITICAL:"crit",FATAL:"crit",ERROR:"crit",WARN:"warn",WARNING:"warn",INFO:"info",DEBUG:"mute",NOTICE:"info"};
+const sev=v=>{const k=String(v||"").toUpperCase();return k?`<span class="pill ${SEVC[k]||"mute"}">${esc(k)}</span>`:"";};
+const say=(m,bad)=>{const b=$("#msg");if(!b)return;b.hidden=!m;
+  b.innerHTML=m?`<div class="${bad?"errbox":"okbox"}">${esc(m)}</div>`:"";};
+const chip=(id,label,on)=>`<button class="fchip${on?" on":""}" data-f="${id}">${esc(label)}</button>`;
+
+/* ── 목록 ── */
+async function listView(){
+  $("#view").innerHTML=`<div class="skel">불러오는 중…</div>`;
+  const d=await api(`/api/board/list?kind=${encodeURIComponent(STATE.kind)}&q=${encodeURIComponent(STATE.q)}&mine=${encodeURIComponent(STATE.mine)}`);
+  if(d.error){$("#view").innerHTML=`<div class="errbox">${esc(d.error)}</div>`;return;}
+  const st=d.stats||{posts:0,open:0,replies:0};
+  topChip(st);
+  const rows=(d.posts||[]).map(p=>`<tr data-id="${p.id}">
+      <td>${kindPill(p.kind)}</td>
+      <td><div class="ti"><span class="txt">${esc(p.title)}</span>
+        ${p.incidents.length?`<span class="clip">${IC_CLIP}${p.incidents.length}</span>`:""}
+        </div></td>
+      <td class="who">${esc(p.author_name||p.author)}</td>
+      <td class="num">${p.replies}</td>
+      <td class="when">${when(p.at)}</td><td class="stc">${stCell(p)}</td></tr>`).join("");
+  $("#view").innerHTML=`
+   <div class="kpi kband">
+     <div class="card"><div class="bd"><div class="ic" style="background:var(--accent-soft)">${IC_POSTS}</div>
+       <div><div class="lb">전체 글</div><div class="vl">${st.posts}</div></div></div></div>
+     <div class="card"><div class="bd"><div class="ic" style="background:var(--warn-soft)">${IC_OPEN}</div>
+       <div><div class="lb">아직 해결되지 않은 글</div><div class="vl">${st.open}</div><div class="note">질문 · 분석 요청 중 채택 전</div></div></div></div>
+     <div class="card"><div class="bd"><div class="ic" style="background:var(--ok-soft)">${IC_REP}</div>
+       <div><div class="lb">달린 답글</div><div class="vl">${st.replies}</div></div></div></div>
+   </div>
+   <div id="msg" hidden></div>
+   <div class="bar">
+     <div class="fchips grow">
+       ${chip("","전체",!STATE.kind&&!STATE.mine)}${chip("question","질문",STATE.kind==="question")}
+       ${chip("share","분석 공유",STATE.kind==="share")}${chip("request","분석 요청",STATE.kind==="request")}
+       <span style="width:1px;height:20px;background:var(--line);margin:0 4px"></span>
+       ${chip("mine","내 글",!!STATE.mine)}
+     </div>
+     <label class="srch">${ICON_SEARCH}<input id="q" type="text" placeholder="제목 · 내용 · 글쓴이 검색" value="${esc(STATE.q)}"></label>
+     <button class="btn" id="new">＋ 글쓰기</button>
+   </div>
+   <div class="bsplit${SPLIT()?" on":""}"><div class="card blist">
+     <div class="hd">글 목록<span class="sub">${(d.posts||[]).length}건 표시 · 전체 ${d.total}건</span></div>
+     <div class="tblwrap">
+       <table class="tbl"><thead><tr><th style="width:96px">종류</th><th>제목</th>
+         <th class="who" style="width:150px">글쓴이</th><th class="num" style="width:70px">답글</th>
+         <th style="width:140px">등록</th><th style="width:86px">상태</th></tr></thead>
+       <tbody>${rows||`<tr><td colspan="6"><div class="empty">${STATE.q||STATE.kind||STATE.mine?"조건에 맞는 글이 없습니다":"아직 글이 없습니다 — 첫 질문을 올려 보십시오"}</div></td></tr>`}</tbody></table>
+     </div>
+   </div>${SPLIT()?`<div class="bpost" id="bpost"><div class="card"><div class="empty">목록에서 글을 고르면 여기에서 본문·붙인 분석·답글을 봅니다.</div></div></div>`:""}</div>`;
+  $$(".fchip").forEach(b=>b.onclick=()=>{
+    const f=b.dataset.f;
+    if(f==="mine"){STATE.mine=STATE.mine?"":(ME.login||"");}
+    else{STATE.kind=f;STATE.mine="";}
+    listView();});
+  $("#q").oninput=e=>{STATE.q=e.target.value;clearTimeout(window._qt);window._qt=setTimeout(listView,250);};
+  $("#new").onclick=()=>writeView(null);
+  $$(".tbl tbody tr[data-id]").forEach(tr=>tr.onclick=()=>{ STATE.sel=+tr.dataset.id; postView(STATE.sel); });
+  if(SPLIT()){   // 두 단: 고른 글을 오른쪽에(처음 한 번은 맨 위 글)
+    const ids=[...$$(".tbl tbody tr[data-id]")].map(t=>+t.dataset.id);
+    if(!ids.includes(STATE.sel)) STATE.sel=(!STATE.auto&&ids.length)?ids[0]:0;
+    STATE.auto=true;
+    if(STATE.sel) postView(STATE.sel);
+  }
+}
+
+function topChip(st){const c=$("#topchip");if(!c||!st)return;c.textContent=`글 ${st.posts} · 미해결 ${st.open} · 답글 ${st.replies}`;}
+async function refreshChip(){const d=await api("/api/board/list?limit=1");if(!d.error)topChip(d.stats);}
+
+/* ── 글 보기 ── */
+async function postView(id){
+  const pane=SPLIT()?$("#bpost"):null, box=pane||$("#view");
+  if(pane) $$(".tbl tbody tr[data-id]").forEach(t=>t.classList.toggle("sel",+t.dataset.id===id));
+  box.innerHTML=`<div class="skel">불러오는 중…</div>`;
+  const p=await api(`/api/board/post?id=${id}`);
+  if(p.error){box.innerHTML=`<div class="errbox">${esc(p.error)}</div>`;return;}
+  const mine=p.author===ME.login, admin=!!ME.is_admin;
+  const info=p.attached||(p.incidents||[]).map(i=>({id:i,name:"",at:"",gone:false}));
+  const att=info.map(x=>`<div class="it" data-inc="${esc(x.id)}">
+      <span class="nm">${esc(x.name||"분석 이력")}</span><span class="id">${esc(x.id)}</span>
+      ${x.at?`<span class="id">${esc(x.at)}</span>`:""}
+      ${x.gone?'<span class="pill mute">보관 기간 지남</span>':""}
+      ${x.masked?'<span class="pill acc">가림</span>':""}
+      <span class="go">${x.gone?"":`<button class="btn ghost sm" data-open="${esc(x.id)}">여기서 보기</button>`}</span>
+    </div><div class="incbox" data-box="${esc(x.id)}" hidden></div>`).join("");
+  const reps=(p.replies||[]).map(r=>`<div class="rep${r.accepted?" best":""}">
+      <div class="top"><b>${esc(r.author_name||r.author)}</b><span class="t">${when(r.at)}</span>
+        ${r.accepted?'<span class="pill ok">채택된 답변</span>':""}
+        <span class="r">${mine&&!r.accepted?`<button class="btn ghost sm" data-acc="${r.id}">채택</button>`:""}
+        ${(r.author===ME.login||admin)?`<button class="btn ghost sm danger" data-delr="${r.id}">삭제</button>`:""}</span></div>
+      <p class="text">${esc(r.body)}</p></div>`).join("");
+  box.innerHTML=`
+   ${pane?"":`<button class="back" id="back">← 목록으로</button>
+   <div id="msg" hidden></div>`}
+   <div class="card post">
+     <div class="hd"><div style="flex:1;min-width:0">
+        <div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap">${kindPill(p.kind)}
+          ${p.kind==="share"?"":stCell(p)}
+          ${p.share_raw?'<span class="pill acc">원문 공개</span>':""}</div>
+        <h2 style="margin-top:8px">${esc(p.title)}</h2>
+        <div class="meta"><span>글쓴이 <b>${esc(p.author_name||p.author)}</b></span><span>등록 ${when(p.at)}</span>
+          <span>조회 ${p.views}</span><span>답글 ${(p.replies||[]).length}</span></div>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        ${mine?'<button class="btn ghost sm" id="edit">고치기</button>':""}
+        ${(mine||admin)?'<button class="btn ghost sm danger" id="del">삭제</button>':""}
+      </div></div>
+     <div class="bd"><p class="text">${esc(p.body)}</p></div>
+     ${att?`<div class="att"><div class="hd">붙인 분석 이력 <span class="sub">${info.length}건 — 누르면 이 자리에서 판정·로그를 봅니다</span></div>${att}</div>`:""}
+     <div class="reps">
+       <div class="hd" style="border-top:1px solid var(--line)">답글 <span class="sub">${(p.replies||[]).length}건</span></div>
+       ${reps||'<div class="empty">아직 답글이 없습니다</div>'}
+       <div class="bd" style="border-top:1px solid var(--line)">
+         <label class="f">답글 쓰기</label>
+         <textarea id="rbody" rows="4" placeholder="확인한 내용이나 조치 방법을 적어 주십시오"></textarea>
+         <div style="margin-top:10px"><button class="btn" id="rsend">답글 등록</button></div>
+       </div>
+     </div>
+   </div>`;
+  refreshChip();
+  if($("#back")) $("#back").onclick=listView;
+  if($("#edit"))$("#edit").onclick=()=>writeView(p);
+  if($("#del"))$("#del").onclick=async()=>{
+    if(!confirm("이 글과 답글을 모두 지웁니다. 계속할까요?"))return;
+    const r=await api("/api/board/delete",{id:p.id});
+    if(!r.error) STATE.sel=0;
+    r.error?say(r.error,true):listView();};
+  $("#rsend").onclick=async()=>{
+    const body=$("#rbody").value.trim();
+    if(!body){say("답글 내용을 적어 주십시오",true);return;}
+    const r=await api("/api/board/reply",{id:p.id,body});
+    r.error?say(r.error,true):(pane?listView():postView(p.id));};
+  $$("[data-acc]").forEach(b=>b.onclick=async e=>{e.stopPropagation();
+    const r=await api("/api/board/accept",{id:p.id,reply:+b.dataset.acc});
+    r.error?say(r.error,true):(pane?listView():postView(p.id));});
+  $$("[data-delr]").forEach(b=>b.onclick=async e=>{e.stopPropagation();
+    if(!confirm("이 답글을 지울까요?"))return;
+    const r=await api("/api/board/reply_delete",{reply:+b.dataset.delr});
+    r.error?say(r.error,true):(pane?listView():postView(p.id));});
+  $$("[data-open]").forEach(b=>b.onclick=()=>openInc(p.id,b.dataset.open,b));
+}
+
+/* ── 글에 붙은 분석 열기 ── */
+async function openInc(post,id,btn){
+  const box=$(`[data-box="${CSS.escape(id)}"]`);
+  if(!box)return;
+  if(!box.hidden){box.hidden=true;btn.textContent="여기서 보기";return;}
+  box.hidden=false;btn.textContent="접기";
+  box.innerHTML=`<div class="skel">불러오는 중…</div>`;
+  const d=await api(`/api/board/incident?post=${post}&id=${encodeURIComponent(id)}`);
+  if(d.error){box.innerHTML=`<div class="errbox">${esc(d.error)}</div>`;return;}
+  const inc=d.incident||{}, ev=d.events||[];
+  const masked=inc.masked;
+  const row=(k,v)=>v?`<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`:"";
+  box.innerHTML=`
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <b style="font-size:13px">${esc(inc.name||id)}</b>
+      ${masked?'<span class="maskchip">🔒 IP·호스트명 가림</span>':'<span class="pill ok">원문</span>'}
+      ${d.can_open?`<button class="btn ghost sm" style="margin-left:auto" data-go="${esc(id)}">분석 화면에서 열기</button>`:""}
+    </div>
+    <table>${row("분석 시각",inc.analyzed_at)}${row("판정",inc.verdict||inc.summary)}
+      ${row("대상",inc.target||inc.host)}${row("등록한 담당자",d.owner_name||"")}</table>
+    ${ev.length?`<div class="evt"><table><thead><tr><th style="width:150px">시각</th><th style="width:74px">등급</th>
+        <th style="width:110px">코드</th><th style="width:130px">대상</th><th>내용</th></tr></thead><tbody>
+      ${ev.map(e=>`<tr><td class="mono">${esc(e.ts||e.at||e.time||"")}</td>
+        <td>${sev(e.severity||e.level||e.kind||"")}</td><td class="mono">${esc(e.code||"")}</td>
+        <td>${esc(e.host||e.target||"")}</td><td>${esc(e.message||e.text||"")}</td></tr>`).join("")}</tbody></table></div>
+      ${d.total&&d.total>ev.length?`<div class="note" style="margin-top:7px">이벤트 ${d.total}건 가운데 ${ev.length}건을 보여 줍니다 — 전체는 [분석 이력] 에서 확인하십시오</div>`:""}`
+      :`<div class="note" style="margin-top:8px">${esc(d.note||"표시할 이벤트가 없습니다")}</div>`}`;
+  const go=box.querySelector("[data-go]");
+  if(go)go.onclick=()=>{location.href="/?inc="+encodeURIComponent(id)+"#report";};
+}
+
+/* ── 글쓰기 · 고치기 ── */
+async function writeView(edit){
+  $("#view").innerHTML=`<div class="skel">불러오는 중…</div>`;
+  const d=await api("/api/board/mine");
+  const list=(d.incidents||[]);
+  const picked=new Set((edit&&edit.incidents)||[]);
+  let kind=(edit&&edit.kind)||"question";
+  $("#view").innerHTML=`
+   <button class="back" id="cancel">← ${edit?"글로 돌아가기":"목록으로"}</button>
+   <div id="msg" hidden></div>
+   <div class="card">
+     <div class="hd">${edit?"글 고치기":"새 글 쓰기"}<span class="sub">서로 묻고 답하는 공간입니다 — 분석 이력을 붙이면 같이 볼 수 있습니다</span></div>
+     <div class="bd">
+       <div class="frm">
+         <div class="wide">
+           <label class="f">글 종류</label>
+           <div class="seg" id="seg">
+             <button data-k="question" class="${kind==="question"?"on":""}">질문</button>
+             <button data-k="share" class="${kind==="share"?"on":""}">분석 공유</button>
+             <button data-k="request" class="${kind==="request"?"on":""}">분석 요청</button>
+           </div>
+         </div>
+         <div class="wide">
+           <label class="f" for="ti">제목</label>
+           <input id="ti" type="text" maxlength="120" placeholder="무엇을 묻거나 공유하는지 한 줄로" value="${esc((edit&&edit.title)||"")}">
+         </div>
+         <div class="wide">
+           <label class="f" for="bo">내용</label>
+           <textarea id="bo" rows="10" placeholder="증상, 확인한 것, 필요한 도움을 적어 주십시오">${esc((edit&&edit.body)||"")}</textarea>
+         </div>
+         <div class="wide">
+           <label class="f">붙일 분석 이력 <span class="cnt" id="pc">${picked.size}건 선택</span></label>
+           ${list.length?`<div class="picks" id="picks">${list.map(x=>`
+             <label class="p${picked.has(x.id)?" on":""}" data-id="${esc(x.id)}">
+               <span class="ck"><input type="checkbox" value="${esc(x.id)}"${picked.has(x.id)?" checked":""}></span>
+               <span class="nm">${esc(x.name||x.id)}</span>
+               <span class="id">${esc(x.id)}</span>
+               <span class="dt">${esc(x.at||"")}</span>
+             </label>`).join("")}</div>`
+            :'<div class="empty" style="border:1px solid var(--line);border-radius:8px">붙일 수 있는 내 분석 이력이 없습니다</div>'}
+           <div class="note" style="margin-top:7px">한 글에 10건까지 붙일 수 있습니다. 읽는 사람은 글에서 바로 판정과 로그를 봅니다.</div>
+         </div>
+         <div class="wide">
+           <label class="sw"><input type="checkbox" id="raw"${edit&&edit.share_raw?" checked":""}>
+             <span class="tx">내가 등록한 분석의 <b>IP·호스트명을 이 글에서 그대로 공개</b>
+               <small>켜지 않으면 다른 계정에는 ** 로 가려져 보입니다. 밖으로 공유될 수 있는 글이면 끄는 쪽을 권합니다.</small></span></label>
+         </div>
+       </div>
+     </div>
+     <div class="ft" style="padding:12px 18px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:8px;background:#FAFBFC">
+       <button class="btn ghost" id="cancel2">취소</button>
+       <button class="btn" id="save">${edit?"고치기":"등록"}</button>
+     </div>
+   </div>`;
+  refreshChip();
+  $$("#seg button").forEach(b=>b.onclick=()=>{kind=b.dataset.k;
+    $$("#seg button").forEach(x=>x.classList.toggle("on",x===b));});
+  const pc=()=>{const n=$$("#picks input:checked").length;$("#pc").textContent=n+"건 선택";};
+  $$("#picks .p").forEach(l=>{const cb=l.querySelector("input");
+    cb.onchange=()=>{l.classList.toggle("on",cb.checked);pc();};});
+  const back=()=>edit?postView(edit.id):listView();
+  $("#cancel").onclick=back;$("#cancel2").onclick=back;
+  $("#save").onclick=async()=>{
+    const inc=$$("#picks input:checked").map(x=>x.value);
+    const title=$("#ti").value.trim(), body=$("#bo").value.trim();
+    if(title.length<2){say("제목을 2자 이상 적어 주십시오",true);$("#ti").focus();return;}
+    if(!body){say("내용을 적어 주십시오",true);$("#bo").focus();return;}
+    const payload={kind,title,body,incidents:inc,share_raw:$("#raw").checked};
+    $("#save").disabled=true;
+    const r=edit?await api("/api/board/update",{id:edit.id,...payload}):await api("/api/board/create",payload);
+    $("#save").disabled=false;
+    if(r.error){say(r.error,true);return;}
+    edit?postView(edit.id):postView(r.id);};
+  $("#ti").focus();
+}
+
+(async function(){
+  const me=await api("/api/me");
+  if(!me.error)ME=me;
+  const hz=await api("/healthz");                 // 어느 판이 도는지 화면에서 바로 보이게
+  const bc=$("#buildchip"); if(bc) bc.textContent=hz&&hz.build?("빌드 "+hz.build):"빌드 확인 불가";
+  const q=new URLSearchParams(location.search);
+  const id=+(q.get("post")||0);
+  id?postView(id):listView();
+})();
+</script>
+</body>
+</html>

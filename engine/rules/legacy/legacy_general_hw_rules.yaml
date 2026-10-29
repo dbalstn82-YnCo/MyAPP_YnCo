@@ -1,0 +1,209 @@
+# 기존 'AI 로그분석기 v2.2' 내장 룰에서 변환 반입(tools/import_legacy_rules.py) — 중복(코드·패턴) 제외
+# 심각도 CRITICAL→critical HIGH→error MEDIUM→warn LOW→info · immediate_actions→즉시 · root_actions→중기 · negative_patterns→exclude
+rules:
+- id: LEG-GEN-CRIT-HW
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:CRITICAL.*hardware)|(?:hardware.*CRITICAL)|(?:CRIT.*hardware)|(?:severity.*critical.*hardware)
+  severity: critical
+  category: hardware
+  verdict: 하드웨어 CRITICAL 이벤트 — 하드웨어 컴포넌트 CRITICAL 수준 이벤트 발생
+  immediate:
+  - 관리 콘솔(iLO IML · iDRAC Lifecycle/SEL · IMM/XCC · AIX HMC 서비스 이벤트)에서 CRITICAL 이벤트 부품·시각 확인
+  - 'BMC SEL(읽기): `ipmitool sel elist | tail -30`'
+  - 'AIX: `errpt -d H -T PERM | head -20` / Windows: `Get-WinEvent -FilterHashtable @{LogName=''System'';Level=1,2} -MaxEvents 30`'
+  short:
+  - (2차·승인 후) 서비스를 다른 서버로 우회한 뒤 제조사 긴급 지원 요청, 교체 부품·작업 시간 확정
+  - '영향: 시스템 가용성 위험.'
+  mid:
+  - 해당 하드웨어 컴포넌트 교체 준비
+  - 서비스 다른 서버로 이전
+  - 제조사 긴급 지원 케이스 접수와 자료 전달
+  long:
+  - 하드웨어 CRITICAL 이벤트 감시 통합과 유지보수 계약(SLA) 대응 시간 점검
+  source_note: 'legacy-analyzer-v2.2 general_hw_rules.json GEN-CRIT-HW (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-GEN-WARN-HW
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:WARNING.*hardware)|(?:hardware.*WARNING)|(?:WARN.*sensor)|(?:sensor.*warning.*threshold)
+  severity: error
+  category: hardware
+  verdict: 하드웨어 WARNING 이벤트 — 하드웨어 컴포넌트 WARNING 수준 이벤트 발생
+  immediate:
+  - 'WARNING 센서 식별(읽기): `ipmitool sdr elist | grep -v '' ok ''` — 경고 센서와 값 기록'
+  - 관리 콘솔 이벤트 로그에서 같은 경고 반복 여부(최근 7일) 확인
+  - 'AIX: `errpt -d H -T TEMP | head` (일시 하드웨어 오류)'
+  short:
+  - (2차) 경고 부품 예방 교체 일정 협의와 감시 주기 단축
+  - '영향: 장애 발생 예고 신호.'
+  mid:
+  - 경고 컴포넌트 교체 계획 수립
+  - 경고 부품 감시 주기 5분 이하로 단축
+  - 예비 부품(팬·PSU·디스크) 준비
+  long:
+  - WARNING 단계 알림을 별도 등급으로 운영해 예방 교체 근거로 활용
+  source_note: 'legacy-analyzer-v2.2 general_hw_rules.json GEN-WARN-HW (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-GEN-SENSOR-CRIT
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:sensor.*critical)|(?:IPMI.*critical)|(?:sensor.*assert.*critical)|(?:threshold.*critical.*sensor)|(?:ipmitool.*critical)|(?:sdr.*critical)
+  severity: critical
+  category: capacity
+  verdict: 센서 임계값 초과 (CRITICAL) — IPMI 센서값이 CRITICAL 임계값을 초과
+  immediate:
+  - 'CRITICAL 센서 식별(읽기): `ipmitool sdr list | grep -v ''| ok'' | grep -v ''| ns''`'
+  - '센서 유형별 분기: 온도 `ipmitool sdr type Temperature` / 전압 `ipmitool sdr type Voltage` / 팬 `ipmitool sdr type Fan`'
+  - 'SEL 이벤트 시각: `ipmitool sel elist | tail -20`'
+  short:
+  - (2차·승인 후) 온도는 냉각·팬, 전압은 PSU·전원, 팬은 교체로 유형별 조치하고 위험 지속 시 서비스 우회 후 계획 정지
+  - '영향: 즉각적인 하드웨어 조치 필요.'
+  mid:
+  - 해당 유형에 맞는 즉시 조치 (팬 교체, 냉각 강화 등)
+  - 제조사 HW 지원 케이스 접수
+  long:
+  - 센서 CRITICAL 임계 이벤트 실시간 알림 연동
+  source_note: 'legacy-analyzer-v2.2 general_hw_rules.json GEN-SENSOR-CRIT (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-GEN-SENSOR-WARN
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:sensor.*warning)|(?:IPMI.*warning)|(?:sensor.*assert.*warning)|(?:threshold.*warning.*sensor)
+  severity: error
+  category: internal
+  verdict: 센서 WARNING 경고 — IPMI 센서값이 WARNING 임계값에 도달
+  immediate:
+  - 'WARNING 센서 값과 임계 비교(읽기): `ipmitool sensor list | grep -v ''| ok''` — 현재 값과 상·하한 임계 기록'
+  - 10분 간격 2회 재조회로 추이(상승·하강) 확인
+  - 관리 콘솔에서 같은 센서 이력 그래프 확인(iLO·iDRAC 지원 시)
+  short:
+  - (2차) 추이가 상승이면 해당 부품 예방 점검을 제조사에 요청
+  - '영향: 장애 발생 전 예고 단계.'
+  mid:
+  - 경고 부품 예방적 유지보수 일정 수립
+  - 센서 경고 감시 주기 단축
+  - 예비 부품(팬·PSU) 확보 기준 수립
+  long:
+  - 센서 경고 이력 분석으로 부품 교체 주기 표준화
+  source_note: 'legacy-analyzer-v2.2 general_hw_rules.json GEN-SENSOR-WARN (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-GEN-SYSLOG-ERR
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:syslog.*error.*flood)|(?:system.*log.*critical)|(?:kern.*error.*repeated)|(?:kernel.*error.*multiple)|(?:rsyslog.*critical)
+  severity: error
+  category: internal
+  verdict: 시스템 로그 오류 집중 — 시스템 로그에 오류 메시지 집중 발생
+  immediate:
+  - '최근 오류(읽기): Linux `journalctl -p err -n 100 --no-pager` / AIX `errpt | head -30` / Windows `Get-WinEvent -FilterHashtable @{LogName=''System'';Level=2} -MaxEvents 50`'
+  - '반복 메시지 상위 집계: `journalctl -p err --since ''-1 hour'' -o cat | sort | uniq -c | sort -rn | head -15`'
+  - '같은 시각 하드웨어·디스크 원인 여부: `dmesg -T | grep -iE ''I/O error|mce|hardware'' | tail -20`'
+  short:
+  - (2차) 상위 반복 메시지의 발생 주체(서비스·커널 모듈) 담당에 이관, 로그 폭주로 디스크가 차면 로그 순환(logrotate) 조치는 승인 후
+  - '영향: 시스템 불안정 신호. 근본 원인 파악 필요.'
+  mid:
+  - 오류 패턴 분석 후 근본 원인 조치
+  - 하드웨어 및 소프트웨어 상태 종합 점검
+  long:
+  - 로그 오류 건수 급증 감시(시간당 기준선 대비) 등록
+  source_note: 'legacy-analyzer-v2.2 general_hw_rules.json GEN-SYSLOG-ERR (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-GEN-WATCHDOG
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:watchdog.*timeout)|(?:watchdog.*reset)|(?:WDT.*expired)|(?:watchdog.*bite)|(?:NMI.*watchdog)|(?:hard lockup.*watchdog)
+  severity: critical
+  category: upstream
+  verdict: 워치독 타임아웃 — 시스템 워치독 타임아웃으로 강제 재기동
+  immediate:
+  - '직전 부팅의 워치독·lockup 기록(읽기): `journalctl -k -b -1 | grep -iE ''watchdog|lockup|panic'' | tail -30` (persistent journal 설정 시)'
+  - 'kdump 덤프 존재: `ls -lt /var/crash/ | head` — 있으면 vmcore-dmesg.txt 확인'
+  - 'BMC 워치독 이벤트: `ipmitool sel elist | grep -i watchdog | tail` / AIX `errpt | head -20` / Windows 시스템 이벤트 41(Kernel-Power)·1001(BugCheck)'
+  short:
+  - (2차·승인 후) 덤프·로그 보존 후 커널·드라이버 결함 여부를 제조사에 의뢰, 하드 lockup 반복 시 펌웨어·하드웨어 진단
+  - '영향: 서비스 갑작스러운 중단 및 재기동.'
+  mid:
+  - 커널 또는 드라이버 업데이트
+  - 하드웨어 진단(메모리·CPU) 수행
+  - kdump 활성화로 덤프 수집
+  long:
+  - kdump·persistent journal 표준 설정과 비정상 재부팅 감시
+  source_note: 'legacy-analyzer-v2.2 general_hw_rules.json GEN-WATCHDOG (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-GEN-HW-FAILURE
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:hardware failure)|(?:HW.*error)|(?:hardware.*fault)|(?:device.*failure)|(?:hardware.*malfunction)
+  severity: error
+  category: hardware
+  verdict: 하드웨어 일반 장애 — 하드웨어 일반 장애 이벤트
+  immediate:
+  - 관리 콘솔 이벤트 로그(iLO IML·iDRAC Lifecycle·IMM/XCC)에서 실패 장치 이름·위치 확인
+  - 'OS 커널 메시지(읽기): Linux `dmesg -T | tail -100 | grep -iE ''fail|error''` / AIX `errpt -d H | head -20`'
+  - 'BMC SEL: `ipmitool sel elist | tail -20`'
+  short:
+  - (2차·승인 후) 장애 장치 식별 후 제조사 교체 의뢰, 이중화가 없으면 서비스 우회 준비
+  - '영향: 시스템 또는 서비스 장애.'
+  mid:
+  - 장애 컴포넌트 식별 후 교체
+  - 제조사 지원 케이스 접수와 진단 자료 전달
+  long:
+  - 하드웨어 장애 이력 관리와 유지보수 계약 범위 점검
+  source_note: 'legacy-analyzer-v2.2 general_hw_rules.json GEN-HW-FAILURE (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-GEN-POWER-WARN
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:power.*warning)|(?:AC.*loss)|(?:power.*anomaly)|(?:under voltage)|(?:over voltage)|(?:power.*fluctuation)|(?:PDU.*warning)
+  severity: error
+  category: hardware
+  verdict: 전원 이상 경고 — 서버 또는 PDU 전원 이상
+  immediate:
+  - 'x86 IPMI/BMC 서버(읽기): `ipmitool sdr type ''Power Supply''` 로 PSU 상태(Failure detected·AC lost)를 먼저 보고 `ipmitool sdr type Voltage` 는 보조 — 전압 센서 범위 이탈만으로 PSU 고장을 확정하지 않는다(PSU 상태 센서·SEL 과 함께 판단), 이벤트 시각은 `ipmitool sel elist | grep -iE ''power supply|ac lost|volt|redundancy'' | tail -20`'
+  - 'IBM Power 서버(IPMI 대상 아님): HMC 에서 관리 시스템 상태와 열린 하드웨어 서비스 이벤트(`lssyscfg -r sys -F name,state` · `lssvcevents -t hardware --filter status=open`) 또는 ASMI 오류 로그 화면, AIX 에서 `errpt -d H | head -20` 으로 전원 관련 항목 확인'
+  - UPS 상태·배터리 잔량과 PDU 입력 전원 확인(UPS·PDU 관리 화면) — 같은 시각 여러 서버에서 나면 시설 전원 쪽
+  short:
+  - (2차) 상위 전원 문제는 시설 담당 이관, PSU 결함이면 제조사 교체
+  - '영향: 서버 비정상 종료 위험.'
+  mid:
+  - 상용 전원 불안정 시 UPS 운전·발전기 전환(시설 담당)
+  - 전기 공급 업체·시설 담당 연락
+  - 서버 계획적 셧다운 준비
+  long:
+  - UPS·PDU 이벤트 감시 통합과 정전 시 계획 셧다운 순서 문서화
+  verify_note: "미검증 — HMC `lssvcevents -t hardware --filter status=open` 형식은 IBM 지원 문서(HMC 업그레이드 준비)로만 확인, `lssyscfg -r sys -F name,state` 의 상태 값과 ASMI 메뉴 이름은 IBM 문서로 확인하지 못함"
+  source_note: 'legacy-analyzer-v2.2 general_hw_rules.json GEN-POWER-WARN (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관

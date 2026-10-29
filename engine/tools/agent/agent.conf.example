@@ -1,0 +1,7 @@
+# LogTriage 에이전트 설정 예시 — agent.conf 로 복사해 사용(권한 600). 화면에서 받은 lt-agent.zip 에는 agent.conf 가 이미 채워져 있습니다.
+URL=http://10.0.0.5:8088
+TOKEN=여기에_토큰
+INTERVAL=30
+DISK=all
+PROCS=1
+# COLLECTOR=python|bash|posix   (비우면 자동 선택)

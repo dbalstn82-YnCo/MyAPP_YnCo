@@ -1,0 +1,207 @@
+# DBMS — PostgreSQL 시그니처
+rules:
+- id: DB-PG-001
+  layer: db
+  product:
+  - postgresql
+  match:
+    regex: deadlock detected
+  severity: critical
+  category: lock
+  verdict: 데드락 감지
+  immediate:
+  - "서버 로그의 deadlock detected 다음 DETAIL(Process N waits for … blocked by process M)과 두 SQL·잠금 대상 기록 (읽기 전용)"
+  - "반복 여부 `SELECT datname, deadlocks FROM pg_stat_database;` 와 `SHOW deadlock_timeout;` 확인"
+  short:
+  - "(2차) 반복 데드락 SQL 을 개발팀에 통보, 분석 기간 log_lock_waits=on 으로 잠금 대기 기록 수집(승인 후, 롤백: off 원복)"
+  mid:
+  - "테이블·행 접근 순서 통일과 인덱스 보강으로 잠금 경합 축소"
+  long:
+  - "pg_stat_database.deadlocks 증가 감시와 트랜잭션 설계 표준화"
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: 서버 로그 문구 — 9.x~18 공통
+- id: DB-PG-002
+  layer: db
+  product:
+  - postgresql
+  match:
+    regex: remaining connection slots are reserved|too many clients
+  severity: critical
+  category: connection
+  verdict: 커넥션 슬롯 고갈
+  immediate:
+  - "연결 수와 한도: `SELECT count(*) FROM pg_stat_activity;` · `SHOW max_connections;` · `SHOW superuser_reserved_connections;` (예약 슬롯으로 superuser 접속, 읽기 전용)"
+  - "급증 출처: `SELECT client_addr, usename, application_name, state, count(*) FROM pg_stat_activity GROUP BY 1,2,3,4 ORDER BY 5 DESC LIMIT 10;` — idle 누적·특정 WAS 편중 여부"
+  short:
+  - "(2차·승인 후) 장시간 idle 세션은 소유 앱 확인 후 `SELECT pg_terminate_backend(<pid>);` 로 정리, max_connections 변경은 재기동 필요 — 롤백: 이전 값 기록"
+  mid:
+  - "커넥션 풀러(pgbouncer 등) 도입과 WAS 풀 합계 재산정"
+  long:
+  - "연결 수/max_connections 80% 경보와 커넥션 총량 관리 체계"
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: 서버 로그 문구 — 9.x~18 공통
+- id: DB-PG-003
+  layer: db
+  product:
+  - postgresql
+  match:
+    regex: No space left on device|could not extend file
+  severity: critical
+  category: disk
+  verdict: 디스크 공간 고갈
+  immediate:
+  - "공간 사용처: `df -h <data_directory>` · `du -sh <data_directory>/base <data_directory>/pg_wal` (10+, 9.x 는 pg_xlog) — pg_wal 파일은 절대 직접 지우지 않음 (읽기 전용)"
+  - "WAL 누적 원인: `SELECT failed_count, last_failed_wal FROM pg_stat_archiver;` · `SELECT slot_name, active, restart_lsn FROM pg_replication_slots;` 와 임시 파일 `SELECT datname, temp_bytes FROM pg_stat_database;`"
+  short:
+  - "(2차·승인 후) 보관(archive) 실패 해소·미사용 복제 슬롯 제거(standby 재구축 영향)·불필요 덤프 정리·볼륨 증설 — 롤백: 정리 대상 목록·백업 확인, 슬롯 제거는 되돌릴 수 없어 승인 필수"
+  mid:
+  - "테이블 파티셔닝·오래된 데이터 아카이빙과 autovacuum 상태 정비"
+  long:
+  - "데이터·pg_wal 볼륨 85% 경보와 용량 계획 수립"
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: 서버 로그 문구 — 9.x~18 공통
+- id: DB-PG-004
+  layer: db
+  product:
+  - postgresql
+  match:
+    regex: 'PANIC:'
+  severity: critical
+  category: internal
+  verdict: 서버 PANIC — 인스턴스 중단
+  immediate:
+  - "서버 로그의 PANIC 줄과 직전 ERROR(could not write·fsync 등) 문구 기록, 로그 파일 사본 보존 (읽기 전용)"
+  - "프로세스 상태 `pg_ctl status -D <data_directory>` 또는 `systemctl status postgresql*` 와 같은 시각 `dmesg -T | tail -50` · `df -h <data_directory>`"
+  short:
+  - "(2차·승인 후) 원인(WAL 손상·디스크 공간·I/O) 해소 후 기동해 WAL 재생 복구 완료 확인 — 영향: 복구 중 접속 불가, 롤백: 기동 실패 시 백업·복제본 전환 절차로"
+  mid:
+  - "결함 스토리지 교체와 마이너 버전 패치·복구"
+  long:
+  - "HA(스트리밍 복제) 구성 검토와 PANIC 로그 경보"
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: 서버 로그 문구 — 9.x~18 공통
+# 룰 학습 2차(DB) 승격 — 2026-10-15 · 벤더 문서 대조 GPT 11차(collect/rules_learn_2026-10-13/gpt_review_batch2.md)
+- id: DB-PG-005
+  layer: db
+  product:
+  - postgresql
+  match:
+    regex: could not fork new process for connection
+  severity: error
+  category: capacity
+  verdict: PostgreSQL 연결 프로세스 생성 실패 — 새 접속 불가(OS 메모리·프로세스 한도 등)
+  immediate:
+  - 줄 끝의 OS 사유(Resource temporarily unavailable·Cannot allocate memory) 기록
+  - "같은 시각 OS 프로세스 수·메모리 확인: postgres 계정 `ulimit -u` · `ps -u postgres | wc -l` · `free -m` (읽기 전용)"
+  short:
+  - "(2차·승인 후) max_connections·OS 프로세스 한도(limits.conf nproc)·메모리 여유 조정 — 롤백: 변경 전 설정 파일 백업"
+  mid:
+  - 커넥션 풀(pgbouncer 등)로 연결 수 관리
+  long:
+  - "서버 메모리·프로세스 용량 재산정과 연결 수 경보"
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  version_note: '''could not fork new process for connection: <OS 사유>'' — 뒤의 OS 사유를 원인 분석에 보존(GPT 11차)'
+- id: DB-PG-007
+  layer: db
+  product:
+  - postgresql
+  match:
+    regex: could not fork (?:autovacuum (?:worker|launcher) process|(?:background )?worker process)
+  severity: warn
+  category: capacity
+  verdict: PostgreSQL 백그라운드 작업 프로세스 생성 실패 — 자동 정리(autovacuum)·백그라운드 작업 지연
+  immediate:
+  - 줄 끝의 OS 사유 기록, 반복 빈도 확인
+  - "같은 시각 OS 프로세스 수·메모리 확인: postgres 계정 `ulimit -u` · `ps -u postgres | wc -l` · `free -m` 와 autovacuum 진행 `SELECT pid, LEFT(query,60) FROM pg_stat_activity WHERE backend_type='autovacuum worker';` (10+, 읽기 전용)"
+  short:
+  - "(2차·승인 후) max_connections·OS 프로세스 한도(limits.conf nproc)·메모리 여유 조정 — 롤백: 변경 전 설정 파일 백업"
+  mid:
+  - 커넥션 풀(pgbouncer 등)로 연결 수 관리
+  long:
+  - "서버 메모리·프로세스 용량 재산정과 autovacuum 지연 감시"
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  version_note: '''could not fork autovacuum worker process: …'' 등 — 연결 실패(DB-PG-005, error)와 심각도 구분(GPT 11차)'
+- id: DB-PG-006
+  layer: db
+  product:
+  - postgresql
+  match:
+    regex: 'invalid page in block \d+ of relation|could not read block \d+ in file "[^"\r\n]+": (?:read only \d+ of \d+ bytes|[^\r\n]*Input/output error)'
+  severity: critical
+  category: storage
+  verdict: PostgreSQL 데이터 블록 손상·읽기 실패 — 데이터 무결성 위험(디스크·파일 원인 구분 필요)
+  immediate:
+  - "같은 시각 OS 디스크 I/O 오류 확인: `dmesg -T | tail -50` (읽기 전용)"
+  - "블록 번호·relation 경로 기록, 경로의 객체 확인 `SELECT relname FROM pg_class WHERE relfilenode=<파일번호>;` 와 최근 백업·복제본 상태 확인"
+  short:
+  - "(2차·승인 후) 손상 객체 식별(amcheck·pg_amcheck 14+) 후 백업 복원·REINDEX 판단 — 롤백: 작업 전 데이터 디렉터리 백업"
+  mid:
+  - data_checksums 사용 여부 검토
+  long:
+  - 디스크·백업 검증 체계 강화
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  version_note: '''invalid page in block N of relation …'', ''could not read block N in file "…": read only X of Y bytes'''

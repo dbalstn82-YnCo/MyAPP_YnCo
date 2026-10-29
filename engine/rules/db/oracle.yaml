@@ -1,0 +1,169 @@
+# DBMS — Oracle 에러코드 시그니처
+rules:
+- id: DB-ORA-004
+  layer: db
+  product:
+  - oracle
+  match:
+    regex: ORA-00060
+  severity: critical
+  category: lock
+  verdict: 데드락 (ORA-00060)
+  immediate:
+  - "`grep -n \"ORA-00060\" <alert_SID.log> | tail -10` 로 trace 경로 확인 뒤 `grep -n -A25 \"Deadlock graph\" <trace 파일> | head -60` 으로 데드락 그래프·SQL 확인"
+  - "반복 여부: `grep -c \"ORA-00060\" <alert_SID.log>` 와 최근 발생 시각 — 같은 SQL 쌍이 반복되면 유발 세션·모듈 특정(실행 제한은 2차)"
+  short:
+  - "(2차·승인 후, 롤백: 제한 해제) 반복 유발 배치·모듈이 특정되면 업무 담당 합의 뒤 해당 작업을 잠시 멈추거나 실행 시간 분리"
+  - 동일 데드락 반복 여부 감시, 유발 SQL 개발팀 통보
+  mid:
+  - 트랜잭션 락 획득 순서 통일, 인덱스 점검
+  long:
+  - 업무 로직 트랜잭션 설계 개선
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: ORA/TNS 코드·alert log 문구 — 10gR2~26ai 공통
+- id: DB-ORA-001
+  layer: db
+  product:
+  - oracle
+  match:
+    regex: ORA-00600|ORA-07445
+  severity: critical
+  category: internal
+  verdict: Oracle 내부 오류 (ORA-600/7445)
+  immediate:
+  - "`grep -nE \"ORA-00600|ORA-07445\" <alert_SID.log> | tail -20` 로 첫 인수·trace 경로·incident 번호 기록 (경로: `select value from v$diag_info where name='Diag Trace';`, 11g+)"
+  - "11g+: `adrci exec=\"set homepath <home>; show problem; show incident -mode basic\"` 로 incident 목록, `select instance_name, status from v$instance;` 로 OPEN 유지 여부 확인"
+  short:
+  - 오류 인자 기준 벤더 KB 조회, SR 접수
+  mid:
+  - 권고 패치(PSU/RU) 적용 계획 수립
+  long:
+  - 정기 패치 사이클 수립
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: ORA/TNS 코드·alert log 문구 — 10gR2~26ai 공통
+- id: DB-ORA-009
+  layer: db
+  product:
+  - oracle
+  match:
+    regex: ORA-01555
+  severity: error
+  category: undo
+  verdict: 스냅샷 과거 오류 (ORA-01555)
+  immediate:
+  - "`select begin_time, maxquerylen, maxqueryid, tuned_undoretention, ssolderrcnt from v$undostat where begin_time > sysdate-1/24 order by begin_time;` (10g+) — maxquerylen 이 tuned_undoretention 보다 길면 장기 조회 원인"
+  - "장기 실행 쿼리: `select sid, username, sql_id, last_call_et from v$session where status='ACTIVE' and last_call_et > 600 order by last_call_et desc;` — 10분 이상 실행 중인 조회 확인(세션 처리는 2차)"
+  short:
+  - "(2차·승인 후, 롤백: 불가 — 취소된 조회는 다시 실행) 업무 담당 확인 뒤 원인 장기 조회 세션 종료 또는 배치 시간 분리"
+  - undo_retention·언두 테이블스페이스 사용률 점검
+  mid:
+  - 장기 쿼리 튜닝, 배치 시간대 조정
+  long:
+  - 대용량 배치 커밋 전략 재설계
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: ORA/TNS 코드·alert log 문구 — 10gR2~26ai 공통
+- id: DB-ORA-012
+  layer: db
+  product:
+  - oracle
+  match:
+    regex: unable to extend|ORA-01653|ORA-01654
+  severity: critical
+  category: storage
+  verdict: 테이블스페이스 공간 부족 (ORA-1653/1654)
+  immediate:
+  - "사용률: `select tablespace_name, round(used_percent,1) pct from dba_tablespace_usage_metrics where used_percent > 85 order by 2 desc;` (11g+) — 대상 TS 가 95% 이상이면 확정"
+  - "AUTOEXTEND 여지: `select file_name, autoextensible, round(bytes/1048576) mb, round(maxbytes/1048576) max_mb from dba_data_files where tablespace_name='<TS>';` 와 `df -h <datafile 경로>` — 모두 MAXSIZE 도달이면 2차에서 파일 추가"
+  short:
+  - "(2차·승인 후, 롤백: 추가 파일은 줄일 수 없어 용량 계획 반영) `alter tablespace <TS> add datafile '<path>' size 4G autoextend on maxsize 32G;` 또는 기존 파일 AUTOEXTEND 활성화"
+  - 테이블스페이스 증가 추이 확인, OS 여유 공간 점검
+  mid:
+  - 파티셔닝·아카이빙으로 대형 세그먼트 정리
+  long:
+  - 용량 계획(Capacity Planning) 정례화
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: ORA/TNS 코드·alert log 문구 — 10gR2~26ai 공통
+- id: DB-ORA-020
+  layer: db
+  product:
+  - oracle
+  match:
+    regex: ORA-00020|maximum number of processes
+  severity: critical
+  category: connection
+  verdict: 프로세스/세션 한도 초과 (ORA-00020)
+  immediate:
+  - '`select resource_name,current_utilization,limit_value from v$resource_limit where resource_name in (''processes'',''sessions'');` 로 한도 도달 확인(읽기 전용, DBA 계정)'
+  - '`select machine,program,count(*) from v$session where type=''USER'' group by machine,program order by 3 desc;` 로 급증 출처(WAS 풀) 확인'
+  short:
+  - '(2차·승인 후, 롤백: 없음 — 끊긴 세션은 재접속) 유휴·비정상 세션 정리(ALTER SYSTEM KILL SESSION ''sid,serial#''), WAS 풀 최대값 축소 요청'
+  - processes·sessions 파라미터와 실사용량 비교
+  mid:
+  - WAS 풀 총합이 DB 한도 이내가 되도록 재산정
+  long:
+  - 커넥션 총량 관리 체계(서비스별 상한) 수립
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: ORA/TNS 코드·alert log 문구 — 10gR2~26ai 공통
+- id: DB-ORA-025
+  layer: db
+  product:
+  - oracle
+  match:
+    regex: ORA-00257|archiver error
+  severity: critical
+  category: storage
+  verdict: 아카이브 로그 공간 고갈 (ORA-00257)
+  immediate:
+  - '`select dest_name,status,error from v$archive_dest where status<>''INACTIVE'';` 와 `select * from v$recovery_file_dest;` 로 아카이브 대상·FRA 사용률 확인 — DB 쓰기 전면 중단 상태'
+  - '`df -h <archive_dest>` 로 파일시스템 여유 확인, RMAN `list backup of archivelog all completed after ''sysdate-1'';` 로 마지막 아카이브 백업 시각 확인'
+  short:
+  - '(2차·승인 후, 롤백: 지운 아카이브는 되돌릴 수 없음 — 백업 완료 확인 후) RMAN `backup archivelog all delete input;` 또는 db_recovery_file_dest_size 상향'
+  - 아카이브 생성량 추이 확인, 백업 주기 조정
+  mid:
+  - 아카이브 영역 증설
+  long:
+  - 백업·보관 정책 재수립
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: ORA/TNS 코드·alert log 문구 — 10gR2~26ai 공통

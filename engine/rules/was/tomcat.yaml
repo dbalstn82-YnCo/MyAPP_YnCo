@@ -1,0 +1,130 @@
+# WAS — Apache Tomcat 시그니처 (룰 학습 1차 2026-10-13: Claude 초안 → 기계 검증 → GPT 벤더 문서 대조, 근거 URL 은 version_note) · 2026-10-16 G7a 4단 보강
+rules:
+- id: WAS-TC-015
+  layer: was
+  product:
+  - tomcat
+  match:
+    regex: Error parsing HTTP request header|Invalid character found in (?:method name|the request target)
+  severity: info
+  category: connection
+  verdict: 잘못된 형식의 HTTP 요청(스캐너·HTTPS 를 HTTP 포트로 보냄 등) — 단발이면 장애 아님
+  immediate:
+  - 같은 시각 접속 IP·반복 빈도 확인(access log)
+  - "`awk '$9==400{print $1}' $CATALINA_BASE/logs/localhost_access_log.$(date +%Y-%m-%d).txt | sort | uniq -c | sort -rn | head` 로 400 출처 IP 집계 — 내부 업무 IP 면 연동 오류, 외부 스캐너면 장애 아님"
+  short:
+  - 연동 측이 HTTPS 를 HTTP 포트로 보내는지 확인
+  - "(2차) 업무 클라이언트가 원인이면 URL 인코딩·프로토콜 수정 요청, 불가피할 때만 relaxedQueryChars 조정(승인 후, 롤백: server.xml 백업)"
+  mid:
+  - 외부 노출 포트를 WEB(프록시) 뒤로
+  long:
+  - 비정상 요청 차단 정책
+  - "400 출처 IP 추세 감시와 WAF 차단 목록 정기 갱신"
+  versions:
+  - Tomcat 7.0
+  - Tomcat 8.5
+  - Tomcat 9.0
+  - Tomcat 10.1
+  - Tomcat 11.0
+  version_note: coyote/http11 LocalStrings — https://github.com/apache/tomcat/blob/main/java/org/apache/coyote/http11/LocalStrings.properties
+- id: WAS-TC-016
+  layer: was
+  product:
+  - tomcat
+  match:
+    regex: Keystore was tampered with, or password was incorrect|Alias name \[[^\]]+\] does not identify a key entry|Failed to load keystore|The AJP Connector is configured with secretRequired="true" but the secret attribute is either null or ""
+  severity: critical
+  category: security
+  verdict: TLS 키스토어·AJP secret 설정 오류 — 해당 커넥터 기동 실패(침해 사고 아님)
+  immediate:
+  - 최근 인증서·키스토어·server.xml 변경 여부 확인
+  - "`ls -l --time-style=long-iso $CATALINA_BASE/conf/server.xml <keystore경로>` 로 변경 시각, `keytool -list -v -keystore <keystore경로> | grep -E 'Alias name|Valid until'` 로 별칭·만료 확인(비밀번호 기록 금지)"
+  short:
+  - "(2차·승인 후, 롤백: 기존 키스토어·server.xml 백업 복원) 키스토어 경로·비밀번호·별칭, AJP secret 설정 바로잡은 뒤 Tomcat 재기동"
+  mid:
+  - 인증서 만료·교체 일정 관리
+  long:
+  - 인증서 교체 절차 표준화
+  - "인증서 만료 60/30/7일 전 경보 등록"
+  versions:
+  - Tomcat 8.5
+  - Tomcat 9.0
+  - Tomcat 10.1
+  - Tomcat 11.0
+  version_note: AJP secretRequired 는 9.0.31·8.5.51 이후. Keystore 문구는 JDK 구현 문구 — https://github.com/apache/tomcat/blob/main/java/org/apache/tomcat/util/net/LocalStrings.properties , https://github.com/apache/tomcat/blob/9.0.x/java/org/apache/coyote/ajp/LocalStrings.properties
+- id: WAS-TC-019
+  layer: was
+  product:
+  - tomcat
+  match:
+    regex: Executor rejected socket \[[^\]]+\] for processing|Socket processing request was rejected for
+  severity: error
+  category: thread
+  verdict: 요청 처리 스레드 풀이 새 연결을 거절 — 스레드 고갈
+  immediate:
+  - 같은 시각 느린 요청·외부 연동·DB 대기 여부 확인(스레드 덤프는 2차)
+  - "`curl -s -u <user> 'http://localhost:<port>/manager/status?XML=true' | grep -o '<threadInfo[^>]*>'` 로 currentThreadsBusy·maxThreads 확인(manager-status 역할, 읽기 전용)"
+  short:
+  - 지연 원인 해소, maxThreads·executor 설정 검토
+  - "(2차·승인 후, 롤백: server.xml 백업 복원) Executor maxThreads·maxQueueSize 조정 후 재기동 일정 반영"
+  mid:
+  - 응답 시간 상위 URL 개선
+  long:
+  - 용량 계획·부하 분산
+  - "currentThreadsBusy/maxThreads 70% 경보 등록"
+  versions:
+  - Tomcat 8.5
+  - Tomcat 9.0
+  - Tomcat 10.1
+  - Tomcat 11.0
+  version_note: tomcat/util/net LocalStrings endpoint.executor.fail — https://github.com/apache/tomcat/blob/main/java/org/apache/tomcat/util/net/LocalStrings.properties
+- id: WAS-TC-020
+  layer: was
+  product:
+  - tomcat
+  match:
+    regex: Failed to open access log file|Failed to create directory \[[^\]]+\] for access logs
+  severity: error
+  category: disk
+  verdict: 접근 로그 파일 열기 실패 — 디스크 부족·경로·권한 문제
+  immediate:
+  - "`grep -n -A3 'AccessLogValve' $CATALINA_BASE/conf/server.xml` 로 directory·prefix 확인 후 `df -h <로그경로>` 와 `df -i <로그경로>` 로 공간·inode 확인 — 95% 이상이면 공간 원인"
+  - "`ls -ld <로그경로>` 와 `ps -o user= -p <PID>` 로 Tomcat 실행 계정의 쓰기 권한 확인 — 디렉터리 없음·소유자 불일치면 경로·권한 원인"
+  short:
+  - "(2차·승인 후, 롤백: 정리 전 압축본 보관·변경 전 소유자 기록) 오래된 접근 로그 압축·이동으로 공간 확보, 또는 디렉터리 생성·실행 계정 소유로 권한 바로잡기"
+  mid:
+  - "AccessLogValve maxDays 와 logrotate 로 로그 보관·순환 정책 적용"
+  long:
+  - "로그 볼륨 분리와 사용률 85%/95% 감시"
+  versions:
+  - Tomcat 7.0
+  - Tomcat 8.5
+  - Tomcat 9.0
+  - Tomcat 10.1
+  - Tomcat 11.0
+  version_note: catalina/valves LocalStrings accessLogValve.openFail — 디스크 부족 전용 아님 — https://github.com/apache/tomcat/blob/main/java/org/apache/catalina/valves/LocalStrings.properties
+- id: WAS-TC-022
+  layer: was
+  product:
+  - tomcat
+  match:
+    regex: SSLv3 has been explicitly enabled\. This protocol is known to be insecure
+  severity: warn
+  category: security
+  verdict: 취약 프로토콜(SSLv3) 사용 설정
+  immediate:
+  - server.xml 커넥터의 sslEnabledProtocols 확인
+  - "`grep -n -o -E '(sslEnabledProtocols|protocols)=\"[^\"]*\"' $CATALINA_BASE/conf/server.xml` 로 SSLv3 가 포함된 커넥터 확인"
+  short:
+  - "(2차·승인 후, 롤백: server.xml 백업 복원) SSLHostConfig protocols 에서 SSLv3 제거(TLSv1.2+TLSv1.3) 후 재기동, 구형 클라이언트 영향 사전 확인"
+  mid:
+  - TLS 설정 표준 점검
+  long:
+  - 정기 보안 점검
+  - "취약 프로토콜·암호 스위트 정기 스캔(openssl s_client) 결과 보관"
+  versions:
+  - Tomcat 8.5
+  - Tomcat 9.0
+  - Tomcat 10.1
+  - Tomcat 11.0
+  version_note: tomcat/util/net LocalStrings — https://github.com/apache/tomcat/blob/main/java/org/apache/tomcat/util/net/LocalStrings.properties

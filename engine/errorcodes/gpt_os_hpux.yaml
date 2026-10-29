@@ -1,0 +1,115 @@
+product: hpux
+layer: os
+note: GPT 협업 수집분 — 벤더 공식 문서와 대조 후 확정
+codes:
+- code: HPUX-SWAP-RESERVATION
+  severity: critical
+  category: memory
+  title: 스왑 예약 실패
+  vendor_cause: 프로세스가 메모리를 확보할 때 필요한 스왑 예약(장치 스왑 + pseudo-swap)이 한도에 도달해 지연(deferred)
+    스왑 예약이 실패한 상태. 해당 프로세스는 메모리 확보에 실패해 종료될 수 있으며 메모리 과다 사용·스왑 과소가 원인.
+  immediate:
+  - '`swapinfo -tam` 의 total PCT USED 와 reserve 행 확인, 로그의 pid 로 `ps -fp <PID>` 해당
+    프로세스 확인'
+  - '`UNIX95= ps -eo pid,vsz,user,comm | sort -k2 -rn | head -10` 으로 가상 메모리 상위 프로세스
+    확인(정리는 2차·승인 후)'
+  short:
+  - (2차·승인 후) Deferred swap reservation failure 발생 PID와 메모리 소비를 분석하고 비필수 프로세스 종료 여부를
+    업무 담당과 결정
+  mid:
+  - 물리 메모리와 device swap을 증설하고 애플리케이션 메모리 설정을 조정
+  long:
+  - swap 예약률과 메모리 사용량 임계치 경보를 운영
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - HP-UX 11i v1 (11.11)
+  - HP-UX 11i v2 (11.23)
+  - HP-UX 11i v3 (11.31)
+  version_note: syslog.log 문구 기반 — 11i v1~v3 공통(형식 동일)
+- code: HPUX-VXFS-FULL
+  severity: critical
+  category: storage
+  title: VxFS 파일시스템 가득참
+  vendor_cause: VxFS 가 할당할 블록(extent)을 찾지 못해 쓰기가 실패한 상태('vx_nospace ... file system
+    full'). 공간 고갈 또는 단편화로 요청 크기의 연속 extent 가 없을 때 발생한다.
+  immediate:
+  - '`bdf <mount>` 로 사용률, `du -kx <mount> | sort -rn | head -15` 로 큰 디렉터리 확인(정리는 2차·승인
+    후)'
+  - syslog 의 vx_nospace 메시지에서 장치(/dev/<vg>/<lv>)·빈도 확인, 여유가 있는데도 반복되면 `fsadm -F vxfs
+    -E <mount>` 로 단편화 보고만 확인
+  short:
+  - 로그와 core 및 애플리케이션 데이터 증가 원인을 분석
+  mid:
+  - 볼륨과 파일시스템을 증설하고 보존정책을 재설계
+  long:
+  - VxFS 사용률과 증가율 기반 선제 증설 경보를 운영
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - HP-UX 11i v1 (11.11)
+  - HP-UX 11i v2 (11.23)
+  - HP-UX 11i v3 (11.31)
+  version_note: VxFS(OnlineJFS) 전 버전
+- code: HPUX-LVM-LOST-QUORUM
+  severity: critical
+  category: storage
+  title: LVM 쿼럼 상실
+  vendor_cause: VG 의 과반 PV 에 접근할 수 없어 LVM 이 쿼럼을 잃은 상태('Lost quorum'). 쿼럼이 복구될 때까지
+    해당 VG 의 구성 변경·쓰기가 중단될 수 있으며 디스크·경로 다중 장애가 원인.
+  immediate:
+  - "`vgdisplay -v /dev/<vg> | head -60` 으로 VG Status·Cur PV/Act PV 와 PV Status(unavailable) 확인 — Act PV 가 Cur PV 의 과반 미만이면 쿼럼 상실 확정"
+  - "`grep -i -E 'quorum|lvm' /var/adm/syslog/syslog.log | tail -30` 으로 시각·장치, `ioscan -fnC disk`(11i v1/v2) 또는 `ioscan -fNC disk`(11i v3) 로 해당 디스크 S/W State 확인 — NO_HW 면 장치·경로 측"
+  short:
+  - SAN과 PVLink 및 디스크 장애를 분석해 quorum 상실 원인을 확인
+  mid:
+  - 실패 PV 또는 경로를 복구하고 VG 활성 상태를 검증
+  long:
+  - LVM quorum과 PV 가용성을 상시 모니터링
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - HP-UX 11i v1 (11.11)
+  - HP-UX 11i v2 (11.23)
+  - HP-UX 11i v3 (11.31)
+  version_note: syslog.log 문구 기반 — 11i v1~v3 공통(형식 동일)
+- code: HPUX-PVLINK-FAILED
+  severity: critical
+  category: storage
+  title: PV 경로 접근 실패
+  vendor_cause: LVM 대체 링크(PVLinks) 중 하나의 경로로 PV 에 접근하지 못한 상태('Path ... to PV ... Failed').
+    남은 경로로 전환되었으면 I/O 는 계속되며 FC 케이블·HBA·스위치·스토리지 포트 장애가 원인.
+  immediate:
+  - "`vgdisplay -v /dev/<vg> | grep -E 'PV Name|PV Status'` 로 PV 별 주/대체 링크(Alternate Link)와 상태 확인 — PV 가 available 이면 남은 경로로 I/O 유지 (11i v1/v2)"
+  - "`grep -i -E 'PVLink|Failed|switch' /var/adm/syslog/syslog.log | tail -30` 으로 경로 실패 시각, `ioscan -fnC fc` 로 FC HBA S/W State 확인 — NO_HW·ERROR 면 HBA·케이블 측"
+  short:
+  - ioscan과 pvdisplay 및 SAN 로그로 경로 장애 원인을 분석
+  mid:
+  - 결함 FC 경로와 HBA 및 케이블 또는 스토리지 포트를 복구
+  long:
+  - PVLink 상태와 SAN path failover 이벤트를 지속 감시
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - HP-UX 11i v1 (11.11)
+  - HP-UX 11i v2 (11.23)
+  version_note: PVLinks(LVM 대체 링크)는 11i v1/v2 — v3 는 네이티브 멀티패스(Native Multi-Pathing,
+    'PVLink' 문구 없음)
+- code: HPUX-SCSI-ASYNC-WRITE
+  severity: critical
+  category: disk
+  title: SCSI 비동기 쓰기 오류
+  vendor_cause: 'SCSI 디스크에 대한 비동기 쓰기 I/O 가 실패했다는 커널 메시지(''SCSI: Async write error'').
+    메시지의 dev 번호가 대상 장치이며 디스크·경로 장애가 흔한 원인이고 데이터가 기록되지 못했을 수 있다.'
+  immediate:
+  - "`grep -i -E 'Async write error|SCSI' /var/adm/syslog/syslog.log | tail -30` 으로 dev 번호(major/minor)·errno·block·시각 기록 — 같은 dev 반복이면 장치 결함 의심"
+  - "`ls -l /dev/dsk | grep <minor>`(11i v3 는 `/dev/disk` 도) 로 dev 번호를 장치 파일에 대응, `ioscan -fnC disk`(11i v1/v2) 또는 `ioscan -fNC disk`(11i v3) 로 S/W State 확인 — NO_HW·ERROR 면 장치·경로 장애"
+  - "`tail -50 /var/opt/resmon/log/event.log` 로 같은 장치의 EMS 디스크 이벤트 확인 — SERIOUS/CRITICAL 이면 하드웨어 결함(3차 HPE 의뢰)"
+  short:
+  - SCSI와 AUTOPATH 및 SAN과 디스크 로그를 상관분석
+  mid:
+  - 결함 디스크 또는 경로를 교체하고 데이터 정합성을 검증
+  long:
+  - SCSI 쓰기 오류와 경로 장애 및 디스크 상태를 실시간 감시
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - HP-UX 11i v1 (11.11)
+  - HP-UX 11i v2 (11.23)
+  - HP-UX 11i v3 (11.31)
+  version_note: syslog.log 문구 기반 — 11i v1~v3 공통(형식 동일)

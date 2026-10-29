@@ -1,0 +1,161 @@
+# 5차 보강(2026-10-16) — GPT 핵심 코드 대조에서 빠진 Altibase 코드 추가.
+# 근거: ALTIBASE/Documents (github, 제조사 공식 저장소) Manuals/Altibase_7.1·7.3 'Error Message Reference' (0x코드·이름·Cause·Action 동일 확인)
+#       뷰·메타: 7.3 'General Reference-2. The Data Dictionary' (V$VERSION·V$MEMSTAT·V$REPGAP·V$REPSENDER·V$PROPERTY·SYSTEM_.SYS_REPLICATIONS_·SYS_REPL_HOSTS_·SYS_CONSTRAINTS_),
+#       프로퍼티: 'General Reference-1' (REPLICATION_CONNECT_TIMEOUT·REPLICATION_RECEIVE_TIMEOUT — ALTER SYSTEM 변경 가능)
+# 코드 표기: 문서 0x11018 → 로그·사전 ERR-11018 (16진 5자리, 파서 _ALTI_CODE)
+product: altibase
+layer: db
+note: 5차 보강 — 공식 Error Message Reference(7.1·7.3)와 대조해 추가
+codes:
+- code: ERR-11018
+  severity: error
+  category: storage
+  title: 백업 데이터 파일 버전 비호환
+  vendor_cause: "smERR_ABORT_BACKUP_DISK_INVALID — 백업 데이터 파일의 버전 정보(Version ID·Bit·Endian·LogSize·Transaction Table Size)가 현재 서버 저장 관리자와 호환되지 않음. 다른 버전·다른 플랫폼에서 받은 백업으로 복원하려 할 때 흔히 발생."
+  vendor_action: 데이터베이스를 export/import 하거나, 데이터 파일과 호환되는 이전 버전의 저장 관리자를 사용한다.
+  vendor_url: https://github.com/ALTIBASE/Documents/blob/master/Manuals/Altibase_7.3/kor/Error%20Message%20Reference.md
+  immediate:
+  - "메시지의 Backup DB=>[…] 와 Server=>[…] 값(Version ID·Bit·Endian·LogSize·Transaction Table Size)을 그대로 기록해 어느 항목이 다른지 확인"
+  - "isql 로 sys 접속 후 `SELECT PRODUCT_VERSION, SM_VERSION FROM V$VERSION;` 로 현재 서버 버전을 확인하고 백업을 만든 서버의 버전·OS·비트와 대조"
+  - "`tail -100 $ALTIBASE_HOME/trc/altibase_boot.log` 로 복원·기동 단계의 직전 메시지 확인(복원 재시도는 2차)"
+  short:
+  - "(2차·승인 후, 롤백: 작업 전 현재 데이터 파일·로그 파일 사본 보관) 같은 버전·플랫폼에서 만든 백업으로 다시 복원하거나, 버전이 다르면 원본 서버에서 aexport·iLoader 로 내려받아 이관"
+  mid:
+  - "백업마다 생성 서버의 제품 버전·OS·비트를 메타 정보로 함께 보관하고 복원 대상 서버와 일치 여부를 사전 점검"
+  long:
+  - "버전 업그레이드 시 기존 백업의 복원 가능 기간을 정하고 업그레이드 직후 새 버전으로 전체 백업을 다시 수행"
+  versions:
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ALTIBASE/Documents 7.1·7.3 Error Message Reference 에서 0x11018 이름·Cause·Action 동일 확인. 6.x 이하는 공개 문서로 대조하지 못함
+  source: "공식 문서 대조(2026-10-16 5차 보강)"
+- code: ERR-4000F
+  severity: critical
+  category: internal
+  title: 메시지 파일(msb) 적재 실패
+  vendor_cause: "mmERR_FATAL_LOAD_MSB_ERROR — 서버가 메시지 파일(msb)을 찾거나 열지 못함(FATAL 등급). 패치·재설치 중 msg 디렉터리 누락, ALTIBASE_HOME 환경변수 오설정, 파일 권한 변경이 흔한 원인이며 서버가 기동되지 못한다."
+  vendor_action: msb 파일이 msg 디렉터리에 있는지 확인한다.
+  vendor_url: https://github.com/ALTIBASE/Documents/blob/master/Manuals/Altibase_7.3/kor/Error%20Message%20Reference.md
+  immediate:
+  - "`echo $ALTIBASE_HOME` 과 `ls -l $ALTIBASE_HOME/msg/ | head -30` 로 msg 디렉터리·msb 파일 존재와 소유자·권한 확인"
+  - "메시지에 표시된 파일 이름을 실제 파일과 대조하고 `tail -50 $ALTIBASE_HOME/trc/altibase_boot.log` 로 기동 실패 직전 기록 확인"
+  - "같은 버전 다른 서버의 msg 디렉터리와 `ls -l` 결과(파일 수·크기)를 비교하고 최근 패치·파일 정리 이력 확인"
+  short:
+  - "(2차·승인 후, 롤백: 복사 전 현재 msg 디렉터리 백업) 같은 버전·패치 수준 설치본에서 누락된 msb 파일을 복원하고 소유자·권한을 원래대로 맞춘 뒤 서버 기동"
+  mid:
+  - "패치 절차서에 msg 디렉터리 무결성(파일 목록·체크섬) 확인 단계를 추가"
+  long:
+  - "ALTIBASE_HOME 아래 설치 파일을 정리 대상에서 제외하는 운영 기준을 두고 설치 파일 체크섬을 정기 점검"
+  versions:
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ALTIBASE/Documents 7.1·7.3 Error Message Reference 에서 확인. 문서는 'msg 디렉터리'라고만 적음 — $ALTIBASE_HOME/msg 는 설치 구조 기준. 6.x 이하는 미대조
+  source: "공식 문서 대조(2026-10-16 5차 보강)"
+- code: ERR-61055
+  severity: error
+  category: memory
+  title: 이중화 메모리 할당 실패
+  vendor_cause: "rpERR_ABORT_MEMORY_ALLOC — 이중화(rp) 모듈이 메모리를 할당하지 못함(메시지에 함수·변수 이름 표시). OS 메모리 부족, 서버 프로세스 메모리 증가, 이중화 갭 누적에 따른 버퍼 증가가 흔한 원인."
+  vendor_action: 할당 가능한 메모리 상태를 확인한 뒤 다시 시도한다.
+  vendor_url: https://github.com/ALTIBASE/Documents/blob/master/Manuals/Altibase_7.3/kor/Error%20Message%20Reference.md
+  immediate:
+  - "`free -m` 과 `ps -eo pid,rss,vsz,comm --sort=-rss | head -10` 로 OS 여유 메모리와 altibase 프로세스 크기 확인"
+  - "isql 로 sys 접속 후 `SELECT NAME, ALLOC_SIZE, MAX_TOTAL_SIZE FROM V$MEMSTAT ORDER BY ALLOC_SIZE DESC LIMIT 10;` 로 모듈별 메모리 상위 확인(읽기 전용)"
+  - "`SELECT REP_NAME, REP_GAP FROM V$REPGAP;` 와 `tail -100 $ALTIBASE_HOME/trc/altibase_rp.log` 로 이중화 갭·같은 시각 이중화 오류 확인"
+  short:
+  - "(2차·승인 후, 롤백: 중지 전 V$REPGAP·이중화 상태 기록, 문제 시 ALTER REPLICATION <rep> START 로 원상) 메모리 원인 해소 뒤 해당 이중화를 ALTER REPLICATION <rep> STOP / START 로 재개"
+  mid:
+  - "V$MEMSTAT 상위 모듈 추이와 이중화 갭을 함께 수집해 메모리 증가 원인(갭 누적·대량 트랜잭션)을 특정"
+  long:
+  - "서버 메모리 사용률·V$REPGAP 갭 크기 감시 임계를 등록하고 이중화 대상 대량 배치는 시간대를 분산"
+  versions:
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ALTIBASE/Documents 7.1·7.3 Error Message Reference 에서 확인, V$MEMSTAT·V$REPGAP 칼럼은 7.3 Data Dictionary 기준. 6.x 이하는 미대조
+  source: "공식 문서 대조(2026-10-16 5차 보강)"
+- code: ERR-31017
+  severity: warn
+  category: upstream
+  title: 이중화 객체 없음
+  vendor_cause: "qpERR_ABORT_QCM_REPL_NOT_FOUND — 지정한 이름의 이중화가 아직 생성되지 않음(메타에 없음). 이중화 이름 오타, 상대 서버에만 생성, 재구성 중 삭제 후 미생성이 흔한 원인."
+  vendor_action: 이중화를 먼저 생성하고 이중화 이름이 올바른지 확인한다.
+  vendor_url: https://github.com/ALTIBASE/Documents/blob/master/Manuals/Altibase_7.3/kor/Error%20Message%20Reference.md
+  immediate:
+  - "isql 로 sys 접속 후 `SELECT REPLICATION_NAME, IS_STARTED, ITEM_COUNT FROM SYSTEM_.SYS_REPLICATIONS_;` 로 등록된 이중화 이름을 확인하고 명령·스크립트의 이름과 대조"
+  - "상대 서버에서도 같은 조회를 해 양쪽 구성이 일치하는지 보고 `SELECT REPLICATION_NAME, HOST_IP, PORT_NO FROM SYSTEM_.SYS_REPL_HOSTS_;` 로 대상 호스트 확인"
+  short:
+  - "(2차·승인 후, 롤백: DROP REPLICATION <rep>) 이름 오류면 스크립트를 고치고, 실제 미생성이면 이중화 설계서대로 양쪽에 CREATE REPLICATION 후 시작"
+  mid:
+  - "이중화 생성·삭제 스크립트를 양쪽 서버 한 묶음으로 관리하고 수행 후 SYS_REPLICATIONS_ 대조"
+  long:
+  - "이중화 구성표(이름·대상 테이블·호스트)를 형상관리하고 월 1회 메타와 대조 점검"
+  versions:
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ALTIBASE/Documents 7.1·7.3 Error Message Reference 에서 확인, SYS_REPLICATIONS_·SYS_REPL_HOSTS_ 칼럼은 7.3 Data Dictionary 기준. 6.x 이하는 미대조
+  source: "공식 문서 대조(2026-10-16 5차 보강)"
+- code: ERR-61012
+  severity: error
+  category: upstream
+  title: 이중화 송신자 상대 서버 접속 실패
+  vendor_cause: "rpERR_ABORT_RP_SENDER_CONNECT_PEER — 이중화 송신자(Sender)가 상대 서버에 접속하지 못함. 상대 서버 미기동, IP 주소·포트 오설정, 네트워크 장애가 원인(제조사 문서)."
+  vendor_action: 상대 서버가 기동 중인지, IP 주소와 포트 번호가 올바른지, 네트워크가 정상인지 확인한다.
+  vendor_url: https://github.com/ALTIBASE/Documents/blob/master/Manuals/Altibase_7.3/kor/Error%20Message%20Reference.md
+  immediate:
+  - "isql 로 sys 접속 후 `SELECT REPLICATION_NAME, HOST_IP, PORT_NO FROM SYSTEM_.SYS_REPL_HOSTS_;` 로 상대 IP·포트 확인"
+  - "`ping -c 5 <peer_ip>` 와 `nc -zvw3 <peer_ip> <port>` 로 경로·이중화 포트 도달 확인, 상대 서버에서 `ps -ef | grep [a]ltibase` 로 기동 여부 확인"
+  - "`tail -100 $ALTIBASE_HOME/trc/altibase_rp.log` 와 `SELECT REP_NAME, REP_GAP FROM V$REPGAP;` 로 실패 반복·갭 누적 확인 — 갭이 계속 늘면 2차 즉시 호출"
+  short:
+  - "(2차·승인 후, 롤백: 변경 전 방화벽·이중화 호스트 설정 기록 후 원복) 상대 서버 기동 또는 방화벽 포트 허용, IP 가 바뀌었으면 이중화 호스트 정보를 수정한 뒤 ALTER REPLICATION <rep> START"
+  mid:
+  - "이중화 전용 네트워크 경로를 이중화하고 REPLICATION_CONNECT_TIMEOUT(기본 10초) 값이 경로 지연에 맞는지 검토"
+  long:
+  - "V$REPSENDER 상태·V$REPGAP 갭을 상시 감시해 송신 중단을 분 단위로 경보"
+  versions:
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ALTIBASE/Documents 7.1·7.3 Error Message Reference 에서 확인(원인 3가지·조치 3가지 동일). 6.x 이하는 미대조
+  source: "공식 문서 대조(2026-10-16 5차 보강)"
+- code: ERR-61003
+  severity: error
+  category: upstream
+  title: 이중화 소켓 읽기 실패
+  vendor_cause: "rpERR_ABORT_RP_READ_SOCKET — 이중화 연결이 끊겼거나 지정한 시간 안에 데이터를 받지 못함. 네트워크 순단, 상대 서버 지연·중단, 이중화 타임아웃 과소가 흔한 원인."
+  vendor_action: 이중화 관련 타임아웃을 늘리거나, 로컬·원격 altibase_rp.log 를 확인해 연결이 끊긴 이유를 찾는다.
+  vendor_url: https://github.com/ALTIBASE/Documents/blob/master/Manuals/Altibase_7.3/kor/Error%20Message%20Reference.md
+  immediate:
+  - "로컬과 상대 서버의 `tail -100 $ALTIBASE_HOME/trc/altibase_rp.log` 를 같은 시각으로 대조해 어느 쪽이 먼저 연결을 닫았는지 확인"
+  - "isql 로 sys 접속 후 `SELECT NAME, VALUE1 FROM V$PROPERTY WHERE NAME LIKE 'REPLICATION%TIMEOUT';` 로 현재 타임아웃 값 확인(변경은 2차)"
+  - "`SELECT REP_NAME, PEER_IP, PEER_PORT, STATUS FROM V$REPSENDER;` 와 `SELECT REP_NAME, REP_GAP FROM V$REPGAP;` 로 송신자 상태·갭 확인"
+  short:
+  - "(2차·승인 후, 롤백: ALTER SYSTEM SET <property> = <이전값>) 네트워크 원인이 없으면 REPLICATION_RECEIVE_TIMEOUT 등 관련 타임아웃을 상향하고, 끊긴 이중화는 ALTER REPLICATION <rep> START 로 재개"
+  mid:
+  - "끊김 시각을 네트워크 장비·방화벽 세션 로그와 대조하고 같은 시각 장시간 트랜잭션 롤백 여부 확인"
+  long:
+  - "이중화 갭·재접속 횟수 감시 임계를 등록하고 이중화 네트워크 품질(지연·손실)을 정기 측정"
+  versions:
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ALTIBASE/Documents 7.1·7.3 Error Message Reference 에서 확인, REPLICATION_RECEIVE_TIMEOUT(기본 7200초, 운영 중 변경 가능)은 7.3 General Reference-1 기준. 6.x 이하는 미대조
+  source: "공식 문서 대조(2026-10-16 5차 보강)"
+- code: ERR-11058
+  severity: warn
+  category: internal
+  title: 고유 인덱스 중복 키
+  vendor_cause: "smERR_ABORT_smnUniqueViolation — 고유(unique) 인덱스에 같은 키의 행이 이미 있어 INSERT/UPDATE 가 실패함. 애플리케이션 중복 요청·재처리, 채번 꼬임, 양방향 이중화 키 충돌이 흔한 원인."
+  vendor_action: 중복 키를 넣거나 갱신하지 않는다. 또는 unique 제약을 제거한다(제약 제거는 정합성 훼손 위험이 있어 표준 조치에서 제외).
+  vendor_url: https://github.com/ALTIBASE/Documents/blob/master/Manuals/Altibase_7.3/kor/Error%20Message%20Reference.md
+  immediate:
+  - "애플리케이션 로그에서 실패 SQL·대상 테이블·입력 키를 확인하고 같은 키의 중복 요청(재시도·이중 처리) 여부 확인"
+  - "isql 로 `SELECT C.CONSTRAINT_NAME, C.CONSTRAINT_TYPE FROM SYSTEM_.SYS_CONSTRAINTS_ C, SYSTEM_.SYS_TABLES_ T WHERE C.TABLE_ID = T.TABLE_ID AND T.TABLE_NAME = '<TABLE>' AND C.CONSTRAINT_TYPE IN (2, 3, 6);` 로 고유 제약(2 UNIQUE·3 PRIMARY KEY·6 LOCAL UNIQUE) 확인(읽기 전용)"
+  short:
+  - "(2차·승인 후, 롤백: 수정 전 대상 행을 백업 테이블로 복사) 채번 꼬임이면 시퀀스를 기존 최대 키보다 크게 맞추고, 데이터 오류면 업무 담당 확인 후 정정"
+  mid:
+  - "애플리케이션에 멱등 처리(재시도 전 존재 확인)를 반영하고, 양방향 이중화 구성이면 키 충돌 회피 규칙(채번 범위 분리)을 점검"
+  long:
+  - "테이블별 ERR-11058 건수를 집계해 급증 시 경보, 제약 제거·비활성화는 변경관리 승인 없이 금지"
+  versions:
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ALTIBASE/Documents 7.1·7.3 Error Message Reference 에서 확인, SYS_CONSTRAINTS_.CONSTRAINT_TYPE 값은 7.3 Data Dictionary 기준. 6.x 이하는 미대조
+  source: "공식 문서 대조(2026-10-16 5차 보강)"

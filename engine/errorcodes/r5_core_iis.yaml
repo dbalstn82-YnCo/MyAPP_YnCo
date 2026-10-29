@@ -1,0 +1,27 @@
+product: iis
+layer: web
+note: 5차 핵심 코드 보강(2026-10-16) — Microsoft Learn 'Types of Errors Logged by the HTTP Server API' 사유 문구 원문 대조. HTTPERR 로그=%SystemRoot%\System32\LogFiles\HTTPERR\httperr*.log
+codes:
+- code: IIS-HTTPERR-TIMER-APPPOOL
+  severity: error
+  category: capacity
+  title: 앱 풀 큐 대기 시간 초과(Timer_AppPool)
+  vendor_cause: 'HTTP.sys(HTTPERR) 사유 Timer_AppPool — 요청이 앱 풀 큐에서 너무 오래 기다려 서버 애플리케이션(w3wp)이 꺼내 처리하지 못한 채 연결이 만료되었다. 대기 한도는 ConnectionTimeout(기본 2분)이다. 워커 프로세스 행·모든 스레드가 느린 백엔드를 기다리는 상태가 흔하다(503 을 주는 AppPoolTimer 와 다른 사유).'
+  vendor_action: 'Microsoft 문서는 사유 정의만 제공 — 대기 한도는 ConnectionTimeout(기본 2분)'
+  vendor_url: https://learn.microsoft.com/en-us/windows/win32/http/types-of-errors-logged-by-the-http-server-api
+  immediate:
+  - '`Select-String -Path "$env:SystemRoot\System32\LogFiles\HTTPERR\httperr*.log" -Pattern "Timer_AppPool" | Select-Object -Last 20` 로 발생 시각·앱 풀(s-queuename)·URL 확인'
+  - '`Get-Counter "\HTTP Service Request Queues(*)\CurrentQueueSize" -SampleInterval 5 -MaxSamples 3` 로 앱 풀 큐 적체 확인 — 0 이 아니고 계속 늘면 워커가 요청을 꺼내지 못하는 상태'
+  - '`%windir%\system32\inetsrv\appcmd list requests /elapsed:30000` 로 30초 이상 걸린 요청과 `appcmd list wp` 로 워커 프로세스 PID 확인 — 오래 걸린 요청이 많으면 백엔드 대기, 없으면 워커 행 의심'
+  short:
+  - '(2차·승인 후, 롤백: 해당 없음) 워커 행이면 DebugDiag 또는 procdump 로 w3wp 덤프(행 덤프 2~3회)를 먼저 받은 뒤 앱 풀 재활용, 백엔드 대기면 DB·외부 API 담당에 지연 통보 — ConnectionTimeout 상향은 증상만 가리므로 하지 않음'
+  mid:
+  - '느린 백엔드 호출에 애플리케이션 시간 초과를 두고, 부하가 다른 사이트는 앱 풀을 분리해 한 앱의 지연이 다른 앱 큐를 막지 않게 함'
+  long:
+  - 'CurrentQueueSize 와 HTTPERR Timer_AppPool 건수를 기준선과 비교해 증가 시 경보'
+  versions:
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: HTTP.sys HTTPERR 사유 문구 — Microsoft HTTP Server API 문서 원문 확인(문서에 버전 구분 없음), 사이트 limits connectionTimeout 기본 120초
+  source: 공식 문서 대조(2026-10-16 5차 보강)

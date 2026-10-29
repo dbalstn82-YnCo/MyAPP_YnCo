@@ -1,0 +1,582 @@
+product: oracle
+layer: db
+note: Claude 야간 수집 2026-09-18 — 벤더 공식 문서와 대조 후 확정
+codes:
+- code: ORA-00603
+  severity: critical
+  category: internal
+  title: 치명적 오류로 세션 종료
+  immediate:
+  - "직전 오류와 trace 파일명: `grep -n -B3 \"ORA-00603\" $ORACLE_BASE/diag/rdbms/<db>/<SID>/trace/alert_<SID>.log | tail -30` (11g+ ADR)"
+  - "인시던트: `adrci exec=\"set home diag/rdbms/<db>/<SID>; show incident -mode brief\"` (11g+) — 같은 시각 ORA-600/7445 인시던트 확인"
+  - "OS 메모리 고갈 기록: `dmesg -T | grep -i \"out of memory\" | tail`"
+  short:
+  - "첫 오류 코드(ORA-600 인자·7445 함수명)로 판정을 다시 보고 알려진 결함과 대조, 재현 SQL 은 업무 담당 승인 후 격리 환경에서 실행(2차)"
+  mid:
+  - "패치 수준(11gR2 PSU / 12c+ RU) 확인 후 관련 패치 적용 계획 수립"
+  long:
+  - "ADR 인시던트 패키지(IPS) 수집 절차와 분기별 RU 적용 주기 운영"
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/ora-00603/)
+  vendor_cause: "서버 세션이 치명적 오류로 종료됨 — 같은 스택이나 trace 의 ORA-00600·ORA-07445·ORA-04030 등이 실제 원인. 내부 결함·프로세스 메모리 고갈·OS 시그널이 흔한 원인."
+  vendor_url: "https://docs.oracle.com/en/error-help/db/ora-00603/"
+  vendor_action: "다시 로그인하면 새 서버 세션이 자동으로 만들어진다. 세션 trace 파일에서 상세 원인을 확인한다."
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: ORA-01013
+  severity: warn
+  category: internal
+  title: 사용자 요청으로 작업 취소
+  immediate:
+  - "애플리케이션 로그에서 취소 직전 대기 시간과 타임아웃 설정(JDBC queryTimeout·트랜잭션 타임아웃) 확인"
+  - "SQL 평균 수행 시간: `select sql_id, executions, round(elapsed_time/1e6/greatest(executions,1),1) avg_sec from v$sql where sql_text like '%<식별 문자열>%' fetch first 5 rows only;` (12c+)"
+  - "같은 시각 잠금 대기: `select sid, blocking_session, event, seconds_in_wait from v$session where blocking_session is not null;`"
+  short:
+  - "타임아웃 값과 실제 수행 시간 비교 후 SQL 튜닝 요청 또는 타임아웃 재설정(2차·승인 후, 롤백: 원래 값)"
+  mid:
+  - "장시간 SQL 실행계획 개선 또는 배치 분리"
+  long:
+  - "온라인·배치 SQL 응답시간 기준과 타임아웃 표준 정립"
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/ora-01013/)
+  vendor_cause: "사용자나 애플리케이션이 실행 중인 작업을 취소함 — 대부분 JDBC queryTimeout·WAS 트랜잭션 타임아웃 만료로 드라이버가 취소를 보낸 경우이며 SQL*Plus Ctrl+C 도 같은 오류."
+  vendor_url: "https://docs.oracle.com/en/error-help/db/ora-01013/"
+  vendor_action: "조치 필요 없음(사용자 취소 알림)."
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: ORA-01650
+  severity: critical
+  category: capacity
+  title: 롤백 세그먼트 확장 불가
+  immediate:
+  - "여유 공간: `select tablespace_name, round(sum(bytes)/1024/1024) free_mb from dba_free_space where tablespace_name='<rbs_ts>' group by tablespace_name;`"
+  - "세그먼트·대량 트랜잭션: `select segment_name, status from dba_rollback_segs;` 와 `select s.sid, s.username, t.used_ublk from v$transaction t join v$session s on s.taddr=t.addr order by t.used_ublk desc;`"
+  short:
+  - "(2차·승인 후, 롤백: 추가 파일은 축소 불가 — 용량 계획 반영) `alter tablespace <rbs_ts> add datafile '<path>' size <n>G autoextend on maxsize <m>G;` 후 대량 작업을 나눠 재실행"
+  mid:
+  - "UNDO_MANAGEMENT=AUTO 전환 검토와 대량 배치 커밋 주기 재설계"
+  long:
+  - "롤백·UNDO 테이블스페이스 사용률 감시와 대량 배치 트랜잭션 설계 기준"
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/ora-01650/)
+  vendor_cause: "롤백 세그먼트(수동 UNDO)를 확장할 공간이 해당 테이블스페이스에 없음. 대량 트랜잭션·자동확장 미설정이 흔한 원인이며 자동 UNDO 환경에서는 ORA-30036 이 대신 발생."
+  vendor_url: "https://docs.oracle.com/en/error-help/db/ora-01650/"
+  vendor_action: "ALTER TABLESPACE ADD DATAFILE 로 해당 테이블스페이스에 데이터파일을 추가한다."
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: ORA-01651
+  severity: critical
+  category: capacity
+  title: UNDO 세이브 확장 불가
+  immediate:
+  - "SYSTEM 여유: `select round(sum(bytes)/1024/1024) free_mb from dba_free_space where tablespace_name='SYSTEM';` 와 `select file_name, autoextensible, round(maxbytes/1024/1024) max_mb from dba_data_files where tablespace_name='SYSTEM';`"
+  - "오프라인 테이블스페이스: `select tablespace_name, status from dba_tablespaces where status='OFFLINE';`"
+  short:
+  - "(2차·승인 후, 롤백: 오프라인 사유 확인 후 원상태로) 해당 테이블스페이스를 `alter tablespace <ts> online;` 으로 되돌려 save undo 적용, SYSTEM 부족이면 데이터파일 자동확장 설정"
+  mid:
+  - "트랜잭션 진행 중 테이블스페이스 오프라인 금지(작업 절차), SYSTEM 자동확장 MAXSIZE 설정"
+  long:
+  - "SYSTEM·SYSAUX 사용률 감시 항목 등록"
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/ora-01651/)
+  vendor_cause: "오프라인된 테이블스페이스에 나중에 적용할 save undo 를 보관할 익스텐트를 SYSTEM 테이블스페이스에서 할당하지 못함. 트랜잭션 진행 중 테이블스페이스 오프라인과 SYSTEM 공간 부족이 겹칠 때 발생."
+  vendor_url: "https://docs.oracle.com/en/error-help/db/ora-01651/"
+  vendor_action: "SYSTEM 테이블스페이스의 저장 파라미터를 확인하고, undo 를 적용할 수 있도록 해당 테이블스페이스를 다시 온라인으로 전환한다."
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: ORA-01691
+  severity: critical
+  category: capacity
+  title: LOB 세그먼트 확장 불가
+  immediate:
+  - "사용률: `select tablespace_name, round(used_percent,1) pct from dba_tablespace_usage_metrics where tablespace_name='<TS>';`"
+  - "LOB 상위: `select owner, segment_name, round(bytes/1024/1024) mb from dba_segments where segment_type like 'LOB%' and tablespace_name='<TS>' order by bytes desc fetch first 10 rows only;` (12c+)"
+  - "AUTOEXTEND: `select file_name, autoextensible, round(bytes/1024/1024) mb, round(maxbytes/1024/1024) max_mb from dba_data_files where tablespace_name='<TS>';`"
+  short:
+  - "(2차·승인 후, 롤백: 추가 파일은 축소 불가 — 용량 계획 반영) `alter tablespace <TS> add datafile '<path>' size 4G autoextend on maxsize 32G;`, 증가 원인 테이블의 보존 정책 확인"
+  mid:
+  - "SecureFiles(11g+) 압축·중복제거(라이선스 확인) 또는 LOB 전용 테이블스페이스 분리 검토"
+  long:
+  - "LOB 테이블스페이스 월간 증가 추세 기반 증설 계획"
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/ora-01691/)
+  vendor_cause: "LOB 세그먼트가 지정 테이블스페이스에서 다음 익스텐트를 할당하지 못함 — 테이블스페이스 여유 부족·자동확장 미설정/MAXSIZE 도달이 원인. 첨부·문서 LOB 급증 시 흔함."
+  vendor_url: "https://docs.oracle.com/en/error-help/db/ora-01691/"
+  vendor_action: "ALTER TABLESPACE ADD DATAFILE 로 해당 테이블스페이스에 데이터파일을 추가한다."
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: ORA-04020
+  severity: error
+  category: lock
+  title: 객체 잠금 중 데드락
+  immediate:
+  - "교착 객체·세션: `grep -n -A10 \"ORA-04020\" $ORACLE_BASE/diag/rdbms/<db>/<SID>/trace/alert_<SID>.log | tail -40` 와 trace 파일"
+  - "대기 세션: `select sid, serial#, username, event, blocking_session, sql_id from v$session where event like 'library cache%';`"
+  - "같은 시각 DDL·재컴파일: `select owner, object_name, object_type, last_ddl_time from dba_objects where last_ddl_time > sysdate-1/24;`"
+  short:
+  - "(2차·승인 후, 롤백: 해당 없음) 실패 작업을 업무 외 시간에 다시 실행, 교착이 계속되면 업무 확인 후 한쪽 세션 종료 `alter system kill session '<sid>,<serial#>' immediate;`"
+  mid:
+  - DDL 배포 창을 업무 외 시간으로 고정
+  long:
+  - 배포 절차에 락 영향 검토 항목 추가
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/ora-04020/)
+  vendor_cause: "라이브러리 캐시 객체(패키지·프로시저·뷰) 잠금을 얻는 중 교착이 감지됨 — 운영 중 컴파일·DDL·권한 변경이 실행 중인 PL/SQL 과 의존 객체를 서로 잠글 때 흔함."
+  vendor_url: "https://docs.oracle.com/en/error-help/db/ora-04020/"
+  vendor_action: "나중에 작업을 다시 시도한다."
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: ORA-04063
+  severity: error
+  category: internal
+  title: 패키지·뷰에 오류 있음
+  immediate:
+  - "무효 객체: `select owner, object_name, object_type, status, last_ddl_time from dba_objects where status='INVALID' and owner=upper('<owner>');`"
+  - "컴파일 오류 내용: `select name, type, line, text from dba_errors where owner=upper('<owner>') and name=upper('<object>');`"
+  short:
+  - "(2차·승인 후, 롤백: 이전 소스 백업) 오류 원인(누락 객체·권한) 조치 후 `alter package <owner>.<pkg> compile;` 또는 `exec utl_recomp.recomp_serial('<owner>');`"
+  mid:
+  - 배포 후 무효 객체 자동 검증 절차
+  long:
+  - 스키마 변경 관리 도입
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/ora-04063/)
+  vendor_cause: "참조한 패키지·프로시저·뷰가 컴파일 오류(INVALID) 상태라 실행할 수 없음 — 의존 객체(테이블 컬럼·권한·다른 패키지) 변경 후 재컴파일 실패, 배포 누락이 흔한 원인."
+  vendor_url: "https://docs.oracle.com/en/error-help/db/ora-04063/"
+  vendor_action: "오류를 수정하거나 참조 객체를 필요한 대로 생성한다."
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: ORA-06508
+  severity: error
+  category: internal
+  title: 호출된 프로그램 유닛을 찾을 수 없음
+  immediate:
+  - "대상 상태: `select owner, object_name, object_type, status, last_ddl_time from dba_objects where object_name=upper('<unit>');` — 오류 직전 last_ddl_time 이면 패키지 상태 무효화"
+  - "실행 권한: `select grantee, privilege from dba_tab_privs where table_name=upper('<unit>');`"
+  short:
+  - "(2차·승인 후, 롤백: 이전 소스 백업) INVALID 면 원인 조치 후 재컴파일, 패키지 상태 무효화면 애플리케이션 연결풀 갱신으로 해소"
+  mid:
+  - 패키지 배포 순서 정립
+  long:
+  - 의존성 자동 점검 도구 적용
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/ora-06508/)
+  vendor_cause: "PL/SQL 이 호출한 프로그램 유닛을 찾지 못함 — 대상 패키지 부재·INVALID, 실행 권한 없음, 재컴파일로 세션의 패키지 상태가 무효화된 경우(ORA-04068 동반)가 흔함."
+  vendor_url: "https://docs.oracle.com/en/error-help/db/ora-06508/"
+  vendor_action: "패키지 본문을 포함한 모든 참조 프로그램이 존재하고 호환되는지 확인한다."
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: ORA-08103
+  severity: error
+  category: internal
+  title: 객체가 더 이상 존재하지 않음
+  immediate:
+  - "같은 시각 DDL: `select owner, object_name, object_type, last_ddl_time from dba_objects where last_ddl_time > sysdate-1/24 order by last_ddl_time;` — 오류 직전 대상 객체의 last_ddl_time 이 있으면 동시 DDL 확정"
+  - "배치 일정(테이블 비움·파티션 교체 DDL)과 오류 시각 대조 — 겹치면 동시 DDL 이 원인"
+  short:
+  - "동시 DDL 이면 조회와 TRUNCATE/파티션 작업 시간 분리, 원인이 없으면 (2차) `analyze table <owner>.<table> validate structure online;`·RMAN `validate datafile <n>;` 로 손상 점검"
+  mid:
+  - 블록 손상 여부 DBV/RMAN 검증
+  long:
+  - DDL 통제 절차
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/ora-08103/)
+  vendor_cause: "쿼리 실행 중 대상 객체(세그먼트)가 다른 세션의 TRUNCATE·DROP·파티션 교체·MOVE 로 바뀌어 더 이상 존재하지 않음, 또는 이전 불완전 복구가 객체 삭제 도중 시점으로 되돌린 경우. 둘 다 아니면 블록 손상 가능성도 있음."
+  vendor_url: "https://docs.oracle.com/en/error-help/db/ora-08103/"
+  vendor_action: "불완전 복구의 결과라면 해당 객체를 삭제한다."
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: ORA-08177
+  severity: error
+  category: lock
+  title: 직렬화 트랜잭션 접근 불가
+  immediate:
+  - "isolation level 사용 위치 확인(`SET TRANSACTION ISOLATION LEVEL SERIALIZABLE`·JDBC TRANSACTION_SERIALIZABLE) — `grep -rn \"SERIALIZABLE\" <app_src 또는 설정 디렉터리>`"
+  - "ITL 경합: `select object_name, value from v$segment_statistics where statistic_name='ITL waits' and value>0 order by value desc fetch first 10 rows only;` (12c+) 와 `select table_name, ini_trans from dba_tables where table_name=upper('<table>');`"
+  short:
+  - "애플리케이션에 ORA-08177 재시도 로직 적용, ITL 경합이면 (2차·승인 후, 롤백: 원래 INITRANS) `alter table <t> initrans <n>;`(이후 새 블록부터 적용)"
+  mid:
+  - 격리 수준을 READ COMMITTED 로 조정 검토
+  long:
+  - 트랜잭션 설계 가이드
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/ora-08177/)
+  vendor_cause: "SERIALIZABLE 격리 수준 트랜잭션이 시작 후 다른 트랜잭션이 변경·커밋한 행을 갱신하려 해 직렬화가 불가능함. 동시 갱신이 많은 테이블·INITRANS 부족(ITL 경합) 블록에서 흔함."
+  vendor_url: "https://docs.oracle.com/en/error-help/db/ora-08177/"
+  vendor_action: "읽기/쓰기 트랜잭션에서는 해당 작업 또는 트랜잭션을 다시 시도한다."
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: ORA-12518
+  severity: critical
+  category: connection
+  title: 리스너가 클라이언트 연결을 넘기지 못함
+  immediate:
+  - "한도: `select resource_name, current_utilization, limit_value from v$resource_limit where resource_name='processes';`"
+  - "OS: oracle 계정 `ulimit -u`·`ps -u oracle | wc -l`·`free -m`"
+  - "리스너 로그 분당 접속 수: `grep \"<날짜 시:분>\" $ORACLE_BASE/diag/tnslsnr/<host>/<listener>/trace/<listener>.log | grep -c establish`"
+  short:
+  - "(2차·승인 후, 롤백: 원래 값 SCOPE=SPFILE) PROCESSES/SESSIONS 상향(재기동) 또는 연결풀 최대값 축소·재시도 간격 조정"
+  mid:
+  - 리스너·인스턴스 자원 모니터링
+  long:
+  - 접속 증가 대비 용량 계획
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/ora-12518/)
+  vendor_cause: "리스너가 클라이언트 연결을 서버 프로세스에 넘기지 못함. PROCESSES 한도 도달·OS 프로세스/메모리 한도·접속 폭주가 흔한 원인."
+  vendor_url: "https://docs.oracle.com/en/error-help/db/ora-12518/"
+  vendor_action: "리스너 트레이스를 켜고 다시 실행해 리스너·인스턴스가 직접 hand-off 에 맞게 구성되었는지 확인하고, 계속되면 Oracle Support 에 문의한다."
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: ORA-12528
+  severity: critical
+  category: connection
+  title: 리스너가 신규 연결을 차단 중
+  immediate:
+  - "리스너 등록 상태: `lsnrctl services <listener>` — `status BLOCKED` 또는 `RESTRICTED` 확인"
+  - "인스턴스: `select instance_name, status, logins from v$instance;` — STATUS 가 OPEN 이 아니거나 LOGINS=RESTRICTED"
+  - "기동 진행: `tail -50 $ORACLE_BASE/diag/rdbms/<db>/<SID>/trace/alert_<SID>.log`"
+  short:
+  - "(2차·승인 후, 롤백: 해당 없음) 복구·유지보수 완료 확인 후 `alter database open;` 또는 `alter system disable restricted session;`, 이어 `alter system register;`"
+  mid:
+  - 기동 절차·복구 절차 정비
+  long:
+  - 기동 자동화 스크립트에 상태 검증 추가
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/ora-12528/)
+  vendor_cause: "리스너에 등록된 인스턴스가 모두 신규 연결을 막고 있음(BLOCKED) — 인스턴스가 NOMOUNT/MOUNT 상태, RESTRICTED SESSION 모드, 기동·복구 진행 중일 때 발생."
+  vendor_url: "https://docs.oracle.com/en/error-help/db/ora-12528/"
+  vendor_action: "다시 연결을 시도하고, 계속되면 관리자에게 인스턴스 상태 확인을 요청한다."
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: ORA-12545
+  severity: error
+  category: connection
+  title: 대상 호스트 또는 객체 없음
+  immediate:
+  - "해석된 호스트: `tnsping <alias>` 후 `nslookup <host>`·`getent hosts <host>`"
+  - "RAC 면 서버의 `select name, value from v$parameter where name in ('local_listener','remote_listener');` 호스트명이 클라이언트에서 해석되는지 확인 (11gR2+ SCAN)"
+  short:
+  - "(2차·승인 후, 롤백: tnsnames.ora·hosts 백업본 복원) 접속 문자열 HOST 정정 또는 DNS/hosts 등록"
+  mid:
+  - 접속 정보 중앙 관리
+  long:
+  - DNS·hosts 변경 관리 절차
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/ora-12545/)
+  vendor_cause: "접속 문자열의 HOST 를 해석하지 못하거나 그 주소로 연결할 수 없음 — 호스트명 오타, DNS/hosts 미등록, RAC SCAN·VIP 이름 해석 실패가 흔한 원인."
+  vendor_url: "https://docs.oracle.com/en/error-help/db/ora-12545/"
+  vendor_action: "ADDRESS 파라미터(특히 노드 이름)가 올바른지, 서버 실행파일(oracle)이 있는지 확인하고, TCP/IP 면 TNSNAMES.ORA 의 호스트명을 숫자 IP 로 바꿔 다시 시도한다."
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: ORA-16014
+  severity: critical
+  category: storage
+  title: 로그 시퀀스가 아카이브되지 않음
+  immediate:
+  - "목적지: `select dest_id, status, error from v$archive_dest where status<>'INACTIVE';`"
+  - "공간: `select file_type, percent_space_used, percent_space_reclaimable from v$recovery_area_usage;` 와 `df -h <archive_dest>`"
+  - "로그: `select group#, sequence#, status, archived from v$log;` — 즉시 DBA 호출"
+  short:
+  - "(2차·승인 후, 롤백: 파라미터 원래 값·정리 대상 목록 기록) RMAN 으로 백업 완료 아카이브 정리 또는 FRA 상향 후 `alter system archive log all;`, 오류 목적지는 원인 조치 후 `alter system set log_archive_dest_state_<n>=enable;`"
+  mid:
+  - FRA 크기·보존 기간 재설계
+  long:
+  - 아카이브 공간 감시 알림
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/ora-16014/)
+  vendor_cause: "로그 그룹을 아카이브할 수 있는 목적지가 하나도 없어 해당 리두를 재사용할 수 없음 — 모든 아카이브 목적지가 ERROR·공간 부족(FRA 가득 참) 상태라 곧 DB 가 멈춤."
+  vendor_url: "https://docs.oracle.com/en/error-help/db/ora-16014/"
+  vendor_action: "아카이브 로그 목적지가 올바르게 지정되었는지 확인하고 함께 나온 오류 메시지로 원인을 확인한다(공간 부족·경로 오타가 흔함, Data Guard 는 파일명 변환·역할·DB_UNIQUE_NAME 확인)."
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: ORA-16198
+  severity: error
+  category: upstream
+  title: 리두 전송 프로세스 시간초과
+  immediate:
+  - "전송 목적지: `select dest_id, status, error, net_timeout from v$archive_dest where target='STANDBY';`"
+  - "지연(standby 에서): `select name, value, time_computed from v$dataguard_stats;` (10gR2+) — transport lag 증가 여부"
+  - "구간 네트워크: `ping -c 10 <standby_host>`·`tnsping <standby_alias>`"
+  short:
+  - "(2차·승인 후, 롤백: 이전 속성값) Broker 사용 시 `edit database '<db>' set property NetTimeout=<초>;`, 아니면 log_archive_dest_n 의 NET_TIMEOUT 조정, 원인 해소 후 `alter system set log_archive_dest_state_<n>=enable;`"
+  mid:
+  - DG 네트워크 대역·지연 개선
+  long:
+  - DG 구성 표준화
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/ora-16198/)
+  vendor_cause: "Data Guard 리두 전송 중 standby 응답을 NET_TIMEOUT 안에 받지 못함 — standby 구간 네트워크 지연·대역 부족·standby I/O 지연이 흔한 원인. SYNC 전송이면 primary 커밋도 지연될 수 있음."
+  vendor_url: "https://docs.oracle.com/en/error-help/db/ora-16198/"
+  vendor_action: "조치 필요 없음 — 실패한 파일은 다시 아카이브를 시도하며, 응답 없는 전송 프로세스는 종료되고 새로 시작된다."
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 내부 채널 일반 오류가 아니라 redo transport timeout
+- code: ORA-19566
+  severity: critical
+  category: storage
+  title: 손상 블록 허용 한도 초과
+  immediate:
+  - "손상 위치: `select file#, block#, blocks, corruption_type from v$database_block_corruption;`"
+  - "세그먼트: `select owner, segment_name, segment_type from dba_extents where file_id=<file#> and <block#> between block_id and block_id+blocks-1;`"
+  - "OS I/O 오류: `dmesg -T | grep -i \"i/o error\" | tail`"
+  short:
+  - "(2차·승인 후, 롤백: 복구 전 RMAN 백업 목록 확인) RMAN `recover datafile <f> block <b>;`(11g+, 10g 는 `blockrecover`)로 블록 복구 — 백업이 없으면 세그먼트 재생성 계획"
+  mid:
+  - 스토리지 I/O 오류 점검
+  long:
+  - 정기 DBV·RMAN 검증 스케줄
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/ora-19566/)
+  vendor_cause: "RMAN 백업 중 손상 블록 수가 SET MAXCORRUPT 허용치(기본 0)를 넘어 백업이 중단됨 — 데이터파일 물리 손상(스토리지 I/O 오류)이 원인."
+  vendor_url: "https://docs.oracle.com/en/error-help/db/ora-19566/"
+  vendor_action: "별도 조치 없음 — 복사·백업 작업은 실패하며, 세션 trace 파일에 손상 블록 상세가 기록된다."
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: ORA-27300
+  severity: error
+  category: internal
+  title: OS 시스템 호출 실패
+  immediate:
+  - "동반 메시지: `grep -n -A3 \"ORA-27300\" $ORACLE_BASE/diag/rdbms/<db>/<SID>/trace/alert_<SID>.log | tail -30` 의 ORA-27301 OS 오류(예: No space left on device·Resource temporarily unavailable)"
+  - "OS 한도: oracle 계정 `ulimit -a`·`ipcs -ls`·`sysctl kernel.sem`·`ps -u oracle | wc -l`"
+  short:
+  - "(2차·승인 후, 롤백: /etc/security/limits.conf·/etc/sysctl.conf 백업 복원) 원인 한도(nproc·nofile·kernel.sem)를 상향하고 다음 기동부터 적용 확인"
+  mid:
+  - OS 자원 모니터링
+  long:
+  - DB 서버 OS 설정 표준화
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/ora-27300/)
+  vendor_cause: "Oracle 이 호출한 OS 시스템 호출(fork·semget·shmget 등)이 실패함 — 동반 ORA-27301(OS 오류 메시지)·ORA-27302(실패 위치)에 원인이 나옴. 프로세스 수·세마포어·메모리·파일 디스크립터 한도가 흔한 원인."
+  vendor_url: "https://docs.oracle.com/en/error-help/db/ora-27300/"
+  vendor_action: "Oracle Support 에 문의한다."
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 하드웨어 고장으로 한정되지 않음
+- code: ORA-29701
+  severity: critical
+  category: connection
+  title: CSS 서비스 연결 불가
+  immediate:
+  - "CSS 상태: `crsctl check css` 와 `crsctl stat res -t -init` (Grid Infrastructure 11gR2+)"
+  - "프로세스·로그: `ps -ef | grep [o]cssd` 와 GI alert log `tail -100 $ORACLE_BASE/diag/crs/<host>/crs/trace/alert.log`(12c+) · 11gR2 는 `$GRID_HOME/log/<host>/alert<host>.log`"
+  short:
+  - "(2차·승인 후, 롤백: 해당 없음 — 노드 전체 영향 확인) CSS 원인(보팅 디스크·인터커넥트) 조치 후 `crsctl start crs`(RAC) 또는 `crsctl start has`(Oracle Restart)로 스택 기동"
+  mid:
+  - 클러스터 기동 자동화 검증
+  long:
+  - RAC 운영 절차 정비
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/ora-29701/)
+  vendor_cause: "인스턴스·ASM 이 Cluster Synchronization Service(ocssd)에 연결하지 못함 — Grid Infrastructure·Oracle Restart 스택 미기동, ocssd 비정상, 소켓 파일 권한 문제가 흔함. ASM 을 쓰는 DB 는 기동 불가."
+  vendor_url: "https://docs.oracle.com/en/error-help/db/ora-29701/"
+  vendor_action: "CSS 상태를 확인해 기동되지 않았으면 기동 후 DB 기동을 재시도하고, CSS 가 죽었거나 응답이 없으면 Oracle·CSS trace 를 확인해 Oracle Support 에 문의한다."
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: Cluster Synchronization Service 연결 실패
+- code: ORA-01194
+  severity: critical
+  category: storage
+  title: 파일에 추가 복구 필요
+  immediate:
+  - "파일별 SCN·fuzzy: `select file#, checkpoint_change#, fuzzy from v$datafile_header;`"
+  - "필요 로그: `select sequence#, name from v$archived_log where next_change# > <최소 checkpoint_change#> order by sequence#;` 와 `ls -l <archive_dest>`"
+  short:
+  - "(2차·승인 후, 롤백: 복구 전 컨트롤파일·데이터파일 사본 보관) 누락 아카이브를 RMAN `restore archivelog from sequence <n>;` 으로 복원해 `recover database until cancel` 재적용 — RESETLOGS 는 데이터 손실 범위 승인 후"
+  mid:
+  - 백업·아카이브 정합성 점검
+  long:
+  - 복구 리허설 정례화
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/ora-01194/)
+  vendor_cause: "데이터파일이 일관된 시점까지 복구되지 않은 상태에서 OPEN(RESETLOGS)하려 함 — 불완전 복구 시 필요한 아카이브·온라인 리두가 덜 적용되었거나 백업 모드 중 복사한 파일을 쓴 경우."
+  vendor_url: "https://docs.oracle.com/en/error-help/db/ora-01194/"
+  vendor_action: "파일이 일관될 때까지 로그를 더 적용하거나 더 오래된 백업에서 파일을 복원해 복구를 다시 수행한다."
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: ORA-00354
+  severity: critical
+  category: storage
+  title: 리두 로그 블록 헤더 손상
+  immediate:
+  - "손상 그룹·멤버: `grep -n -A3 \"ORA-00354\" $ORACLE_BASE/diag/rdbms/<db>/<SID>/trace/alert_<SID>.log | tail -30` 의 ORA-00312 파일명과 `select group#, status, member from v$logfile;`"
+  - "그룹 상태: `select group#, sequence#, status, archived from v$log;` — CURRENT/ACTIVE 그룹 손상이면 위험도 최고"
+  - "다중화 멤버 존재와 스토리지 오류: `ls -l <member>` · `dmesg -T | grep -i \"i/o error\" | tail`"
+  short:
+  - "(2차·승인 후, 롤백: 해당 없음 — 조치 직후 전체 백업) INACTIVE·아카이브 완료 그룹이면 `alter database clear logfile group <n>;`, 미아카이브면 `clear unarchived logfile` 후 즉시 전체 백업 — CURRENT 손상은 Oracle SR"
+  mid:
+  - 리두 로그 다중화 상태 점검
+  long:
+  - 스토리지 무결성 검증 주기
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/ora-00354/)
+  vendor_cause: "리두 로그 블록 헤더가 손상되어 읽을 수 없음(동반 ORA-00353·ORA-00312 에 그룹·멤버 표시) — 스토리지 I/O 오류·불완전 쓰기가 원인. 아카이브 중이면 아카이브 실패, 복구 중이면 그 지점 이후 적용 불가."
+  vendor_url: "https://docs.oracle.com/en/error-help/db/ora-00354/"
+  vendor_action: "정상 로그로 복구하거나 표시 시각까지 시점 복구한다. 아카이브 중이면 UNARCHIVED 옵션으로 로그를 clear 해 건너뛸 수 있으며, 이후 모든 데이터파일을 백업해야 한다."
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: ORA-16401
+  severity: warn
+  category: upstream
+  title: RFS 아카이브 로그 거부
+  immediate:
+  - "거부 시퀀스가 이미 수신됐는지(standby): `select thread#, sequence#, applied from v$archived_log where sequence#=<seq>;`"
+  - "갭(standby): `select * from v$archive_gap;` — 행이 없으면 정상"
+  - "standby 아카이브 공간: `df -h <standby_archive_dest>`"
+  short:
+  - "갭이 있으면 primary 에서 누락 시퀀스 재전송(Broker 또는 `alter system set log_archive_dest_state_<n>=enable;`, 2차·승인 후, 롤백: 이전 상태), 중복 전송 구성(같은 standby 로 여러 목적지)은 정리"
+  mid:
+  - standby 아카이브 정책 정비
+  long:
+  - DG 모니터링 강화
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/ora-16401/)
+  vendor_cause: "standby 의 RFS 가 전송된 아카이브 로그를 거부함 — 이미 받은 아카이브를 다시 보내려 한 경우(여러 primary·standby 가 같은 standby 로 아카이브)로 대부분 진단용 정보 메시지. 반복·갭 동반 시에만 조치."
+  vendor_url: "https://docs.oracle.com/en/error-help/db/ora-16401/"
+  vendor_action: "alert log·trace 에서 상세를 확인한다. 진단 기록용 정보 메시지로 조치는 필요 없다."
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: Oracle 문서상 informational이며 조치 없음

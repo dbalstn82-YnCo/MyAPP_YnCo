@@ -1,0 +1,361 @@
+product: aix
+layer: os
+note: GPT 협업 수집분 — 벤더 공식 문서와 대조 후 확정
+codes:
+- code: 1655419A
+  severity: critical
+  category: hardware
+  title: CPU_FAIL_PREDICTED CPU장애예측
+  vendor_cause: 프로세서의 정정 가능 오류가 임계를 넘어 펌웨어가 해당 CPU 의 장애를 예측한 상태(CPU_FAIL_PREDICTED).
+    CPU Guard 가 켜져 있으면 AIX 가 이 CPU 를 동적으로 격리하려 시도한다.
+  immediate:
+  - errpt 상세에서 예측 장애 CPU와 물리 위치를 확인한다.
+  short:
+  - CPU Gard가 활성화되어 있는지 확인하고 시스템 진단을 수행한다.
+  mid:
+  - 장애 예측 CPU의 유지보수 또는 교체 계획을 수립한다.
+  long:
+  - CPU 예측 장애 이벤트와 하드웨어 진단 결과를 정기적으로 관리한다.
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://www.ibm.com/docs/en/aix/7.1.0?topic=deallocation-error-log-entries)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: CPU_FAIL_PREDICTED와 IDENTIFIER 일치
+- code: 8470267F
+  severity: error
+  category: hardware
+  title: CPU_DEALLOC_ABORTED CPU격리실패
+  vendor_cause: 장애가 예측된 CPU 를 동적으로 격리하려 했으나 실패한 상태(CPU_DEALLOC_ABORTED). 해당 CPU 에
+    바인딩된 프로세스·커널 확장 등이 격리를 막은 경우가 흔하다.
+  immediate:
+  - errpt 상세의 deallocation 원인 코드와 대상 CPU를 확인한다.
+  short:
+  - CPU Gard 상태와 CPU에 바인딩된 프로세스 또는 관련 확장 모듈을 확인한다.
+  mid:
+  - IBM 진단 절차에 따라 CPU 장애 원인과 격리 실패 원인을 조치한다.
+  long:
+  - CPU 예측 장애 발생 시 격리와 유지보수 절차를 운영 기준으로 관리한다.
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://www.ibm.com/docs/en/aix/7.1.0?topic=deallocation-error-log-entries)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: CPU DEALLOCATION ABORTED
+- code: 804E987A
+  severity: warn
+  category: hardware
+  title: CPU_DEALLOC_SUCCESS CPU격리완료
+  vendor_cause: 장애가 예측된 논리 CPU 를 AIX 가 동적으로 격리(deallocate)하는 데 성공한 상태(CPU_DEALLOC_SUCCESS).
+    서비스는 계속되지만 CPU 자원이 줄었고 하드웨어 교체가 남아 있다.
+  immediate:
+  - "`errpt -a -j 804E987A | head -60` 으로 할당 해제(deallocate)된 논리 CPU 번호·시각 확인"
+  - "`bindprocessor -q` 로 현재 사용 가능 논리 CPU, `lparstat -i | head -30` 의 Online Virtual CPUs 확인, `vmstat 2 5` 의 us+sy 가 80% 이상이면 줄어든 CPU 로 서비스 영향 있음"
+  short:
+  - 시스템의 남은 CPU 자원과 서비스 영향을 확인한다.
+  mid:
+  - 예측 장애가 발생한 CPU에 대해 필요한 유지보수를 수행한다.
+  long:
+  - CPU 자동 격리 이벤트 발생 후 하드웨어 정비가 누락되지 않도록 관리한다.
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://www.ibm.com/docs/en/aix/7.1.0?topic=deallocation-error-log-entries)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: CPU DEALLOCATED
+- code: 0502F666
+  severity: critical
+  category: hardware
+  title: SCSI_ERR1 SCSI어댑터장애
+  vendor_cause: SCSI 어댑터가 하드웨어 오류를 보고한 상태(SCSI_ERR1, ADAPTER ERROR). 어댑터 불량, 케이블·터미네이터
+    문제, 연결된 장치의 버스 이상이 흔한 원인.
+  immediate:
+  - errpt 상세에서 SCSI 어댑터와 위치 및 상세 데이터를 확인한다.
+  short:
+  - 어댑터와 케이블 및 터미네이터 상태를 점검하고 진단을 수행한다.
+  mid:
+  - 진단 결과에 따라 장애 어댑터나 연결 구성요소를 정비한다.
+  long:
+  - SCSI 하드웨어 오류 재발 여부를 errpt와 정기 점검으로 관리한다.
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://www.redbooks.ibm.com/redbooks/pdfs/sg246185.pdf)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: SCSI_ERR1 ADAPTER ERROR
+- code: A19337FA
+  severity: critical
+  category: hardware
+  title: SC_DISK_SDDAPPCM_ER 서브시스템장애
+  vendor_cause: SDDPCM 경로 제어 모듈이 스토리지 서브시스템 구성요소 장애를 보고한 상태(SC_DISK_SDDAPPCM_ER).
+    스토리지 배열의 디스크 매체·전원·팬 등 내부 구성요소 문제가 흔한 원인.
+  immediate:
+  - "`errpt -a -j A19337FA | head -80` 으로 장애 hdisk·PATH ID·SENSE DATA 기록(스토리지 지원 의뢰 자료)"
+  - "`pcmpath query device <N>` 으로 경로별 State·Errors, `pcmpath query adapter` 로 어댑터 상태 확인 — DEAD/FAILED 경로가 있으면 이중화 상실 (SDDPCM 설치 시, AIXPCM 이면 `lspath -l hdisk<N>`)"
+  short:
+  - 스토리지 배열과 디스크 미디어 및 전원과 팬 구성요소 상태를 점검한다.
+  mid:
+  - 문제 판별 절차를 수행하고 확인된 스토리지 구성요소를 정비한다.
+  long:
+  - 스토리지 서브시스템의 하드웨어 오류와 경로 상태를 지속적으로 감시한다.
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://www.ibm.com/support/pages/scdisksddappcmer-errors-reported-errpt-output-ibm-smart-analytics-system-running-aix)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: SC_DISK_SDDAPPCM_ER SUBSYSTEM COMPONENT FAILURE
+- code: FE3E6B3B
+  severity: critical
+  category: connection
+  title: 요청 중 VFC 전송 이벤트
+  vendor_cause: 가상 FC(NPIV) 클라이언트에서 요청 처리 중 전송 이벤트가 발생한 상태. VIOS 종료·재기동 또는 VIOS 와의
+    CRQ 연결이 닫힌 것이 흔한 원인.
+  immediate:
+  - errpt 상세에서 VIOS 파티션과 vfchost 및 물리 어댑터를 확인한다.
+  short:
+  - VIOS가 종료되었거나 CRQ 연결이 닫혔는지 확인하고 VIOS 상태를 복구한다.
+  mid:
+  - VIOS 장애 로그와 가상 FC 연결 구성을 함께 조사한다.
+  long:
+  - VIOS와 NPIV 연결의 장애 감시와 이중화 상태를 정기적으로 검증한다.
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://www.ibm.com/support/pages/error-label-viosvfcclientfai-identifier-d119376c-logged-vio-server)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 정확한 설명은 Transport event while requests are active
+- code: AE7C4B0F
+  severity: critical
+  category: connection
+  title: VFC4_ERR15 FC링크다운
+  vendor_cause: VIOS 가 가상 FC 의 물리 링크 다운(LINK_DOWN)을 보고한 상태(VFC4_ERR15). SAN 스위치·케이블·VIOS
+    물리 FC 포트 장애가 원인이며 복구 후 경로가 자동 복귀하지 않을 수 있다.
+  immediate:
+  - "`errpt -a -j AE7C4B0F | head -60` 으로 LINK_DOWN 을 보고한 가상 FC 어댑터(fcs)·시각 확인"
+  - "`lspath | grep -v Enabled` 로 Failed/Missing 경로 확인 — 링크 복구 뒤에도 Failed 로 남으면 경로 자동 복귀 실패, VIOS 에서 `lsmap -all -npiv`(padmin) 로 Status(LOGGED_IN 여부)·FC name 확인"
+  short:
+  - FC 어댑터와 VIOS 및 SAN 연결 상태를 점검해 경로를 복구한다.
+  mid:
+  - 복구되지 않은 MPIO 경로와 SAN 스위치 장애 이력을 함께 확인한다.
+  long:
+  - SAN 장애 후 AIX 경로 자동 복구 여부를 정기적으로 검증한다.
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://www.ibm.com/support/pages/vfc4err15-aix-errpt-and-vfc-paths-did-not-recover)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: VFC4_ERR15 LINK_DOWN event reported by the VIOS
+- code: 7BFEEA1F
+  severity: error
+  category: connection
+  title: FCA_ERR4 FC링크오류
+  vendor_cause: FC 어댑터 포트가 링크 오류를 보고한 상태(FCA_ERR4). 실제 사용 중 포트의 케이블·SFP·스위치 문제이거나,
+    연결하지 않은 미사용 포트가 Available 로 남아 반복 기록되는 경우가 있다.
+  immediate:
+  - "`errpt -a -j 7BFEEA1F | head -60` 으로 오류 fcs 포트·시각, `lsdev -Cc adapter | grep fcs` 로 포트 상태(Available) 확인"
+  - "`lspath -p fscsi<N>` 로 그 포트를 쓰는 경로 확인 — 경로가 없으면 미사용 포트(반복 기록 가능), 있으면 `fcstat fcs<N> | head -40` 으로 Link 상태·오류 카운터 확인"
+  short:
+  - 사용 중인 포트이면 FC 어댑터와 케이블 및 SAN 연결을 점검한다.
+  mid:
+  - 사용하지 않는 포트이면 IBM 절차에 따라 불필요한 포트 구성을 정리한다.
+  long:
+  - FC 포트의 사용 여부와 Available 상태를 구성관리 항목으로 유지한다.
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://www.ibm.com/support/pages/node/7251174)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: FCA_ERR4 LINK ERROR
+- code: '26623394'
+  severity: error
+  category: connection
+  title: FCP_ERR12 통신프로토콜오류
+  vendor_cause: fscsi 프로토콜 드라이버가 FC 통신 프로토콜 오류를 보고한 상태(FCP_ERR12). SAN 구간 프레임 손실·스위치
+    오류·대상 포트 이상이 흔한 원인이며 sense data 디코딩으로 세부 원인을 구분한다.
+  immediate:
+  - "`errpt -a -j 26623394 | head -80` 으로 fscsi 자원·SENSE DATA·시각 기록(IBM 디코딩 의뢰 자료)"
+  - "`lspath -p fscsi<N> | grep -v Enabled` 로 그 어댑터 경유 비정상 경로, `fcstat fcs<N> | head -40` 의 Error Frames·Link Failure Count 확인 — 계속 증가하면 SAN 구간 문제"
+  short:
+  - IBM 문제 판별 절차와 오류 디코딩을 수행해 통신 오류 원인을 확인한다.
+  mid:
+  - FC 어댑터와 VIOS 및 SAN 구간의 반복 오류를 함께 점검한다.
+  long:
+  - FCP 통신 오류와 경로 장애 추이를 지속적으로 감시한다.
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://www.ibm.com/support/pages/error-label-fcperr12-fscsi-communication-protocol-error-logged-aix-or-vio-server)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: FCP_ERR12 COMMUNICATION PROTOCOL ERROR
+- code: 65DE6DE3
+  severity: error
+  category: storage
+  title: 요청 작업 수행 불가
+  vendor_cause: 디스크가 요청 작업을 수행할 수 없다고 응답한 상태(SC_DISK_ERR10). sense code 가 0118 이면
+    다른 initiator 의 SCSI 예약(reservation) 충돌이며, 공유 디스크의 reserve_policy 불일치가 흔한 원인.
+  immediate:
+  - "`errpt -a -j 65DE6DE3 | head -80` 으로 hdisk·PATH ID·SENSE DATA 확인 — sense code 0118 이면 다른 initiator 의 예약(reservation) 충돌"
+  - "`lsattr -El hdisk<N> -a reserve_policy` 로 예약 정책(no_reserve·single_path·PR_exclusive 등) 확인 — 공유 디스크인데 노드마다 값이 다르면 정책 불일치 의심"
+  short:
+  - 해당 디스크를 예약한 다른 initiator와 현재 reserve 정책을 확인한다.
+  mid:
+  - 클러스터와 MPIO의 디스크 예약 정책을 올바른 구성으로 조정한다.
+  long:
+  - 공유 디스크의 예약 정책과 접근 노드를 구성관리 대상으로 유지한다.
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://www.ibm.com/support/pages/node/7231151)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: SC_DISK_ERR10 자체 의미는 예약충돌이 아니며 sense code 0118일 때 예약충돌
+- code: 891A3632
+  severity: error
+  category: storage
+  title: NVME_ERR4 NVMeSW오류
+  vendor_cause: NVMe 컨트롤러 소프트웨어 오류가 보고된 상태(NVME_ERR4). IBM 사례에서는 4K 섹터 NVMe 장치에 정렬되지
+    않은 버퍼로 CIO I/O 를 할 때 invalid buffer 오류가 LVM_IO_FAIL 과 함께 기록되었다.
+  immediate:
+  - errpt 상세에서 NVME_ERR4의 오류 위치와 invalid buffer 관련 정보를 확인한다.
+  short:
+  - 해당 패턴이면 4K 장치 지원 설정과 CIO 사용 조건을 점검한다.
+  mid:
+  - 애플리케이션과 파일시스템의 I/O 정렬 조건을 확인해 원인을 제거한다.
+  long:
+  - NVMe I/O 오류와 파일시스템 옵션 변경을 정기적으로 검증한다.
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://www.ibm.com/support/pages/error-label-nvmeerr4-identifier-891a3632-and-label-lvmiofail-identifier-e86653c3-logged-aix-db2-server-nvme-4k-flash-disk)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: NVME CONTROLLER SOFTWARE ERROR
+- code: EC0BCCD4
+  severity: error
+  category: connection
+  title: GOENT_LINK_DOWN 이더넷링크다운
+  vendor_cause: 기가비트 이더넷 어댑터(goent)의 물리 링크가 끊긴 상태(GOENT_LINK_DOWN). 케이블·스위치 포트 장애,
+    상대 장비 재기동이 흔한 원인.
+  immediate:
+  - "`errpt -a -j EC0BCCD4 | head -40` 으로 링크 다운 ent 장치·시각과 뒤이은 LINK_UP 기록 여부 확인"
+  - "`entstat -d ent<N> | grep -i -E 'link status|media speed'` 로 현재 링크 상태·속도 확인 — Down 이면 케이블·스위치 포트 측, Up 이면 순간 단절(상대 장비 전원·부팅 이벤트 등) 이력 대조"
+  short:
+  - 물리 링크와 케이블 및 스위치 포트 상태를 확인해 연결을 복구한다.
+  mid:
+  - 반복 발생 시 어댑터와 네트워크 장비 양쪽의 오류 이력을 비교한다.
+  long:
+  - 이더넷 링크 다운 이벤트와 포트 오류를 지속적으로 감시한다.
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://www.ibm.com/support/pages/apar/IZ95312)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: GOENT_LINK_DOWN 식별자 확인
+- code: 4E8BE8F9
+  severity: warn
+  category: internal
+  title: 멀티큐 호환모드 미지원
+  vendor_cause: LPAR 의 프로세서 호환 모드가 NPIV Multiple Queue 를 지원하지 않아 해당 기능이 쓰이지 않는다는 정보성
+    오류. 프로세서 호환 모드가 낮은 세대로 설정된 경우 발생한다.
+  immediate:
+  - "`errpt -a -j 4E8BE8F9 | head -40` 으로 오류 상세(대상 어댑터·Description) 확인, `oslevel -s` 로 TL·SP 기록(IBM APAR IJ30734 대조용)"
+  - "`lparstat -i | head -30` 으로 LPAR 구성, `prtconf | grep -i -E 'Processor (Type|Implementation Mode)'` 로 프로세서 종류와 현재 호환 모드 확인 — 호환 모드가 POWER9 미만이면 오류 문구와 일치, HMC 의 LPAR 프로필 호환 모드 설정과 대조(조정은 2차·HMC 승인 후)"
+  short:
+  - NPIV Multiple Queue를 지원하는 processor compatibility mode인지 확인한다.
+  mid:
+  - 필요한 경우 IBM 지원 조건에 맞는 Power9 이상 호환 모드로 조정한다.
+  long:
+  - NPIV Multiple Queue 적용 전 VIOS와 펌웨어 및 프로세서 지원 조건을 검증한다.
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://www.ibm.com/support/pages/apar/IJ30734)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: Informational 오류이며 프로세서 호환모드 설정 문제
+- code: FADE02F2
+  severity: warn
+  category: hardware
+  title: VFC4_ERR18 멀티큐미지원
+  vendor_cause: VIOS 가 NPIV Multiple Queue 를 지원하지 않는다고 보고한 상태(VFC4_ERR18). VIOS 레벨·PHYP
+    펌웨어·물리 FC 어댑터 중 하나가 요구 조건을 만족하지 않는 것이 원인.
+  immediate:
+  - "`errpt -a -j FADE02F2 | head -40` 으로 보고한 가상 FC 어댑터·Detail Data 확인"
+  - "`oslevel -s` 로 AIX TL·SP, `lsmcode -c` 로 시스템 펌웨어 레벨, VIOS 에서 `ioslevel`(padmin) 확인 — IBM 문서의 Multiple Queue 요구 레벨보다 낮으면 원인 확정"
+  short:
+  - 파트너 VIOS 오류 로그에서 Multiple Queue가 구성되지 않은 원인을 확인한다.
+  mid:
+  - VIOS와 PHYP 펌웨어 및 FC 어댑터의 지원 조건을 대조한다.
+  long:
+  - NPIV Multiple Queue 요구사항을 가상 FC 구성 표준에 반영한다.
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://www.ibm.com/support/pages/vfc4err-logged-after-upgrade-aix-7200-05-01-2038)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: VIOS PHYP 펌웨어 FC 어댑터 지원 여부 관련
+- code: 192AC071
+  severity: warn
+  category: internal
+  title: ERRLOG_OFF 오류로깅중지
+  vendor_cause: AIX 오류 로깅(errdemon)이 꺼졌음을 기록한 항목(ERRLOG_OFF). 운영자의 errstop 실행, 시스템
+    종료 과정, 또는 errdemon 비정상 종료 때 기록되며 이후 하드웨어 오류가 남지 않을 수 있다.
+  immediate:
+  - '`ps -ef | grep errdemon | grep -v grep` 으로 errdemon 동작 여부, `/usr/lib/errdemon
+    -l` 로 로그 설정 확인'
+  - '`errpt | head -5` 로 ERRLOG_OFF 이후 새 항목이 기록되는지와 그 시각의 운영자 작업(`last | head`)을 확인'
+  short:
+  - '(2차·승인 후, 롤백: 불필요) 의도된 정지가 아니면 `/usr/lib/errdemon` 으로 오류 로깅 재개 후 `errpt | head
+    -3` 으로 ERRLOG_ON 기록 확인'
+  mid:
+  - 오류 로깅을 중지시킨 관리 작업과 설정 변경 이력을 확인한다.
+  long:
+  - errdemon과 오류 로그 수집 상태를 운영 점검 항목으로 관리한다.
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://www.ibm.com/docs/en/aix/7.3.0?topic=overview-managing-error-logging)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: ERRLOG_OFF 식별자 확인

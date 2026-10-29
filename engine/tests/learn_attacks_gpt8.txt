@@ -1,0 +1,56 @@
+R;;ERROR a{0,90}a{0,90}a{0,90}a{0,90}a{0,90}Z
+R;;ERROR \d{0,80}\d{0,80}\d{0,80}\d{0,80}\d{0,80}Z
+R;;ERROR (?a:\w+)\w+\w+\w+Z
+R;;ERROR (?i:a+[A-Z]+[a-z]+[A-Z]+)Z
+R;;ERROR [^\d]+\w+[^\s]+\S+Z
+R;;ERROR (?:ab|a)?(?:ab|a)?(?:ab|a)?(?:ab|a)?(?:ab|a)?(?:ab|a)?(?:ab|a)?(?:ab|a)?(?:ab|a)?(?:ab|a)?(?:ab|a)?(?:ab|a)?(?:ab|a)?(?:ab|a)?(?:ab|a)?(?:ab|a)?(?:ab|a)?(?:ab|a)?(?:ab|a)?(?:ab|a)?(?:ab|a)?(?:ab|a)?(?:ab|a)?Z
+R;;ERROR a+?a+?a+?a+?Z
+R;;ERROR (?s:.+).+.+.+Z
+R;;ERROR (?:\s*\S+){8}Z
+R;;ERROR (?<=ERROR )(?:a+)+Z
+R;;ERROR (?:(?=a)a|a){24}Z
+R;;ERROR [a-f]{0,70}[a-f]{0,70}[a-f]{0,70}[a-f]{0,70}Z
+R;;ERROR (?s:.*)a+a+a+a+Z
+R;;ERROR (?i:[^0-9]+[A-Z]+[a-z]+\w+)Z
+R;;ERROR (?:a+?){10}Z
+R;;ERROR (?:a{1,3}){20}Z
+T;;ERROR LDAP bind rejected DN CN=Han Sol,OU=Finance,DC=lab,DC=example
+T;;ERROR SMB authentication failed for CORP\svc-payroll on \\nas-prod-07\hr_private
+T;;ERROR SQL Server connection failed Server=tcp:sql-ledger01.lab.internal,1433;Database=FinCore;User ID=svc_job;PWD=MockOnly!984
+T;;ERROR Oracle listener refused (DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST=ora-ledger03)(PORT=1521))(CONNECT_DATA=(SERVICE_NAME=COREPAY)))
+T;;ERROR GET /internal/payments/ledger?sig=FakeSignedValue987654321 was rejected
+T;;ERROR OAuth validation failed id_token=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ0ZXN0In0.FakeSignature
+T;;ERROR session rejected session_cookie=SESSIONMockZ9A7B6C5
+T;;ERROR upstream sent Set-Cookie: LTSESSION=MockSession987abc; HttpOnly
+T;;ERROR registry lookup failed HKLM\SOFTWARE\Vendor\Accounts\ops_admin
+T;;ERROR proxy authentication failed Proxy-Authorization: Digest username="svc-proxy", realm="corp", nonce="Synthetic777"
+T;;ERROR file access denied \\fileserver-09\c$\Users\sample.operator\Desktop\config.ini
+T;;ERROR PostgreSQL connection refused postgresql%3A%2F%2Fsvc_report%3AMockPass9%40db-prod-11.internal%3A5432%2Ffinance
+T;;ERROR SSPI handshake failed SPN=MSSQLSvc/sql-prod-01.internal:1433
+T;;ERROR SQL permission denied for relation hr_employee_compensation owned by svc_reader_02
+T;;ERROR Request rejected X-Amz-Security-Token=DummyTemporaryTokenZ7
+T;;ERROR SSH authentication failed for principal=svc_backup@LAB.INTERNAL from fe80::5e00:ff:fe88:10b%eth0
+T;;ERROR sqlcmd connection failed -S DB-PROD-04 -U svc_etl -P FakePass987
+T;;ERROR PostgreSQL startup failed PGUSER=svc_prod PGHOST=ledger-qa-02 PGPASSWORD=MockPW123
+T;;ERROR pod unavailable pod=finance-api-774cb5cd6f-f8q2b namespace=client-north-7
+T;;ERROR Kerberos login rejected principal=user01/instance02@CORP.INTERNAL keytab=FILE:/etc/security/keytabs/payroll.service.keytab
+M;;ERROR Login denied user=svc_alpha host=app01;;ERROR Login denied user=svc_beta host=app02;;same
+M;;ERROR Login denied user=svc_alpha host=app01;;INFO Login successful user=svc_alpha host=app01;;diff
+M;;ERROR ORA-00060 deadlock detected;;ERROR ORA-00001 unique constraint violated;;diff
+M;;ERROR SQLSTATE 23505 duplicate key;;ERROR SQLSTATE 40P01 deadlock detected;;diff
+M;;ERROR WFLYCTL0412 Required services missing;;ERROR WFLYCTL0186 Services failed to start;;diff
+M;;ERROR BEA-000337 stuck thread detected;;INFO BEA-000339 thread became unstuck;;diff
+M;;ERROR TLS certificate expired for api01;;ERROR TLS certificate expired for api02;;same
+M;;WARN TLS certificate will expire in 2 days;;ERROR TLS certificate expired 2 days ago;;diff
+M;;ERROR JDBC connection refused host=db01 port=5432;;ERROR JDBC connection refused host=db02 port=5433;;same
+M;;ERROR process pid=1234 terminated by SIGKILL;;ERROR process pid=5678 terminated by SIGKILL;;same
+M;;WARN file descriptors used=902 limit=1024;;WARN file descriptors used=1000 limit=1024;;same
+M;;ERROR HTTP status=500 path=/ledger/1001;;INFO HTTP status=200 path=/ledger/1002;;diff
+M;;ERROR unable to resolve hostname=cache-a01;;ERROR unable to resolve hostname=cache-b08;;same
+M;;ERROR SQL relation CUSTOMER_AUDIT does not exist;;ERROR SQL relation PAYMENT_AUDIT does not exist;;same
+M;;ERROR SQL relation CUSTOMER_AUDIT does not exist;;ERROR SQL relation CUSTOMER_AUDIT access denied;;diff
+M;;ERROR session id=550e8400-e29b-41d4-a716-446655440000 timed out;;ERROR session id=123e4567-e89b-42d3-a456-426614174000 timed out;;same
+M;;WARN free memory=1048576 bytes;;WARN free memory=2097152 bytes;;same
+M;;ERROR TLS handshake alert unknown_ca;;ERROR TLS handshake alert bad_certificate;;diff
+M;;ERROR task failed on 2026-10-13T11:20:30 host=worker01;;ERROR task failed on 2026-10-14T07:25:41 host=worker02;;same
+M;;ERROR ORA-00060 transaction rolled back;;ERROR ORA-00061 transaction rolled back;;diff

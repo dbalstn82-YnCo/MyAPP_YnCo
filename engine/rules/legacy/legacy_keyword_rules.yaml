@@ -1,0 +1,577 @@
+# 기존 'AI 로그분석기 v2.2' 내장 룰에서 변환 반입(tools/import_legacy_rules.py) — 중복(코드·패턴) 제외
+# 심각도 CRITICAL→critical HIGH→error MEDIUM→warn LOW→info · immediate_actions→즉시 · root_actions→중기 · negative_patterns→exclude
+rules:
+- id: LEG-KW-OVERTEMP
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:TEMP_CRIT)|(?:TEMP_HIGH)|(?:OVER.?TEMP)|(?:temperature.*critical)|(?:critical.*temperature)|(?:thermal.*critical)|(?:critical.*thermal)|(?:over temperature)|(?:high temperature)|(?:temp.*exceed)|(?:temperature.*threshold.*exceeded)|(?:CPU.*HOT)|(?:thermal.*emergency)|(?:high
+      temperature.*critical)|(?:temp.*exceed.*critical)|(?:heat.*critical)|(?:OVERTEMP_CRIT)|(?:TEMP_EXCEEDED)
+  severity: critical
+  category: hardware
+  verdict: 과온도 이벤트 (OVERTEMP/TEMP_CRIT) — 시스템 또는 컴포넌트 온도가 임계값을 초과. 냉각 팬 고장, 에어컨 장애, 먼지 누적
+  immediate:
+  - '온도 센서 전체(읽기): `ipmitool sdr type Temperature` — cr(critical) 센서 위치(CPU·Inlet·DIMM)와 값 기록'
+  - '팬 회전수(읽기): `ipmitool sdr type Fan` — 0 RPM·ns 팬이 있으면 팬 고장 원인'
+  - 'SEL 온도 이벤트 시각: `ipmitool sel elist | grep -i temp | tail -20` 과 서버실 항온항습기 경보 대조'
+  short:
+  - (2차·승인 후) 서비스 우회(L4 제외·이중화 전환) 후 계획 정지로 과열 손상 방지, 팬·방열 부품 교체 의뢰
+  - '영향: CPU/메모리 쓰로틀링 → 성능 저하. 지속 시 긴급 셧다운.'
+  mid:
+  - 고장 냉각 팬 교체(Hot-swap 가능 모델은 무정지)
+  - 서버실 냉각 시스템 점검 및 개선
+  - 공기 흐름 개선 (블랭킹 패널, Cold/Hot Aisle 구성)
+  - 정기 먼지 청소 주기 단축
+  long:
+  - 흡기·CPU 온도 경고 임계 감시(SNMP·BMC 알림)와 서버실 온도 이력 관리
+  source_note: 'legacy-analyzer-v2.2 keyword_rules.json KW-OVERTEMP (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-KW-HW-CRITICAL
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:CRITICAL.*(?:fan|power|psu|memory|cpu|disk|raid|temp|voltage|sensor))|(?:(?:fan|power|psu|memory|cpu|disk|raid|temp|voltage|sensor).*CRITICAL)|(?:SEL.*CRITICAL)|(?:IPMI.*CRITICAL)|(?:iLO.*CRITICAL)|(?:iDRAC.*CRITICAL)|(?:IMM.*CRITICAL)|(?:BMC.*CRITICAL)|(?:severity.*=.*critical)|(?:level.*critical.*hardware)|(?:HARDWARE.*CRIT)|(?:CRIT.*HARDWARE)
+  severity: critical
+  category: memory
+  verdict: 하드웨어 CRITICAL 경보 — 하드웨어 컴포넌트가 CRITICAL 상태. 팬/전원/메모리/디스크/온도 중 하나 이상 임계 초과
+  immediate:
+  - 'BMC 이벤트 전체(읽기): `ipmitool sel elist | tail -30` — CRITICAL 이 어느 부품(Memory·PS·Fan·Drive)인지 기록'
+  - '센서 이상 목록: `ipmitool sdr list | grep -v ''| ok''` — cr·nr 상태 센서 기록'
+  - 관리 콘솔(iLO IML · iDRAC Lifecycle/SEL · IMM/XCC 이벤트)에서 부품 위치(슬롯)·시리얼 확인
+  short:
+  - (2차·승인 후) 메모리 UE·PSU 이중화 소실 등 부품별로 서비스 우회 후 제조사 긴급 교체, 교체 전 부품 위치·시리얼 확인
+  - '영향: 즉각 조치 없으면 서비스 중단 또는 데이터 손실.'
+  mid:
+  - CRITICAL 컴포넌트 식별 후 즉시 교체
+  - 벤더 HW 지원팀 긴급 연락(케이스 접수·자료 전달)
+  - 예방적 유지보수(부품 사용 연수 기반) 강화
+  long:
+  - BMC 알림(SNMP 트랩·메일)을 감시 시스템으로 통합하고 부품 교체 이력 관리
+  source_note: 'legacy-analyzer-v2.2 keyword_rules.json KW-HW-CRITICAL (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-KW-HW-WARNING
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:WARNING.*(?:fan|power|psu|memory|cpu|disk|raid|temp|voltage|sensor|battery))|(?:(?:fan|power|psu|memory|cpu|disk|raid|temp|voltage|sensor|battery).*WARNING)|(?:SEL.*WARNING)|(?:IPMI.*WARNING)|(?:WARN.*hardware)|(?:hardware.*WARN)|(?:sensor.*warn.*assert)
+  severity: error
+  category: hardware
+  verdict: 하드웨어 WARNING 경보 — 하드웨어 컴포넌트가 WARNING 상태. 장애 발생 전 예고 단계
+  immediate:
+  - '비정상 센서 목록(읽기): `ipmitool sdr list | grep -v ''| ok''` — nc(non-critical) 상태 센서와 값 기록'
+  - '경고 시작 시각: `ipmitool sel elist | grep -i ''non-critical'' | tail -20`'
+  - 관리 콘솔에서 같은 부품 경고가 최근 7일 반복됐는지 확인
+  short:
+  - (2차) 경고 부품 예방 교체 일정을 제조사와 협의하고 그 전까지 감시 주기를 5분 이하로 단축
+  - '영향: 방치 시 CRITICAL 또는 장애로 진행.'
+  mid:
+  - 경고 컴포넌트 예방적 교체 계획 수립
+  - 예비 부품(팬·PSU·디스크) 확보
+  - 정기 점검 주기 단축(분기→월)
+  long:
+  - 경고(nc) 단계 알림을 CRITICAL 과 분리 등록해 사전 교체 근거로 활용
+  source_note: 'legacy-analyzer-v2.2 keyword_rules.json KW-HW-WARNING (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-KW-FAN-WARN
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:FAN.*(?:WARN|CRIT|FAIL|ERROR|FAULT|LOW|STOP|0 RPM|SLOW))|(?:(?:WARN|CRIT|FAIL|ERROR).*FAN)|(?:fan.*speed.*(?:low|critical|warning|zero))|(?:cooling.*fail)|(?:fan.*not.*spinning)|(?:rpm.*(?:low|0|zero).*fan)|(?:FAN.*(?:WARN|CRIT|FAIL|ERROR|FAULT|LOW|STOP))|(?:FAN_FAULT)|(?:FAN_FAIL)|(?:cooling.*fan.*critical)
+  severity: error
+  category: hardware
+  verdict: 팬 속도 이상 (FAN WARNING/CRITICAL) — 냉각 팬 속도 저하 또는 완전 정지. 베어링 마모, 전원 불량
+  immediate:
+  - '팬 RPM·상태(읽기): `ipmitool sdr type Fan` — 0 RPM 또는 lnc/lcr 팬 번호 기록'
+  - '팬 고장으로 온도가 오르는지 동시 확인: `ipmitool sdr type Temperature`'
+  - 관리 콘솔에서 팬 슬롯 위치·이중화(Redundancy) 상태 확인
+  short:
+  - (2차) Hot-swap 팬이면 제조사 교체 요청, 이중화 소실·온도 상승 동반 시 서비스 우회 후 교체
+  - '영향: 냉각 불충분으로 과온도 → 자동 셧다운 위험.'
+  mid:
+  - 장애 팬 Hot-swap 교체
+  - 팬 전원 케이블 연결 상태 확인
+  - 예비 팬 재고 확보 기준 수립
+  long:
+  - 팬 RPM 저하 경고 감시와 서버실 먼지 관리(필터 청소) 주기 수립
+  source_note: 'legacy-analyzer-v2.2 keyword_rules.json KW-FAN-WARN (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-KW-PSU-WARN
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:PSU.*(?:WARN|CRIT|FAIL|FAULT|ERROR|LOSS|DOWN))|(?:(?:WARN|CRIT|FAIL|FAULT).*PSU)|(?:power.supply.*(?:fail|warn|crit|loss|error))|(?:(?:fail|warn|crit).*power.supply)|(?:AC.*loss)|(?:power.*redundan.*lost)|(?:under.voltage)|(?:over.voltage)
+  severity: critical
+  category: hardware
+  verdict: 전원 공급 이상 (PSU WARNING/CRITICAL) — PSU 장애 또는 AC 전원 이상. 이중화 소실 가능
+  immediate:
+  - 'PSU 상태(읽기): `ipmitool sdr type ''Power Supply''` — Failure detected·AC lost 로 표시된 PSU 번호 기록'
+  - 'SEL 전원 이벤트: `ipmitool sel elist | grep -iE ''power supply|ac lost'' | tail -20`'
+  - PDU·UPS 측 해당 콘센트 전원 공급 여부 확인 — 케이블·PDU 문제인지 PSU 결함인지 구분
+  short:
+  - (2차) PSU 결함이면 제조사 Hot-swap 교체, 전원 피드 문제면 시설 담당 이관
+  - '영향: 이중화 소실 시 추가 PSU 장애 시 서버 즉시 다운.'
+  mid:
+  - 장애 PSU Hot-swap 교체
+  - UPS 배터리 상태 점검
+  - 전원 이중화(A/B 피드) 구성 재검토
+  long:
+  - PSU 이중화 소실 이벤트 즉시 알림과 A/B 전원 피드 분리 점검 주기화
+  source_note: 'legacy-analyzer-v2.2 keyword_rules.json KW-PSU-WARN (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-KW-MEM-WARN
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:MEMORY.*(?:WARN|CRIT|FAIL|ERROR|ECC|FAULT))|(?:(?:WARN|CRIT|FAIL|ECC).*MEMORY)|(?:DIMM.*(?:WARN|CRIT|FAIL|ERROR|FAULT))|(?:ECC.*(?:error|corrected|uncorrected|fail))|(?:uncorrectable.*memory)|(?:correctable.*ECC)|(?:memory.*bank.*error)|(?:memory.*module.*fail)
+  severity: critical
+  category: memory
+  verdict: 메모리 오류 (MEMORY WARNING/CRITICAL/ECC) — 메모리 ECC 오류 또는 DIMM 장애. 하드웨어 불량
+  immediate:
+  - '메모리 이벤트(읽기): `ipmitool sel elist | grep -iE ''memory|ecc|dimm'' | tail -20` — Correctable/Uncorrectable 구분과 DIMM 슬롯 기록'
+  - 'OS 측 ECC 집계: Linux `ras-mc-ctl --errors` (rasdaemon) / AIX `errpt -d H | head -20` / Windows `Get-WinEvent -ProviderName Microsoft-Windows-WHEA-Logger -MaxEvents 20`'
+  - Uncorrectable(UE) 면 즉시 2차 통보, 같은 DIMM 의 Correctable 다발이면 교체 예정으로 분류
+  short:
+  - (2차·승인 후) UE·다발 CE DIMM 은 서비스 우회 후 제조사 교체, 교체 전 최신 백업 성공 여부 확인
+  - '영향: 데이터 손상, 시스템 불안정, 커널 패닉.'
+  mid:
+  - 오류 DIMM 교체(제조사 진단 결과 기준)
+  - 교체 후 제조사 진단 도구 또는 memtest86+ 전체 검사
+  - 메모리 운영 모드(Advanced ECC·미러링) 검토
+  long:
+  - ECC CE 건수 추이 감시(rasdaemon·BMC)와 임계 초과 DIMM 예방 교체 기준 수립
+  source_note: 'legacy-analyzer-v2.2 keyword_rules.json KW-MEM-WARN (원 출처: builtin)'
+  exclude: (?:java.lang.OutOfMemoryError)|(?:WebContainer)
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-KW-DISK-WARN
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:DISK.*(?:WARN|CRIT|FAIL|ERROR|FAULT|BAD))|(?:(?:WARN|CRIT|FAIL|ERROR).*DISK)|(?:DRIVE.*(?:WARN|CRIT|FAIL|ERROR|FAULT))|(?:SMART.*(?:warn|fail|error|critical))|(?:(?:warn|fail|error).*SMART)|(?:bad.block)|(?:reallocated.sector)|(?:predictive.*failure)|(?:drive.*health.*warn)
+  severity: error
+  category: disk
+  verdict: 디스크 오류 (DISK WARNING/CRITICAL/SMART) — 디스크 SMART 경고 또는 물리적 불량. 드라이브 교체 임박
+  immediate:
+  - 'SMART 상태(읽기): `smartctl -H -a /dev/<sdX>` — overall-health FAILED·Reallocated/Pending Sector 증가면 교체 대상 (RAID 뒤 디스크는 `smartctl -a -d megaraid,<N> /dev/sda`)'
+  - 'RAID 상태(읽기): Broadcom/LSI `storcli /c0/eall/sall show` / HPE `ssacli ctrl all show config` — Failed·Predictive Failure 디스크 슬롯 기록'
+  - 'OS 측 오류 동반 여부: Linux `dmesg -T | grep -i ''I/O error'' | tail` / AIX `errpt -d H | head` / Windows `Get-PhysicalDisk | Select-Object FriendlyName,HealthStatus,OperationalStatus`'
+  short:
+  - '(2차·승인 후, 롤백: 교체 전 최신 백업 확인) 예측 장애 디스크 Hot-swap 교체, RAID 재구성 중 대량 작업 연기'
+  - '영향: 데이터 손실 위험. RAID 환경에서는 성능 저하 모드.'
+  mid:
+  - 예측 장애(Predictive Failure) 드라이브 예방적 교체
+  - RAID 재구성 완료 모니터링
+  - 정기 SMART 모니터링(smartd) 설정
+  long:
+  - smartd·RAID 컨트롤러 알림을 감시 시스템에 연동하고 디스크 사용 연수 기반 교체 계획 수립
+  source_note: 'legacy-analyzer-v2.2 keyword_rules.json KW-DISK-WARN (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-KW-RAID-WARN
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:RAID.*(?:WARN|CRIT|DEGRAD|FAIL|ERROR|OFFLINE))|(?:(?:WARN|CRIT|DEGRAD|FAIL).*RAID)|(?:array.*(?:degrad|fail|warn|crit|offline))|(?:volume.*(?:degrad|fail|warn|crit))|(?:raid.*member.*fail)|(?:raid.*rebuild)|(?:RAID_DEGRADED)|(?:ARRAY_FAIL)
+  severity: critical
+  category: storage
+  verdict: RAID 상태 이상 (RAID WARNING/DEGRADED) — RAID 멤버 드라이브 장애로 성능 저하 또는 완전 장애
+  immediate:
+  - "논리 드라이브·멤버 상태(읽기): Broadcom/LSI `storcli /c0/vall show` 와 `storcli /c0/eall/sall show` / HPE `ssacli ctrl all show config` / Dell `perccli /c0/vall show` — Dgrd·Failed·Rbld 기록"
+  - "리빌드(Rebuild) 진행률(읽기): `storcli /c0/eall/sall show rebuild` — 진행 중이면 진행률·완료 예상 시각 기록"
+  - "Linux 소프트웨어 RAID(읽기): `cat /proc/mdstat` 와 `mdadm --detail /dev/md<N>` — [U_] 처럼 _ 가 있거나 State 에 degraded 면 멤버 이탈 확정"
+  short:
+  - '(2차·승인 후, 롤백: 교체 전 백업 성공 확인) 장애 드라이브 Hot-swap 교체 후 자동 재구성 확인, 핫스페어가 없으면 즉시 확보'
+  - '영향: 데이터 보호 소실. 추가 장애 시 데이터 손실.'
+  mid:
+  - 장애 드라이브 Hot-swap 교체
+  - RAID 재구성 완료 모니터링
+  - 이중화 스토리지(핫스페어·RAID 수준) 구성 검토
+  long:
+  - RAID 상태 변화 이벤트 알림 연동과 핫스페어 상시 확보 기준 수립
+  source_note: 'legacy-analyzer-v2.2 keyword_rules.json KW-RAID-WARN (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-KW-VOLT-WARN
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:VOLTAGE.*(?:WARN|CRIT|LOW|HIGH|FAIL|ERROR))|(?:(?:WARN|CRIT).*VOLTAGE)|(?:VCC.*(?:warn|crit|low|high))|(?:VCORE.*(?:warn|crit|low|high))|(?:under.voltage)|(?:over.voltage)|(?:voltage.*out.*range)|(?:voltage.*threshold)
+  severity: error
+  category: hardware
+  verdict: 전압 이상 (VOLTAGE WARNING/CRITICAL) — 서버 전압 공급 이상. PSU 불량 또는 전원 품질 저하
+  immediate:
+  - '전압 센서 값(읽기): `ipmitool sdr type Voltage` — lnc/lcr/unc/ucr 상태 센서 이름(Vcore·3.3V·12V 등)과 값 기록'
+  - 'PSU 상태 동시 확인: `ipmitool sdr type ''Power Supply''`'
+  - UPS·PDU 입력 전압 기록 확인 — 여러 장비 동시면 상위 전원 품질 문제
+  short:
+  - (2차) 단일 서버면 PSU·메인보드 진단을 제조사 의뢰, 여러 장비면 시설 담당 전원 품질 점검 요청
+  - '영향: 하드웨어 손상 또는 긴급 셧다운.'
+  mid:
+  - PSU 교체(제조사 진단 결과 기준)
+  - 전원 품질 개선 (UPS, 정압기)
+  long:
+  - 전압 센서 경고 감시와 UPS 입력 전압 이력 관리
+  source_note: 'legacy-analyzer-v2.2 keyword_rules.json KW-VOLT-WARN (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-KW-NET-WARN
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:LINEPROTO.*UPDOWN)|(?:LINEPROTO-\d+-UPDOWN)|(?:BGP-\d+-ADJCHANGE)|(?:OSPF-\d+-ADJCHG)
+  severity: error
+  category: hardware
+  verdict: 네트워크 장비 WARNING/CRITICAL — 네트워크 장비 경고/오류 이벤트. 링크 장애, 설정 오류 등
+  immediate:
+  - '인터페이스 상태(읽기, Cisco IOS 기준): `show interfaces <if>` — line protocol down·CRC 증가 여부'
+  - '최근 이벤트: `show logging | include UPDOWN|ADJCHANGE|ADJCHG` — 짧은 간격 반복(플래핑) 여부와 시각'
+  - '광 모듈 수신 레벨: `show interfaces <if> transceiver detail` (지원 모듈)'
+  short:
+  - '(2차·승인 후, 롤백: 변경 전 running-config 백업) 케이블·SFP 교체 또는 포트 설정 수정, 필요 시 shutdown/no shutdown 으로 재활성화'
+  - '영향: 네트워크 통신 장애 또는 서비스 중단.'
+  mid:
+  - 케이블/SFP 교체와 광 레벨(DOM) 확인
+  - 포트 설정(속도·듀플렉스·VLAN) 검토
+  - (2차·승인 후) 장비 재기동은 이중화 확인·작업 공지 후 최후 수단
+  long:
+  - 링크·인접 관계 변화 SNMP 트랩·syslog 감시와 장비 설정 백업 자동화
+  source_note: 'legacy-analyzer-v2.2 keyword_rules.json KW-NET-WARN (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-KW-VM-WARN
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:(?:WARN|CRIT|ERROR|ALERT).*(?:vSphere|VMware|ESXi|vCenter|KVM|libvirt|qemu))|(?:(?:vSphere|VMware|ESXi|vCenter|KVM|libvirt|qemu).*(?:WARN|CRIT|ERROR|ALERT))|(?:HA.*(?:fail|warn|crit|alert))|(?:vSAN.*(?:warn|crit|error|health))|(?:datastore.*(?:warn|crit|full|error))
+  severity: error
+  category: storage
+  verdict: 가상화 플랫폼 WARNING/CRITICAL — 가상화 플랫폼 경고/오류. HA 장애, 스토리지 이슈 등
+  immediate:
+  - vCenter › 모니터 › 문제 및 알람에서 해당 시각 경보 대상(호스트·데이터스토어·VM) 확인
+  - 'ESXi 상태(읽기): `esxcli system version get` 와 `esxcli storage filesystem list` — 데이터스토어 Free 급감·미마운트 여부'
+  - KVM 이면 `virsh list --all` 와 `journalctl -u libvirtd --since '-1 hour' | tail -50`
+  short:
+  - (2차·승인 후) 원인별 절차(HA·데이터스토어·vSAN)로 분기, VM 재기동은 원인 해소·업무 담당 승인 후
+  - '영향: VM 서비스 중단 또는 성능 저하.'
+  mid:
+  - (2차·승인 후) 원인 해소 후 영향 VM 재기동·업무 정상 확인
+  - 가상화 플랫폼(ESXi·vCenter·libvirt) 패치 수준을 제조사 권고 판으로 유지
+  long:
+  - vCenter 알람을 감시 시스템(SNMP·메일)으로 통합 연동
+  source_note: 'legacy-analyzer-v2.2 keyword_rules.json KW-VM-WARN (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-KW-CONN-FAIL
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:connection.*failed)|(?:connect.*refused)|(?:connection.*error)|(?:failed.*connect)|(?:unable.*connect)|(?:conn.*fail)
+  severity: error
+  category: connection
+  verdict: 연결 실패 감지 — 서비스 또는 포트 연결 실패. 서비스 미기동 또는 방화벽 차단
+  immediate:
+  - "연결 실패 대상 도달 시험(읽기): Linux `nc -zvw3 <server> <port>` / AIX `telnet <server> <port>`(nc 는 기본 미설치) / Windows `Test-NetConnection <server> -Port <port>`"
+  - "대상 서버 리슨 여부: Linux `ss -ltnp | grep ':<port>'` / AIX `netstat -an | grep LISTEN | grep <port>` / Windows `Get-NetTCPConnection -LocalPort <port> -State Listen`"
+  - "refused 면 서비스 미기동, timeout 이면 방화벽·경로 막힘으로 구분해 해당 담당 통보"
+  short:
+  - '(2차·승인 후, 롤백: 변경 전 정책 기록) 미기동이면 서비스 기동, 차단이면 방화벽 정책 요청'
+  - '영향: 해당 서비스 접근 불가.'
+  mid:
+  - 서비스 자동 기동(systemd enable·Windows 서비스 자동 시작) 설정 점검
+  - 방화벽 포트 정책 문서화와 변경 이력 관리
+  - 네트워크 경로(라우팅·L4) 이중화 확인
+  long:
+  - 주요 서비스 포트 합성 감시(1분 주기 TCP 접속 시험) 등록
+  source_note: 'legacy-analyzer-v2.2 keyword_rules.json KW-CONN-FAIL (원 출처: builtin)'
+  exclude: (?:ORA-12541)|(?:TBR-7000)|(?:tblistener)|(?:WebtoBConnectionManager)|(?:WebtoBConnector)|(?:WEB-3347)|(?:WEB-3346)|(?:jeus.servlet)|(?:registerToWebtoB)
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-KW-TIMEOUT
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:timed out)|(?:connection timeout)|(?:read timeout)|(?:socket timeout)|(?:operation.*timeout)
+  severity: warn
+  category: capacity
+  verdict: 타임아웃 감지 — 처리 시간 초과. 서버 과부하, 네트워크 지연, DB 응답 지연
+  immediate:
+  - '타임아웃 구간(연결/읽기·호출 대상) 확인: `grep -niE ''timed out|timeout'' <앱 로그> | tail -30` — 대상 호스트·포트 편중 여부'
+  - '자원 포화 여부(읽기): Linux/AIX `vmstat 1 5` / Windows `Get-Counter ''\Processor(_Total)\% Processor Time'' -SampleInterval 2 -MaxSamples 5`'
+  - DB 호출이면 같은 시각 활성 세션·대기 이벤트 확인을 DB 담당에 요청
+  short:
+  - '(2차·승인 후, 롤백: 변경 전 값 기록) 원인 구간 해소 후 타임아웃 값 조정 — 원인 해소 없이 값만 늘리면 스레드 고갈 위험'
+  - '영향: 요청 처리 실패, 사용자 오류 응답.'
+  mid:
+  - 타임아웃 임계값을 구간별(연결·응답) 업무 기준으로 표준화
+  - 서버 리소스(CPU·메모리) 증설 재산정
+  - 슬로우 쿼리 튜닝(실행 계획·인덱스)
+  long:
+  - 구간별 응답시간·타임아웃 건수 감시 임계 등록
+  source_note: 'legacy-analyzer-v2.2 keyword_rules.json KW-TIMEOUT (원 출처: builtin)'
+  exclude: (?:ORA-12541)|(?:ORA-12541)|(?:TNS-12541)
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-KW-AUTH-FAIL
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:authentication.*fail)|(?:auth.*error)|(?:login.*fail)|(?:invalid.*credential)|(?:password.*incorrect)|(?:access.*denied)|(?:permission denied)|(?:unauthorized)|(?:authentication.*fail)|(?:auth.*error.*(?:user|login|password))|(?:login.*fail)|(?:invalid.*credential)|(?:password.*incorrect)|(?:access.*denied.*(?:user|auth))|(?:unauthorized.*(?:user|access))|(?:HTTP
+      401)|(?:HTTP 403)
+  severity: warn
+  category: lock
+  verdict: 인증 실패 감지 — 인증 실패. 잘못된 자격 증명 또는 계정 잠금
+  immediate:
+  - '실패 계정·출발 IP·시각(읽기): Linux `grep -iE ''authentication failure|Failed password'' /var/log/secure | tail -30` (Debian 계열 /var/log/auth.log) / AIX `who /etc/security/failedlogin | tail -20` / Windows `Get-WinEvent -FilterHashtable @{LogName=''Security'';Id=4625} -MaxEvents 20`'
+  - '계정 잠금 여부(읽기): Linux `faillock --user <user>` (RHEL 8+, RHEL 7 은 `pam_tally2 -u <user>`) / AIX `lsuser -a unsuccessful_login_count account_locked <user>`'
+  - 단일 IP 에서 여러 계정·짧은 간격 반복이면 무차별 대입 의심으로 보안 담당 통보(비밀번호는 기록하지 않음)
+  short:
+  - '(2차·승인 후, 롤백: 이전 설정 사본) 정당 사용자 확인 후 잠금 해제(`faillock --user <user> --reset`), 서비스 계정이면 애플리케이션 자격 증명 설정 갱신'
+  - '영향: 해당 서비스 접근 거부.'
+  mid:
+  - 계정 잠금 정책(시도 횟수·잠금 시간) 점검
+  - 서비스 계정 비밀번호 변경 시 연계 설정 갱신 절차 수립
+  - 접근 통제(허용 IP·다중 인증) 정책 검토
+  long:
+  - 인증 실패 급증 감시(IP별 분당 실패 수)와 서비스 계정 비밀번호 만료 사전 알림
+  source_note: 'legacy-analyzer-v2.2 keyword_rules.json KW-AUTH-FAIL (원 출처: builtin)'
+  exclude: (?:AH01630)|(?:WebContainer)
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-KW-SERVICE-DOWN
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:service.*down)|(?:service.*stopped)|(?:service.*unavailable)|(?:process.*killed)|(?:process.*terminated)|(?:daemon.*down)|(?:server.*down)|(?:application.*down)
+  severity: critical
+  category: internal
+  verdict: 서비스 다운 감지 — 서비스 또는 데몬 프로세스 중단
+  immediate:
+  - '서비스 상태·종료 사유(읽기): Linux `systemctl status <service>` 와 `journalctl -u <service> -n 100` / AIX `lssrc -s <subsystem>` / Windows `Get-Service <name>` 와 시스템 이벤트 7031·7034'
+  - '비정상 종료 흔적: Linux `journalctl -k --since ''-1 hour'' | grep -iE ''segfault|out of memory''` — 커널 원인(메모리 고갈·segfault) 여부 구분'
+  - '포트 리슨 여부: Linux `ss -ltnp | grep '':<port>''` / AIX `netstat -an | grep LISTEN` / Windows `netstat -an | findstr LISTENING`'
+  short:
+  - '(2차·승인 후, 롤백: 설정 변경 없음 확인) 원인 기록 후 서비스 재기동, 재발 시 기동 로그·코어 덤프 보존 후 담당 이관'
+  - '영향: 해당 서비스 전체 중단.'
+  mid:
+  - 중단 원인(메모리 고갈·설정·의존 서비스) 근본 해결
+  - 자동 재기동(systemd Restart=on-failure·Windows 서비스 복구 옵션) 검토 — 반복 크래시 은폐 방지를 위해 횟수 제한
+  long:
+  - 서비스 가용성 감시(프로세스·포트·헬스체크) 등록
+  source_note: 'legacy-analyzer-v2.2 keyword_rules.json KW-SERVICE-DOWN (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-KW-CPU-WARN
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:cpu.*usage.*high)|(?:cpu.*warning)|(?:high cpu)|(?:load.*average.*high)|(?:cpu.*\d{2,3}%)|(?:\d{2,3}%.*cpu)
+  severity: error
+  category: internal
+  verdict: CPU 사용률 경고 — CPU 사용률 임계값 접근
+  immediate:
+  - 'CPU 사용률 추이(읽기): Linux `mpstat -P ALL 1 3` 또는 `sar -u 1 5` / AIX `sar -u 1 5` / Windows `Get-Counter ''\Processor(_Total)\% Processor Time'' -SampleInterval 2 -MaxSamples 5`'
+  - '점유 프로세스: Linux `ps aux --sort=-%cpu | head -10` / AIX `ps aux | sort -rn -k3 | head -10` / Windows `Get-Process | Sort-Object CPU -Descending | Select-Object -First 10`'
+  - 단일 코어 100%(단일 스레드 루프)인지 전체 포화인지 mpstat 코어별 값으로 구분
+  short:
+  - (2차) 원인 프로세스 담당 확인 후 배치 일정 조정·쿼리 튜닝, 폭주 프로세스 정리는 승인 후
+  - '영향: 시스템 응답 지연.'
+  mid:
+  - 고 CPU 프로세스 원인 코드·쿼리 최적화 요청
+  - CPU 증설 또는 부하 분산 재산정
+  long:
+  - CPU 사용률 85% 5분 지속 감시와 sar 이력 30일 보존
+  source_note: 'legacy-analyzer-v2.2 keyword_rules.json KW-CPU-WARN (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-KW-PROCESS-ERROR
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:process.*error)|(?:process.*fail)|(?:process.*crash)|(?:core.*dump)|(?:segmentation fault)|(?:signal.*error)|(?:exit.*code.*[1-9])|(?:abnormal.*exit)
+  severity: error
+  category: internal
+  verdict: 프로세스 오류 감지 — 프로세스 오류 또는 비정상 종료
+  immediate:
+  - '비정상 종료 프로세스·신호(읽기): Linux `journalctl --since ''-1 hour'' | grep -iE ''segfault|core dumped'' | tail -20` / AIX `errpt -J CORE_DUMP | head`'
+  - '코어 파일 위치: Linux `coredumpctl list | tail` (systemd-coredump 사용 시) 또는 `cat /proc/sys/kernel/core_pattern` / AIX `errpt -a -J CORE_DUMP | head -40`'
+  - '커널 메시지: `dmesg -T | tail -50` — 하드웨어·메모리 고갈 원인 여부 구분'
+  short:
+  - (2차·승인 후) 코어 파일을 다른 파일시스템에 보존한 뒤 프로세스 재기동, 반복 시 코어·로그를 개발/제조사에 전달(민감정보 주의)
+  - '영향: 해당 기능 중단.'
+  mid:
+  - 코어 스택 분석 후 코드 수정·패치 적용
+  - core 파일 경로·크기 제한(ulimit -c) 표준화
+  long:
+  - 프로세스 비정상 종료 감시와 코어 파일 자동 수집 체계 마련
+  source_note: 'legacy-analyzer-v2.2 keyword_rules.json KW-PROCESS-ERROR (원 출처: builtin)'
+  exclude: (?:ORA-07445)|(?:SIGSEGV.*oracle)
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-KW-CONFIG-ERROR
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:configuration.*error)|(?:config.*fail)|(?:invalid.*config)|(?:syntax.*error.*config)|(?:parse.*error)|(?:invalid.*parameter)
+  severity: error
+  category: internal
+  verdict: 설정 파일 오류 — 설정 파일 오류. 문법 오류 또는 잘못된 파라미터 값
+  immediate:
+  - '오류 메시지의 설정 파일명·줄 번호 확인: `grep -niE ''config|parse|syntax'' <서비스 로그> | tail -20`'
+  - '제품별 문법 검사(읽기 전용): Apache `apachectl -t` / Nginx `nginx -t` / sshd `sshd -t` / systemd `systemd-analyze verify <unit>` — 오류 줄 기록'
+  - '최근 변경 확인: `ls -l --time-style=full-iso <설정파일>` 과 작업 계획서·형상관리 이력 대조'
+  short:
+  - '(2차·승인 후, 롤백: 현재 파일을 .bad 로 보관) 직전 정상 백업본 복원 또는 오류 줄 수정 후 문법 검사 통과 확인 뒤 적용'
+  - '영향: 서비스 기동 불가 또는 특정 기능 비활성화.'
+  mid:
+  - 설정 파일 오류 줄 수정 후 문법 검사 통과 확인
+  - 변경 전 백업·문법 검사를 작업 절차서 필수 항목으로 지정
+  - 설정 변경 이력 관리(형상관리)
+  long:
+  - 설정 파일을 형상관리(Git 등)로 관리하고 배포 전 자동 문법 검사
+  source_note: 'legacy-analyzer-v2.2 keyword_rules.json KW-CONFIG-ERROR (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-KW-REPLICATION-FAIL
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:replication.*fail)|(?:sync.*error)|(?:synchronization.*fail)|(?:replica.*error)|(?:master.*slave.*error)|(?:cluster.*sync.*fail)
+  severity: error
+  category: internal
+  verdict: 복제/동기화 실패 — 데이터 복제 또는 클러스터 동기화 실패
+  immediate:
+  - "복제 종류별 상태 조회(읽기): MySQL `SHOW REPLICA STATUS\\G` (8.0.22+, 이전 `SHOW SLAVE STATUS\\G`) / PostgreSQL `SELECT * FROM pg_stat_replication;` / Oracle DG `SELECT dest_id,status,error FROM v$archive_dest WHERE status<>'INACTIVE';`"
+  - "복제 지연(초)·마지막 오류 메시지와 발생 시각 기록"
+  - "복제 구간 네트워크(읽기): Linux `nc -zvw3 <peer_host> <port>` 와 `ping -c 5 <peer_host>` / Windows `Test-NetConnection <peer_host> -Port <port>` — 손실·응답 없음 여부"
+  short:
+  - '(2차·승인 후, 롤백: 재동기화 전 대상 측 백업·스냅샷) 원인 해소 후 복제 재시작·재동기화, 데이터 불일치 시 재구성 범위를 담당과 결정'
+  - '영향: 데이터 불일치, DR 기능 미동작.'
+  mid:
+  - 복제 재구성 절차(초기 동기화 포함) 문서화와 시험
+  - 복제 구간 네트워크 품질(대역폭·지연) 개선
+  - '복제 지연 임계(예: 300초) 알림 설정'
+  long:
+  - DR 전환 훈련 분기 1회 실시와 RPO 목표 대비 복제 지연 보고
+  source_note: 'legacy-analyzer-v2.2 keyword_rules.json KW-REPLICATION-FAIL (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-KW-SECURITY-WARN
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:security.*warning)|(?:security.*violation)|(?:intrusion.*detect)|(?:brute.*force)|(?:suspicious.*activity)|(?:malicious.*request)|(?:csrf.*detect)|(?:xss.*detect)|(?:sql.*injection)
+  severity: error
+  category: security
+  verdict: 보안 경고 감지 — 보안 위협 탐지. 무차별 대입 공격, 악성 요청 등
+  immediate:
+  - '탐지 로그의 출발 IP·대상 URL·시각 확인: `grep -iE ''intrusion|brute|injection|xss|csrf|suspicious'' <보안로그·웹로그> | tail -30`'
+  - '같은 IP 요청 수 집계(읽기): `awk ''{print $1}'' <access_log> | sort | uniq -c | sort -rn | head -10`'
+  - 보안 담당 즉시 통보 — 원본 로그는 수정·이동하지 말고 사본으로만 분석(증거 보존)
+  short:
+  - '(2차·승인 후, 롤백: 차단 규칙 번호 기록 후 해제 가능) 보안 담당 승인 하에 공격 IP 방화벽·WAF 차단'
+  - '영향: 서비스 보안 위협, 데이터 유출 가능성.'
+  mid:
+  - IP 차단 정책을 방화벽·WAF 표준 규칙으로 적용
+  - fail2ban 등 자동 차단 도구 설정
+  - 웹 방화벽(WAF) 규칙 강화
+  long:
+  - 보안 이벤트 통합 감시(SIEM)와 침해 대응 절차·연락망 정비
+  source_note: 'legacy-analyzer-v2.2 keyword_rules.json KW-SECURITY-WARN (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-KW-HEALTH-FAIL
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:health.*check.*fail)|(?:healthcheck.*down)|(?:health.*error)|(?:probe.*fail)|(?:liveness.*fail)|(?:readiness.*fail)
+  severity: error
+  category: performance
+  verdict: 헬스체크 실패 — 서비스 헬스체크 실패. 서비스 응답 불가 또는 비정상
+  immediate:
+  - '헬스체크 URL 직접 호출(읽기): `curl -s -o /dev/null -w ''%{http_code} %{time_total}'' --max-time 5 http://<server>:<port>/<health>` (Windows `Invoke-WebRequest -UseBasicParsing <URL>`) — 200 아님·수 초 이상이면 실패 재현'
+  - '의존 서비스(DB·캐시) 도달: `nc -zvw3 <db_host> <port>`'
+  - L4·로드밸런서 화면에서 해당 서버 제외(Down) 여부와 다른 서버 부하 집중 여부 확인
+  short:
+  - '(2차·승인 후, 롤백: 변경 전 설정 사본) 원인 서비스 복구 후 헬스체크 재통과 확인, 헬스체크 경로가 무거우면 경량 경로로 변경'
+  - '영향: 로드밸런서에서 해당 서버 제외, 트래픽 집중.'
+  mid:
+  - 서비스 정상화 후 헬스체크 복구
+  - 헬스체크 주기·실패 횟수·타임아웃을 서비스 기동 시간 기준으로 재설정
+  long:
+  - 헬스체크 실패 이력 감시와 의존 서비스 상태를 포함한 단계별 헬스 엔드포인트 표준화
+  source_note: 'legacy-analyzer-v2.2 keyword_rules.json KW-HEALTH-FAIL (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-KW-FILE-ERROR
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:file.*not.*found)|(?:no such file)|(?:file.*permission.*denied)|(?:cannot.*open.*file)|(?:file.*read.*error)|(?:file.*write.*error)|(?:FileNotFoundException)|(?:IOException)
+  severity: warn
+  category: lock
+  verdict: 파일 접근 오류 — 파일 접근 실패. 파일 미존재, 권한 부족 또는 잠금
+  immediate:
+  - "오류 경로 존재·권한(읽기): Linux/AIX `ls -ld <path> <상위디렉터리>` 와 `id <실행계정>` / Windows `Get-Acl <path> | Format-List`"
+  - "SELinux 거부 여부(Linux): `getenforce` 와 `ausearch -m avc -ts recent | tail -20` — AVC denied 가 있으면 SELinux 원인"
+  - "공간 부족 동반 여부: `df -h <path>` 와 `df -i <path>` (AIX `df -g <path>`)"
+  short:
+  - '(2차·승인 후, 롤백: 변경 전 `ls -l`·`getfacl` 출력 보관) 경로 생성·권한/소유자 수정 또는 SELinux 컨텍스트 복원(`restorecon -v <path>`)'
+  - '영향: 파일 기반 기능 오류.'
+  mid:
+  - 애플리케이션 설정의 파일 경로를 환경별로 분리·표준화
+  - 실행 계정 권한 정책 문서화
+  - SELinux 정책 조정(semanage fcontext)으로 영구 컨텍스트 지정
+  long:
+  - 파일 접근 오류 건수 감시와 배포 시 경로·권한 사전 점검표 운영
+  source_note: 'legacy-analyzer-v2.2 keyword_rules.json KW-FILE-ERROR (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관

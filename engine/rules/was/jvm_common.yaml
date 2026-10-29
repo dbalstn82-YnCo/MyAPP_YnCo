@@ -1,0 +1,81 @@
+# WAS — JVM 공통(WAS) 시그니처 (룰 학습 1차 2026-10-13: Claude 초안 → 기계 검증 → GPT 벤더 문서 대조, 근거 URL 은 version_note)
+rules:
+- id: WAS-JVM-010
+  layer: was
+  product:
+  - '*'
+  match:
+    regex: A fatal error has been detected by the Java Runtime Environment|SIGSEGV \(0xb\) at pc=|#\s*EXCEPTION_ACCESS_VIOLATION\b
+  severity: critical
+  category: internal
+  verdict: JVM 비정상 종료(크래시) — hs_err_pid 파일 생성
+  immediate:
+  - "hs_err 파일 찾기(읽기): Linux/AIX `ls -lt <WAS기동디렉터리>/hs_err_pid*.log /tmp/hs_err_pid*.log 2>/dev/null | head` (-XX:ErrorFile 지정 시 그 경로) / Windows `Get-ChildItem <WAS기동디렉터리> -Filter 'hs_err_pid*.log' | Sort-Object LastWriteTime -Descending | Select-Object -First 3` — 생성 시각이 종료 시각과 맞는지 확인"
+  - "원인 프레임(읽기): `head -30 <path>/hs_err_pid<PID>.log` (Windows `Get-Content <파일> -TotalCount 30`) 의 'Problematic frame' — C [lib…] 면 네이티브 라이브러리, V [libjvm…] 면 JVM 결함, 'insufficient memory' 문구면 WAS-JVM-012 로 판단"
+  short:
+  - 네이티브 라이브러리·JDK 결함 여부를 제조사에 문의(3차)
+  mid:
+  - JDK 패치 적용
+  long:
+  - JDK 지원 판 유지
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  version_note: HotSpot vmError.cpp — https://github.com/openjdk/jdk/blob/master/src/hotspot/share/utilities/vmError.cpp
+- id: WAS-JVM-011
+  layer: was
+  product:
+  - '*'
+  match:
+    regex: Too many open files
+  severity: critical
+  category: capacity
+  verdict: 열린 파일(소켓) 수 한도 초과 — 새 연결·파일 열기 실패
+  immediate:
+  - 프로세스 열린 파일 수(ls /proc/<pid>/fd | wc -l)와 ulimit -n 확인
+  - CLOSE_WAIT 소켓 급증(연결 미반환) 여부 확인
+  short:
+  - 연결 미반환 원인 해소, nofile 한도 검토(2차)
+  mid:
+  - 연결 풀·HTTP 클라이언트 자원 반환 점검
+  long:
+  - 한도 감시
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  version_note: OS 오류(EMFILE) 문구 — 프로세스 한도인지 시스템 전체인지는 OS 로그로 구분
+- id: WAS-JVM-012
+  layer: was
+  product:
+  - '*'
+  match:
+    regex: There is insufficient memory for the Java Runtime Environment to continue
+  severity: critical
+  category: memory
+  verdict: OS 메모리 부족으로 JVM 종료(네이티브 메모리 할당 실패)
+  immediate:
+  - "같은 시각 메모리·스왑(읽기): Linux `free -m` 와 `dmesg -T | grep -iE 'out of memory|oom-killer' | tail -20`(RHEL 7+) / AIX `svmon -G` 와 `lsps -a` / Windows `Get-Counter '\\Memory\\Available MBytes','\\Memory\\% Committed Bytes In Use'` — 가용 메모리·스왑이 바닥이면 OS 메모리 부족 확정"
+  - "메모리 많이 쓰는 프로세스(읽기): Linux `ps aux --sort=-rss | head -10` / AIX `svmon -Pt 10` / Windows `Get-Process | Sort-Object WorkingSet64 -Descending | Select-Object -First 10 Name,Id,WorkingSet64`"
+  - "hs_err 할당 실패 문구(읽기): `head -30 <path>/hs_err_pid<PID>.log` — 'Native memory allocation (mmap|malloc) failed' 면 OS 메모리·주소 공간 부족"
+  short:
+  - 힙·스레드 수·네이티브 메모리 사용 점검(2차)
+  mid:
+  - 서버 메모리 용량·프로세스 배치 조정
+  long:
+  - 용량 계획
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  version_note: HotSpot vmError.cpp(힙 OOM 과 다름 — OS 가 메모리를 못 줌) — https://github.com/openjdk/jdk/blob/master/src/hotspot/share/utilities/vmError.cpp

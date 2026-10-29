@@ -1,0 +1,2 @@
+2026/09/02 14:03:10 [error] 1863#0: *55211 upstream timed out (110: Connection timed out) while reading response header from upstream, client: 10.20.1.55, server: order.example.co.kr, request: "POST /api/v1/orders HTTP/1.1", upstream: "http://10.20.2.11:8080/api/v1/orders"
+2026/09/02 14:03:12 [error] 1863#0: *55214 upstream timed out (110: Connection timed out) while reading response header from upstream, client: 10.20.1.61, server: order.example.co.kr, request: "POST /api/v1/orders HTTP/1.1", upstream: "http://10.20.2.12:8080/api/v1/orders"

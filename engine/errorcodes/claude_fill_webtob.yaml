@@ -1,0 +1,208 @@
+product: webtob
+layer: web
+note: GPT 협업 수집분 — 벤더 공식 문서와 대조 후 확정
+codes:
+- code: WEBTOB-HTH-HANG
+  severity: critical
+  category: thread
+  title: HTH 응답 없음
+  immediate:
+  - '`ps -ef | grep -E "[w]sm|[h]tl|[h]th"` 로 HTH 프로세스 생존·CPU 확인'
+  - '`$WEBTOBDIR/bin/wsadmin` 접속 후 `st -p` 로 서버 프로세스 상태, `st -s` 로 서비스 큐 대기 수 확인 — 큐 적체면 백엔드(JEUS) 지연'
+  - '`ls -lt $WEBTOBDIR/log | head` 로 최근 로그 파일을 찾아 `tail -100` 으로 hang 전후 오류 확인'
+  short:
+  - '(2차·승인 후, 롤백: 없음 — 기동 확인으로 대체) 백엔드 지연 원인 확인 뒤에도 응답이 없으면 `wsdown` 후 `wsboot` 로 재기동, 전후 `wsadmin` st 결과 보관'
+  mid:
+  - 'HTH 수·MaxUser 와 JSV MinProc/MaxProc 를 동시 접속량 기준으로 재산정'
+  long:
+  - 'HTH 응답성(헬스체크 URL 응답 시간) 감시와 큐 대기 수 경보'
+  vendor_cause: '이 사전 별칭(로그 문구 hth … hang/not respond)상 HTH(HTTP 요청 처리 프로세스)가 응답하지 않는 상태다. HTH 가 처리 중인 요청이 JSV(JEUS)·CGI 응답을 기다리며 묶였거나 클라이언트 폭주로 HTH 처리 한도에 도달한 것이 흔한 원인.'
+  verify_note: '미검증 — HTH hang 로그 문구의 공식 메시지 표를 확인하지 못함(별칭 기반 의사코드)'
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - WebtoB 4.1
+  - WebtoB 5.x
+  - WebtoB 6.x
+  version_note: 로그 문구 기반 별칭 — 4.1/5/6 공통(로그 레이아웃은 사이트 설정에 따라 다름)
+- code: WEBTOB-SVR-QUEUE-FULL
+  severity: critical
+  category: capacity
+  title: 서버 큐 가득참
+  immediate:
+  - '`$WEBTOBDIR/bin/wsadmin` 접속 후 `st -s` 로 서비스별 큐 대기 수, `st -p` 로 서버 프로세스 상태(모두 처리 중인지) 확인'
+  - '같은 시각 JEUS 쪽 스레드·DB 대기 로그 확인 — 백엔드 지연이면 WebtoB 설정이 아닌 WAS 원인'
+  short:
+  - '(2차) 백엔드 지연 원인(DB 잠금·외부 연동) 담당에 통보, 프로세스 수·큐 한도 조정은 원인 확인 뒤 승인 후(롤백: http.m 백업 복원 후 wscfl)'
+  mid:
+  - '*SERVER MinProc/MaxProc·MaxQCount 를 처리량 기준으로 재산정하고 JEUS 워커 수와 일치'
+  long:
+  - '`st -s` 큐 대기 수 주기 수집·경보'
+  vendor_cause: '이 사전 별칭상 WebtoB 서버(서비스) 큐가 가득 찬 상태다. 요청이 백엔드(JSV·CGI) 처리 프로세스 수보다 많이 들어와 대기 요청이 MaxQCount 한도에 닿은 것으로, 백엔드 처리 지연이나 요청 폭주가 흔한 원인.'
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - WebtoB 4.1
+  - WebtoB 5.x
+  - WebtoB 6.x
+  version_note: 로그 문구 기반 별칭 — 4.1/5/6 공통(로그 레이아웃은 사이트 설정에 따라 다름)
+- code: WEBTOB-SVR-MAXPROC
+  severity: error
+  category: capacity
+  title: 서버 프로세스 최대 도달
+  immediate:
+  - '`$WEBTOBDIR/bin/wsadmin` 접속 후 `st -p` 로 처리 중 프로세스 수, `cfg` 로 MinProc·MaxProc 설정 확인'
+  - '`grep -n -i "MaxProc\|MinProc" $WEBTOBDIR/config/http.m` 로 설정 파일 값 확인(읽기 전용)'
+  short:
+  - '(2차·승인 후, 롤백: http.m 백업 복원 후 wscfl) 백엔드 지연이 아니면 MaxProc 상향 후 `wscfl -i http.m` 컴파일·재기동 일정 협의'
+  mid:
+  - 'MaxProc 를 피크 동시 요청량과 JEUS 처리 스레드 수 기준으로 재산정'
+  long:
+  - '처리 프로세스 사용률(처리 중/MaxProc) 80% 경보'
+  vendor_cause: '이 사전 별칭상 서버 그룹의 처리 프로세스 수가 MaxProc 에 도달했다. 동시 요청 증가 또는 프로세스가 응답 대기로 오래 묶여 새 요청이 큐에 쌓이기 시작한 상태다.'
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - WebtoB 4.1
+  - WebtoB 5.x
+  - WebtoB 6.x
+  version_note: 로그 문구 기반 별칭 — 4.1/5/6 공통(로그 레이아웃은 사이트 설정에 따라 다름)
+- code: WEBTOB-CLIENT-DISCONNECT
+  severity: warn
+  category: connection
+  title: 클라이언트 연결 종료
+  immediate:
+  - '`ls -lt $WEBTOBDIR/log | head` 로 최근 로그를 찾아 `grep -c -i "disconnect\|closed" <로그파일>` 로 시간당 건수 확인 — 평소 수준이면 정보성'
+  - '급증 시 같은 시각 `$WEBTOBDIR/bin/wsadmin` `st -s` 큐 대기와 접근 로그 응답 시간 확인'
+  short:
+  - '(2차) 응답 지연 동반이면 지연 URL 의 백엔드 처리 시간 개선을 WAS 담당에 요청'
+  mid:
+  - 'LB·WebtoB·JEUS 타임아웃 정렬'
+  long:
+  - '클라이언트 조기 종료 건수 기준선 감시'
+  vendor_cause: '이 사전 별칭상 클라이언트가 응답 전에 연결을 끊었다. 응답 지연으로 사용자·LB 가 기다리다 포기했거나 사용자가 요청을 취소한 경우가 흔하며, 단발성은 장애가 아니다.'
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - WebtoB 4.1
+  - WebtoB 5.x
+  - WebtoB 6.x
+  version_note: 로그 문구 기반 별칭 — 4.1/5/6 공통(로그 레이아웃은 사이트 설정에 따라 다름)
+- code: WEBTOB-JSV-TIMEOUT
+  severity: error
+  category: upstream
+  title: JSV 응답 시간 초과
+  immediate:
+  - '`$WEBTOBDIR/bin/wsadmin` 접속 후 `st -s` 로 JSV 서비스 큐 대기 수, `si` 로 JSV 서버 상태 확인'
+  - '같은 시각 JEUS 서버 로그에서 스레드 풀 고갈·장시간 요청·GC 확인 — JEUS 지연이면 WAS 담당 통보'
+  short:
+  - '(2차) JEUS 지연 원인(DB·외부 연동) 해소 요청, WebtoB 쪽 시간 제한 조정은 원인 확인 뒤 승인 후(롤백: http.m 백업 복원)'
+  mid:
+  - 'WebtoB·JEUS·DB 타임아웃 계층 정렬과 JEUS 처리 스레드 재산정'
+  long:
+  - 'JSV 응답 시간·시간 초과 건수 감시'
+  vendor_cause: '이 사전 별칭상 JSV(JEUS 연동) 요청이 정해진 시간 안에 JEUS 응답을 받지 못했다. JEUS 처리 지연(스레드 고갈·DB 대기·GC)이나 WebtoB-JEUS 간 네트워크 지연이 흔한 원인이며 사용자에게 시간 초과 오류가 나간다.'
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - WebtoB 4.1
+  - WebtoB 5.x
+  - WebtoB 6.x
+  version_note: 로그 문구 기반 별칭 — 4.1/5/6 공통(로그 레이아웃은 사이트 설정에 따라 다름)
+- code: WEBTOB-JSV-RECONNECT
+  severity: warn
+  category: connection
+  title: JSV 재연결
+  immediate:
+  - '`$WEBTOBDIR/bin/wsadmin` 접속 후 `si` 로 JSV(JEUS) 서버 상태(RDY)·연결 수 확인 (`si` 는 내부 서버(JSV) 상태 — `ci` 는 WebtoB 5 에서 클라이언트 정보라 JEUS 연결 확인에 쓰지 않는다)'
+  - '같은 시각 JEUS 서버 기동 로그(서버 시작 시각) 확인 — 기동 시각과 일치하면 JEUS 쪽 기동(교체)이 원인'
+  short:
+  - '(2차) 예정에 없던 JEUS 재기동이면 WAS 담당에 원인 확인 요청, 방화벽 세션 정리면 유휴 타임아웃 조정을 네트워크 담당에 승인 후 요청'
+  mid:
+  - 'WebtoB-JEUS 연결 유지(keepalive) 설정과 방화벽 세션 타임아웃 정렬'
+  long:
+  - 'JSV 재연결 건수 감시'
+  vendor_cause: '이 사전 별칭상 WebtoB 와 JEUS(JSV) 사이 연결이 끊겼다가 다시 맺어졌다. JEUS 재기동·네트워크 순단·방화벽 세션 정리가 흔한 원인이며, 재연결 사이에 들어온 요청은 실패할 수 있다.'
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - WebtoB 4.1
+  - WebtoB 5.x
+  - WebtoB 6.x
+  version_note: 로그 문구 기반 별칭 — 4.1/5/6 공통(로그 레이아웃은 사이트 설정에 따라 다름)
+- code: WEBTOB-SSL-CERT-EXPIRED
+  severity: critical
+  category: security
+  title: SSL 인증서 만료
+  immediate:
+  - '`grep -n -i "Certificate" $WEBTOBDIR/config/http.m` 로 *SSL 절의 인증서 파일 경로 확인 후 `openssl x509 -in <인증서> -noout -enddate -subject` 로 만료일 확인'
+  - '`openssl s_client -connect <host>:<sslport> -servername <host> </dev/null 2>/dev/null | openssl x509 -noout -enddate` 로 실제 제공 인증서 확인'
+  short:
+  - '(2차·승인 후, 롤백: 이전 인증서 파일 복원) 새 인증서·키·체인을 같은 경로에 배치하고 `wscfl -i http.m` 컴파일 후 재기동 일정에 적용'
+  mid:
+  - '인증서 갱신 절차(발급·체인·배치·확인) 표준화'
+  long:
+  - '인증서 만료 60/30/7일 전 경보'
+  vendor_cause: '이 사전 별칭상 WebtoB SSL 인증서가 만료됐다. 만료된 인증서로는 브라우저가 접속을 거부하거나 경고를 띄우며, 갱신 누락이 원인이다.'
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - WebtoB 4.1
+  - WebtoB 5.x
+  - WebtoB 6.x
+  version_note: 로그 문구 기반 별칭 — 4.1/5/6 공통(로그 레이아웃은 사이트 설정에 따라 다름)
+- code: WEBTOB-DIRECTORY-LISTING
+  severity: warn
+  category: security
+  title: 디렉터리 목록 노출
+  immediate:
+  - '`grep -n -i "index" $WEBTOBDIR/config/http.m` 로 디렉터리 인덱스 관련 설정 확인(읽기 전용)'
+  - '접근 로그에서 디렉터리 URL(끝이 /) 요청의 응답 코드 확인 — 200 이면 목록 노출 가능성, 403 이면 index 파일 누락'
+  short:
+  - '(2차·승인 후, 롤백: http.m 백업 복원) 목록 노출이면 디렉터리 인덱스 비활성화, 누락이면 index 파일 배포'
+  mid:
+  - '디렉터리 목록 노출 금지 설정 표준'
+  long:
+  - '정기 보안 점검에 디렉터리 노출 점검 포함'
+  vendor_cause: '이 사전 별칭상 디렉터리 목록(인덱스) 표시와 관련된 기록이다. 디렉터리 목록 노출이 켜져 있으면 파일 구조가 외부에 드러나는 보안 문제가 되고, 꺼져 있는데 index 파일이 없으면 403 이 난다.'
+  verify_note: '미검증 — WebtoB http.m 의 디렉터리 목록 관련 정확한 설정 항목 이름을 공식 문서에서 확인하지 못함'
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - WebtoB 4.1
+  - WebtoB 5.x
+  - WebtoB 6.x
+  version_note: 로그 문구 기반 별칭 — 4.1/5/6 공통(로그 레이아웃은 사이트 설정에 따라 다름)
+- code: WEBTOB-HEADER-TOO-LARGE
+  severity: warn
+  category: capacity
+  title: 요청 헤더 크기 초과
+  immediate:
+  - '`ls -lt $WEBTOBDIR/log | head` 로 최근 로그를 찾아 `grep -n -i "header" <로그파일> | tail -20` 로 출처·URL 확인'
+  - '같은 사용자가 반복하면 쿠키 크기 문제, 다수 외부 IP 면 비정상 요청으로 보안 담당 통보'
+  short:
+  - '(2차) 정상 사용자면 쿠키 크기 축소를 애플리케이션 담당과 협의, 한도 상향은 승인 후(롤백: http.m 백업 복원)'
+  mid:
+  - '쿠키·헤더 크기 기준 수립'
+  long:
+  - '헤더 크기 초과 건수 감시'
+  vendor_cause: '이 사전 별칭상 요청 헤더가 WebtoB 허용 크기를 넘어 거부됐다(431 계열). 큰 쿠키·인증 토큰이나 비정상 요청이 흔한 원인.'
+  verify_note: '미검증 — WebtoB 요청 헤더 크기 한도의 http.m 설정 항목 이름을 공식 문서에서 확인하지 못함'
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - WebtoB 4.1
+  - WebtoB 5.x
+  - WebtoB 6.x
+  version_note: 로그 문구 기반 별칭 — 4.1/5/6 공통(로그 레이아웃은 사이트 설정에 따라 다름)
+- code: WEBTOB-INVALID-REQUEST
+  severity: warn
+  category: security
+  title: 잘못된 요청
+  immediate:
+  - '접근 로그에서 400 응답 출처 상위 확인 `tail -n 10000 <접근로그> | awk -F''"'' ''NF>=3 {s=$3; sub(/^[[:space:]]+/,"",s); split(s,a,/[[:space:]]+/); if(a[1]=="400") {split($1,b,/[[:space:]]+/); print b[1], $2}}'' | sort | uniq -c | sort -rn | head` (WebtoB DEFAULT·COMMON·COMBINED 공통 — 출처 IP·요청 줄, 최근 1만 줄만)'
+  - '출처가 내부 연계 시스템이면 해당 시스템 담당, 외부 다수면 보안 담당 통보'
+  short:
+  - '(2차) 공격이면 방화벽 차단을 승인 후 적용(롤백: 규칙 제거), 연계 시스템이면 요청 형식 수정 요청'
+  mid:
+  - 'WAF 비정상 요청 차단 정책'
+  long:
+  - '400 응답 비율 감시'
+  vendor_cause: '이 사전 별칭상 HTTP 규격에 맞지 않는 요청(400 Bad Request·malformed)을 받아 거부했다. 스캐너·퍼징 도구나 잘못된 연계 클라이언트가 흔한 원인.'
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - WebtoB 4.1
+  - WebtoB 5.x
+  - WebtoB 6.x
+  version_note: 로그 문구 기반 별칭 — 4.1/5/6 공통(로그 레이아웃은 사이트 설정에 따라 다름)

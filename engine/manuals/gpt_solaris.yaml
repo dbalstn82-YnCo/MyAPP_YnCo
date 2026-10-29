@@ -1,0 +1,15 @@
+product: solaris
+title: Oracle Solaris 운영 참고 (GPT 수집 — 벤더 문서 대조 필요)
+sections:
+- heading: 로그 위치
+  body: 전통 시스템 메시지는 /var/adm/messages에서 확인하며 Solaris 11 Fault Management는 FMA 저장소를
+    fmadm, fmdump로 조회한다. SMF 서비스 로그는 svcs -xv가 표시하는 logfile 경로를 따른다.
+- heading: 장애 시 수집 방법
+  body: fmadm faulty, fmdump -eV, /var/adm/messages, svcs -xv, iostat -en, prstat,
+    vmstat 결과를 수집하고 하드웨어 장애면 ILOM fault 정보와 함께 보존한다.
+- heading: 대표 장애 신호
+  body: FMA fault, kernel panic, ZFS DEGRADED/FAULTED, SCSI/I/O 오류, NFS server not
+    responding, swap 고갈, SMF maintenance와 /var/adm/messages의 genunix 경고를 우선 확인한다.
+- heading: 1차 확인 명령
+  body: fmadm faulty; svcs -xv; zpool status -x; iostat -en; prstat -Z 1 5; vmstat
+    1 5; tail -100 /var/adm/messages 로 하드웨어·서비스·ZFS·자원을 확인한다.

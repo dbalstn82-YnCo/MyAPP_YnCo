@@ -1,0 +1,232 @@
+# 5차 보강(2026-10-16) — GPT 핵심 코드 대조에서 빠진 Tibero 코드 추가.
+# 근거: Tibero 7.2.5 Error Reference Guide (docs.tibero.com, 장별 페이지에서 번호·이름·description/cause/action 확인)
+#       뷰·칼럼: Tibero Reference Guide 'Static View'·'Dynamic View' (DBA_TBL_PRIVS·DBA_TBL_COLUMNS·DBA_SYNONYMS(ORG_OBJECT_*)·V$SGA(NAME,TOTAL,USED)·V$INSTANCE(TIP_FILE))
+# 넣지 않은 후보: TBR-20010 — 오류 참조의 20000번대(psmuser)는 20001 ERROR_PSMUSER(raise_application_error 사용자 오류)만 정의, 20010 은 제조사 정의 코드가 아님
+product: tibero
+layer: db
+note: 5차 보강 — 공식 오류 참조(7.2.5)와 대조해 추가
+codes:
+- code: TBR-12099
+  severity: error
+  category: connection
+  title: 클라이언트 메시지 수신 시간 초과로 연결 종료
+  vendor_cause: "ERROR_READ_MSG_TIMEOUT — 서버가 최대 대기 시간 동안 클라이언트 메시지를 받지 못해 그 클라이언트 연결을 닫았다는 뜻. 클라이언트(WAS) 쪽 처리 정지·네트워크 순단·방화벽 세션 만료가 흔한 원인."
+  vendor_action: 클라이언트 상태를 확인한다.
+  vendor_url: https://docs.tibero.com/tibero-manuals_en/7.2.5.manuals_en/tibero-error-reference-guide/chapter-12000.frame.error
+  immediate:
+  - "`grep -n \"12099\" $TB_HOME/instance/$TB_SID/log/slog/sys.log | tail -20` 로 발생 시각·빈도 확인 — 같은 시각에 여러 건이면 네트워크/WAS 공통 원인, 한두 건이면 개별 클라이언트"
+  - "같은 시각 WAS·애플리케이션 로그에서 해당 클라이언트의 소켓 오류·스레드 정지를 확인하고 `ping -c 5 <client_ip>` 로 경로 확인"
+  - "tbsql 로 DBA 접속 후 `select sid, username, ipaddr, status from v$session order by ipaddr;` 로 해당 IP 세션 잔존·편중 확인(읽기 전용)"
+  short:
+  - "(2차·승인 후, 롤백: 변경 전 풀·방화벽 설정값 기록 후 원복) 반복되는 클라이언트의 WAS 커넥션 풀 유휴 검증(validation query·idle timeout)과 방화벽 세션 유지 시간을 서로 맞게 조정"
+  mid:
+  - "발생 시각을 WAS GC 로그·스레드 덤프·방화벽 세션 로그와 대조해 클라이언트 정지 원인(풀 고갈·Full GC·네트워크 장비)을 특정"
+  long:
+  - "클라이언트 IP별 TBR-12099 건수를 시간 단위로 집계해 임계(예: 시간당 10건) 초과 시 경보, 방화벽 idle timeout 을 커넥션 풀 수명보다 길게 표준화"
+  versions:
+  - Tibero 7
+  version_note: Tibero 7.2.5 Error Reference Guide 에서 번호·이름·원인 확인. Tibero 6 이하는 공개 오류 문서로 대조하지 못함(번호 체계는 공통으로 알려져 있으나 이 코드는 미확인)
+  source: "공식 문서 대조(2026-10-16 5차 보강)"
+- code: TBR-2004
+  severity: error
+  category: connection
+  title: DSN 파일(tbdsn.tbr) 형식 오류
+  vendor_cause: "ERROR_CLI_INVALID_DSN_FILE_FORMAT — 클라이언트가 읽는 DSN 파일의 형식이 잘못되어 접속 정보를 해석할 수 없다는 뜻. tbdsn.tbr 수작업 편집 중 괄호·등호 누락, 다른 환경 파일 복사, 줄끝(CRLF) 혼입이 흔한 원인."
+  vendor_action: 데이터베이스 홈 아래 client/config 디렉터리의 DSN 파일을 확인한다.
+  vendor_url: https://docs.tibero.com/tibero-manuals_en/7.2.5.manuals_en/tibero-error-reference-guide/chapter-2000.cli.error
+  immediate:
+  - "`ls -l $TB_HOME/client/config/tbdsn.tbr` 로 수정 시각 확인 — 최근 변경이면 누가·언제 바꿨는지 변경 이력 확보"
+  - "`cat -A $TB_HOME/client/config/tbdsn.tbr | head -40` 로 괄호 짝·등호 누락과 줄끝 ^M(CRLF) 혼입 확인(읽기 전용, 파일에는 호스트·포트·DB 이름만 있음)"
+  - "정상 접속되는 다른 클라이언트의 tbdsn.tbr 사본과 `diff <정상 사본> $TB_HOME/client/config/tbdsn.tbr` 로 차이 확인"
+  short:
+  - "(2차·승인 후, 롤백: 수정 전 tbdsn.tbr 백업본 복원) 파일을 백업한 뒤 잘못된 별칭 항목만 고치고 `tbsql <user>@<alias>` 로 접속 확인"
+  mid:
+  - "클라이언트 서버별 tbdsn.tbr 을 형상관리(버전·체크섬)에 올리고 운영 중 수작업 편집 금지"
+  long:
+  - "배포 체크리스트에 DSN 파일 접속 시험(별칭별 tbsql 접속)을 넣고 변경은 변경관리 절차로만 수행"
+  versions:
+  - Tibero 7
+  version_note: Tibero 7.2.5 Error Reference Guide 에서 확인. tbdsn.tbr 위치($TB_HOME/client/config)는 Tibero 설치 안내서 기준. Tibero 6 이하는 공개 오류 문서로 대조하지 못함
+  source: "공식 문서 대조(2026-10-16 5차 보강)"
+- code: TBR-3002
+  severity: critical
+  category: memory
+  title: 공유 풀(shared pool) 메모리 부족
+  vendor_cause: "ERROR_OUT_OF_SHP — 공유 풀에서 요청한 바이트를 할당하지 못함(남은 shared pool 부족). 리터럴 SQL 남발로 공유 커서가 과다해지거나 대량 PSM 적재, TOTAL_SHM_SIZE 과소 설정이 흔한 원인."
+  vendor_action: 공유 메모리를 늘리려면 TOTAL_SHM_SIZE 파라미터를 더 큰 값으로 지정한다.
+  vendor_url: https://docs.tibero.com/tibero-manuals_en/7.2.5.manuals_en/tibero-error-reference-guide/chapter-3000.common.error
+  immediate:
+  - "tbsql 로 DBA 접속 후 `select name, total, used from v$sga;` 로 공유 풀 사용량 확인 — used 가 total 의 95% 이상이면 확정"
+  - "`select name, value from v$parameters where name = 'TOTAL_SHM_SIZE';` 와 `select tip_file from v$instance;` 로 현재 설정값·tip 파일 위치 확인(값 변경은 2차)"
+  - "`grep -n \"3002\" $TB_HOME/instance/$TB_SID/log/slog/sys.log | tail -20` 로 반복 여부·시작 시각 확인 — 연속 발생이면 신규 SQL 실행이 계속 실패하므로 2차 DBA 즉시 호출"
+  short:
+  - "(2차·승인 후, 롤백: tip 파일 백업본으로 되돌린 뒤 재기동) tip 파일의 TOTAL_SHM_SIZE 를 상향하고 정기 점검 시간에 재기동 — 사전에 OS 공유 메모리 한도(kernel.shmmax·shmall)와 물리 메모리 여유 확인"
+  mid:
+  - "같은 형태에 리터럴만 다른 SQL 을 많이 만드는 모듈을 찾아 바인드 변수 사용으로 개선 요청, PSM 적재량과 공유 풀 크기를 함께 산정"
+  long:
+  - "v$sga 공유 풀 사용률 85%/95% 감시 임계 등록, TOTAL_SHM_SIZE 를 용량 계획(업무 증가율)에 반영"
+  versions:
+  - Tibero 7
+  version_note: Tibero 7.2.5 Error Reference Guide 에서 확인, V$SGA·V$PARAMETERS·V$INSTANCE(TIP_FILE)는 7 Reference Guide 기준. Tibero 6 이하는 공개 오류 문서로 대조하지 못함
+  source: "공식 문서 대조(2026-10-16 5차 보강)"
+- code: TBR-10007
+  severity: warn
+  category: internal
+  title: UNIQUE 제약조건 위반
+  vendor_cause: "ERROR_EXEC_CONSTRAINT_UNIQUE — UNIQUE 제약이 걸린 칼럼에 중복 값을 넣으려 함(메시지에 '소유자'.'제약조건' 표시). 애플리케이션 중복 요청·재처리, 채번(시퀀스) 꼬임, 이관 데이터 중복이 흔한 원인."
+  vendor_action: UNIQUE 제약조건을 해제하거나 고유한 값을 입력한다(제약 해제는 정합성 훼손 위험이 있어 표준 조치에서 제외).
+  vendor_url: https://docs.tibero.com/tibero-manuals_en/7.2.5.manuals_en/tibero-error-reference-guide/chapter-10000.exec.error
+  immediate:
+  - "메시지의 소유자·제약조건 이름으로 `select owner, constraint_name, constraint_type, table_name from dba_constraints where owner = '<OWNER>' and constraint_name = '<CONSTRAINT>';` 확인(읽기 전용)"
+  - "`select column_name, position from dba_cons_columns where owner = '<OWNER>' and constraint_name = '<CONSTRAINT>' order by position;` 로 대상 칼럼을 확인하고 애플리케이션 로그에서 같은 키의 중복 요청(재시도·이중 처리) 여부 확인"
+  short:
+  - "(2차·승인 후, 롤백: 수정 전 대상 행을 백업 테이블로 복사) 채번 꼬임이면 시퀀스 다음 값을 기존 최대 키보다 크게 맞추고, 데이터 오류면 업무 담당 확인 후 정정"
+  mid:
+  - "애플리케이션에 중복 요청 방지(멱등 키·재시도 전 존재 확인)를 반영하고 이관 스크립트에 중복 검사 단계 추가"
+  long:
+  - "업무별 TBR-10007 건수를 집계해 평소 대비 급증 시 경보, 제약조건 해제·비활성화는 변경관리 승인 없이는 금지"
+  versions:
+  - Tibero 7
+  version_note: Tibero 7.2.5 Error Reference Guide 에서 확인. Tibero 6 이하는 공개 오류 문서로 대조하지 못함
+  source: "공식 문서 대조(2026-10-16 5차 보강)"
+- code: TBR-7607
+  severity: critical
+  category: internal
+  title: 데이터베이스를 NORMAL 모드로 열 수 없음
+  vendor_cause: "ERROR_DDL_CANNOT_OPEN_DATABASE — 메시지의 사유(due to …) 때문에 현재 상태로는 DB 를 NORMAL 모드로 열 수 없다는 뜻. 컨트롤·데이터·로그 파일 누락이나 불일치, 복구가 필요한 상태가 흔한 원인이며 서비스 전체가 기동되지 못한다."
+  vendor_action: 데이터베이스를 열기 위한 조건을 확인한다.
+  vendor_url: https://docs.tibero.com/tibero-manuals_en/7.2.5.manuals_en/tibero-error-reference-guide/chapter-7000.ddl.error
+  immediate:
+  - "메시지의 'due to …' 사유를 그대로 기록하고 `tail -n 200 $TB_HOME/instance/$TB_SID/log/slog/sys.log | grep -F -e \"[E]\" -e \"[F]\" -e \"TBR-\" | tail -30` 로 직전 오류 확인"
+  - "`ls -lt $TB_HOME/instance/$TB_SID/log/tbsvr.out.* 2>/dev/null | head -2` 의 최신 파일 끝부분과 `ps -ef | grep -E \"[t]bsvr\"` 로 기동 단계·프로세스 상태 확인"
+  - "`grep -i CONTROL_FILES $TB_HOME/config/$TB_SID.tip` 로 컨트롤 파일 경로를 확인하고 `ls -l <컨트롤 파일 경로>` 로 존재·권한·크기 확인(복구·재기동은 2차)"
+  short:
+  - "(2차·승인 후, 롤백: 작업 전 데이터·컨트롤·로그 파일 사본 확보) 사유에 따라 누락 파일 복원 또는 `tbboot -t MOUNT` 후 매체 복구 — 복구 방식은 Tibero 관리자 안내서 '백업과 복구' 절차로 DBA 가 결정"
+  mid:
+  - "기동 실패 사유별(파일 누락·권한·불일치·복구 필요) 조치 절차를 운영 매뉴얼로 정리하고 CONTROL_FILES 다중화(서로 다른 디스크 2개 이상) 점검"
+  long:
+  - "정기 백업·복구 훈련으로 기동 불가 시 복구 시간(RTO) 검증, 데이터 파일 경로·스토리지 변경은 변경관리로만 수행"
+  versions:
+  - Tibero 7
+  version_note: Tibero 7.2.5 Error Reference Guide 에서 확인. Tibero 6 이하는 공개 오류 문서로 대조하지 못함
+  source: "공식 문서 대조(2026-10-16 5차 보강)"
+- code: TBR-8053
+  severity: error
+  category: security
+  title: 객체·칼럼 접근 권한 없음
+  vendor_cause: "ERROR_DML_NOT_ENOUGH_PRIVILEGE — 권한이 없는 객체나 칼럼에 접근하려 함. 배포 후 GRANT 누락, 롤 회수, 다른 스키마 객체를 권한 없이 호출하는 SQL 이 흔한 원인."
+  vendor_action: 해당 객체에 접근할 수 없다(문서 문구) — 필요한 권한이 부여됐는지 확인한다.
+  vendor_url: https://docs.tibero.com/tibero-manuals_en/7.2.5.manuals_en/tibero-error-reference-guide/chapter-8000.dml.error
+  immediate:
+  - "애플리케이션 로그에서 실패 SQL·접속 계정·대상 객체를 확인하고 tbsql 로 DBA 접속 후 `select grantee, owner, table_name, privilege from dba_tbl_privs where owner = '<OWNER>' and table_name = '<OBJECT>';` 로 부여 현황 확인"
+  - "`select grantee, privilege from dba_sys_privs where grantee = '<USER>';` 로 시스템 권한을 확인하고 최근 배포·REVOKE 이력과 대조"
+  short:
+  - "(2차·승인 후, 롤백: REVOKE <privilege> ON <OWNER>.<OBJECT> FROM <USER>) 업무에 필요한 최소 권한만 GRANT"
+  mid:
+  - "배포 스크립트에 객체 생성과 GRANT 를 한 묶음으로 넣고 배포 직후 dba_tbl_privs 점검 쿼리 실행"
+  long:
+  - "계정·롤별 권한 기준표를 관리하고 분기마다 dba_tbl_privs·dba_sys_privs 와 대조 감사"
+  versions:
+  - Tibero 7
+  version_note: Tibero 7.2.5 Error Reference Guide 에서 확인. Tibero 의 테이블 권한 뷰 이름은 DBA_TBL_PRIVS(Oracle 의 DBA_TAB_PRIVS 아님 — 7 Reference Guide). Tibero 6 이하는 미대조
+  source: "공식 문서 대조(2026-10-16 5차 보강)"
+- code: TBR-8063
+  severity: warn
+  category: internal
+  title: LONG 칼럼을 쓸 수 없는 문맥
+  vendor_cause: "ERROR_DML_LONG_NOT_PERMITTED — LONG 타입 칼럼을 허용하지 않는 SQL 문맥에서 사용함(쿼리 작성 오류). 레거시 LONG 칼럼을 신규 SQL·이관 스크립트에서 그대로 다룰 때 주로 나타나며 DB 장애는 아니다."
+  vendor_action: 쿼리를 수정한다.
+  vendor_url: https://docs.tibero.com/tibero-manuals_en/7.2.5.manuals_en/tibero-error-reference-guide/chapter-8000.dml.error
+  immediate:
+  - "애플리케이션 로그에서 실패 SQL 전문과 호출 모듈을 확인해 영향 업무 범위만 파악(DB 상태 이상이 아닌 SQL 오류)"
+  - "tbsql 로 `select owner, table_name, column_name from dba_tbl_columns where data_type = 'LONG' and table_name = '<TABLE>';` 로 대상 LONG 칼럼 확인(읽기 전용)"
+  short:
+  - "개발 담당에 SQL 수정 요청 — LONG 칼럼을 조건·연산·복사 대상에서 빼거나 별도 조회로 분리"
+  mid:
+  - "(2차·승인 후, 롤백: 변환 전 테이블 백업·이관 리허설 결과 보관) LONG 칼럼을 CLOB 으로 전환하는 계획 수립"
+  long:
+  - "신규 설계에서 LONG 타입 사용 금지 기준을 적용하고 배포 전 SQL 검토 항목에 포함"
+  versions:
+  - Tibero 7
+  version_note: Tibero 7.2.5 Error Reference Guide 에서 확인, 칼럼 뷰는 DBA_TBL_COLUMNS(7 Reference Guide). Tibero 6 이하는 미대조
+  source: "공식 문서 대조(2026-10-16 5차 보강)"
+- code: TBR-8103
+  severity: warn
+  category: internal
+  title: 순환 시노님 감지
+  vendor_cause: "ERROR_DML_CIRCULAR_SYN — 시노님이 직접 또는 다른 시노님을 거쳐 자기 자신을 참조함. 원본 객체를 지운 뒤 같은 이름의 PUBLIC 시노님만 남았거나 이관 중 시노님을 잘못 재생성한 경우가 흔함."
+  vendor_action: 시노님 정의를 확인한다.
+  vendor_url: https://docs.tibero.com/tibero-manuals_en/7.2.5.manuals_en/tibero-error-reference-guide/chapter-8000.dml.error
+  immediate:
+  - "tbsql 로 `select owner, synonym_name, org_object_owner, org_object_name from dba_synonyms where synonym_name = '<SYN>';` 실행 — org_object 가 다시 시노님을 가리키는 고리 확인(읽기 전용)"
+  - "`select owner, object_name, object_type, status from dba_objects where object_name = '<ORG_OBJECT>';` 로 실제 원본 객체가 있는지 확인"
+  short:
+  - "(2차·승인 후, 롤백: 현재 dba_synonyms 조회 결과를 보관해 같은 정의로 재생성) 고리를 이루는 시노님을 올바른 원본 객체를 가리키도록 재생성"
+  mid:
+  - "시노님 생성·삭제를 객체 배포 스크립트와 함께 관리하고 배포 후 시노님 대상 존재 검증 쿼리 실행"
+  long:
+  - "월 1회 원본 없는 시노님·순환 시노님 점검 결과를 보고하는 정기 점검 항목 추가"
+  versions:
+  - Tibero 7
+  version_note: Tibero 7.2.5 Error Reference Guide 에서 확인, DBA_SYNONYMS 칼럼(ORG_OBJECT_OWNER·ORG_OBJECT_NAME)은 7 Reference Guide 기준. Tibero 6 이하는 미대조
+  source: "공식 문서 대조(2026-10-16 5차 보강)"
+- code: TBR-15163
+  severity: warn
+  category: internal
+  title: PSM 처리되지 않은 예외(역추적)
+  vendor_cause: "ERROR_PSM_BACKTRACE — PSM(프로시저·함수) 안에서 예외가 처리되지 않아 발생 위치(모듈·줄 번호)를 보여 주는 역추적 오류. 실제 원인은 함께 찍힌 앞선 오류 코드이고 이 코드는 위치 정보다."
+  vendor_action: 예외가 발생한 PSM 모듈에서 원인을 조사하고 적절한 예외 처리 코드를 추가한다.
+  vendor_url: https://docs.tibero.com/tibero-manuals_en/7.2.5.manuals_en/tibero-error-reference-guide/chapter-15000.psm.error
+  immediate:
+  - "같은 오류 스택에서 TBR-15163 앞에 찍힌 원래 오류 코드를 먼저 확인 — 그 코드의 판정·조치를 따른다"
+  - "메시지의 모듈·줄 번호로 `select line, text from dba_source where owner = '<OWNER>' and name = '<PSM>' and line between <줄-5> and <줄+5> order by line;` 조회(읽기 전용)"
+  short:
+  - "개발 담당에 원래 오류 원인 수정과 해당 블록 EXCEPTION 처리 추가 요청(오류를 삼키지 말고 기록한 뒤 다시 발생)"
+  mid:
+  - "PSM 공통 예외 처리·오류 기록 테이블 표준을 정해 모듈별로 적용"
+  long:
+  - "배포 전 PSM 단위 시험에 예외 경로를 포함하고 모듈별 TBR-15163 발생 건수 추이를 감시"
+  versions:
+  - Tibero 7
+  version_note: Tibero 7.2.5 Error Reference Guide 에서 확인, DBA_SOURCE(OWNER·NAME·TYPE·LINE·TEXT)는 7 Reference Guide 기준. Tibero 6 이하는 미대조
+  source: "공식 문서 대조(2026-10-16 5차 보강)"
+- code: TBR-26020
+  severity: warn
+  category: upstream
+  title: 원격 서버(DB Link) LOB 읽기 불가
+  vendor_cause: "ERROR_LOB_CANT_READ_REMOTE — DB Link 로 연결한 원격 서버의 LOB 객체를 읽을 수 없음. 원격 테이블의 CLOB/BLOB 칼럼을 DB Link 로 직접 조회하는 쿼리가 원인이며 링크 접속 장애와는 다르다."
+  vendor_action: 쿼리를 변경한다.
+  vendor_url: https://docs.tibero.com/tibero-manuals_en/7.2.5.manuals_en/tibero-error-reference-guide/chapter-26000.lob.error
+  immediate:
+  - "애플리케이션 로그에서 실패 SQL 의 @<dblink> 와 조회한 LOB 칼럼을 확인"
+  - "tbsql 로 `select owner, db_link, host from dba_db_links where db_link = '<DBLINK>';` 로 링크 대상 확인(읽기 전용) — 같은 링크의 LOB 아닌 조회가 정상이면 쿼리 형태 문제로 판단"
+  short:
+  - "개발 담당에 쿼리 변경 요청 — LOB 칼럼을 원격에서 직접 읽지 말고 원격 측에서 처리하거나 로컬로 적재한 뒤 조회하도록 분리"
+  mid:
+  - "DB Link 를 거치는 LOB 조회 업무를 목록화해 배치 적재 방식으로 전환 검토"
+  long:
+  - "DB Link 사용 표준에 'LOB 칼럼 원격 직접 조회 금지'를 넣고 배포 전 SQL 검토에 반영"
+  versions:
+  - Tibero 7
+  version_note: Tibero 7.2.5 Error Reference Guide 에서 확인. Tibero 6 이하는 미대조
+  source: "공식 문서 대조(2026-10-16 5차 보강)"
+- code: TBR-21001
+  severity: error
+  category: internal
+  title: 트랜잭션 시작 불가
+  vendor_cause: "ERROR_TX_CANT_BEGIN_TX — 트랜잭션을 시작할 수 없음. 문서는 원인을 따로 적지 않으므로 같은 시각에 함께 찍힌 오류(UNDO·공간·세션 자원 부족 등)가 실제 원인이다."
+  vendor_action: 실패 원인을 확인한 뒤 다시 시도한다.
+  vendor_url: https://docs.tibero.com/tibero-manuals_en/7.2.5.manuals_en/tibero-error-reference-guide/chapter-21000.tx.error
+  immediate:
+  - "`tail -n 200 $TB_HOME/instance/$TB_SID/log/slog/sys.log | grep -F -e \"[E]\" -e \"[F]\" -e \"TBR-\" | tail -30` 로 같은 시각 동반 오류 확인 — TBR-21002(UNDO 공간 부족)·TBR-21004(익스텐트 부족)가 있으면 그 코드 조치를 따른다"
+  - "tbsql 로 DBA 접속 후 `select status, count(*) from v$session group by status;` 로 세션 상태 분포 확인 — 짧은 시간에 반복되면 2차 DBA 호출"
+  short:
+  - "(2차·승인 후, 롤백: 변경 전 설정값 기록 후 원복) 동반 오류의 원인(UNDO 공간·세션 한도)을 해소한 뒤 실패한 업무를 재처리"
+  mid:
+  - "TBR-21001 발생 시점의 동반 오류 패턴을 모아 원인 유형별 조치 기준을 정리"
+  long:
+  - "UNDO 테이블스페이스·세션 사용률을 상시 감시해 트랜잭션 시작 실패 전에 경보"
+  versions:
+  - Tibero 7
+  version_note: Tibero 7.2.5 Error Reference Guide 에서 확인. Tibero 6 이하는 미대조
+  source: "공식 문서 대조(2026-10-16 5차 보강)"

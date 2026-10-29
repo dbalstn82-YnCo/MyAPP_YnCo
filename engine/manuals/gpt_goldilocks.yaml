@@ -1,0 +1,15 @@
+product: goldilocks
+title: GOLDILOCKS 운영 참고 (GPT 수집 — 벤더 문서 대조 필요)
+sections:
+- heading: 로그 위치
+  body: 시스템 trace 기본 위치는 $GOLDILOCKS_DATA/trc/system.trc, listener는 $GOLDILOCKS_DATA/trc/listener.trc이다.
+    SYSTEM_LOGGER_DIR 기본값은 $GOLDILOCKS_DATA/trc, redo는 $GOLDILOCKS_DATA/wal이다.
+- heading: 장애 시 수집 방법
+  body: system.trc, listener.trc, 관련 trace와 $GOLDILOCKS_DATA/conf 설정을 수집하고 필요 시 gtrclogger를
+    사용한다. instance 단계와 listener 상태도 함께 기록한다.
+- heading: 대표 장애 신호
+  body: system.trc의 ERROR/WARNING, gmaster 비정상 종료, media recovery required, 메모리·tablespace
+    부족, deadlock, redo/datafile I/O, listener address in use와 연결 실패를 우선 확인한다.
+- heading: 1차 확인 명령
+  body: gsql sys <password> --as sysdba 후 select INSTANCE_STATUS from v$instance;
+    를 실행하고 listener는 glsnr --status로 상태를 확인한다.

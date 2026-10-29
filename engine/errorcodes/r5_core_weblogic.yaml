@@ -1,0 +1,127 @@
+product: weblogic
+layer: was
+note: 5차 핵심 코드 보강(2026-10-16) — Oracle Fusion Middleware Error Messages(BEA-000001~BEA-2194843, 12.2.1.4) 원문 대조. 로그=$DOMAIN_HOME/servers/<server>/logs/<server>.log
+codes:
+- code: BEA-000366
+  severity: error
+  category: internal
+  title: 서버 종료 실패
+  vendor_cause: 서버 종료(shutdown) 처리 중 예외가 나서 서버가 정상 종료되지 못했다는 메시지(The server failed to shut down. Exception …). 함께 찍힌 예외가 근본 원인이며, 종료 중 애플리케이션 해제(undeploy)·JDBC/JMS 자원 정리 지연·Stuck 스레드가 선행했는지 로그로 확인한다.
+  vendor_action: 로그 파일에서 실패의 근본 원인 단서를 확인(Inspect the log file for indications of the root cause of the failure)
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  immediate:
+  - "`grep -n -A30 'BEA-000366' $DOMAIN_HOME/servers/<server>/logs/<server>.log | tail -80` 로 종료 실패 예외(Exception: 뒤 클래스·메시지)를 기록 — 같은 시각 BEA-000371·BEA-000337(Stuck) 동반 여부 확인"
+  - "`ps -ef | grep '[w]eblogic.Name=<server>'` 로 JVM 이 아직 남아 있는지 확인 — 남아 있으면 `jcmd <PID> Thread.print > <path>/td_shutdown_$(date +%H%M%S).txt` 로 스레드 덤프(프로세스는 유지)"
+  - "클러스터 멤버면 `grep -n 'BEA-000365' $DOMAIN_HOME/servers/<server>/logs/<server>.log | tail -5` 로 마지막 상태 전이(SHUTTING_DOWN 등)를 확인하고 다른 멤버가 요청을 받고 있는지 LB 상태 확인"
+  short:
+  - "(2차·승인 후, 롤백: 해당 없음) 종료가 진행되지 않으면 스레드 덤프·로그 보존 뒤 WLST `shutdown('<server>', force='true')` 또는 노드 매니저로 강제 종료하고, 종료 예외의 원인 모듈(앱·데이터소스·JMS)을 담당에 전달"
+  mid:
+  - "종료 예외 원인 모듈을 수정하고 서버 Graceful Shutdown Timeout(GracefulShutdownTimeout)·Ignore Sessions During Shutdown 값을 운영 기준으로 정해 종료 대기 시간을 예측 가능하게 함"
+  long:
+  - "정기 작업 때 종료 소요 시간과 BEA-000366/000371 건수를 기록하고, 종료 스크립트에 종료 전 스레드 덤프 채취 단계를 넣어 재발 시 원인 자료 확보"
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 12.2.1.4 Error Messages 원문 확인, 10.3.6·12.1.3·14.1.x 도 같은 ID(카테고리 WebLogicServer)
+  source: 공식 문서 대조(2026-10-16 5차 보강)
+- code: BEA-000371
+  severity: error
+  category: internal
+  title: 서버 종료 중 오류
+  vendor_cause: 서버를 종료하는 도중 오류가 발생했다는 메시지(An error occurred during server shutdown). 종료 자체는 끝났을 수도 있으므로 프로세스 잔존 여부와 함께 찍힌 예외(배포 모듈 해제·자원 정리 실패)를 확인해야 한다.
+  vendor_action: 로그 파일에서 실패의 근본 원인 단서를 확인(Inspect the log file for indications of the root cause of the failure)
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  immediate:
+  - "`grep -n -A30 'BEA-000371' $DOMAIN_HOME/servers/<server>/logs/<server>.log | tail -80` 로 오류 예외와 관련 모듈 이름 기록"
+  - "`ps -ef | grep '[w]eblogic.Name=<server>'` 와 `netstat -an | grep '.<port> ' | grep LISTEN` 로 프로세스·리스닝 포트가 남았는지 확인 — 남아 있으면 다음 기동 시 포트 충돌(BEA-000402 계열) 위험을 담당에 알림"
+  short:
+  - "(2차·승인 후, 롤백: 해당 없음) 프로세스가 남아 있으면 스레드 덤프 보존 뒤 노드 매니저 또는 WLST 강제 종료, 원인 모듈은 해당 개발 담당에 예외 전문과 함께 전달"
+  mid:
+  - "종료 시 실패한 모듈(애플리케이션 리스너·스타트업 클래스·JMS 서버)의 종료 처리 코드를 수정하고 스테이징에서 종료-기동 반복 시험으로 검증"
+  long:
+  - "종료 로그에서 BEA-000371 발생 여부를 배포 후 점검 항목에 넣고, 반복되면 모듈 단위 종료 시험을 회귀 시험에 포함"
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 12.2.1.4 Error Messages 원문 확인(카테고리 WebLogicServer)
+  source: 공식 문서 대조(2026-10-16 5차 보강)
+- code: BEA-000409
+  severity: error
+  category: connection
+  title: 소켓 muxer 등록 실패
+  vendor_cause: 소켓을 muxer(소켓 I/O 다중 처리기)에 등록하다 예외가 났다는 메시지(Problem on socket). 문서는 소켓에서 파일 디스크립터를 얻지 못했을 가능성을 든다 — FD 한도 소진이나 등록 전에 상대가 끊은 연결을 먼저 의심한다.
+  vendor_action: 오류를 수집해 서버 로그 파일을 My Oracle Support 에 전달(Capture the errors and send the server log files to My Oracle Support)
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  immediate:
+  - "`grep -nE 'BEA-000409|BEA-000429|BEA-000415|Too many open files' $DOMAIN_HOME/servers/<server>/logs/<server>.log | tail -30` 로 발생 빈도·동반 예외와 기동 시 FD 한도(BEA-000415 soft/hard) 확인"
+  - "`ls /proc/<PID>/fd | wc -l` 와 `grep 'open files' /proc/<PID>/limits` 로 FD 사용량 대비 한도 확인 — 90% 이상이면 FD 고갈 확정 (Linux · AIX 는 `procfiles <PID> | grep -c S_IF`, Solaris 는 `pfiles <PID> | grep -c S_IF`)"
+  - "`netstat -an | grep '.<port> ' | grep -c CLOSE_WAIT` 로 CLOSE_WAIT 누적 확인 — 수백 이상이 계속 늘면 소켓 미해제(누수)"
+  short:
+  - "(2차·승인 후, 롤백: 이전 limits.conf/startWebLogic 의 ulimit 값 복원) FD 고갈이면 OS nofile 한도를 올려 다음 정기 재기동에 반영, CLOSE_WAIT 누적이면 개발 담당에 소켓·커넥션 미해제 수정 요청"
+  mid:
+  - "반복 발생 시 서버 로그·스레드 덤프·`ulimit -a` 결과를 묶어 My Oracle Support 에 의뢰(문서 권고), 연결 폭주 원인(LB 헬스체크 주기·클라이언트 재시도 간격)을 함께 조정"
+  long:
+  - "WebLogic JVM 의 FD 사용률 80% 경보와 CLOSE_WAIT 수 추세 감시를 등록"
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 12.2.1.4 Error Messages 원문 확인(카테고리 Socket)
+  source: 공식 문서 대조(2026-10-16 5차 보강)
+- code: BEA-000429
+  severity: error
+  category: connection
+  title: muxer 소켓 I/O 처리 오류
+  vendor_cause: muxer 가 소켓 I/O 요청을 처리하다 예상하지 못한 오류를 받았다는 메시지(Muxer received error). 네트워크 단절·상대 측 강제 종료(RST)·FD 한도 소진 같은 소켓 계층 문제가 함께 기록되는지 확인한다.
+  vendor_action: 오류를 수집해 서버 로그 파일을 My Oracle Support 에 전달(Capture the errors and send the server log files to My Oracle Support)
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  immediate:
+  - "`grep -n -A15 'BEA-000429' $DOMAIN_HOME/servers/<server>/logs/<server>.log | tail -60` 로 오류 문구(Connection reset·Too many open files 등)와 원격 주소 기록"
+  - "`netstat -an | grep '.<port> ' | awk '{print $NF}' | sort | uniq -c` 로 소켓 상태 분포(ESTABLISHED·CLOSE_WAIT·TIME_WAIT) 확인 — 같은 시각 LB·방화벽 세션 정리 이력과 대조"
+  - "FD 한도 확인: `grep 'open files' /proc/<PID>/limits` 와 `ls /proc/<PID>/fd | wc -l` (Linux · AIX `procfiles`, Solaris `pfiles`)"
+  short:
+  - "(2차·승인 후, 롤백: 이전 설정 값 복원) 원인이 FD 한도면 nofile 상향, 방화벽 유휴 세션 정리면 네트워크 담당과 유휴 시간 정렬 — 변경 전 현재 값 기록"
+  mid:
+  - "지속 발생 시 서버 로그·스레드 덤프·netstat 결과를 My Oracle Support 에 의뢰(문서 권고)하고, muxer 관련 패치(PSU) 적용 수준을 확인"
+  long:
+  - "BEA-000429 발생 건수와 소켓 상태 분포를 일 단위로 추세 감시"
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 12.2.1.4 Error Messages 원문 확인(카테고리 Socket)
+  source: 공식 문서 대조(2026-10-16 5차 보강)
+- code: BEA-000504
+  severity: warn
+  category: connection
+  title: RJVM 메시지 명령 코드 오류(전송 중 손상 가능)
+  vendor_cause: RJVM(서버 간·클라이언트 원격 호출 계층)이 잘못된 명령 코드를 가진 메시지를 받아 처리할 수 없다는 메시지(Unmarshal exception received illegal command code). 문서는 전송 중 메시지 손상을 가능한 원인으로 들며 대개 일시적이라고 본다.
+  vendor_action: 대부분 일시적이므로 조치 불필요, 계속되면 서버 로그와 설정을 My Oracle Support 에 전달(This is most likely a temporary situation … contact My Oracle Support)
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  immediate:
+  - "`grep -c 'BEA-000504' $DOMAIN_HOME/servers/<server>/logs/<server>.log` 와 `grep -n 'BEA-000504' $DOMAIN_HOME/servers/<server>/logs/<server>.log | tail -10` 로 일시성(한두 건)인지 지속인지 판단 — 일시성이면 관찰만"
+  - "지속이면 같은 시각 `netstat -an | grep '.<port> ' | grep ESTABLISHED` 로 접속 출처를 기록하고, T3/IIOP 포트에 다른 프로토콜 트래픽(헬스체크·스캐너)이 들어오는지 LB·보안 담당과 대조"
+  short:
+  - "(2차) 지속 발생이면 서버 로그·config.xml(비밀번호 가림)을 My Oracle Support 에 의뢰(문서 권고), 출처가 비정상 트래픽이면 승인 후 연결 필터·방화벽으로 차단(롤백: 규칙 해제)"
+  mid:
+  - "T3/IIOP 를 쓰는 서버 간 채널을 전용 네트워크 채널(Network Channel)로 분리하고 외부 노출 포트에서 T3 를 막는 접근 통제 기준 수립"
+  long:
+  - "BEA-000504 를 일 단위로 세어 기준선보다 늘면 경보, 서버·클라이언트 WebLogic 버전·패치 수준 일치 여부를 정기 점검"
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 12.2.1.4 Error Messages 원문 확인(카테고리 RJVM)
+  source: 공식 문서 대조(2026-10-16 5차 보강)

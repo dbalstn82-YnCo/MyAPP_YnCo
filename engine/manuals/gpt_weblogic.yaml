@@ -1,0 +1,15 @@
+product: weblogic
+title: Oracle WebLogic Server 운영 참고 (GPT 수집 — 벤더 문서 대조 필요)
+sections:
+- heading: 로그 위치
+  body: 기본 서버 로그는 $DOMAIN_HOME/servers/<server>/logs/<server>.log이며 진단 로그도 해당 logs
+    아래에 생성된다. Node Manager 로그와 도메인 로그 위치는 도메인 설정에 따라 함께 확인한다.
+- heading: 장애 시 수집 방법
+  body: 서버 로그와 Node Manager 로그, config.xml, JVM GC 로그를 보존하고 jcmd <pid> Thread.print를
+    연속 수집한다. 필요 시 WLST로 서버 상태·JDBC pool·thread runtime을 조회한다.
+- heading: 대표 장애 신호
+  body: BEA-000337 stuck thread, BEA-000394 deadlock, BEA-001129 JDBC 연결 생성 실패, socket
+    accept/리스너 실패, OOM, RUNNING 이탈과 배포 실패를 우선 확인한다.
+- heading: 1차 확인 명령
+  body: WLST 접속 후 state('<server>','Server')로 상태를 확인하고 OS에서는 ps -ef | grep weblogic.Name,
+    jcmd <pid> Thread.print와 <server>.log 최근 오류를 확인한다.

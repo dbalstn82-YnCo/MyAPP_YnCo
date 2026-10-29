@@ -1,0 +1,338 @@
+product: windows
+layer: os
+note: GPT 협업 수집분 — 벤더 공식 문서와 대조 후 확정
+codes:
+- code: '98'
+  severity: error
+  category: storage
+  title: 볼륨 복구 필요
+  immediate:
+  - '`Get-WinEvent -FilterHashtable @{LogName="System"; Id=98} -MaxEvents 20 | fl TimeCreated,Message` 로 대상 볼륨·문구 확인 — "needs to be taken offline"(오프라인 Chkdsk 필요)면 확정, "is healthy" 면 정보성 (2012 R2+)'
+  - '`Get-Volume -DriveLetter <X> | fl HealthStatus,OperationalStatus` 와 `fsutil dirty query <X>:` 로 볼륨 상태·dirty 비트 확인(읽기 전용, 관리자) — Healthy 가 아니거나 Dirty 면 손상 표시 (2012 R2+)'
+  - 해당 볼륨을 쓰는 서비스와 최근 백업 성공 시각 확인(`wbadmin get versions`, Windows Server Backup 사용 시) — 복구 작업 전 데이터 보호 판단 근거
+  short:
+  - '(2차·승인 후, 롤백: 사전 백업에서 복원) 정지 시간에 `Repair-Volume -DriveLetter <X> -OfflineScanAndFix` 또는 `chkdsk <X>: /f` 수행 — 볼륨 잠금·서비스 중단 동반'
+  - CHKDSK 검사 결과와 디스크 및 파일시스템 이벤트를 분석
+  mid:
+  - 정비창에 Repair-Volume 또는 CHKDSK 복구를 수행
+  long:
+  - 볼륨 상태검사와 스토리지 오류 조기경보를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/windows-server/backup-and-storage/troubleshoot-data-corruption-and-disk-errors)
+  note: 오프라인 Chkdsk 필요 사례
+  vendor_cause: 불량 섹터가 있거나 파일시스템의 I/O 요청이 디스크 서브시스템에서 정상 완료되지 않아 NTFS가 손상됨
+  vendor_action: chkdsk /f /r을 실행하고 하드웨어 상태·SCSI/RAID 드라이버·필터 드라이버·스토리지 펌웨어를 확인·갱신
+  vendor_url: https://learn.microsoft.com/en-us/troubleshoot/windows-server/backup-and-storage/troubleshoot-data-corruption-and-disk-errors
+  versions:
+  - Windows Server 2012/R2
+  - '2016'
+  - '2019'
+  - '2022'
+  - '2025'
+  version_note: NTFS 98(볼륨 복구 필요) 2012 이후
+- code: '129'
+  severity: warn
+  category: storage
+  title: Storport 장치 리셋
+  immediate:
+  - '`Get-WinEvent -FilterHashtable @{LogName="System"; Id=129,153,157} -MaxEvents 30 | ft TimeCreated,Id,ProviderName -AutoSize` 로 RaidPort 번호·발생 간격·Disk 153/157 동반 확인 — 수 분 간격 반복이면 경로·장치 이상 (2008 R2+)'
+  - '`Get-PhysicalDisk | ft FriendlyName,HealthStatus,OperationalStatus` (2012+) 와 MPIO 구성 시 `mpclaim -s -d` 로 디스크·경로 상태 확인 — Healthy 아님 또는 경로 수 감소면 경로 장애'
+  - '`Get-Counter "\PhysicalDisk(*)\Avg. Disk sec/Transfer" -SampleInterval 2 -MaxSamples 5` 로 지연 확인 — 0.025(25ms) 이상 지속이면 스토리지 과부하·응답 지연'
+  short:
+  - '(2차·승인 후, 롤백: 원래 작업 일정 복원) 백업·배치 등 대량 I/O 작업 시간대를 옮겨 스토리지 부하 완화'
+  - HBA와 SAN 및 MPIO와 드라이버 타임아웃 로그를 분석
+  mid:
+  - 스토리지 경로와 펌웨어 및 드라이버를 개선하거나 결함 부품을 교체
+  long:
+  - 스토리지 latency와 reset 이벤트를 상시 모니터링
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/windows-server/backup-and-storage/troubleshoot-data-corruption-and-disk-errors)
+  note: Critical→Warning
+  vendor_cause: 스토리지 과부하로 요청이 시간초과되며 LUN 무응답 또는 불량 SAN 라우터 같은 하드웨어 문제가 원인일 수 있음
+  vendor_action: 스토리지 네트워크 안정성과 LUN 응답을 확인하고 디스크 timeout 조정은 스토리지 공급업체 지침에 따라 수행
+  vendor_url: https://learn.microsoft.com/en-us/troubleshoot/windows-server/backup-and-storage/troubleshoot-data-corruption-and-disk-errors
+  versions:
+  - Windows Server 2008/R2
+  - 2012/R2
+  - '2016'
+  - '2019'
+  - '2022'
+  - '2025'
+  version_note: Storport 129 는 2008 이후
+- code: '157'
+  severity: warn
+  category: storage
+  title: Disk 예기치 않은 제거
+  immediate:
+  - '`Get-WinEvent -FilterHashtable @{LogName="System"; Id=157,153,129} -MaxEvents 30 | fl TimeCreated,Id,Message` 로 제거된 디스크 번호·Storport 리셋 동반·반복 여부 확인 (2008 R2+)'
+  - '`Get-Disk | ft Number,FriendlyName,OperationalStatus,HealthStatus,IsOffline` (2012+) 로 해당 디스크 존재·Offline 여부 확인 — 목록에 없거나 Offline 이면 확정, MPIO 면 `mpclaim -s -d` 로 남은 경로 수 확인'
+  - 해당 디스크를 쓰는 서비스(DB·파일 공유)와 최근 백업 시각 확인 — 쓰기 중지 여부는 2차에서 결정
+  short:
+  - '(2차·승인 후, 롤백: 경로 복구 후 서비스 재기동) 경로가 복구될 때까지 해당 볼륨에 쓰는 서비스 중지로 데이터 보호'
+  - 스토리지 연결과 케이블 및 HBA와 디스크 이벤트를 상관분석
+  mid:
+  - 결함 경로 또는 장비를 교체하고 다중경로 구성을 검증
+  long:
+  - 디스크 연결상태와 path loss 이벤트를 실시간 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/azure/virtual-machines/windows/disk-has-been-surprise-removed-event-id-157)
+  note: Critical→Warning
+  vendor_cause: SAN·SCSI 통신 장애, 디스크 고장·분리, 과도한 I/O, 낮은 timeout 또는 VM 메모리 부족으로 디스크 통신이 끊김
+  vendor_action: 디스크·연결·I/O 상태와 timeout 설정을 점검하고 Azure에서는 디스크 상태·성능·throttling을 확인
+  vendor_url: https://learn.microsoft.com/en-us/troubleshoot/azure/virtual-machines/windows/disk-has-been-surprise-removed-event-id-157
+  versions:
+  - Windows Server 2012/R2
+  - '2016'
+  - '2019'
+  - '2022'
+  - '2025'
+  version_note: Disk 157 은 2012 이후
+- code: '2019'
+  severity: error
+  category: memory
+  title: Srv 비페이징 풀 고갈
+  immediate:
+  - '`Get-Counter "\Memory\Pool Nonpaged Bytes","\Memory\Available MBytes" -SampleInterval 5 -MaxSamples 6` 로 비페이징 풀 크기·추세 확인 — 계속 증가하면 누수 의심 (2008 R2+)'
+  - '`Get-Process | Sort-Object NPM -Descending | Select-Object -First 10 Name,Id,NPM,Handles` 로 프로세스별 비페이징 풀·핸들 상위 확인 — 핸들이 수십만이면 해당 프로세스 누수'
+  - '`poolmon.exe -b` (WDK 도구 설치 시) 로 태그별 사용량 상위 확인, 태그의 드라이버는 `findstr /m /l <태그> C:\Windows\System32\drivers\*.sys` 로 식별'
+  short:
+  - pool tag와 드라이버별 nonpaged pool 증가 추세를 분석
+  mid:
+  - 메모리 누수 드라이버를 업데이트 또는 교체하고 서버 메모리를 재산정
+  long:
+  - 커널 풀 사용률과 드라이버 누수 회귀시험을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/outlook/data-files/limits-using-pst-files-over-lan-wan)
+  note: Critical→Error
+  vendor_cause: 'Server(Srv) 서비스가 시스템 비페이징 풀에서 메모리를 할당하지 못한 상태(풀이 비어 있음) — 드라이버·필터 드라이버의 풀 누수, 과도한 핸들·연결 수, 느린 I/O 로 Server 작업 항목이 쌓이는 경우가 흔한 원인. 예: 네트워크 PST 파일 I/O 지연으로 작업 큐가 쌓인 사례'
+  vendor_action: '문서 사례: 공유 PST를 분리하고 Exchange 파일과 동일 스토리지에 PST를 두지 않음'
+  vendor_url: https://learn.microsoft.com/en-us/troubleshoot/outlook/data-files/limits-using-pst-files-over-lan-wan
+  versions:
+  - Windows Server 2003
+  - 2008/R2
+  - 2012/R2
+  - '2016'
+  - '2019'
+  - '2022'
+  - '2025'
+  version_note: 이벤트 ID 전 버전 공통(2003 포함). CSV 내보내기는 2008 R2+ Get-WinEvent, 2003/2008 은 wevtutil/Get-EventLog
+- code: '2020'
+  severity: error
+  category: memory
+  title: Srv 페이징 풀 고갈
+  immediate:
+  - '`Get-Counter "\Memory\Pool Paged Bytes","\Memory\Pool Paged Resident Bytes" -SampleInterval 5 -MaxSamples 6` 로 페이징 풀 크기·추세 확인 — 계속 증가하면 누수 의심 (2008 R2+)'
+  - '`Get-Process | Sort-Object PagedSystemMemorySize64 -Descending | Select-Object -First 10 Name,Id,PagedSystemMemorySize64,Handles` 로 페이징 풀·핸들 상위 프로세스 확인'
+  - '`(Get-SmbOpenFile).Count` (2012+) 로 SMB 열린 파일 수 확인 — 평소보다 크게 많으면 열린 파일 누적이 원인, 태그별 확인은 `poolmon.exe -b` (WDK 도구 설치 시)'
+  short:
+  - '(2차·승인 후, 롤백: 서비스 재기동·시작 유형 원복) 원인 프로세스·비필수 서비스 중지로 페이징 풀 부담 완화'
+  - PoolMon으로 과다 pool tag와 열린 파일 및 드라이버 누수를 분석
+  mid:
+  - 원인 드라이버와 서비스 설정을 수정하고 패치를 적용
+  long:
+  - Paged Pool 사용률과 누수 추세를 지속 모니터링
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/windows-server/performance/unable-allocate-memory-system-paged-pool)
+  note: Critical→Error
+  vendor_cause: 많은 열린 파일 등으로 paged pool이 소진되고 Memory Manager가 수요 증가 속도만큼 빠르게 trim하지 못함
+  vendor_action: 레지스트리를 백업한 뒤 PoolUsageMaximum을 60으로 설정하고 필요하면 PagedPoolSize를 0xFFFFFFFF로 설정
+  vendor_url: https://learn.microsoft.com/en-us/troubleshoot/windows-server/performance/unable-allocate-memory-system-paged-pool
+  versions:
+  - Windows Server 2003
+  - 2008/R2
+  - 2012/R2
+  - '2016'
+  - '2019'
+  - '2022'
+  - '2025'
+  version_note: 이벤트 ID 전 버전 공통(2003 포함). CSV 내보내기는 2008 R2+ Get-WinEvent, 2003/2008 은 wevtutil/Get-EventLog
+- code: '4227'
+  severity: warn
+  category: capacity
+  title: Tcpip 송신 포트 고갈
+  immediate:
+  - '`netstat -ano | find /c "TIME_WAIT"` 와 `netstat -ano | find /c "ESTABLISHED"` 로 상태별 연결 수 확인 — 동적 포트 범위 크기(기본 16384개)에 근접하면 고갈'
+  - '`netsh int ipv4 show dynamicport tcp` 로 동적 포트 범위 확인 (2008+), `Get-NetTCPConnection | Group-Object OwningProcess | Sort-Object Count -Descending | Select-Object -First 5 Name,Count` (2012+) 로 포트를 가장 많이 쓰는 PID 확인'
+  short:
+  - '(2차·승인 후, 롤백: 설정 원복) 포트를 과다 소비하는 애플리케이션의 신규 연결 생성 제한 또는 연결 재사용 설정 적용'
+  - 프로세스별 ephemeral port 사용량과 연결풀 누수를 분석
+  mid:
+  - 연결 재사용과 풀 설정 및 포트 범위를 워크로드에 맞게 조정
+  long:
+  - 포트 사용률과 신규 연결률 및 TIME_WAIT 추세를 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/windows-server/printing/printing-pauses-event-2004-4227-lpr-port)
+  note: Critical→Warning
+  vendor_cause: 'TCP/IP 가 선택한 로컬 끝점(포트)이 같은 원격 끝점에 최근 사용되어(TIME_WAIT) 송신 연결을 맺지 못한 상태 — 짧은 연결을 빠르게 열고 닫아 사용 가능한 로컬 포트가 소진될 때 흔히 발생. 예: LPR 이 TCP 721~731 의 11개 포트만 써서 인쇄 연결 반복 시 소진된 사례'
+  vendor_action: '문서 사례: LPR 대신 표준 TCP/IP 포트 사용을 권장'
+  vendor_url: https://learn.microsoft.com/en-us/troubleshoot/windows-server/printing/printing-pauses-event-2004-4227-lpr-port
+  versions:
+  - Windows Server 2008/R2
+  - 2012/R2
+  - '2016'
+  - '2019'
+  - '2022'
+  - '2025'
+  version_note: Tcpip 4227 2008 이후
+- code: '4231'
+  severity: warn
+  category: capacity
+  title: Tcpip 임시 포트 할당 실패
+  immediate:
+  - '`Get-NetTCPConnection | Group-Object State | ft Name,Count` (2012+) / `netstat -ano | find /c "TIME_WAIT"` (2008 R2) 로 상태별 연결 수 확인 — TIME_WAIT·BOUND 합이 동적 포트 범위(기본 16384개)에 근접하면 고갈'
+  - '`netsh int ipv4 show dynamicport tcp` 로 범위 확인, `Get-NetTCPConnection | Group-Object OwningProcess | Sort-Object Count -Descending | Select-Object -First 5 Name,Count` (2012+) 로 포트 소비 상위 PID 확인 후 `Get-Process -Id <PID>` 로 프로세스 식별'
+  short:
+  - '(2차·승인 후, 롤백: 서비스 재기동·설정 원복) 포트를 해제하지 않는 프로세스의 연결 수 제한 또는 해당 서비스 재시작, 공급업체에 소켓 누수 확인 요청'
+  - 프로세스별 소켓 생성률과 연결 해제 패턴을 분석
+  mid:
+  - 애플리케이션 연결풀과 동적 포트 범위를 최적화
+  long:
+  - 포트 고갈 임계치와 소켓 생성률을 상시 모니터링
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/windows-client/networking/tcp-ip-port-exhaustion-troubleshooting)
+  note: Critical→Warning
+  vendor_cause: 프로세스가 소비한 포트를 정상 해제하지 못해 TIME_WAIT·BOUND 연결이 누적되면서 동적 포트가 고갈됨
+  vendor_action: netstat -anobq 또는 Get-NetTCPConnection으로 포트 소비 프로세스를 식별하고 종료 후 해당 앱 공급업체에 확인
+  vendor_url: https://learn.microsoft.com/en-us/troubleshoot/windows-client/networking/tcp-ip-port-exhaustion-troubleshooting
+  versions:
+  - Windows Server 2008/R2
+  - 2012/R2
+  - '2016'
+  - '2019'
+  - '2022'
+  - '2025'
+  version_note: Tcpip 4231 2008 이후
+- code: '5719'
+  severity: error
+  category: connection
+  title: 도메인 연결 실패
+  immediate:
+  - '`nltest /sc_query:<도메인>` 으로 보안 채널 상태 확인 — "NERR_Success" 가 아니면 보안 채널 이상, `Test-ComputerSecureChannel` (2012+, -Repair 없이 읽기 전용) 결과 False 도 같은 판단'
+  - '`nltest /dsgetdc:<도메인>` 과 `Resolve-DnsName -Type SRV _ldap._tcp.dc._msdcs.<도메인>` (2012+) 로 DC 탐색·DNS SRV 확인 — 실패면 DNS·네트워크 원인'
+  - '`Test-NetConnection <DC> -Port 389` (2012 R2+) 로 LDAP 도달성 확인 — 부팅 직후 1회만 발생하고 이후 정상이면 NIC·네트워크 준비 지연(문서 사례)'
+  short:
+  - 방화벽과 네트워크 및 DNS와 secure channel 상태를 분석
+  mid:
+  - 도메인 연결 경로와 DNS 및 스위치 구성을 개선
+  long:
+  - DC 도달성과 Netlogon 오류 및 인증 실패율을 통합 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/windows-server/group-policy/netlogon-event-id-5719-or-group-policy-event-1129)
+  note: 공식 Learn 확인
+  vendor_cause: Netlogon이 네트워크 준비 전에 시작하거나 NIC·스위치 초기화 지연, 방화벽/IPsec 등으로 DC 연결이 늦어짐
+  vendor_action: NIC 최신 드라이버 또는 PortFast를 적용하고 방화벽·IPsec 정책과 DC 연결 관련 설정을 조정
+  vendor_url: https://learn.microsoft.com/en-us/troubleshoot/windows-server/group-policy/netlogon-event-id-5719-or-group-policy-event-1129
+  versions:
+  - Windows Server 2003
+  - 2008/R2
+  - 2012/R2
+  - '2016'
+  - '2019'
+  - '2022'
+  - '2025'
+  version_note: 이벤트 ID 전 버전 공통(2003 포함). CSV 내보내기는 2008 R2+ Get-WinEvent, 2003/2008 은 wevtutil/Get-EventLog
+- code: '6008'
+  severity: error
+  category: internal
+  title: EventLog 예기치 않은 종료
+  immediate:
+  - '`Get-WinEvent -FilterHashtable @{LogName="System"; Id=6008,41,1001,1074} -MaxEvents 20 | ft TimeCreated,Id,ProviderName -AutoSize` 로 비정상 종료 전후 순서와 BugCheck(1001) 여부 확인'
+  - '덤프 확인: `Get-ChildItem C:\Windows\MEMORY.DMP,C:\Windows\Minidump -ErrorAction SilentlyContinue | ft FullName,LastWriteTime,Length`'
+  - BMC(iLO/iDRAC)·UPS 로그로 같은 시각 전원·하드웨어 이벤트 확인
+  short:
+  - 41과 1001 이벤트 및 드라이버와 전원 장애 여부를 상관분석
+  mid:
+  - 원인 하드웨어나 드라이버 및 OS 문제를 수정
+  long:
+  - 비정상 종료 감지와 자동 덤프 수집 및 장애분석을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/windows-server/performance/troubleshoot-unexpected-reboots-system-event-logs)
+  note: Critical→Error
+  vendor_cause: 이벤트 로그 서비스가 시작 시 직전 시스템 종료가 정상 종료 절차를 거치지 않았음을 기록 — 전원 차단, Stop 오류(블루스크린), 하드웨어 리셋, 응답 정지 후 강제 재부팅이 원인.
+  vendor_action: Event ID 41·1001·1074 등과 함께 System 로그를 필터링해 정상/비정상 종료와 실제 재부팅 원인을 확인
+  vendor_url: https://learn.microsoft.com/en-us/troubleshoot/windows-server/performance/troubleshoot-unexpected-reboots-system-event-logs
+  versions:
+  - Windows Server 2003
+  - 2008/R2
+  - 2012/R2
+  - '2016'
+  - '2019'
+  - '2022'
+  - '2025'
+  version_note: 이벤트 ID 전 버전 공통(2003 포함). CSV 내보내기는 2008 R2+ Get-WinEvent, 2003/2008 은 wevtutil/Get-EventLog
+- code: '1001'
+  severity: error
+  category: internal
+  title: WER 버그체크 후 재부팅
+  immediate:
+  - '`Get-WinEvent -FilterHashtable @{LogName="System"; Id=1001; ProviderName="Microsoft-Windows-WER-SystemErrorReporting"} -MaxEvents 5 | fl TimeCreated,Message` 로 BugCheck 코드·인자·덤프 저장 경로 확인 (2008 R2+)'
+  - '`Get-ChildItem C:\Windows\MEMORY.DMP,C:\Windows\Minidump -ErrorAction SilentlyContinue | ft FullName,LastWriteTime,Length` 로 덤프 존재 확인 — 없거나 크기 0 이면 덤프 미생성, 있으면 덮어쓰기 전에 다른 볼륨으로 복사 보관'
+  - '`Get-HotFix | Sort-Object InstalledOn -Descending | Select-Object -First 5` 와 업무 서비스 `Get-Service <서비스> | fl Status` 확인 — 버그체크 직전 설치 항목이 있으면 우선 의심, 서비스 복구는 2차'
+  short:
+  - '(2차·승인 후, 롤백: 서비스 시작 유형 원복) 재부팅 후 기동되지 않은 업무 서비스를 순서대로 기동해 복구'
+  - WinDbg로 스택과 드라이버 및 모듈을 분석
+  mid:
+  - 문제 드라이버와 OS 패치를 적용하고 재현시험을 수행
+  long:
+  - 덤프 자동보존과 드라이버 회귀시험 및 패치 정책을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/windows-server/performance/troubleshoot-unexpected-reboots-system-event-logs)
+  note: Provider=WER-SystemErrorReporting, Critical→Error
+  vendor_cause: 'System 로그 원본 Microsoft-Windows-WER-SystemErrorReporting 이벤트 1001 "The computer has rebooted from a bugcheck. The bugcheck was: 0x…" — OS 가 Stop 오류(BugCheck·블루스크린)로 멈춘 뒤 재부팅됐다는 기록으로, 본문에 버그체크 코드·인자와 덤프 저장 경로가 들어 있다. 흔한 원인은 최근 설치·갱신된 드라이버·애플리케이션·OS 업데이트와 하드웨어(메모리 등) 결함. Application 로그의 같은 번호 1001(Windows Error Reporting)은 응용 프로그램 오류 보고로 별개다.'
+  vendor_action: 최근 드라이버·앱·OS 업데이트 시점을 확인하고 의심 드라이버를 롤백; 계속되면 메모리 덤프를 수집해 분석
+  vendor_url: https://learn.microsoft.com/en-us/troubleshoot/windows-server/performance/troubleshoot-unexpected-reboots-system-event-logs
+  versions:
+  - Windows Server 2003
+  - 2008/R2
+  - 2012/R2
+  - '2016'
+  - '2019'
+  - '2022'
+  - '2025'
+  version_note: 이벤트 ID 전 버전 공통(2003 포함). CSV 내보내기는 2008 R2+ Get-WinEvent, 2003/2008 은 wevtutil/Get-EventLog
+- code: '7031'
+  severity: error
+  category: internal
+  title: 서비스 비정상 종료
+  immediate:
+  - '`Get-WinEvent -FilterHashtable @{LogName="System"; Id=7031,7034; ProviderName="Service Control Manager"} -MaxEvents 20 | fl TimeCreated,Id,Message` 로 서비스명·반복 횟수·예정된 복구 동작 확인 — 같은 서비스가 하루 여러 번이면 반복 장애 (2008 R2+)'
+  - '`sc.exe qfailure <서비스>` 로 복구 동작(RESET_PERIOD·FAILURE_ACTIONS) 확인, `Get-Service <서비스> | fl Status,StartType` 로 복구 동작 이후 현재 Running 인지 확인 — Stopped 면 서비스 중단 지속'
+  - '같은 시각 Application 오류: `Get-WinEvent -FilterHashtable @{LogName="Application"; Id=1000,1026; StartTime=(Get-Date).AddHours(-2)} | fl TimeCreated,Id,Message` 로 실패 모듈·예외 코드(.NET 은 1026) 기록'
+  short:
+  - 서비스 크래시 덤프와 의존 서비스 및 계정 문제를 분석
+  mid:
+  - 서비스 결함을 수정하고 복구 옵션과 재시작 정책을 조정
+  long:
+  - 서비스 반복종료 임계치와 크래시 덤프 자동수집을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/outlook/connectivity/outlook-repeatedly-disconnects-and-reconnects)
+  note: 공식 Learn 확인
+  vendor_cause: 'Service Control Manager 가 "The <service> service terminated unexpectedly. It has done this N time(s). The following corrective action will be taken ..." 을 기록한 상태(복구 동작이 설정된 서비스 — 설정이 없으면 7034) — 서비스 프로세스 크래시(처리되지 않은 예외), 종속 자원·서비스 실패, 메모리·핸들 등 자원 고갈이 흔한 원인. 예(Exchange): 삭제된 공용 폴더 DB 를 Mailbox DB 가 계속 참조해 비정상 종료된 사례'
+  vendor_action: '문서 사례: 잘못된 참조를 제거하거나 유효한 대상으로 변경'
+  vendor_url: https://learn.microsoft.com/en-us/troubleshoot/outlook/connectivity/outlook-repeatedly-disconnects-and-reconnects
+  versions:
+  - Windows Server 2003
+  - 2008/R2
+  - 2012/R2
+  - '2016'
+  - '2019'
+  - '2022'
+  - '2025'
+  version_note: 이벤트 ID 전 버전 공통(2003 포함). CSV 내보내기는 2008 R2+ Get-WinEvent, 2003/2008 은 wevtutil/Get-EventLog
+- code: '7024'
+  severity: error
+  category: internal
+  title: 서비스 고유오류 종료
+  immediate:
+  - '`Get-WinEvent -FilterHashtable @{LogName="System"; Id=7024,7023} -MaxEvents 20 | fl TimeCreated,Id,Message` 로 서비스명·서비스 고유 오류 코드 확인 (2008 R2+)'
+  - '`sc.exe query <서비스>` 로 WIN32_EXIT_CODE·SERVICE_EXIT_CODE 확인 — WIN32_EXIT_CODE 1066 이면 서비스 고유 오류이며 SERVICE_EXIT_CODE 의미는 해당 제품 문서·로그에서 확인(`net helpmsg` 는 Win32 코드에만 유효)'
+  - '`sc.exe qc <서비스>` 로 DEPENDENCIES 확인 후 `Get-Service <종속 서비스> | fl Status,StartType` — Disabled·Stopped 면 종속성 원인'
+  short:
+  - 서비스 의존성과 구성 및 권한과 실행파일 상태를 분석
+  mid:
+  - 해당 서비스의 설정이나 소프트웨어 결함을 수정
+  long:
+  - 서비스 기동검증과 구성 변경 회귀시험을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/windows-server/remote/service-specific-error-code-2147944102)
+  note: 공식 Learn 확인
+  vendor_cause: 'Service Control Manager 가 "The <service> service terminated with the following service-specific error: ..." 를 기록한 상태 — 오류 번호는 Win32 코드가 아니라 서비스(제품)가 정의한 값이며, 구성 파일 오류·종속 구성 요소 미기동·권한·자원 부족이 흔한 원인. 예: 종속 구성 요소(Terminal Services) 시작 유형이 Disabled 라 고유 오류로 종료된 사례'
+  vendor_action: '문서 사례: 종속 서비스 시작 유형을 Automatic으로 설정·시작하거나 불필요한 구성 요소 제거'
+  vendor_url: https://learn.microsoft.com/en-us/troubleshoot/windows-server/remote/service-specific-error-code-2147944102
+  versions:
+  - Windows Server 2003
+  - 2008/R2
+  - 2012/R2
+  - '2016'
+  - '2019'
+  - '2022'
+  - '2025'
+  version_note: 이벤트 ID 전 버전 공통(2003 포함). CSV 내보내기는 2008 R2+ Get-WinEvent, 2003/2008 은 wevtutil/Get-EventLog

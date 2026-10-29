@@ -1,0 +1,120 @@
+# OS — Linux auditd 감사 로그 시그니처 (보안·이상 징후)
+rules:
+- id: OS-AUD-001
+  layer: os
+  product:
+  - auditd
+  match:
+    regex: (USER_AUTH|USER_LOGIN|USER_ACCT).*실패|res=failed.*(authentication|login)
+  severity: error
+  category: security
+  verdict: 인증/로그인 실패 발생
+  immediate:
+  - '`ausearch -m USER_AUTH,USER_LOGIN -sv no -ts today -i | tail -40` 으로 실패 계정(acct)·발신 주소(addr)·터미널 확인 (RHEL 5+·Ubuntu auditd)'
+  - '`aureport -au --failed -ts today -i | tail -40` 로 계정·주소별 실패 반복 확인 — 단일 주소에서 짧은 시간 수십 건이면 무차별 대입 의심, 보안 담당 통보'
+  short:
+  - '(2차·보안 담당 승인 후, 롤백: 추가한 방화벽 규칙 제거) 공격 출처로 확인된 발신 IP 를 firewalld(RHEL 7+)/iptables(RHEL 6) 규칙으로 막음'
+  - 실패 시간대·계정 패턴 분석, 잠금 정책(pam_faillock) 동작 확인
+  mid:
+  - 인증 실패 알림 기준 수립
+  long:
+  - 접근 통제·2차 인증 체계 검토
+  versions:
+  - RHEL 5~10 (auditd 1.x~3.x)
+  - CentOS·Rocky·Alma
+  - Ubuntu 16.04+ (auditd 설치 시)
+  version_note: USER_AUTH/USER_LOGIN 레코드 전 버전
+- id: OS-AUD-002
+  layer: os
+  product:
+  - auditd
+  match:
+    regex: ANOM_ABEND
+  severity: critical
+  category: internal
+  verdict: 프로세스 비정상 종료 (segfault 등, ANOM_ABEND)
+  immediate:
+  - '`ausearch -m ANOM_ABEND -ts today -i | tail -20` 으로 종료 프로세스(comm/exe)·신호(sig 11=SIGSEGV, 6=SIGABRT)·pid 확인'
+  - '`systemctl status <service>` (RHEL 7+·Ubuntu 16.04+) / `service <service> status` (RHEL 6) 로 기동 상태 확인 — inactive·failed 면 서비스 중단 확정'
+  - '코어 덤프 확인: `coredumpctl list | tail -5` (systemd-coredump 사용 시) / `abrt-cli list` (RHEL 6/7 ABRT) / `ls -l /var/crash` (Ubuntu apport) — 덤프는 별도 보관'
+  short:
+  - 동반 애플리케이션 로그에서 종료 원인 분석
+  mid:
+  - 원인 패치·재발 감시
+  long:
+  - 프로세스 자동 복구(systemd Restart) 체계 정비
+  versions:
+  - RHEL 5~10 (auditd 1.x~3.x)
+  - CentOS·Rocky·Alma
+  - Ubuntu 16.04+ (auditd 설치 시)
+  version_note: ANOM_ABEND 2.x+
+- id: OS-AUD-003
+  layer: os
+  product:
+  - auditd
+  match:
+    regex: \bAVC\b.*denied|USER_AVC.*denied
+  severity: error
+  category: security
+  verdict: SELinux 접근 차단 (AVC denied)
+  immediate:
+  - '`ausearch -m AVC,USER_AVC -ts recent -i | tail -40` 으로 거부된 프로세스(comm/scontext)·대상(tcontext/tclass/name) 확인'
+  - '`getenforce` 와 `ausearch -m AVC -ts recent | audit2why` 로 모드·거부 사유 확인 — Enforcing 이고 같은 시각 서비스 오류가 있으면 기능 영향 확정 (RHEL 6+, audit2why 는 policycoreutils-python 필요)'
+  short:
+  - 정당한 접근이면 정책(모듈) 보완, 아니면 침해 시도 여부 분석
+  mid:
+  - SELinux 정책 정비
+  long:
+  - 보안 정책 변경 관리 절차 수립
+  versions:
+  - RHEL 5~10 (auditd 1.x~3.x)
+  - CentOS·Rocky·Alma
+  - Ubuntu 16.04+ (auditd 설치 시)
+  version_note: AVC 전 버전
+- id: OS-AUD-004
+  layer: os
+  product:
+  - auditd
+  match:
+    regex: ANOM_LOGIN_FAILURES|RESP_ACCT_LOCK
+  severity: error
+  category: security
+  verdict: 로그인 실패 임계 초과 / 계정 잠금
+  immediate:
+  - '`ausearch -m ANOM_LOGIN_FAILURES,RESP_ACCT_LOCK -ts today -i | tail -40` 으로 계정(acct)·발신(addr/hostname)·터미널 확인'
+  - '`faillock --user <user>` (RHEL 8+) / `pam_tally2 --user <user>` (RHEL 6/7) 로 실패 횟수·잠금 상태 확인 — 단일 출처 반복이면 보안 담당 통보(차단은 2차)'
+  short:
+  - '(2차·보안 담당 승인 후) 정당 사용자 확인 시 `faillock --user <user> --reset` (RHEL 8+) / `pam_tally2 --user <user> --reset` (RHEL 6/7) 로 잠금 해제, 공격 출처는 방화벽 차단(롤백: 규칙 제거)'
+  mid:
+  - 실패 임계·잠금 정책 재검토
+  long:
+  - 통합 계정 관리(IAM) 검토
+  versions:
+  - RHEL 5~10 (auditd 1.x~3.x)
+  - CentOS·Rocky·Alma
+  - Ubuntu 16.04+ (auditd 설치 시)
+  version_note: ANOM_LOGIN_FAILURES(pam_tally/faillock) 전 버전
+- id: OS-AUD-005
+  layer: os
+  product:
+  - auditd
+  match:
+    regex: SYSTEM_SHUTDOWN|SERVICE_STOP.*unit=(?!.*(tmpfiles-clean|makecache|logrotate|unbound-anchor|man-db|sysstat|mlocate|updatedb|systemd-))
+  severity: warn
+  category: internal
+  verdict: 시스템 종료/서비스 중지 기록
+  immediate:
+  - 계획된 작업인지 확인 — 비계획이면 수행 주체(uid/exe) 추적
+  - '`ausearch -m SYSTEM_SHUTDOWN,SERVICE_STOP -ts today -i | tail -40` 으로 멈춘 unit·auid(실제 로그인 사용자)·exe 확인'
+  - '`last -x | head -20` 과 `ausearch -ua <auid> -ts today -i | tail -20` 으로 수행 계정의 로그인·명령 기록 대조'
+  short:
+  - 변경 관리(작업 승인) 기록과 대조해 비인가 중지면 보안 담당 보고·해당 서비스 기동 상태 확인
+  mid:
+  - 중요 서비스 중지·시스템 종료를 감사 이벤트로 실시간 경보, 운영 계정 sudo/systemctl 권한 최소화
+  long:
+  - 변경 관리 기록과 감사 로그(auid) 자동 대조 체계와 비인가 중지 사례 분기 보고
+  versions:
+  - RHEL 5~10 (auditd 1.x~3.x)
+  - CentOS·Rocky·Alma
+  - Ubuntu 16.04+ (auditd 설치 시)
+  version_note: SYSTEM_SHUTDOWN·SERVICE_STOP(systemd, RHEL 7+)

@@ -1,0 +1,19 @@
+product: bizmaster-adapter
+layer: sw
+title: "Tmax BizMaster EAI 운영 참고 (실로그 2026-04 학습분)"
+source: "실로그 구조 관찰 — 제조사 문서 미확인"
+sections:
+  - heading: "제품 개요"
+    body: "Tmax BizMaster: 허브(JEUS 6 위에서 동작, JeusServer.log)-에이전트(어댑터 eaiAdapter, adt_YYYYMMDD.log)-업무 앱(GISS, eai.log) 구조의 EAI. 분석기 제품명: 허브 로그 = jeus, 어댑터 = bizmaster-adapter, 업무 앱 = bizmaster-app. 지원 종료(EOS) 세대 제품"
+  - heading: "로그 위치"
+    body: "허브: /ssw/eai/BizMaster/logs/<서버명>/JeusServer_YYYYMMDD.log (UTF-16 으로 저장된 사본도 그대로 투입 가능) · 어댑터: /ssw/share/eaiAdapter 하위 adt_YYYYMMDD.log, start로그 · 업무 앱: eai.log, eai.log.YYYY-MM-DD(날짜는 파일명에서 읽음), err.out.YYMMDD_HHMMSS(stderr 덤프)"
+  - heading: "1차 확인 명령"
+    body: "ps -ef | grep -i 'eaiAdapter\\|BizMaster' 로 허브·어댑터 프로세스 기동 확인; netstat -an | grep <허브 relay 포트> 로 연결 상태; ls -l <어댑터 메시지 저장 폴더>(unsent/sending) 로 미전송 적체 건수; df -g 로 로그·메시지 저장 디스크 여유; 어댑터 로그 마지막 [MEMORY USAGE] 줄로 힙 여유 확인"
+  - heading: "대표 장애 신호"
+    body: "허브: [Network-0708] Connection refused(relay/에이전트 접속 실패, 수 초 간격 반복이면 에이전트 다운) · 어댑터: Failed to re-send message / sync-ack timeout 반복(허브 응답 없음), Enqueued request expired(큐 적체), [MEMORY USAGE] free 급감(힙 고갈), Uncaught exception(거래 유실) · 업무 앱: -407 기관 서버 응답 시간 초과, -402 IO 예외(Connection reset), SocketTimeoutException"
+  - heading: "장애 시 수집"
+    body: "허브 JeusServer_YYYYMMDD.log(장애 전후 1시간, 필요 시 여러 분할 파일), 어댑터 adt 로그·start로그·err.out, 업무 앱 eai.log 해당 일자, 미전송 메시지 폴더 목록(건수·최고 오래된 파일 시각), JVM 옵션(jboot 출력의 -Xmx 등)"
+  - heading: "BizMaster (지원 종료 EOS) 대응 정책"
+    body: "허브가 올라가는 JEUS 6.x 는 TmaxSoft 공지 기준 EOL 2016-12-31·EOS 2018-12-31(현행 JEUS 9.1). BizMaster 자체의 공개 EOL 자료는 미확인이며 현행 TmaxSoft 인터페이스 플랫폼은 AnyLink 8. 제조사 표준 기술지원이 없는 세대 제품이므로 3차는 (1) 유지보수 계약사의 EAI 지원 범위 확인 (2) 보유한 BizMaster/GISS 설치·운영 매뉴얼의 에러코드 표(-4xx 등)를 분석기 담당자에게 전달해 사전 등재 (3) 반복 장애·보안 취약점은 후속 EAI 제품 전환 계획으로 관리. TmaxSoft 유상 기술지원 가능 여부 문의"
+  - heading: "벤더 문의"
+    body: "TmaxSoft 기술지원(technet.tmaxsoft.com) — EOS 제품은 유상 지원 여부 확인. 유지보수 계약사 창구 우선"

@@ -1,0 +1,15 @@
+product: webtob
+title: WebtoB 운영 참고 (GPT 수집 — 벤더 문서 대조 필요)
+sections:
+- heading: 로그 위치
+  body: WebtoB 6.1 LOGGING의 기본 파일명은 webtob_system.log, webtob_access.log, webtob_error.log이며
+    상대경로는 $WEBTOB_HOME 기준이다. 운영 설정의 LOGGING file_name으로 실제 경로를 확정한다.
+- heading: 장애 시 수집 방법
+  body: system/access/error log와 환경설정 파일, wsadmin의 st, st -p, st -s, st -t, st -rpg/-rp
+    결과를 저장하고 JEUS 등 연계 WAS 로그를 동일 시각으로 수집한다.
+- heading: 대표 장애 신호
+  body: CONN/DST/REQ/RSC 오류, destination 연결 종료·가용 내부서버 없음, 서비스 queue 증가, HTH thread
+    NRDY, ReverseProxy QED, JSV 연결 감소와 wscfl 설정 오류를 우선 확인한다.
+- heading: 1차 확인 명령
+  body: wsadmin 접속 후 st, st -p, st -s, st -t, si를 실행해 프로세스·서비스·스레드 상태와 queue를 확인하고
+    설정 변경 전 wscfl -i <config>로 구문을 검증한다.

@@ -1,0 +1,2 @@
+####<Sep 2, 2026 1:58:03 PM KST> <Info> <WebLogicServer> <was03> <AdminServer> <main> <> <> <> <1756789083000> <BEA-000360> <The server started in RUNNING mode.>
+####<Sep 2, 2026 2:02:20 PM KST> <Error> <WebLogicServer> <was03> <AdminServer> <[ACTIVE] ExecuteThread: '12'> <> <> <1756789340000> <BEA-000337> <[STUCK] ExecuteThread: '12' for queue: 'weblogic.kernel.Default (self-tuning)' has been busy for "612" seconds working on the request "Http Request: /api/v1/settle", which is more than the configured time (StuckThreadMaxTime) of "600" seconds.>

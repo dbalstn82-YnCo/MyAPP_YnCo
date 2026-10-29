@@ -1,0 +1,13 @@
+{
+  "_설명": "사이트 서버용. 본사 [사용자 · 권한 → 사이트 → 사이트 등록]이 보여 주는 내용을 그대로 <설치경로>/conf/hub.json 으로 저장하면 됩니다.",
+  "role": "site",
+  "site_id": "BUSAN",
+  "site_name": "부산 IDC",
+  "hub_url": "https://logtriage-hq.example.local",
+  "hub_token": "(본사에서 발급)",
+  "interval_sec": 60,
+  "send_reports": true,
+  "verify_tls": true,
+  "ca_file": "",
+  "_https": "hub_url 은 https:// 만 허용(같은 PC 시험이나 \"allow_http\": true 명시 때만 http)"
+}

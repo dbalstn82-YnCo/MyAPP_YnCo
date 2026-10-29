@@ -1,0 +1,927 @@
+# 기존 'AI 로그분석기 v2.2' 내장 룰에서 변환 반입(tools/import_legacy_rules.py) — 중복(코드·패턴) 제외
+# 2026-09-10 광범위 패턴 3종(MSG-ERROR/WEB-MODULE/WEB-ENGINE: [WEB-dddd].*error 류) 제거 — 룰팩 룰·코드 사전과 중복
+rules:
+- id: LEG-JEUS-OOM-HEAP
+  layer: was
+  product:
+  - jeus
+  match:
+    regex: (?:jeus.*OutOfMemoryError)|(?:WebContainer.*OutOfMemoryError)|(?:JEUSMain.*heap.*fail)|(?:java\.lang\.OutOfMemoryError:\s*Java heap space)|(?:java\.lang\.OutOfMemoryError:\s*GC overhead limit
+      exceeded)|(?:java\.lang\.OutOfMemoryError:\s*unable to create new native thread)|(?:Exception in thread.*OutOfMemoryError)|(?:Heap space.*Exception)|(?:\[Full GC.*->.*\].*Ergonomics)|(?:PSYoungGen.*ParOldGen)|(?:Dumping
+      heap to.*\.hprof)|(?:heap dump written to)|(?:-XX:HeapDumpPath)|(?:hs_err_pid\d+\.log)|(?:# A fatal error has been detected by the Java Runtime)|(?:# There is insufficient memory for the Java Runtime)
+  severity: critical
+  category: memory
+  verdict: JVM Heap OutOfMemoryError — JVM 힙 메모리 고갈. 메모리 누수 또는 -Xmx 설정 부족
+  immediate:
+  - "`jstat -gcutil <PID> 1000 10` 으로 Old(O) 사용률·FGC 증가 확인 — O 95% 이상 유지·FGC 연속 증가면 힙 고갈 확정"
+  - "`ls -lt <SERVER_HOME>/*.hprof <SERVER_HOME>/logs/*.hprof 2>/dev/null | head` 로 자동 힙덤프 유무 확인, 없으면 `jmap -histo <PID> | head -30`(live 옵션 없이 — Full GC 유발 안 함)으로 상위 객체만 기록"
+  - "`grep -n -B5 'OutOfMemoryError' <SERVER_HOME>/logs/JeusServer.log | tail -30` 로 최초 발생 시각·스레드 확인(<SERVER_HOME>=$JEUS_HOME/domains/<domain>/servers/<server>, JEUS 7+)"
+  short:
+  - '영향: JEUS 웹 컨테이너 응답 불가, 서비스 전체 중단.'
+  - "(2차·승인 후, 롤백: 우회 해제) WebtoB·LB 에서 서버 우회 → `jmap -dump:live,format=b,file=<path>/heap.hprof <PID>`(live 는 Full GC 유발·디스크 여유 확인) → jeusadmin stop-server/start-server 로 재기동"
+  mid:
+  - jeus domain.xml에서 -Xmx 값 증가 (현재의 1.5~2배)
+  - Eclipse MAT으로 힙 덤프 분석 → 누수 클래스 확인
+  - HttpSession 타임아웃 단축, 대형 캐시 객체 제거
+  - -XX:+UseG1GC 적용 검토
+  long:
+  - "-XX:+HeapDumpOnOutOfMemoryError·-XX:HeapDumpPath 표준화, Old 영역 85% 경보와 메모리 회귀 부하시험 정례화"
+  source_note: 'legacy-analyzer-v2.2 jeus_rules.json JEUS-OOM-HEAP (원 출처: builtin)'
+  exclude: (?:Metaspace)|(?:Compressed class)
+  versions:
+  - JEUS 6
+  - JEUS 7
+  - JEUS 8/8.5
+  - JEUS 9/9.1
+  version_note: 문구 기반
+- id: LEG-JEUS-OOM-META
+  layer: was
+  product:
+  - jeus
+  match:
+    regex: (?:java\.lang\.OutOfMemoryError:\s*Metaspace)|(?:java\.lang\.OutOfMemoryError:\s*Compressed class space)|(?:java\.lang\.OutOfMemoryError:\s*PermGen space)|(?:OutOfMemoryError.*Metaspace)|(?:MaxMetaspaceSize.*exceeded)|(?:class.*loader.*leak)|(?:ClassLoader.*OutOfMemory)
+  severity: error
+  category: memory
+  verdict: JVM Metaspace/PermGen 고갈 — 클래스 로더 누수 또는 동적 클래스 생성 과다로 Metaspace 고갈
+  immediate:
+  - "`jstat -gcutil <PID> 1000 5` 로 M(Metaspace) 사용률 확인 — 95% 이상이면 확정(VM.native_memory 는 -XX:NativeMemoryTracking 기동 옵션이 있을 때만 출력)"
+  - "`jmap -histo <PID> | head -30` 으로 상위 클래스 기록(live 옵션 없이), `grep -n -i 'deploy' <SERVER_HOME>/logs/JeusServer.log | tail -20` 으로 운영 중 반복 배포(redeploy) 이력 확인"
+  short:
+  - '영향: 신규 클래스 로딩 불가, JEUS 재기동 필요.'
+  - "(2차·승인 후, 롤백: domain.xml JVM 옵션 백업) 클래스 정보 보존 후 jeusadmin stop-server/start-server 로 재기동해 Metaspace 회수"
+  mid:
+  - -XX:MaxMetaspaceSize=512m 또는 증가
+  - 재배포 시 이전 클래스로더 참조 해제 확인
+  - OSGi/동적 배포 환경에서 ClassLoader 관리 검토
+  long:
+  - "Metaspace 사용률 85% 경보와 운영 중 반복 재배포 금지 정책"
+  source_note: 'legacy-analyzer-v2.2 jeus_rules.json JEUS-OOM-META (원 출처: builtin)'
+  versions:
+  - JEUS 7
+  - JEUS 8/8.5
+  - JEUS 9/9.1
+  version_note: Metaspace 는 Java 8+ (JEUS 7+)
+- id: LEG-JEUS-JDBC
+  layer: was
+  product:
+  - jeus
+  match:
+    regex: (?:jeus.*Cannot get a connection)|(?:jeus.*datasource.*pool.*exhausted)|(?:JEUS.*JDBC.*timeout)|(?:Cannot get a connection.*pool.*exhausted)|(?:Timeout waiting for connection from pool)|(?:HikariPool.*Connection
+      is not available)|(?:BoneCP.*timeout.*waiting)|(?:C3P0.*timeout.*acquiring.*connection)|(?:DBCP.*Cannot get a connection)|(?:getConnection.*timed out)|(?:Connection pool.*exhausted)|(?:connection.*pool.*empty)|(?:No
+      available.*JDBC.*connection)
+  severity: error
+  category: connection
+  verdict: JDBC 커넥션 풀 고갈 — DB 커넥션 미반환(누수) 또는 커넥션 풀 크기 부족
+  immediate:
+  - "`$JEUS_HOME/bin/jeusadmin -host <host>:9736 -u <user> 'connection-pool-info -server <server> -id <DS> -active'` 로 사용 중 연결·대기 확인(JEUS 7+, 읽기 전용) — 사용 중이 max 와 같으면 고갈 확정"
+  - DB 서버에서 애플리케이션 계정 세션 수 확인
+  - 로그에서 커넥션 반환 누락 코드 패턴 확인
+  short:
+  - '영향: DB 조회/저장 전체 실패, 서비스 오류.'
+  - "(2차·승인 후, 롤백: domain.xml 백업 복원) DB 지연 해소가 우선, 누수면 connection-trace 로 미반납 코드 확인 후 수정, 풀 max 조정은 DB 세션 한도 안에서"
+  mid:
+  - domain.xml connection-pool max-size 증가
+  - connection-test-query 설정으로 유효하지 않은 커넥션 제거
+  - try-with-resources로 Connection.close() 자동 보장
+  - DB 서버 max_connections 파라미터 확인
+  long:
+  - "풀 사용률 80% 경보와 미반납 추적(connection-trace) 상시 운영"
+  source_note: 'legacy-analyzer-v2.2 jeus_rules.json JEUS-JDBC (원 출처: builtin)'
+  versions:
+  - JEUS 6
+  - JEUS 7
+  - JEUS 8/8.5
+  - JEUS 9/9.1
+  version_note: 문구 기반
+- id: LEG-JEUS-GC
+  layer: was
+  product:
+  - jeus
+  match:
+    regex: '(?:\[Full GC)|(?:\[GC \(Allocation Failure\))|(?:GC overhead limit exceeded)|(?:Pause Full \(Ergonomics\))|(?:Pause Full \(System\.gc\(\)\))|(?:Pause Young \(Allocation Failure\))|(?:\[GC \(Promotion
+      Failure\))|(?:CMS Initial Mark|CMS Final Remark|CMS-concurrent)|(?:G1 Evacuation Pause)|(?:G1 Humongous Allocation)|(?:To-space exhausted)|(?:GC locker: Trying a full collection)'
+  severity: warn
+  category: memory
+  verdict: Full GC 과다/GC 오버헤드 — 힙 메모리 부족 또는 부적절한 GC 정책으로 GC 오버헤드
+  immediate:
+  - GC 로그 파일에서 Full GC 주기와 지속시간 확인
+  - "`jstat -gcutil <PID> 5000 12` 로 1분간 각 영역 사용률·FGC 추이 확인 — Old 가 GC 후에도 내려가지 않으면 누수 의심"
+  short:
+  - '영향: GC Stop-The-World 동안 서비스 응답 지연.'
+  - "(2차·승인 후, 롤백: domain.xml JVM 옵션 백업) GC 로그가 없으면 -verbose:gc(JDK 8)·-Xlog:gc*(JDK 9+) 옵션 추가 — 다음 재기동부터 적용"
+  mid:
+  - -Xmx 힙 크기 증가
+  - -XX:+UseG1GC -XX:MaxGCPauseMillis=200 G1GC 적용
+  - -XX:NewRatio 조정으로 Young/Old 비율 최적화
+  - -Xlog:gc*:file=gc.log:time:filecount=10,filesize=50m
+  long:
+  - "GC 정지 시간 SLO(1분 중 GC 10% 이하) 감시와 메모리 용량계획"
+  source_note: 'legacy-analyzer-v2.2 jeus_rules.json JEUS-GC (원 출처: builtin)'
+  versions:
+  - JEUS 6
+  - JEUS 7
+  - JEUS 8/8.5
+  - JEUS 9/9.1
+  version_note: GC 로그 문구 — JVM 공통
+- id: LEG-JEUS-DEPLOY
+  layer: was
+  product:
+  - jeus
+  match:
+    regex: (?:jeus.*DeploymentException)|(?:jeus.*deploy.*fail)|(?:JEUS.*application.*deploy.*error)|(?:java\.lang\.ClassNotFoundException)|(?:java\.lang\.NoClassDefFoundError)|(?:java\.lang\.NoSuchMethodError)|(?:java\.lang\.NoSuchFieldError)|(?:java\.lang\.VerifyError)|(?:java\.lang\.IncompatibleClassChangeError)|(?:ClassCastException.*loader)|(?:Cannot
+      load class)|(?:Class path contains.*duplicate)|(?:WAR.*not deployed)|(?:EAR.*deployment.*failed)|(?:Deployment of.*failed)|(?:Module.*could not be deployed)
+  severity: error
+  category: internal
+  verdict: 애플리케이션 배포 실패 — WAR/EAR 패키지 오류, 클래스 충돌, 설정 파일 오류
+  immediate:
+  - JEUS 로그에서 'Caused by:' 스택 추적 전체 확인
+  - "`unzip -l <배포파일> | grep -E 'WEB-INF/(web.xml|jeus-web-dd.xml|lib/)' | head -30` 로 WAR 내 META-INF·WEB-INF 구조와 포함 라이브러리 확인(읽기 전용)"
+  short:
+  - '영향: 해당 애플리케이션 서비스 불가.'
+  - "(2차·승인 후, 롤백: 실패 배포본 별도 보관) 원인 수정이 늦으면 이전 정상 배포본으로 되돌려 재배포"
+  mid:
+  - JAR 의존성 충돌 제거 (mvn dependency:tree 분석)
+  - web.xml, jeus-web-dd.xml 설정 검토
+  - 클래스패스 중복 라이브러리 제거
+  long:
+  - "배포 전 검증 환경 배포 시험·배포본 보관(되돌림용)과 배포 실패 경보"
+  source_note: 'legacy-analyzer-v2.2 jeus_rules.json JEUS-DEPLOY (원 출처: builtin)'
+  versions:
+  - JEUS 6
+  - JEUS 7
+  - JEUS 8/8.5
+  - JEUS 9/9.1
+  version_note: 문구 기반
+- id: LEG-JEUS-SLOW
+  layer: was
+  product:
+  - jeus
+  match:
+    regex: (?:jeus.*response.*time.*exceed)|(?:jeus.*slow.*request)|(?:jeus.*request.*timeout)|(?:WebContainer.*timeout)|(?:servlet.*timeout.*jeus)|(?:jeus.*504)|(?:Gateway Timeout.*jeus)|(?:read.*timeout.*jeus)|(?:socket.*timeout.*jeus)|(?:connection.*timeout.*jeus)|(?:jeus.*elapsed.*\d{4,}ms)
+  severity: warn
+  category: thread
+  verdict: JEUS 응답 지연/타임아웃 — DB 쿼리 지연, 외부 서비스 타임아웃, 스레드 풀 고갈
+  immediate:
+  - "`for i in 1 2 3; do jstack <PID> > td_$(date +%H%M%S)_$i.txt; sleep 10; done` 로 덤프 3회 수집 후 같은 스택에서 대기하는 스레드 분석(프로세스 유지)"
+  - DB 슬로우 쿼리 로그 확인
+  - 외부 API 연동 서버 응답 시간 측정
+  short:
+  - '영향: HTTP 504 오류, 사용자 서비스 장애.'
+  - "(2차) 덤프의 병목 지점(SQL·외부 API·락)을 DB·연동 담당에 전달, 스레드 풀 조정은 승인 후 domain.xml 백업 뒤 반영"
+  mid:
+  - DB 쿼리 튜닝 및 인덱스 최적화
+  - 외부 API timeout 설정 단축
+  - 비동기 처리 도입으로 응답 시간 개선
+  long:
+  - "URI 별 응답 시간 SLO 감시(servlet access.log 응답 시간 항목)와 느린 URI 상위 개선 관리"
+  source_note: 'legacy-analyzer-v2.2 jeus_rules.json JEUS-SLOW (원 출처: builtin)'
+  versions:
+  - JEUS 6
+  - JEUS 7
+  - JEUS 8/8.5
+  - JEUS 9/9.1
+  version_note: 문구 기반
+- id: LEG-JEUS-CONN-BACKEND
+  layer: was
+  product:
+  - jeus
+  match:
+    regex: (?:jeus.*ConnectException)|(?:jeus.*Connection refused)|(?:jeus.*backend.*unreachable)|(?:jeus.*upstream.*fail)|(?:WebContainer.*connect.*error)|(?:java\.net\.ConnectException.*refused)|(?:java\.net\.ConnectException.*timeout)|(?:java\.net\.SocketException)|(?:java\.net\.SocketTimeoutException)|(?:java\.rmi\.ConnectException)
+  severity: error
+  category: upstream
+  verdict: JEUS 백엔드 연결 오류 — JEUS가 연결하려는 백엔드(DB, 외부 서비스, RMI)에 접근 불가
+  immediate:
+  - 백엔드 서버 기동 상태 확인
+  - "네트워크 연결 테스트: `nc -zvw3 <backend_host> <port>`(또는 telnet) — 거부면 대상 미기동, 시간 초과면 방화벽·경로"
+  - 방화벽 정책 확인
+  short:
+  - '영향: 해당 백엔드 의존 기능 전체 오류.'
+  - "(2차) 대상 시스템 담당에 장애 시각·대상 주소·오류 유형 전달, 방화벽 변경이 필요하면 보안 승인 후 요청"
+  mid:
+  - 백엔드 서비스 복구
+  - 연결 타임아웃 설정 최적화
+  - 백엔드 서비스 이중화
+  long:
+  - "백엔드별 연결 실패율·응답 시간 감시와 서킷브레이커 적용 검토"
+  source_note: 'legacy-analyzer-v2.2 jeus_rules.json JEUS-CONN-BACKEND (원 출처: builtin)'
+  exclude: (?:LINEPROTO)|(?:LINK-3-UPDOWN)|(?:GigabitEthernet)|(?:FastEthernet)
+  versions:
+  - JEUS 6
+  - JEUS 7
+  - JEUS 8/8.5
+  - JEUS 9/9.1
+  version_note: 문구 기반
+- id: LEG-JEUS-SESSION
+  layer: was
+  product:
+  - jeus
+  match:
+    regex: (?:jeus.*session.*memory)|(?:jeus.*session.*leak)|(?:too many.*sessions.*jeus)|(?:session.*overflow.*jeus)|(?:HttpSession.*jeus.*high)|(?:session.*count.*exceed)
+  severity: warn
+  category: memory
+  verdict: 세션 메모리 누수 — 웹 세션 객체 과다 누적. 세션 타임아웃 미설정
+  immediate:
+  - "`jmap -histo <PID> | grep -i session | head -20` 으로 세션 관련 객체 수·크기 확인(live 옵션 없이 — Full GC 유발 안 함)"
+  - JEUS 세션 수 모니터링
+  short:
+  - '영향: 힙 메모리 증가로 OOM 유발 가능.'
+  - "(2차) 세션당 큰 속성(목록·캐시)을 저장하는 기능을 덤프로 특정해 개발 담당에 전달, 세션 타임아웃 변경은 승인 후 재배포"
+  mid:
+  - web.xml session-timeout 값 단축 (기본 30분 → 15분)
+  - 세션에 대형 객체 저장 금지
+  - 세션 클러스터링 설정 점검
+  long:
+  - "활성 세션 수·세션 크기 추세 감시와 세션 사용 개발 표준"
+  source_note: 'legacy-analyzer-v2.2 jeus_rules.json JEUS-SESSION (원 출처: builtin)'
+  versions:
+  - JEUS 6
+  - JEUS 7
+  - JEUS 8/8.5
+  - JEUS 9/9.1
+  version_note: 문구 기반
+- id: LEG-JEUS-CRASH
+  layer: was
+  product:
+  - jeus
+  match:
+    regex: (?:JEUSMain.*crash)|(?:JEUSMain.*exit)|(?:jeusadmin.*connection.*refused)|(?:jeus.*server.*terminated)|(?:jeus.*process.*killed)|(?:jeus.*abnormal.*shutdown)|(?:hs_err_pid\d+\.log created)|(?:#
+      Java.*Runtime Environment.*crash)|(?:SIGSEGV.*jeus)|(?:SIGFPE.*jeus)
+  severity: critical
+  category: hardware
+  verdict: JEUS 프로세스 비정상 종료 — JEUS 서버 프로세스 비정상 종료. JVM crash 또는 OS 시그널
+  immediate:
+  - "hs_err_pid*.log에서 crash 스택 트레이스 확인 — `ls -lt <SERVER_HOME>/hs_err_pid*.log $JEUS_HOME/bin/hs_err_pid*.log 2>/dev/null | head` 후 `head -40` 으로 문제 프레임(C/J) 확인"
+  - "OS dmesg에서 커널 OOM 킬러 동작 여부 확인 — `dmesg -T | grep -i -E 'out of memory|oom' | tail`"
+  short:
+  - '영향: 웹 서비스 전체 중단.'
+  - "(2차·승인 후, 롤백: 해당 없음 — 기동 전 hs_err·core 파일 보존) 원인 자료 보존 후 jeusadmin start-server 또는 startManagedServer 로 기동"
+  mid:
+  - -XX:+HeapDumpOnOutOfMemoryError 옵션 추가
+  - JVM 버전 업그레이드
+  - JEUS 패치 최신 적용
+  long:
+  - "프로세스 생존 감시(자동 경보)와 JDK·JEUS 패치 정기 적용 일정"
+  source_note: 'legacy-analyzer-v2.2 jeus_rules.json JEUS-CRASH (원 출처: builtin)'
+  versions:
+  - JEUS 6
+  - JEUS 7
+  - JEUS 8/8.5
+  - JEUS 9/9.1
+  version_note: JEUSMain 문구는 JEUS 6, jeusadmin 문구는 6~9 공통
+- id: LEG-JEUS-LOG-FULL
+  layer: was
+  product:
+  - jeus
+  match:
+    regex: (?:jeus.*No space left)|(?:jeus.*disk.*full)|(?:jeus.*log.*full)|(?:jeus.*log.*disk.*error)|(?:jeus.*cannot.*write.*log)
+  severity: error
+  category: disk
+  verdict: JEUS 로그 디스크 부족 — JEUS 로그 파일이 디스크를 가득 채움
+  immediate:
+  - df -h $JEUS_HOME/logs
+  - "`df -i <SERVER_HOME>/logs` 와 `du -sh <SERVER_HOME>/logs/* | sort -h | tail -10` 로 inode·큰 로그 확인(JEUS 6 은 $JEUS_HOME/logs, 정리는 2차)"
+  short:
+  - '영향: 로그 기록 불가, JEUS 비정상 동작.'
+  - "(2차·승인 후, 롤백: 정리 전 압축본을 다른 볼륨에 보관) 회전된 오래된 로그를 압축·이동해 공간 확보, 사용 중인 현재 로그 파일은 건드리지 않는다"
+  mid:
+  - JEUS 로그 롤링 설정
+  - 로그 레벨 조정 (DEBUG → WARN)
+  - 로그 파티션 별도 구성
+  long:
+  - "로그 파일시스템 사용률 85%/95% 감시와 보관 주기 표준"
+  source_note: 'legacy-analyzer-v2.2 jeus_rules.json JEUS-LOG-FULL (원 출처: builtin)'
+  versions:
+  - JEUS 6
+  - JEUS 7
+  - JEUS 8/8.5
+  - JEUS 9/9.1
+  version_note: 문구 기반
+- id: LEG-JEUS-NORMAL-SHUTDOWN
+  layer: was
+  product:
+  - jeus
+  match:
+    regex: (?:\[SERVER-0248\].*JEUS server is SHUTDOWN)|(?:\[SERVER-0265\].*JEUS server has exited)|(?:\[WEB-1031\].*web engine has shut down)|(?:\[JNSS-0402\].*Shut down the server)|(?:\[JNSS-0030\].*JNDI
+      naming server.*unexported)|(?:\[WEB-1504\].*web module.*undistributed)|(?:\[Scheduler-0023\].*JEUS scheduler.*unexported)|(?:\[NET-0214\].*Closing.*JMX)|(?:\[NET-0214\].*Closing BASE)|(?:The JEUS
+      server is SHUTDOWN)|(?:The JEUS server has exited)|(?:SERVER-0248)|(?:SERVER-0265)
+  severity: info
+  category: internal
+  verdict: 'JEUS 서버 정상 종료 — JEUS 서버가 정상적인 종료 시퀀스를 수행함.
+
+    정상 종료 순서: 웹모듈 배포해제 → 웹엔진 종료 → JNDI 해제 → 서버 종료 → 프로세스 종료'
+  immediate:
+  - "jeusadmin 또는 JEUS 관리 콘솔(WebAdmin)에서 종료 명령 실행 이력 확인 — 관리 서버(DAS) JeusServer.log 에서 stop-server·local-shutdown 기록 검색"
+  - 종료 전 시간대의 JEUS 로그에서 오류 발생 여부 확인
+  - "OS cron(`crontab -l -u <jeus_user>`) 또는 운영 스크립트에 의한 계획된 정지 작업 여부 확인"
+  - "`$JEUS_HOME/bin/jeusadmin -host <host>:9736 -u <user> 'server-info -server <server> -state'` 로 현재 상태(SHUTDOWN·RUNNING) 확인(JEUS 7+)"
+  short:
+  - '영향: JEUS 서버 서비스 중단. 의도된 종료인지 비의도적 종료인지 확인 필요.'
+  - "(2차·승인 후, 롤백: 해당 없음) 계획 종료가 아니고 서비스가 필요하면 jeusadmin start-server <server> 또는 startManagedServer 로 기동"
+  mid:
+  - "정상 종료였다면 재기동은 jeusadmin start-server <server> 또는 $JEUS_HOME/bin/startManagedServer(JEUS 7+) — wsboot 는 WebtoB 기동 명령이므로 JEUS 에 쓰지 않는다"
+  - 비의도적 종료였다면 종료 직전 로그에서 원인(OOM/오류) 분석
+  - JEUS 자동 재기동 스크립트 설정 검토
+  long:
+  - "계획 정지·기동 작업을 변경 관리 대장에 기록하고 비계획 종료만 경보"
+  source_note: 'legacy-analyzer-v2.2 jeus_rules.json JEUS-NORMAL-SHUTDOWN (원 출처: builtin)'
+  versions:
+  - JEUS 7
+  - JEUS 8/8.5
+  - JEUS 9/9.1
+  version_note: SERVER-0248/0265 는 JEUS 7 이후 코드
+- id: LEG-JEUS-ABNORMAL-SHUTDOWN
+  layer: was
+  product:
+  - jeus
+  match:
+    regex: (?:JEUSMain.*abnormal)|(?:JEUS.*killed)|(?:JEUS.*terminated.*unexpectedly)|(?:hs_err_pid\d+\.log)|(?:\[SERVER-0248\].*SHUTDOWN.*(?!normal))|(?:java.*crash.*jeus)|(?:SIGSEGV.*jeus)|(?:SIGKILL.*jeus)
+  severity: critical
+  category: internal
+  verdict: JEUS 서버 비정상 종료 — JEUS 서버 프로세스 비정상 강제 종료
+  immediate:
+  - "hs_err_pid*.log 확인 — `ls -lt <SERVER_HOME>/hs_err_pid*.log $JEUS_HOME/bin/hs_err_pid*.log 2>/dev/null | head`"
+  - "OS dmesg에서 커널 OOM 킬러 동작 여부 확인 — `dmesg -T | grep -i -E 'out of memory|oom' | tail`"
+  short:
+  - '영향: 웹 서비스 전체 중단.'
+  - "(2차·승인 후, 롤백: 해당 없음 — 기동 전 hs_err·core 보존) 원인 자료 보존 후 jeusadmin start-server 로 기동, OOM Killer 면 서버 메모리 점유 프로세스 정리 계획"
+  mid:
+  - -XX:+HeapDumpOnOutOfMemoryError 추가
+  - JVM 버전 업그레이드
+  - JEUS 패치 최신 적용
+  long:
+  - "프로세스 생존 감시와 서버 메모리 여유(물리 대비 힙 합계) 관리"
+  source_note: 'legacy-analyzer-v2.2 jeus_rules.json JEUS-ABNORMAL-SHUTDOWN (원 출처: builtin)'
+  versions:
+  - JEUS 6
+  - JEUS 7
+  - JEUS 8/8.5
+  - JEUS 9/9.1
+  version_note: JEUSMain(6)·killed/terminated 문구(공통)
+- id: LEG-JEUS-JNDI-ERROR
+  layer: was
+  product:
+  - jeus
+  match:
+    regex: (?:\[JNSS-\d{4}\].*(?:fail|error))|(?:\[NET-\d{4}\].*(?:fail|error))|(?:\[D_SESSION-\d{4}\].*(?:fail|error|closed))|(?:JNDI.*(?:fail|error|lookup.*fail))|(?:naming.*server.*error)|(?:SocketStream.*(?:fail|error))|(?:NET-0907)|(?:D_SESSION-2193)
+  severity: warn
+  category: internal
+  verdict: JEUS JNDI/네트워크 오류 — JEUS JNDI 네이밍 서버 또는 네트워크 세션 오류
+  immediate:
+  - JEUS 서버 간 네트워크 연결 상태 확인
+  - JNDI 설정 파일 검토
+  - "`$JEUS_HOME/bin/jeusadmin -host <host>:9736 -u <user> 'server-info'` 로 관련 서버들의 상태 확인(JEUS 7+), 상대 서버에 `nc -zvw3 <peer_ip> <base_port>`"
+  short:
+  - '영향: EJB 룩업 실패, 분산 세션 오류.'
+  - "(2차·승인 후, 롤백: 해당 없음) 상대 서버·네트워크 원인 해소 후에도 JNDI 오류가 지속되면 서버 재기동 계획"
+  mid:
+  - "(2차·승인 후) JEUS 서버 재기동"
+  - 네트워크 방화벽 설정 확인
+  long:
+  - "서버 간 통신 포트(base 포트) 감시와 방화벽 정책 변경 이력 관리"
+  source_note: 'legacy-analyzer-v2.2 jeus_rules.json JEUS-JNDI-ERROR (원 출처: builtin)'
+  versions:
+  - JEUS 6
+  - JEUS 7
+  - JEUS 8/8.5
+  - JEUS 9/9.1
+  version_note: JNSS-/NET- 접두 — JNSS 는 9.1 모듈 목록에 존재, NET- 는 기존 도구 룰 유래(도입 버전 미확인) → 전 버전 수집
+- id: LEG-JEUS-DEPLOY-XML
+  layer: was
+  product:
+  - jeus
+  match:
+    regex: (?:jeus\.deploy\.JeusDeploymentException)|(?:Deploying the web module failed)|(?:\[SERVER-0405\].*Distributing.*failed)|(?:\[SERVER-0300\].*Distributing.*failed)|(?:\[SERVER-0250\].*Starting
+      server.*failed.*STANDBY)|(?:jeus\.xml\.binding\.JeusJAXBException)|(?:Unmarshalling the XML descriptor failed.*jeus-web-dd)|(?:WEB-INF/jeus-web-dd\.xml)|(?:cvc-complex-type\.\d+\.\d+.*Element.*cannot
+      have character)|(?:Element.*cannot have character.*children.*element-only)|(?:webinf-first.*cannot have character)|(?:javax\.xml\.bind\.UnmarshalException)|(?:org\.xml\.sax\.SAXParseException.*cvc-complex)|(?:jeus\.xml\.binding\.BindingHelper)|(?:jeus\.service\.descriptor\.DescriptorFile)|(?:jeus\.servlet\.deployment\.WarFile.*loadWebDescriptors)|(?:jeus\.servlet\.deployment\.WebModuleDeployer)|(?:jeus\.xml\.util\.XMLSurgeon)
+  severity: error
+  category: internal
+  verdict: JEUS 배포 실패 — jeus-web-dd.xml XML 스키마 오류
+  immediate:
+  - "`grep -n -A10 -E 'jeus-web-dd|webinf-first' <SERVER_HOME>/logs/JeusServer.log | tail -30` 로 오류 요소와 줄 위치 확인"
+  - "`unzip -p <app>.war WEB-INF/jeus-web-dd.xml | grep -n -A3 'webinf-first'` 로 배포본의 해당 태그 확인, 이전 정상 배포본의 같은 파일과 `diff` 로 비교"
+  - "현재 JEUS 버전에서 지원하는 jeus-web-dd.xml 스키마 확인 — JEUS 판 변경 직후면 판 차이 의심"
+  short:
+  - '영향: 해당 웹 애플리케이션(<app>) 배포 완전 실패.
+
+    JEUS 서버가 STANDBY 상태로 전환되어 서비스 제공 불가.'
+  - "(2차·승인 후, 롤백: 수정 전 jeus-web-dd.xml 보관) DD 파일 수정본으로 재배포, 급하면 이전 정상 배포본으로 되돌림"
+  mid:
+  - "jeus-web-dd.xml에서 <webinf-first> 값 형식 수정:\n  잘못된 예: <webinf-first>true</webinf-first>\n  올바른 예: <webinf-first><value>true</value></webinf-first>"
+  - JEUS 공식 스키마 파일($JEUS_HOME/lib/schemas/) 참조하여 DD 파일 재작성
+  - JEUS 버전에 맞는 jeus-web-dd.xml 샘플 파일 활용
+  - '배포 전 xmllint로 XML 유효성 검사: xmllint --schema jeus-web-dd.xsd jeus-web-dd.xml'
+  long:
+  - "빌드 파이프라인에 DD 스키마 검증 단계 추가, JEUS 판 업그레이드 시 DD 호환성 점검"
+  source_note: 'legacy-analyzer-v2.2 jeus_rules.json JEUS-DEPLOY-XML (원 출처: builtin)'
+  exclude: (?:WebtoBConnectionManager)
+  versions:
+  - JEUS 6
+  - JEUS 7
+  - JEUS 8/8.5
+  - JEUS 9/9.1
+  version_note: jeus.deploy.JeusDeploymentException 클래스 — 6~9 공통
+- id: LEG-JEUS-WEBTOB-CONN
+  layer: was
+  product:
+  - jeus
+  match:
+    regex: (?:\[WEB-3347\].*Connecting to WebtoB.*failed.*network error)|(?:\[WEB-3346\].*Connecting to WebtoB.*failed)|(?:Check if WebtoB is running)|(?:jeus\.servlet\.engine\.WebtoBConnectionManager)|(?:jeus\.servlet\.engine\.WJPV2Registration)|(?:jeus\.servlet\.connection\.WebtoBConnector)|(?:WebtoBConnectionManager\.registerToWebtoB)|(?:WebtoBConnectionManager\.createConnection)|(?:WJPV2Registration\.readRegstrationReply)|(?:Connecting
+      to WebtoB.*Connection refused)|(?:Connecting to WebtoB.*EOFException)|(?:registerToWebtoB.*failed)|(?:java\.io\.EOFException.*WebtoB)|(?:java\.net\.ConnectException.*Connection refused.*WebtoB)
+  severity: error
+  category: connection
+  verdict: JEUS↔WebtoB 연결 실패 (WJP 프로토콜)
+  immediate:
+  - WebtoB 서버(<webtob_host>:<jsv_port>) 기동 상태 확인
+  - "WebtoB 서버에서 `ps -ef | grep -E 'wsm|htl|hth' | grep -v grep` 로 WebtoB 프로세스(WSM·HTL·HTH) 확인"
+  - "JEUS 서버에서 `nc -zvw3 <webtob_host> <jsv_port>`(또는 telnet) 으로 WJP(JSV) 포트 연결 테스트 — 거부면 WebtoB 미기동·포트 불일치"
+  - 방화벽 정책에서 JSV 포트(<jsv_port>, 흔히 9900) 허용 여부 확인
+  short:
+  - '영향: JEUS WAS가 WebtoB에 등록되지 않아 HTTP 요청 수신 불가.
+
+    웹 서비스 전체 중단 (WebtoB → JEUS 트래픽 라우팅 불가).'
+  - "(2차·승인 후, 롤백: 설정 백업 복원) WebtoB 담당이 WebtoB 기동(wsboot) 또는 JSV 포트·등록 정보 정정, JEUS 측 webtob-connector 주소 수정"
+  mid:
+  - "(2차·WebtoB 담당 승인 후) WebtoB 미기동 시: wsboot으로 WebtoB 기동"
+  - 'WebtoB jsvgroup 설정 확인: $WEBTOB_HOME/conf/webtob.m의 Jsvgroup 섹션'
+  - WebtoB에서 JEUS 서버 등록 설정 확인 (Server 섹션의 jeus_port, ip)
+  - 방화벽에서 WebtoB WJP 포트(<jsv_port>) 허용
+  long:
+  - "WebtoB-JEUS 연결 수 감시와 연동 포트·주소 대장 관리"
+  source_note: 'legacy-analyzer-v2.2 jeus_rules.json JEUS-WEBTOB-CONN (원 출처: builtin)'
+  exclude: (?:JeusDeploymentException)
+  versions:
+  - JEUS 6
+  - JEUS 7
+  - JEUS 8/8.5
+  - JEUS 9/9.1
+  version_note: WEB-3347 — 6·7·8 공통
+- id: LEG-JEUS-WEBTOB-DOWN
+  layer: was
+  product:
+  - jeus
+  match:
+    regex: (?:\[WEB-3347\].*failed because of a network error)|(?:Connection refused.*Connection refused.*WebtoB)|(?:WebtoBConnector.*run.*ConnectException)|(?:Socket\[unconnected\].*WebtoB.*failed)|(?:Check
+      if WebtoB is running.*contact the administrator)
+  severity: error
+  category: connection
+  verdict: WebtoB 서버 응답 없음 (JEUS 관점)
+  immediate:
+  - "WebtoB 프로세스 기동 상태 즉시 확인 — WebtoB 서버에서 `ps -ef | grep -E 'wsm|htl|hth' | grep -v grep`"
+  - "네트워크 경로 확인: `ping -c3 <webtob_host>` 와 `nc -zvw3 <webtob_host> <jsv_port>`"
+  - WebtoB 로그에서 비정상 종료 원인 확인
+  short:
+  - '영향: JEUS WAS의 HTTP 요청 수신 불가. 서비스 완전 중단.'
+  - "(2차·WebtoB 담당 승인 후, 롤백: 해당 없음) 종료 원인 로그 보존 후 wsboot 로 WebtoB 기동, JEUS 자동 재접속 확인"
+  mid:
+  - "(2차·승인 후) WebtoB 재기동: wsboot"
+  - WebtoB 비정상 종료 원인 분석 후 근본 조치
+  - WebtoB 자동 감시/재기동 스크립트 설정
+  long:
+  - "WebtoB 프로세스 생존 감시와 이중화(복수 WebtoB) 구성 검토"
+  source_note: 'legacy-analyzer-v2.2 jeus_rules.json JEUS-WEBTOB-DOWN (원 출처: builtin)'
+  versions:
+  - JEUS 6
+  - JEUS 7
+  - JEUS 8/8.5
+  - JEUS 9/9.1
+  version_note: WEB-3347·Connection refused — 공통
+- id: LEG-JEUS-SERVER-LIFECYCLE
+  layer: was
+  product:
+  - jeus
+  match:
+    regex: (?:\[SERVER-0405\])|(?:\[SERVER-0300\])|(?:\[SERVER-0250\])|(?:\[SERVER-0248\])|(?:\[SERVER-0265\])|(?:\[SERVER-0201\])|(?:\[SERVER-0210\])|(?:\[SERVER-0400\])|(?:\[SERVER-0401\])|(?:\[SERVER-0402\])|(?:\[SERVER-0403\])|(?:\[SERVER-0406\])|(?:\[SERVER-0407\])|(?:\[SERVER-0101\])|(?:\[SERVER-0120\])|(?:\[SERVER-0130\])|(?:\[SERVER-0131\])
+  severity: warn
+  category: internal
+  verdict: JEUS 서버 상태 변경 (SERVER 코드 계열)
+  immediate:
+  - SERVER 코드로 공식 JEUS 매뉴얼에서 정확한 원인 확인
+  - 해당 코드 전후 로그에서 연관 이벤트 확인
+  - "JEUS 관리 콘솔 또는 `$JEUS_HOME/bin/jeusadmin -host <host>:9736 -u <user> 'server-info -server <server> -state'` 로 서버 상태 확인(JEUS 7+)"
+  short:
+  - '영향: JEUS 서버 또는 배포 애플리케이션 상태 이상.'
+  - "(2차·승인 후, 롤백: 설정 백업 복원) STANDBY·SHUTDOWN 원인(배포 실패·설정 오류) 해소 후 jeusadmin 으로 서버 기동"
+  mid:
+  - 'SERVER-04xx: 배포 파일 및 설정 파일 검토'
+  - "SERVER-STANDBY: 배포 실패 해결 후 jeusadmin 으로 서버 기동(STANDBY→RUNNING 전환 명령은 판별 Reference Guide 확인) — wsadmin 은 WebtoB 도구"
+  - "SERVER-0265 후 미기동: jeusadmin start-server <server> 또는 startManagedServer 실행(wsboot 는 WebtoB 기동 명령)"
+  long:
+  - "서버 상태(RUNNING 외) 자동 감시와 기동·정지 작업 변경 관리"
+  source_note: 'legacy-analyzer-v2.2 jeus_rules.json JEUS-SERVER-LIFECYCLE (원 출처: builtin)'
+  versions:
+  - JEUS 7
+  - JEUS 8/8.5
+  - JEUS 9/9.1
+  version_note: SERVER-0405/0300/0250 … JEUS 7 이후
+- id: LEG-JEUS-DEPLOY-CODES
+  layer: was
+  product:
+  - jeus
+  match:
+    regex: (?:\[SERVER-0405\].*Distributing.*failed)|(?:\[SERVER-0300\].*Distributing.*failed)|(?:\[SERVER-0250\].*Starting server.*failed)|(?:\[SERVER-0406\].*application.*fail)|(?:jeus\.deploy\.JeusDeploymentException)|(?:jeus\.deploy\.deployer\.AbstractDeployer)|(?:jeus\.deploy\.deployer\.DeploymentAdministrator)|(?:jeus\.server\.Server\.innerSingleDistribute)|(?:jeus\.server\.Server\$InnerDistributeAppTask)|(?:jeus\.servlet\.deployment\.WebModuleDeployer)|(?:jeus\.servlet\.deployment\.WarFile)|(?:jeus\.service\.descriptor\.DescriptorFile)|(?:jeus\.xml\.binding\.JeusJAXBException)|(?:jeus\.xml\.binding\.BindingHelper)|(?:jeus\.xml\.util\.XMLSurgeon)|(?:Unmarshalling
+      the XML descriptor failed)|(?:WEB-INF/jeus-web-dd\.xml)|(?:WEB-INF/web\.xml)|(?:Deploying the web module failed)|(?:Distributing the application.*failed)|(?:cvc-complex-type\.\d+\.\d+)|(?:SAXParseException.*cvc-)|(?:javax\.xml\.bind\.UnmarshalException)|(?:org\.xml\.sax\.SAXParseException)|(?:org\.apache\.xerces\.)|(?:webinf-first.*cannot
+      have character)|(?:Element.*cannot have character.*element-only)
+  severity: error
+  category: internal
+  verdict: JEUS 배포 실패 계열 (SERVER-04xx)
+  immediate:
+  - SERVER-0405 전후 로그에서 Caused by 체인 확인
+  - 배포 DD 파일(jeus-web-dd.xml, web.xml) XML 유효성 검사
+  - 이전 정상 배포 버전과 현재 버전의 DD 파일 차이 비교
+  - JEUS 버전별 지원 스키마 확인 ($JEUS_HOME/lib/schemas/)
+  short:
+  - '영향: 해당 애플리케이션 서비스 불가. JEUS STANDBY.'
+  mid:
+  - 'XML 스키마 오류: DD 파일 형식을 JEUS 버전에 맞게 수정'
+  - 'ClassNotFoundException: WAR 파일의 lib 폴더 의존성 확인'
+  - "(2차·승인 후) STANDBY 해제: jeusadmin 으로 서버 기동(wsadmin 은 WebtoB 도구 — JEUS 에 쓰지 않는다)"
+  - "(2차·승인 후, 롤백: 이전 배포본 보관) 재배포: jeusadmin undeploy 후 deploy"
+  long:
+  - "배포 전 DD 스키마 검증·검증 환경 배포 시험 자동화"
+  source_note: 'legacy-analyzer-v2.2 jeus_rules.json JEUS-DEPLOY-CODES (원 출처: builtin)'
+  exclude: (?:WebtoBConnectionManager)
+  versions:
+  - JEUS 7
+  - JEUS 8/8.5
+  - JEUS 9/9.1
+  version_note: SERVER-0405/0300 배포 코드 — JEUS 7 이후
+- id: LEG-JEUS-JNDI-CODES
+  layer: was
+  product:
+  - jeus
+  match:
+    regex: (?:\[JNSS-0402\])|(?:\[JNSS-0030\])|(?:\[JNSS-0001\])|(?:\[JNSS-0010\])|(?:\[JNSS-0401\])|(?:\[JNSS-0100\])|(?:\[JNSS-0101\])|(?:\[JNSS-0102\])|(?:\[JNSS-0200\])|(?:javax\.naming\.NamingException)|(?:javax\.naming\.NameNotFoundException)|(?:javax\.naming\.CommunicationException)|(?:jeus\.jndi\.)|(?:NamingContext)
+  severity: info
+  category: upstream
+  verdict: JEUS JNDI 서비스 코드 (JNSS 계열)
+  immediate:
+  - "`grep -o -E 'JNSS-[0-9]{4}' <SERVER_HOME>/logs/JeusServer.log | sort | uniq -c` 로 코드 계열 확인 — JNSS-01xx 바인딩 설정, JNSS-02xx 서버 간 네트워크"
+  - "`grep -n -A5 'NameNotFoundException' <SERVER_HOME>/logs/JeusServer.log | tail -20` 로 찾지 못한 JNDI 이름 확인, `jeusadmin -host <host>:<base_port> -u <user> 'application-info'` 로 그 이름을 내보내는 EJB 애플리케이션이 RUNNING 인지 확인(JEUS 7+)"
+  short:
+  - '영향: EJB/Resource 룩업 실패, 분산 환경 서비스 장애.'
+  - "(2차·승인 후, 롤백: 설정 백업 복원) 바인딩 누락이면 자원(데이터소스·EJB) 대상 서버 지정·export-name 수정 후 재배포"
+  mid:
+  - "(2차·승인 후) JEUS 재기동으로 JNDI 재초기화"
+  - "JNDI 이름 설정 검토 (jeus-ejb-dd.xml, jeus-web-dd.xml, domain.xml — standalone.xml 은 JBoss 설정 파일이므로 해당 없음)"
+  long:
+  - "JNDI 이름 규칙 표준과 배포 후 핵심 JNDI 조회 스모크 시험"
+  source_note: 'legacy-analyzer-v2.2 jeus_rules.json JEUS-JNDI-CODES (원 출처: builtin)'
+  versions:
+  - JEUS 6
+  - JEUS 7
+  - JEUS 8/8.5
+  - JEUS 9/9.1
+  version_note: JNSS-0402/0030/0001/0010 — JNSS 모듈은 6~9.1 공통(번호별 도입 버전 미확인)
+- id: LEG-JEUS-NET-SESSION
+  layer: was
+  product:
+  - jeus
+  match:
+    regex: (?:\[NET-0214\])|(?:\[NET-0907\])|(?:\[NET-0001\])|(?:\[NET-0100\])|(?:\[NET-0101\])|(?:\[NET-0200\])|(?:\[NET-0201\])|(?:\[NET-0202\])|(?:\[NET-0203\])|(?:\[NET-0204\])|(?:\[NET-0900\])|(?:\[NET-0901\])|(?:\[NET-0902\])|(?:\[NET-0906\])|(?:\[NET-0910\])|(?:\[D_SESSION-2193\])|(?:\[D_SESSION-2000\])|(?:\[D_SESSION-2001\])|(?:\[D_SESSION-2100\])|(?:\[D_SESSION-2190\])|(?:\[D_SESSION-2191\])|(?:\[D_SESSION-2192\])|(?:SocketStream.*IOException.*Selector
+      destroyed)|(?:SocketStream.*Connection reset)|(?:Closing SocketStream.*IOException)
+  severity: info
+  category: connection
+  verdict: JEUS 네트워크/세션 코드 (NET/D_SESSION 계열)
+  immediate:
+  - "`grep -n -E 'NET-0907|D_SESSION-2193|NET-020[0-2]' <SERVER_HOME>/logs/JeusServer.log | tail -20` 로 코드와 시각 확인 — 서버 종료 시각과 겹치는 NET-0907·D_SESSION-2193 은 정상"
+  - "비정상 NET-0200/0201/0202 이면 메시지의 상대 주소로 `nc -zvw3 <peer_host> <port>` 연결 확인 — 실패면 상대 서버·네트워크 원인"
+  short:
+  - '영향: 네트워크 연결 종료 또는 세션 만료.'
+  mid:
+  - '정상 종료 시 발생: 무시 가능'
+  - '비정상 시: 네트워크 장비 및 방화벽 설정 확인'
+  - '세션 타임아웃: D_SESSION 설정 검토'
+  long:
+  - "종료 시각 외 발생 건수만 집계해 기준값 대비 급증 감시"
+  source_note: 'legacy-analyzer-v2.2 jeus_rules.json JEUS-NET-SESSION (원 출처: builtin)'
+  versions:
+  - JEUS 6
+  - JEUS 7
+  - JEUS 8/8.5
+  - JEUS 9/9.1
+  version_note: NET-xxxx — 기존 도구 룰 유래, 실로그는 Network- 접두(6·7+) — 도입 버전 미확인, 전 버전 수집
+- id: LEG-JEUS-WEBTOB-WJP
+  layer: was
+  product:
+  - jeus
+  match:
+    regex: (?:\[WEB-3346\].*Connecting to WebtoB.*failed)|(?:\[WEB-3347\].*Connecting to WebtoB.*failed.*network error)|(?:\[WEB-3348\])|(?:\[WEB-3349\])|(?:\[WEB-3350\])|(?:\[WEB-3351\])|(?:Check if WebtoB
+      is running)|(?:jeus\.servlet\.engine\.WebtoBConnectionManager)|(?:jeus\.servlet\.engine\.WebtoBConnectionManager\.registerToWebtoB)|(?:jeus\.servlet\.engine\.WebtoBConnectionManager\.createConnection)|(?:jeus\.servlet\.connection\.WebtoBConnector)|(?:jeus\.servlet\.connection\.WebtoBConnector\.run)|(?:jeus\.servlet\.engine\.WJPV2Registration)|(?:jeus\.servlet\.engine\.WJPV2Registration\.readRegstrationReply)|(?:WebtoBConnectionManager.*EOFException)|(?:WebtoBConnectionManager.*ConnectException)|(?:WebtoBConnector.*Connection
+      refused)|(?:registerToWebtoB.*failed)|(?:WJPV2Registration.*readFully)|(?:Socket\[unconnected\].*WebtoB.*failed)|(?:Socket\[addr=.*port=\d+.*\].*failed)|(?:Connecting to WebtoB\[Socket)|(?:java\.net\.ConnectException.*Connection
+      refused.*WebtoB)|(?:java\.io\.EOFException.*WebtoB)|(?:java\.net\.SocketException.*WebtoB)|(?:java\.net\.SocketTimeoutException.*WebtoB)
+  severity: error
+  category: connection
+  verdict: JEUS↔WebtoB WJP 연결 코드 계열 (WEB-33xx)
+  immediate:
+  - "WebtoB 서버 기동 상태 확인: WebtoB 서버에서 `ps -ef | grep -E 'wsm|htl|hth' | grep -v grep`"
+  - "`nc -zvw3 <webtob_host> <jsv_port>`(또는 telnet) 으로 WJP 포트 직접 테스트"
+  - WebtoB 로그에서 JEUS 연결 시도 수락 여부 확인
+  - 방화벽에서 WebtoB WJP 포트(<jsv_port>) 허용 여부 확인
+  - JEUS domain.xml에서 WebtoB 연결 설정 확인
+  short:
+  - '영향: JEUS→WebtoB 등록 실패. HTTP 요청 수신 불가. 웹 서비스 전체 중단.'
+  - "(2차·승인 후, 롤백: 설정 백업 복원) WebtoB 기동 또는 JEUS webtob-connector 와 webtob.m JSV 포트·주소 일치화"
+  mid:
+  - "(2차·WebtoB 담당 승인 후) WebtoB 미기동: wsboot으로 기동"
+  - 'WebtoB 설정 오류: $WEBTOB_HOME/conf/webtob.m의 Jsvgroup 섹션 검토'
+  - '포트 변경: JEUS domain.xml의 WebtoB 포트 설정과 webtob.m 일치 확인'
+  - "(2차·보안 승인 후, 롤백: firewall-cmd --remove-port=<jsv_port>/tcp --permanent) 방화벽 포트 허용: firewall-cmd --add-port=<jsv_port>/tcp --permanent 후 --reload"
+  long:
+  - "WebtoB-JEUS 연결 수 감시와 연동 포트 대장 관리"
+  source_note: 'legacy-analyzer-v2.2 jeus_rules.json JEUS-WEBTOB-WJP (원 출처: builtin)'
+  exclude: (?:JeusDeploymentException)
+  versions:
+  - JEUS 6
+  - JEUS 7
+  - JEUS 8/8.5
+  - JEUS 9/9.1
+  version_note: WEB-3346/3347 — 공통
+- id: LEG-JEUS-SESSION-CLOSE
+  layer: was
+  product:
+  - jeus
+  match:
+    regex: (?:\[D_SESSION-2193\].*connection.*closed)|(?:\[D_SESSION-2190\].*connection.*closed)|(?:\[D_SESSION-2191\].*connection.*lost)|(?:connection from.*has been closed)|(?:SocketStream.*Selector destroyed)|(?:\[NET-0907\].*Closing
+      SocketStream)|(?:WebSession.*closed)|(?:ws\d+-\w+.*connection.*closed)
+  severity: info
+  category: connection
+  verdict: 'JEUS 서버 간 세션 연결 종료 — JEUS 서버 간 분산 세션 연결 종료.
+
+    정상 종료 시 항상 발생. 비정상 종료 시에도 발생'
+  immediate:
+  - "`grep -n -i -E 'shutdown|stop-server|D_SESSION' <SERVER_HOME>/logs/JeusServer.log | tail -20` 로 발생 시각이 서버 종료 시퀀스와 겹치는지 확인 — 겹치면 정상"
+  - "종료와 무관하면 `jeusadmin -host <host>:<base_port> -u <user> 'server-info'` 로 상대 서버 상태(JEUS 7+), `nc -zvw3 <peer_host> <port>` 로 네트워크 확인"
+  short:
+  - '영향: 분산 세션 데이터 동기화 중단. 주로 서버 종료 시 정상 발생.'
+  mid:
+  - '정상 종료 시: 무시 가능'
+  - '비정상 시: 상대 서버(<peer_server>) 상태 확인'
+  long:
+  - "종료 시각 외 발생 건수 감시와 분산 세션 대상 서버 구성 대장 관리"
+  source_note: 'legacy-analyzer-v2.2 jeus_rules.json JEUS-SESSION-CLOSE (원 출처: builtin)'
+  versions:
+  - JEUS 6
+  - JEUS 7
+  - JEUS 8/8.5
+  - JEUS 9/9.1
+  version_note: D_SESSION-2193/2190 — 분산 세션 서버 코드(7+ 분산 세션, 도입 버전 미확인) — 전 버전 수집
+- id: LEG-JEUS-BOOT-OK
+  layer: was
+  product:
+  - jeus
+  match:
+    regex: (?:\[SERVER-0101\].*Starting server)|(?:\[SERVER-0102\].*server.*initializ)|(?:\[SERVER-0110\].*container.*start)|(?:\[SERVER-0120\].*[Ss]erver.*started)|(?:\[SERVER-0121\].*[Ss]erver.*ready)|(?:\[SERVER-0130\].*JEUS
+      server is RUNNING)|(?:\[SERVER-0131\].*JEUS server is READY)|(?:\[SERVER-0140\].*application.*started)|(?:\[SERVER-0150\].*[Ll]istener.*started)|(?:JEUS server is RUNNING)|(?:JEUS server is READY)|(?:The
+      JEUS server has started)
+  severity: info
+  category: internal
+  verdict: JEUS 서버 정상 기동 — JEUS 서버가 정상적으로 기동 완료됨
+  immediate:
+  - "jeusadmin으로 서버 상태 확인: `$JEUS_HOME/bin/jeusadmin -host <host>:9736 -u <user> 'server-info'`(상태) 또는 'list-servers'(구성 목록) — JEUS 7+, 'listserver' 는 없는 명령"
+  - 웹 브라우저에서 헬스체크 URL 접속 확인
+  short:
+  - '영향: 서비스 제공 가능 상태.'
+  - "(정상 이벤트) 2차 조치 없음 — 기동 직후 배포 앱 상태가 RUNNING 인지만 확인"
+  mid:
+  - 정기 기동 로그 보관
+  - 기동 시간 모니터링으로 성능 기준값 설정
+  long:
+  - "기동 소요 시간 추세 기록과 비계획 기동 경보"
+  source_note: 'legacy-analyzer-v2.2 jeus_rules.json JEUS-BOOT-OK (원 출처: builtin)'
+  versions:
+  - JEUS 7
+  - JEUS 8/8.5
+  - JEUS 9/9.1
+  version_note: SERVER-0101/0102 — JEUS 7 이후
+- id: LEG-JEUS-RESTART
+  layer: was
+  product:
+  - jeus
+  match:
+    regex: (?:\[SERVER-0201\].*restart)|(?:\[SERVER-0202\].*restarting)|(?:\[SERVER-0210\].*restart.*complete)|(?:\[SERVER-0220\].*reload)|(?:\[SERVER-0221\].*reloading)|(?:\[SERVER-0230\].*update)|(?:JEUS.*restarting)|(?:server.*restart.*requested)
+  severity: warn
+  category: internal
+  verdict: JEUS 서버 재기동 — JEUS 서버 재기동 요청 또는 진행 중
+  immediate:
+  - "기동 완료 후 SERVER-0130(RUNNING) 코드 확인 — `grep -n 'SERVER-0130' <SERVER_HOME>/logs/JeusServer.log | tail -3`"
+  - "서버가 다시 올라오게 된 원인(운영자 명령·OOM·오류)을 직전 로그와 `server-info -state` 로 확인"
+  short:
+  - '영향: 일시적인 서비스 중단.'
+  - "(2차) 비계획 재기동이면 직전 오류(OOM·hs_err) 기준으로 원인 분석, 반복되면 해당 원인 절차로 전환"
+  mid:
+  - 재기동 이유 분석 (OOM/오류/정기점검)
+  - 재기동 완료 여부 모니터링
+  long:
+  - "재기동 이력(계획/비계획) 대장 관리와 비계획 재기동 경보"
+  source_note: 'legacy-analyzer-v2.2 jeus_rules.json JEUS-RESTART (원 출처: builtin)'
+  versions:
+  - JEUS 7
+  - JEUS 8/8.5
+  - JEUS 9/9.1
+  version_note: SERVER-0201/0202 — JEUS 7 이후
+- id: LEG-JEUS-FAIL-ALL
+  layer: was
+  product:
+  - jeus
+  match:
+    regex: (?:Initialization failed for server)|(?:Server startup failed)|(?:\[SERVER-0402\])|(?:\[SERVER-0401\])|(?:\[SERVER-0405\].*Distributing.*failed)|(?:\[SERVER-0300\].*Distributing.*failed)|(?:\[SERVER-0250\].*Starting
+      server.*failed.*STANDBY)|(?:\[SERVER-0401\].*[Ss]tartup failed)|(?:\[SERVER-0402\].*[Ii]nitialization failed)|(?:\[SERVER-0403\].*[Cc]onfiguration error)|(?:\[SERVER-0404\].*[Ll]oad.*fail)|(?:\[SERVER-0406\].*application.*start.*fail)|(?:\[SERVER-0407\].*application.*stop.*fail)|(?:\[SERVER-0408\].*deploy.*timeout)|(?:\[SERVER-0410\].*resource.*init.*fail)|(?:\[SERVER-0420\].*port.*bind.*fail)|(?:\[SERVER-0430\].*cluster.*join.*fail)|(?:\[SERVER-0248\].*STANDBY)|(?:The
+      JEUS server is STANDBY)|(?:Staying in STANDBY)|(?:server.*STANDBY.*fail)
+  severity: error
+  category: internal
+  verdict: JEUS 기동/배포 실패 (SERVER-04xx 전체)
+  immediate:
+  - 오류 코드 이전 로그에서 Caused by 체인 확인
+  - jeus-web-dd.xml / web.xml 설정 파일 검토
+  - 'ClassNotFoundException: WAR 파일 의존성 확인'
+  - "jeusadmin 으로 현재 서버 상태 확인: `$JEUS_HOME/bin/jeusadmin -host <host>:9736 -u <user> 'server-info -server <server> -state'`(JEUS 7+, wsadmin·listserver 는 JEUS 명령이 아님)"
+  short:
+  - '영향: JEUS 서버 STANDBY 상태 — 서비스 제공 불가.'
+  - "(2차·승인 후, 롤백: 이전 배포본·설정 백업) 원인 수정 후 재배포 또는 서버 기동"
+  mid:
+  - 배포 실패 원인 수정 후 재배포
+  - "(2차·승인 후) jeusadmin 으로 STANDBY 해제(서버 기동) — 판별 명령은 Reference Guide 확인"
+  - "(2차·승인 후, 롤백: 현재 설정 별도 보관) 설정 오류: 백업 파일로 되돌린 뒤 재기동"
+  long:
+  - "기동·배포 실패 경보와 domain.xml 형상 관리"
+  source_note: 'legacy-analyzer-v2.2 jeus_rules.json JEUS-FAIL-ALL (원 출처: builtin)'
+  exclude: (?:WebtoBConnectionManager)
+  versions:
+  - JEUS 6
+  - JEUS 7
+  - JEUS 8/8.5
+  - JEUS 9/9.1
+  version_note: '''Initialization failed for server''·''Server startup failed'' 문구 공통 + SERVER- 코드(7+)'
+- id: LEG-JEUS-WEB-LIFECYCLE
+  layer: was
+  product:
+  - jeus
+  match:
+    regex: (?:\[WEB-1001\].*web engine.*started)|(?:\[WEB-1002\].*web module.*distributed)|(?:\[WEB-1003\].*web module.*started)|(?:\[WEB-1005\].*web.*init)|(?:\[WEB-1010\].*web engine.*initializ)|(?:\[WEB-1020\].*web.*deploy)|(?:\[WEB-1031\].*web
+      engine.*shut down)|(?:\[WEB-1031\].*web engine has shut down)|(?:\[WEB-1040\].*web.*stopped)|(?:\[WEB-1050\].*web.*destroyed)|(?:\[WEB-1501\].*web module.*load.*fail)|(?:\[WEB-1502\].*web module.*start.*fail)|(?:\[WEB-1503\].*web
+      module.*deploy.*fail)|(?:\[WEB-1504\].*web module.*undistributed)|(?:\[WEB-1505\].*web module.*stopped)|(?:\[WEB-1510\].*web.*error)|(?:web engine has shut down)|(?:web module.*undistributed)
+  severity: info
+  category: internal
+  verdict: 'JEUS 웹 엔진 라이프사이클 (WEB-10xx/15xx) — JEUS 웹 엔진/모듈 라이프사이클 이벤트.
+
+    WEB-1001~1050: 기동/종료 정상 이벤트
+
+    WEB-15xx: 웹 모듈 오류 계열'
+  immediate:
+  - "`grep -n -E 'WEB-1[05][0-9]{2}' <SERVER_HOME>/logs/JeusServer.log | tail -20` 로 코드·시각 확인 — 종료 시퀀스의 WEB-1031/1504 는 무시"
+  - "WEB-15xx 면 `unzip -l <app>.war | grep -E 'WEB-INF/(web.xml|jeus-web-dd.xml)'` 로 DD 파일·WAR 구조 확인, 비정상 WEB-1031 은 `grep -n -B20 'WEB-1031' <SERVER_HOME>/logs/JeusServer.log | grep Exception` 로 직전 오류 확인"
+  short:
+  - '영향: 웹 모듈 상태 변경.'
+  mid:
+  - 'WEB-15xx: WAR 재패키징 및 재배포'
+  - "(2차·승인 후) WEB-1031 비정상: JEUS 재기동"
+  long:
+  - "웹 모듈 상태(RUNNING 외) 감시와 종료 시각 외 WEB-1031 발생 경보"
+  source_note: 'legacy-analyzer-v2.2 jeus_rules.json JEUS-WEB-LIFECYCLE (원 출처: builtin)'
+  versions:
+  - JEUS 6
+  - JEUS 7
+  - JEUS 8/8.5
+  - JEUS 9/9.1
+  version_note: WEB-1001/1002 — 6 부터 동일 접두
+- id: LEG-JEUS-SERVLET-ERR
+  layer: was
+  product:
+  - jeus
+  match:
+    regex: (?:\[WEB-2001\].*servlet.*error)|(?:\[WEB-2002\].*filter.*error)|(?:\[WEB-2003\].*session.*error)|(?:\[WEB-2005\].*servlet.*timeout)|(?:\[WEB-2010\].*request.*error)|(?:\[WEB-2011\].*dispatch.*error)|(?:\[WEB-2020\].*encoding.*error)|(?:\[WEB-2030\].*redirect.*error)|(?:\[WEB-2040\].*forward.*error)|(?:\[WEB-2050\].*include.*error)|(?:\[WEB-2100\].*session.*expired)|(?:\[WEB-2101\].*session.*invalid)|(?:\[WEB-2110\].*session.*memory)|(?:servlet.*\[WEB-2\d{3}\])
+  severity: error
+  category: internal
+  verdict: JEUS 서블릿/세션 오류 (WEB-20xx) — JEUS 서블릿 컨테이너 내부 오류. WEB-20xx 계열
+  immediate:
+  - "`grep -n -B30 -E 'WEB-20[0-9]{2}' <SERVER_HOME>/logs/JeusServer.log | grep -E 'Exception|Caused by|WEB-20' | tail -30` 로 해당 WEB 코드 직전 예외 스택 확인"
+  - "스택의 서블릿·필터 클래스(init·doFilter)를 추려 개발 담당에 전달 — `grep -c -E 'WEB-20[0-9]{2}' <SERVER_HOME>/logs/JeusServer.log` 로 건수를 보고 반복이면 우선 처리"
+  short:
+  - '영향: 해당 HTTP 요청 처리 실패.'
+  mid:
+  - 근본 예외 유형에 따라 조치
+  - "(2차·승인 후, 롤백: 이전 배포본) 서블릿 재배포"
+  long:
+  - "URI 별 500 비율 감시와 공통 예외 처리 표준"
+  source_note: 'legacy-analyzer-v2.2 jeus_rules.json JEUS-SERVLET-ERR (원 출처: builtin)'
+  versions:
+  - JEUS 6
+  - JEUS 7
+  - JEUS 8/8.5
+  - JEUS 9/9.1
+  version_note: WEB-2001/2002 — 공통
+- id: LEG-JEUS-WJP-ALL
+  layer: was
+  product:
+  - jeus
+  match:
+    regex: (?:\[WEB-3340\].*WebtoB.*connect)|(?:\[WEB-3341\].*WebtoB.*init)|(?:\[WEB-3342\].*WebtoB.*register)|(?:\[WEB-3343\].*WebtoB.*auth)|(?:\[WEB-3344\].*WebtoB.*handshake)|(?:\[WEB-3345\].*WebtoB.*session)|(?:\[WEB-3346\].*Connecting
+      to WebtoB.*failed)|(?:\[WEB-3347\].*Connecting to WebtoB.*network error)|(?:\[WEB-3348\].*WebtoB.*timeout)|(?:\[WEB-3349\].*WebtoB.*reconnect)|(?:\[WEB-3350\].*WebtoB.*disconnect)|(?:\[WEB-3351\].*WebtoB.*recover)|(?:\[WEB-3360\].*WebtoB.*config)|(?:\[WEB-3370\].*WebtoB.*jsvgroup)|(?:jeus\.servlet\.engine\.WebtoBConnectionManager\.)|(?:jeus\.servlet\.engine\.WebtoBConnectionManager\.registerToWebtoB)|(?:jeus\.servlet\.engine\.WebtoBConnectionManager\.createConnection)|(?:jeus\.servlet\.connection\.WebtoBConnector\.)|(?:jeus\.servlet\.connection\.WebtoBConnector\.run)|(?:jeus\.servlet\.engine\.WJPV2Registration\.)|(?:jeus\.servlet\.engine\.WJPV2Registration\.readRegstrationReply)|(?:Connecting
+      to WebtoB.*failed)|(?:Check if WebtoB is running)|(?:registerToWebtoB.*failed)|(?:java\.net\.ConnectException.*refused.*[Ww]eb[Tt]o[Bb])|(?:java\.io\.EOFException.*[Ww]eb[Tt]o[Bb])|(?:java\.net\.SocketTimeoutException.*[Ww]eb[Tt]o[Bb])|(?:java\.net\.SocketException.*[Ww]eb[Tt]o[Bb])|(?:java\.io\.IOException.*[Ww]eb[Tt]o[Bb])|(?:Socket\[unconnected\].*[Ww]eb[Tt]o[Bb].*failed)|(?:Socket\[addr=.*port=\d+.*\].*[Ww]eb[Tt]o[Bb].*failed)
+  severity: error
+  category: upstream
+  verdict: JEUS↔WebtoB WJP 연결 오류 전체 (WEB-33xx)
+  immediate:
+  - "WebtoB 프로세스 즉시 확인: WebtoB 서버에서 `ps -ef | grep -E 'wsm|htl|hth' | grep -v grep`"
+  - "WJP 포트 연결 테스트: `nc -zvw3 <webtob_host> <jsv_port>`(또는 telnet)"
+  - WebtoB 로그($WEBTOB_HOME/log) 확인
+  - 방화벽 JSV 포트(<jsv_port>) 허용 여부 확인
+  short:
+  - '영향: JEUS WAS HTTP 요청 수신 불가. 웹 서비스 전체 중단.'
+  - "(2차·승인 후, 롤백: 설정 백업 복원) WebtoB 기동·JSV 설정 정정은 WebtoB 담당, JEUS webtob-connector 정정은 WAS 담당"
+  mid:
+  - "(2차·WebtoB 담당 승인 후) WebtoB 미기동: wsboot으로 기동"
+  - "(2차·보안 승인 후) 포트 불통: 방화벽 정책 수정"
+  - "설정 오류: `wscfl -i <설정파일>.m` 으로 WebtoB 설정 컴파일 검증 후 수정(wbconfig 는 WebtoB 명령이 아님)"
+  - 'jsvgroup 설정: $WEBTOB_HOME/conf/webtob.m 검토'
+  long:
+  - "WebtoB-JEUS 연결 수·WJP 오류 건수 감시"
+  source_note: 'legacy-analyzer-v2.2 jeus_rules.json JEUS-WJP-ALL (원 출처: builtin)'
+  exclude: (?:JeusDeploymentException)
+  versions:
+  - JEUS 6
+  - JEUS 7
+  - JEUS 8/8.5
+  - JEUS 9/9.1
+  version_note: WEB-3340~ WJP 코드 — 공통
+- id: LEG-JEUS-JNDI-ALL
+  layer: was
+  product:
+  - jeus
+  match:
+    regex: (?:\[JNSS-0001\].*JNDI.*start)|(?:\[JNSS-0002\].*naming.*init)|(?:\[JNSS-0010\].*naming.*server.*start)|(?:\[JNSS-0020\].*naming.*export)|(?:\[JNSS-0030\].*JNDI naming server.*unexported)|(?:\[JNSS-0040\].*naming.*server.*stop)|(?:\[JNSS-0100\].*JNDI.*lookup.*fail)|(?:\[JNSS-0101\].*JNDI.*bind.*fail)|(?:\[JNSS-0102\].*JNDI.*unbind.*fail)|(?:\[JNSS-0110\].*JNDI.*context.*error)|(?:\[JNSS-0120\].*JNDI.*name.*not.*found)|(?:\[JNSS-0200\].*remote.*JNDI.*fail)|(?:\[JNSS-0210\].*cluster.*JNDI.*fail)|(?:\[JNSS-0400\].*naming.*server.*shutdown)|(?:\[JNSS-0401\].*JNDI.*shutdown.*error)|(?:\[JNSS-0402\].*Shut
+      down the server)|(?:JNDI naming server.*unexported)|(?:Shut down the server \[)|(?:javax\.naming\.NameNotFoundException)|(?:javax\.naming\.CommunicationException)|(?:javax\.naming\.NamingException)|(?:javax\.naming\.ServiceUnavailableException)|(?:javax\.naming\.AuthenticationException)|(?:javax\.naming\.CannotProceedException)
+  severity: warn
+  category: upstream
+  verdict: JEUS JNDI 서비스 전체 계열 (JNSS-xxxx)
+  immediate:
+  - "`grep -o -E 'JNSS-[0-9]{4}' <SERVER_HOME>/logs/JeusServer.log | sort | uniq -c` 로 코드 계열 확인 — JNSS-0402 는 정상 종료 시 발생(종료 시각과 겹치면 무시)"
+  - "JNSS-01xx 면 `unzip -p <app>.jar META-INF/jeus-ejb-dd.xml | grep -n 'export-name'` 로 JNDI 이름 확인, JNSS-02xx 면 `nc -zvw3 <peer_host> <port>` 로 서버 간 연결 확인"
+  short:
+  - '영향: EJB/DataSource JNDI 룩업 실패.'
+  mid:
+  - 'JNSS-01xx: JNDI 이름 일치 여부 확인 후 재배포'
+  - 'JNSS-02xx: 클러스터 네트워크 설정 점검'
+  long:
+  - "JNDI 이름 규칙 표준과 종료 시각 외 JNSS 오류 건수 감시"
+  source_note: 'legacy-analyzer-v2.2 jeus_rules.json JEUS-JNDI-ALL (원 출처: builtin)'
+  versions:
+  - JEUS 6
+  - JEUS 7
+  - JEUS 8/8.5
+  - JEUS 9/9.1
+  version_note: JNSS-0001/0002 — JNSS 모듈 6~9.1 공통
+- id: LEG-JEUS-NET-ERR
+  layer: was
+  product:
+  - jeus
+  match:
+    regex: (?:\[NET-0200\].*network.*error)|(?:\[NET-0201\].*socket.*error)|(?:\[NET-0202\].*connect.*timeout)|(?:\[NET-0203\].*read.*timeout)|(?:\[NET-0204\].*write.*timeout)|(?:\[NET-0210\].*connection.*reset)|(?:\[NET-0214\].*Closing.*\(JMX|BASE\))|(?:\[NET-0214\].*Closing)|(?:\[NET-0900\].*stream.*error)|(?:\[NET-0901\].*stream.*closed)|(?:\[NET-0902\].*IO.*exception)|(?:\[NET-0905\].*broken.*pipe)|(?:\[NET-0906\].*socket.*closed)|(?:\[NET-0907\].*Closing
+      SocketStream.*IOException)|(?:\[NET-0907\].*Selector destroyed)|(?:\[NET-0910\].*connection.*reset)|(?:SocketStream.*IOException)|(?:Closing SocketStream.*because of)|(?:Selector destroyed)
+  severity: warn
+  category: connection
+  verdict: JEUS 네트워크 소켓 오류 (NET-09xx)
+  immediate:
+  - "`grep -n -E 'NET-0214|NET-0907|NET-02[0-9]{2}' <SERVER_HOME>/logs/JeusServer.log | tail -20` 로 코드·시각 확인 — 종료 시각과 겹치는 NET-0214·NET-0907 은 정상"
+  - "종료와 무관하게 반복되면 메시지의 상대 주소로 `nc -zvw3 <peer_host> <port>` 연결 확인 — 실패면 네트워크 장비·방화벽·상대 서버 원인"
+  short:
+  - '영향: JEUS 내부 연결 상태 이상.'
+  mid:
+  - '종료 시 발생: 무시 가능'
+  - '비정상 시: 네트워크 장비 점검'
+  long:
+  - "종료 시각 외 NET-02xx/09xx 건수 기준값 대비 급증 감시"
+  source_note: 'legacy-analyzer-v2.2 jeus_rules.json JEUS-NET-ERR (원 출처: builtin)'
+  versions:
+  - JEUS 6
+  - JEUS 7
+  - JEUS 8/8.5
+  - JEUS 9/9.1
+  version_note: NET-0200/0201 — 기존 도구 룰 유래(도입 버전 미확인), 전 버전 수집
+- id: LEG-JEUS-DSESSION
+  layer: was
+  product:
+  - jeus
+  match:
+    regex: (?:\[D_SESSION-2000\].*session.*created)|(?:\[D_SESSION-2001\].*session.*destroyed)|(?:\[D_SESSION-2100\].*session.*timeout)|(?:\[D_SESSION-2101\].*session.*invalid)|(?:\[D_SESSION-2110\].*session.*expired)|(?:\[D_SESSION-2150\].*session.*cluster)|(?:\[D_SESSION-2190\].*connection.*closed)|(?:\[D_SESSION-2191\].*connection.*lost)|(?:\[D_SESSION-2192\].*connection.*reset)|(?:\[D_SESSION-2193\].*connection.*closed)|(?:\[D_SESSION-2193\].*has
+      been closed)|(?:connection from.*has been closed)|(?:D_SESSION.*connection.*closed)
+  severity: info
+  category: connection
+  verdict: JEUS 분산 세션 연결 계열 (D_SESSION-21xx)
+  immediate:
+  - "`grep -n -E 'D_SESSION-21[0-9]{2}' <SERVER_HOME>/logs/JeusServer.log | tail -20` 로 시각 확인 — 종료 시각과 겹치는 D_SESSION-2190~2193 은 정상"
+  - "비정상이면 `jeusadmin -host <host>:<base_port> -u <user> 'server-info'` 로 분산 세션 대상 서버 상태(JEUS 7+), `nc -zvw3 <session_host> <port>` 로 연결 확인"
+  short:
+  - '영향: 분산 세션 동기화 중단.'
+  mid:
+  - '정상 종료 시: 무시'
+  - '비정상 시: JEUS 클러스터 네트워크 확인'
+  long:
+  - "종료 시각 외 D_SESSION 연결 종료 건수 감시와 세션 서버 이중화 구성 점검"
+  source_note: 'legacy-analyzer-v2.2 jeus_rules.json JEUS-DSESSION (원 출처: builtin)'
+  versions:
+  - JEUS 6
+  - JEUS 7
+  - JEUS 8/8.5
+  - JEUS 9/9.1
+  version_note: D_SESSION-2000/2001 — 분산 세션 코드(도입 버전 미확인), 전 버전 수집

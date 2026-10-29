@@ -1,0 +1,125 @@
+# WAS — JEUS 6 서버 로그 시그니처 (BizMaster 허브 실로그 2026-04 학습분). 메시지 코드 [Network-0708] 등
+rules:
+- id: WAS-JEUS-HUB-001
+  layer: was
+  product:
+  - jeus
+  match:
+    regex: Network-0708.*Exception occurred during trying to connect|Cannot connect to agent .* via relay|Cannot create connection to .* via relay
+  severity: critical
+  category: upstream
+  verdict: 허브→relay/에이전트 연결 거부(Connection refused) — 원인 미확정(relay·에이전트 리스너 미기동, 포트·IP 설정 오류, 방화벽 등)
+  immediate:
+  - "`grep -n 'Connection refused' <허브 로그> | tail -10` 로 거부된 대상 IP:포트와 반복 주기 확인 — relay 구간인지 에이전트 구간인지 특정"
+  - "대상 서버에서 `netstat -an | grep LISTEN | grep <port>`, 허브에서 `nc -zvw3 <host> <port>` 로 구간별 LISTEN·도달 확인 — LISTEN 없으면 그 프로세스 미기동, 담당에 즉시 통보(1차가 기동하지 않음)"
+  short:
+  - hub→relay 리스너·연결, relay 프로세스/로그, relay→agent 포트, agent 리스너/PID, 설정된 IP·포트 매핑을 각각 확인해 실패 구간 특정
+  - 에이전트(어댑터) 서버의 adt 로그·start 로그에서 종료·재기동 시각 대조
+  mid:
+  - 에이전트 기동 감시와 자동 재기동
+  long:
+  - 허브-에이전트 구간 이중화
+  versions:
+  - JEUS 6
+  - JEUS 7
+  - JEUS 8/8.5
+  - JEUS 9/9.1
+  version_note: Network-0708 — JEUS 6 실로그·7+ 문서 확인, 6~9 공통
+- id: WAS-JEUS-HUB-002
+  layer: was
+  product:
+  - jeus
+  match:
+    regex: Network-0403|Network-0907|SocketStreamImpl.*(closed|reset|broken)|ConnectionListener.*(closed|lost)
+  severity: warn
+  category: connection
+  verdict: JEUS 네트워크 연결 종료·스트림 오류(Network-0403/0907) — 상대측 연결 끊김
+  immediate:
+  - "`grep -n -E 'Network-0403|Network-0907' <SERVER_HOME>/logs/JeusServer.log | tail -20` 로 상대 주소와 시각 확인"
+  - "같은 시각 상대(어댑터·WebtoB) 측 로그에서 종료·기동 기록 확인 — 상대 쪽 종료와 겹치면 상대 원인"
+  short:
+  - 빈도가 급증한 구간을 장애 시각과 대조
+  mid:
+  - keepalive·타임아웃 설정 점검
+  long:
+  - 연결 종료 원인 추적 체계
+  versions:
+  - JEUS 6
+  - JEUS 7
+  - JEUS 8/8.5
+  - JEUS 9/9.1
+  version_note: Network-0403/0907 — JEUS 6 실로그 확인, 6~9 공통
+- id: WAS-JEUS-HUB-003
+  layer: was
+  product:
+  - jeus
+  match:
+    regex: InvalidMagicNumberException|invalid magic number
+  severity: error
+  category: internal
+  verdict: JMS 프로토콜 불일치(invalid magic number) — 잘못된 클라이언트/버전이 JMS 포트에 접속
+  immediate:
+  - "`grep -n -i 'invalid magic number' <SERVER_HOME>/logs/JeusServer.log | tail -20` 로 접속 출처 IP 확인"
+  - "`netstat -an | grep ':<jms_port> '` 로 그 IP 의 현재 연결 여부 확인 — 등록되지 않은 IP(스캐너·잘못된 설정 클라이언트)면 보안·운영 담당에 전달"
+  short:
+  - "(2차·승인 후, 롤백: 이전 허용 목록 복원) 출처 클라이언트의 JMS 접속 설정(버전·포트) 정정 또는 방화벽에서 JMS 포트 허용 IP 제한"
+  - JEUS JMS 포트에 접속하는 클라이언트 버전 대조
+  mid:
+  - 접근 제어(허용 IP) 설정
+  long:
+  - 포트 접근 정책 관리
+  versions:
+  - JEUS 6
+  - JEUS 7
+  - JEUS 8/8.5
+  - JEUS 9/9.1
+  version_note: InvalidMagicNumberException 문구 — 6~9 공통
+- id: WAS-JEUS-HUB-004
+  layer: was
+  product:
+  - jeus
+  match:
+    regex: TM-6112|TM-5120|transaction .*(timeout|timed out|rollback)
+  severity: error
+  category: undo
+  verdict: JEUS 트랜잭션 타임아웃·롤백(TM-6112/5120)
+  immediate:
+  - "`grep -n -E 'TM-6112|TM-5120' <SERVER_HOME>/logs/JeusServer.log | tail -20` 로 타임아웃 시각과 거래 ID(bxId) 확인"
+  - "`grep -n '<bxId>' <SERVER_HOME>/logs/JeusServer.log` 로 같은 거래의 연계 대상 호출 시작·끝 시각 차이 확인 — 트랜잭션 타임아웃보다 길면 연계 대상 지연이 원인"
+  short:
+  - 트랜잭션 타임아웃 값과 실제 거래 소요 시간 대조
+  mid:
+  - 타임아웃 재산정, 장기 거래 분리
+  long:
+  - 거래 처리 시간 관리
+  versions:
+  - JEUS 6
+  - JEUS 7
+  - JEUS 8/8.5
+  - JEUS 9/9.1
+  version_note: TM-6112/TM-5120 트랜잭션 코드 — 6 부터 동일 접두
+- id: WAS-JEUS-HUB-005
+  layer: was
+  product:
+  - jeus
+  match:
+    regex: WEB-3346|worker\(webtob.*Failed to reconnect|Failed to reconnect
+  severity: error
+  category: upstream
+  verdict: JEUS→WebtoB 워커 재접속 실패(WEB-3346) — 대상 WebtoB 주소 응답 없음(연결 시간 초과·잘못된 주소)
+  immediate:
+  - "`grep -n 'WEB-3346' <SERVER_HOME>/logs/JeusServer.log | tail -10` 로 대상 WebtoB 주소(IP:포트)와 반복 주기 확인 — 수 초 간격 반복이면 폐기된 주소가 설정에 남았거나 그 WebtoB 미기동"
+  - "운영 중인 주소라면 WebtoB 서버에서 `netstat -an | grep LISTEN | grep <jsv_port>` 로 JSV 포트 LISTEN 확인 — LISTEN 없으면 WebtoB 측 원인"
+  short:
+  - "(2차·승인 후, 롤백: 설정 백업 복원) 폐기된 WebtoB 주소면 JEUS 웹 엔진의 WebtoB 연결 설정에서 빼고 반영, 운영 주소면 WebtoB 담당이 기동 상태 복구(WebtoB→JEUS 순서)"
+  - JEUS 컨테이너의 webtob 연결 설정(주소 목록)과 실제 WebtoB 서버 목록 대조
+  mid:
+  - 미사용 WebtoB 주소 제거, 재접속 주기·타임아웃 조정
+  long:
+  - 웹서버-WAS 연결 구성 변경 관리
+  versions:
+  - JEUS 6
+  - JEUS 7
+  - JEUS 8/8.5
+  - JEUS 9/9.1
+  version_note: WEB-3346 WJP 재접속 실패 — 6·7·8 공통(9 는 WebtoB 연동 시)

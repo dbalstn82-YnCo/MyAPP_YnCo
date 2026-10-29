@@ -1,0 +1,81 @@
+# OS — Linux 시그니처
+rules:
+- id: OS-LNX-003
+  layer: os
+  product:
+  - linux
+  match:
+    regex: 'Out of memory: Kill(ed)? process|oom-killer'
+  severity: critical
+  category: memory
+  verdict: OOM Killer 프로세스 강제 종료
+  immediate:
+  - '`journalctl -k --since "-2 hours" | grep -i ''Killed process''` (RHEL 7+, RHEL 6: `grep -i ''Killed process'' /var/log/messages`) 로 종료된 프로세스·시각 확인 — WAS·DB면 담당 즉시 통보'
+  - '`free -m ; ps -eo pid,rss,cmd --sort=-rss | head` 로 현재 메모리 압박·상위 프로세스 확인'
+  short:
+  - '(2차·승인 후, 롤백: 없음) 종료된 WAS·DB 서비스 기동(`systemctl start <service>`) 후 기동 로그·포트 확인'
+  - 메모리 사용 추이(sar -r)·급증 프로세스 확인
+  mid:
+  - 힙·스왑·메모리 한도 재산정
+  long:
+  - 메모리 증설 또는 워크로드 분산
+  versions:
+  - RHEL 5~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: '정규식을 ''Out of memory: Kill(ed)? process'' 로 확장 — 2.6.32~4.18 ''Kill process … or sacrifice child'' 형식(RHEL 6/7·Ubuntu 16.04/18.04) 포함'
+- id: OS-LNX-011
+  layer: os
+  product:
+  - linux
+  match:
+    regex: No space left on device
+  severity: critical
+  category: disk
+  verdict: 파일시스템 공간 고갈
+  immediate:
+  - '`df -hT ; df -i` 로 가득 찬 마운트 확인 — Use% 또는 IUse% 95% 이상이면 확정(inode 고갈도 같은 오류를 낸다, 읽기 전용)'
+  - '`du -xsh /var/log /tmp /var/tmp /opt 2>/dev/null | sort -rh | head` 와 `lsof +L1 2>/dev/null | head` 로 큰 디렉터리·삭제됐지만 열려 있는 파일 식별 — 지우지 않고 목록만 기록(정리는 2차)'
+  short:
+  - '(2차·승인 후, 롤백: 정리 전 `tar czf` 보관본 복원) 보존 의무 확인 뒤 오래된 로그·임시파일 정리, 열려 있는 로그는 삭제 대신 비우기(`: > <file>`) — lsof +L1 의 파일은 소유 프로세스 재시작 전엔 공간 미반환'
+  - 상위 계층(WAS·DB) 오류 해소 확인, 급증 원인 파일 추적
+  mid:
+  - 로그 로테이션·정리 배치 정비
+  long:
+  - 디스크 증설, 용량 임계 알림 체계 수립
+  versions:
+  - RHEL 5~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: ENOSPC 문구 전 버전
+- id: OS-LNX-015
+  layer: os
+  product:
+  - linux
+  match:
+    regex: kernel panic|I/O error|read-only file ?system
+  severity: critical
+  category: hardware
+  verdict: 커널 패닉 / 디스크 I/O 오류
+  immediate:
+  - '`journalctl -k --since ''-2 hours'' | grep -iE ''panic|I/O error|read-only'' | tail -30` (RHEL 7+·Ubuntu 16.04+) / `grep -iE ''I/O error|read-only'' /var/log/messages | tail -30` (RHEL 6) 로 장치명·반복 여부 확인'
+  - '`grep -E '' ro[ ,]'' /proc/mounts` 로 읽기 전용 마운트 FS 확인 — 있으면 쓰기 불가 확정, 인프라팀 즉시 에스컬레이션'
+  - 'kernel panic 후 재부팅이면 `last -x reboot | head -5` 와 `ls -l /var/crash` (kdump 설정 시) 로 재부팅 시각·vmcore 생성 확인'
+  short:
+  - '(2차·승인 후, 롤백: 복구 후 서비스 재기동) 읽기 전용 FS 를 쓰는 애플리케이션의 쓰기 작업 중지'
+  - dmesg·iLO/iDRAC 이벤트 확보, 디스크 상태(smartctl) 점검
+  mid:
+  - 디스크 교체·fsck 수행
+  long:
+  - 하드웨어 수명 관리·이중화 검토
+  versions:
+  - RHEL 5~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: kernel panic / I/O error / read-only 전 버전

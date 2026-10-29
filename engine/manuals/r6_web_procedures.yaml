@@ -1,0 +1,1401 @@
+# 근거 매뉴얼·작성 기준 (r6 WEB 묶음 — 아이디어 3 '유형 연결 → 전용 절차' 승급, 2026-10-16)
+# - IIS 7.5/8.5/10: Microsoft Learn 'HTTP status code overview (IIS 하위 상태)'·'Types of Errors Logged by the HTTP Server API'·
+#   'Http.sys registry settings for Windows'·'Request Limits <requestLimits>'·'Recycling Settings <recycling>'·'FastCGI <fastCgi>'·
+#   'Troubleshoot ASP.NET Core on Azure App Service and IIS'·'ASP.NET Core Module configuration reference'·'Appcmd.exe'·'Application Pool Identities'
+# - nginx 1.x: nginx.org 'ngx_http_fastcgi_module'·'ngx_stream_proxy_module'·'ngx_http_proxy_module'·'ngx_http_upstream_module'·
+#   'ngx_http_core_module'·'ngx_http_limit_req_module'·'ngx_http_limit_conn_module'·'ngx_http_geo_module'·'ngx_http_map_module'
+# - Apache 2.4: httpd.apache.org 'apachectl'·'core'·'mod_ssl'·'mod_proxy'·'mod_proxy_ajp'·'mod_proxy_fcgi'·'mod_reqtimeout'·'mpm_common'·'event'·'stopping'
+# - WebtoB 4.1/5/6: TmaxSoft WebtoB Administrator's Guide 'wsadmin (si, st -s, st -p)'·'환경 파일(http.m)'·'wscfl'·'wsboot/wsdown'
+#   (WebtoB 의 JSV 상태는 wsadmin si(서버 정보)로 본다 — ci 는 클라이언트 정보 / 접근 로그 상태 칸은 형식에 따라 $9 가 아니므로 따옴표로 나눠 읽는다)
+# 작성 기준: knowledge_spec.md 5차 — 1차 읽기 전용·적용 버전·권한 / 2차 사전조건·영향·승인·백업/롤백 + 성공/실패 / 3차 민감정보 마스킹·전달 승인
+# 자리표시자: <AppPool> <site> <siteID> <path> <port> <PID> <user> <error_log>(apachectl -S 의 Main ErrorLog) <access_log> <오류로그>
+procedures:
+# ───────────────────────── IIS ─────────────────────────
+- id: IIS-PROC-R6-RECYCLE
+  scope: id
+  products: [iis]
+  category: internal
+  match: [IIS-W3SVC-1074, IIS-W3SVC-1080, IIS-ASPNET-1334, '500.11', '500.12']
+  title: 앱 풀 재활용·앱 도메인 재시작 중 요청 실패 (W3SVC 1074/1080 · ASP.NET 1334 · 500.11/500.12)
+  source: "Microsoft Learn 'Recycling Settings for an Application Pool <recycling>'(periodicRestart time·requests·schedule, disallowOverlappingRotation)·'HTTP status code overview (500.11·500.12)'·'Appcmd.exe (add backup, restore backup)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 재활용 설정 값 확인 (읽기 전용)
+      cmd: |
+        %windir%\system32\inetsrv\appcmd list apppool "<AppPool>" /config | findstr /i "recycling periodicRestart schedule value= disallowOverlapping"
+      check: "periodicRestart time 이 0 이 아니면(IIS 기본 1.05:00:00 = 29시간) 업무 시간 재활용 가능, requests 가 0 이 아니면 요청 수 한도 재활용, disallowOverlappingRotation=true 면 재활용 순간 요청 실패(500.11·503) 가능"
+      note: "적용: IIS 7.0+ (IIS 8.5/10 확인) · cmd.exe 기준(PowerShell 에서는 & $env:windir\\system32\\inetsrv\\appcmd.exe) · 조회 전용 · 권한: 관리자"
+    - do: 재활용·언로드 시각과 실패 요청 구간 대조
+      cmd: |
+        Get-WinEvent -FilterHashtable @{LogName="System"; ProviderName="Microsoft-Windows-WAS"} -MaxEvents 50 | Format-List TimeCreated,Id,Message
+        Get-WinEvent -FilterHashtable @{LogName="Application"; Id=1334} -MaxEvents 10 -ErrorAction SilentlyContinue | Format-List TimeCreated,ProviderName,Message
+        Get-Content "C:\inetpub\logs\LogFiles\W3SVC<siteID>\u_ex$(Get-Date -Format yyMMdd).log" -Tail 50000 | Select-String " 500 1[12] " | Select-Object -Last 10
+      check: "500.11/500.12 가 재활용·1334 시각 앞뒤 수 초 안에만 있으면 재활용 순간의 일시 현상(재활용 시각 조정 대상) · 재활용 이벤트 없이 반복되면 파일 변경·배포가 원인 — 다음 단계"
+      note: "WAS 이벤트는 logEventOnRecycle 에 포함된 사유만 기록됨 · 기본 W3C 필드(sc-status sc-substatus) 기준 · 적용: IIS 7.0+ · 권한: 관리자(이벤트·로그 읽기)"
+    - do: 사이트 폴더 파일 변경 확인 (1334·500.12)
+      cmd: |
+        Get-ChildItem <사이트경로> -Recurse -Include web.config,*.dll,*.config | Sort-Object LastWriteTime -Descending | Select-Object -First 10 FullName,LastWriteTime
+      check: "언로드·500.12 직전에 web.config·bin 파일이 바뀌었으면 배포·파일 변경이 원인(ASP.NET 은 이 파일이 바뀌면 앱 도메인을 다시 시작한다) · 업무 시간에 백신·로그 쓰기로 바뀌면 운영 원인"
+      note: "적용: ASP.NET 2.0~4.x · 조회 전용 · 권한: 사이트 폴더 읽기"
+  - stage: 2
+    steps:
+    - do: 재활용을 야간 예약으로 옮기고 요청 수 한도 해제
+      cmd: |
+        %windir%\system32\inetsrv\appcmd add backup "before_recycle_<날짜>"
+        %windir%\system32\inetsrv\appcmd set config -section:system.applicationHost/applicationPools /[name='<AppPool>'].recycling.periodicRestart.time:"00:00:00" /commit:apphost
+        %windir%\system32\inetsrv\appcmd set config -section:system.applicationHost/applicationPools /[name='<AppPool>'].recycling.periodicRestart.requests:0 /commit:apphost
+        %windir%\system32\inetsrv\appcmd set config -section:system.applicationHost/applicationPools /+"[name='<AppPool>'].recycling.periodicRestart.schedule.[value='03:00:00']" /commit:apphost
+      check: "성공: 업무 시간 WAS 재활용 이벤트·500.11 이 사라지고 03:00 에만 재활용 · 실패: 재활용을 줄인 뒤 w3wp 메모리가 계속 늘면(누수) 이전 설정으로 원복하고 메모리 한도 재활용(IIS-PROC-R5-MEMORY) 검토"
+      note: "사전조건: w3wp 메모리 추이로 장시간 실행 시 누수가 없는지 확인 — 누수가 있으면 time 재활용을 끄지 말고 시각만 옮김 · 영향: 앱 풀 설정 변경 자체가 재활용을 일으킬 수 있음(진행 중 요청·InProc 세션 영향) · 승인: 웹 운영 담당·변경 관리 · 백업/롤백: appcmd add backup 으로 applicationHost.config 백업, 이상 시 appcmd restore backup before_recycle_<날짜> · 적용: IIS 7.0+"
+    - do: 운영 중 사이트 폴더 쓰기 제거 (1334·500.12 가 파일 변경 원인일 때)
+      check: "성공: 업무 시간 1334·500.12 미발생 · 실패: 계속되면 변경되는 파일 이름을 1차 결과로 다시 특정"
+      note: "앱이 로그·업로드 파일을 사이트 폴더(특히 bin)에 쓰거나 백신이 사이트 폴더를 수정하면 개발·보안 담당과 쓰기 경로를 사이트 밖으로 옮기도록 협의, 배포는 정해진 시간에만"
+  - stage: 3
+    steps:
+    - do: Microsoft·개발 의뢰 자료
+      cmd: |
+        %windir%\system32\inetsrv\appcmd list apppool "<AppPool>" /config | findstr /v /i "password" > apppool_config.txt
+        Get-WinEvent -FilterHashtable @{LogName="System"; ProviderName="Microsoft-Windows-WAS"} -MaxEvents 300 | Export-Csv was_events.csv -NoTypeInformation
+      check: "앱 풀 재활용 설정·WAS/Application 이벤트·W3C 로그(500.11/500.12 구간)·배포 이력"
+      note: "민감정보 마스킹: 앱 풀 설정의 계정 이름·호스트명, W3C 로그의 클라이언트 IP·쿼리 문자열을 가림(비밀번호 줄은 findstr /v 로 뺌) · 전달 승인: 보안 담당"
+
+- id: IIS-PROC-R6-APPERROR
+  scope: id
+  products: [iis]
+  category: internal
+  match: [IIS-ASPNET-1309, IIS-ASPNET-1310, '500.0', '500.100']
+  title: 애플리케이션 예외·구성 오류로 500 (ASP.NET 1309/1310 · 500.0 · 클래식 ASP 500.100)
+  source: "Microsoft Learn 'ASP.NET Health Monitoring (웹 이벤트 3005 처리되지 않은 예외·3008 구성 오류)'·'HTTP status code overview (500.0·500.100)'·'Troubleshoot failed requests using tracing in IIS (FREB)'·'Classic ASP <asp>'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 예외·구성 오류 이벤트 확인 (읽기 전용)
+      cmd: |
+        Get-WinEvent -FilterHashtable @{LogName="Application"; Id=1309,1310} -MaxEvents 20 | Format-List TimeCreated,Id,ProviderName,Message
+      check: "Event code 3005(처리되지 않은 예외)면 예외 형식·요청 URL·스택의 첫 애플리케이션 프레임을 기록, 3008(구성 오류)이면 web.config 파일·줄 번호를 기록 — 이 값이 원인"
+      note: "적용: ASP.NET 2.0~4.x(ASP.NET Core 는 이 이벤트가 아님 — IIS-PROC-R6-ANCM) · 메시지에 연결 문자열·사용자 정보가 있을 수 있어 화면 공유 주의 · 권한: 이벤트 로그 읽기(관리자 권장)"
+    - do: 500 하위 상태별 집중 URL 확인
+      cmd: |
+        Get-Content "C:\inetpub\logs\LogFiles\W3SVC<siteID>\u_ex$(Get-Date -Format yyMMdd).log" -Tail 50000 | Select-String " 500 (0|100) " | ForEach-Object { ($_.Line -split " ")[4] } | Group-Object | Sort-Object Count -Descending | Select-Object -First 10 Count,Name
+      check: "특정 URL 에 몰리면 해당 기능 코드·의존 자원(DB·외부 API) 결함, 전 URL 고르게면 구성·공통 자원 문제 · 500.100 은 cs-uri-query 칸 끝에 ASP 오류 번호·줄 번호가 붙음"
+      note: "기본 W3C 필드(cs-uri-stem 5번째) 기준 — 필드를 바꾼 사이트는 #Fields 줄 확인 · 적용: IIS 7.0+ · 권한: 로그 폴더 읽기"
+    - do: 임시 폴더 권한·ASP 오류 표시 설정 확인 (1310 컴파일·접근 거부, 500.100)
+      cmd: |
+        icacls C:\Windows\Temp
+        icacls "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\Temporary ASP.NET Files"
+        %windir%\system32\inetsrv\appcmd list config "<site>" -section:asp
+      check: "앱 풀 ID(IIS AppPool\\<AppPool> 또는 지정 계정)에 쓰기(M·W) 권한이 없으면 동적 컴파일 실패 원인 · scriptErrorSentToBrowser=true 면 운영에서 오류 내용이 사용자에게 노출(보안 담당 통보)"
+      note: "icacls 는 경로만 주면 권한 표시만 함 · .NET Framework 4.x 64비트 경로 기준(32비트 앱 풀은 Framework 폴더) · 권한: 관리자"
+  - stage: 2
+    steps:
+    - do: 실패 모듈 특정을 위한 실패요청추적(FREB) 한시 설정
+      cmd: |
+        %windir%\system32\inetsrv\appcmd configure trace "<site>" /enablesite
+        %windir%\system32\inetsrv\appcmd configure trace "<site>/<path>" /enable /statuscodes:500
+      check: "성공: %SystemDrive%\\inetpub\\logs\\FailedReqLogFiles\\W3SVC<siteID> 에 fr*.xml 생성, MODULE_SET_RESPONSE_ERROR_STATUS 의 ModuleName 으로 실패 모듈 특정 · 실패: 파일이 생기지 않으면 추적 기능(Web-Http-Tracing) 설치 여부 확인"
+      note: "사전조건: 추적 기능 설치·디스크 여유 · 영향: 추적 중 CPU·디스크 사용 소폭 증가, 추적 파일에 요청 헤더·쿠키가 기록됨 · 승인: 웹 운영 담당 · 백업/롤백: 분석 후 appcmd configure trace \"<site>/<path>\" /disable 과 /disablesite 로 해제 · 적용: IIS 7.0+"
+    - do: 구성 오류 정정(1310) 또는 임시 폴더 권한 부여
+      cmd: |
+        Copy-Item <사이트경로>\web.config <사이트경로>\web.config.$(Get-Date -Format yyyyMMddHHmm)
+        icacls C:\Windows\Temp /grant "IIS AppPool\<AppPool>:(OI)(CI)M"
+      check: "성공: 1310 미발생·해당 URL 200 · 실패: 같은 오류가 계속되면 부여한 권한을 원복하고 메시지의 다른 경로·어셈블리 확인"
+      note: "사전조건: 1310 메시지가 가리키는 파일·줄·경로 확정, 권한을 지우는 그룹 정책이 있는지 보안 담당 확인 · 영향: web.config 수정은 앱 도메인 재시작(InProc 세션 유실), 임시 폴더 권한 확대 · 승인: 웹 운영 담당·보안 담당 · 백업/롤백: web.config 날짜 복사본으로 복원, 권한은 icacls C:\\Windows\\Temp /remove \"IIS AppPool\\<AppPool>\" 로 원복 · 애플리케이션 예외(1309·500.0·500.100)는 코드 수정이 필요하므로 개발 담당 이관"
+  - stage: 3
+    steps:
+    - do: 개발·Microsoft 의뢰 자료
+      cmd: |
+        Get-WinEvent -FilterHashtable @{LogName="Application"; Id=1309,1310} -MaxEvents 100 | Export-Csv aspnet_events.csv -NoTypeInformation
+        Compress-Archive -Path "$env:SystemDrive\inetpub\logs\FailedReqLogFiles\W3SVC<siteID>\*" -DestinationPath freb_<siteID>.zip
+      check: "ASP.NET 이벤트(예외 형식·스택)·FREB 추적·W3C 로그 500 구간·web.config(비밀값 제외)"
+      note: "민감정보 마스킹: 이벤트·FREB 의 요청 쿼리·쿠키·인증 헤더·사용자 이름, web.config 의 connectionStrings·appSettings 비밀값·machineKey 를 가림 · 전달 승인: 보안 담당"
+
+- id: IIS-PROC-R6-ANCM
+  scope: id
+  products: [iis]
+  category: internal
+  match: ['500.30', '500.31', '500.32', '500.35', '500.37', '500.38', '502.5']
+  title: ASP.NET Core 모듈(ANCM) 앱 시작 실패 (500.30~500.38 · 502.5)
+  source: "Microsoft Learn 'Common error troubleshooting for Azure App Service and IIS with ASP.NET Core'(500.30·500.31·500.32·500.35·500.37·500.38·502.5)·'ASP.NET Core Module configuration reference (stdoutLogEnabled, stdoutLogFile, startupTimeLimit, hostingModel)'·'Host ASP.NET Core on Windows with IIS (.NET Hosting Bundle)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: ANCM 이벤트·시작 오류 확인 (읽기 전용)
+      cmd: |
+        Get-WinEvent -FilterHashtable @{LogName="Application"} -MaxEvents 200 | Where-Object { $_.ProviderName -like "*AspNetCore*" } | Select-Object -First 10 | Format-List TimeCreated,Id,ProviderName,Message
+      check: "메시지의 실패 사유 문장을 기록 — 하위 코드 뜻: 500.30 앱 시작 중 예외, 500.31 요구 런타임 없음, 500.32 32/64비트 불일치, 500.35 한 앱 풀에 In-Process 앱 둘 이상, 500.37 startupTimeLimit 초과, 500.38 앱 DLL 없음(단일 파일 게시), 502.5 Out-of-process 프로세스 시작 실패"
+      note: "적용: ASP.NET Core 2.2+ ANCM V2(공급자 이름 IIS AspNetCore Module V2), IIS 10(Windows Server 2016+) · 권한: 이벤트 로그 읽기"
+    - do: 설치 런타임·앱 요구 버전·호스팅 설정 대조
+      cmd: |
+        dotnet --list-runtimes
+        Get-Content <앱경로>\<앱>.runtimeconfig.json
+        Select-String -Path <앱경로>\web.config -Pattern "aspNetCore|hostingModel|stdoutLog|startupTimeLimit"
+        %windir%\system32\inetsrv\appcmd list apppool "<AppPool>" /text:enable32BitAppOnWin64
+      check: "runtimeconfig.json 의 framework 이름·버전이 목록에 없으면 500.31/502.5 확정 · enable32BitAppOnWin64 와 게시 대상(x86/x64)이 다르면 500.32 · 앱 폴더에 <앱>.dll 없이 단일 exe 만 있으면 500.38"
+      note: "dotnet 명령은 호스팅 번들·런타임이 설치된 서버에서만 — self-contained 게시 앱은 앱 폴더에 런타임 포함 · 조회 전용 · 권한: 앱 폴더 읽기"
+    - do: 같은 앱 풀의 앱 목록·서버 자원 확인 (500.35·500.37)
+      cmd: |
+        %windir%\system32\inetsrv\appcmd list app /apppool.name:"<AppPool>"
+        Get-Counter "\Processor(_Total)\% Processor Time","\Memory\Available MBytes" -SampleInterval 5 -MaxSamples 3
+      check: "hostingModel=inprocess 앱이 같은 앱 풀에 둘 이상이면 500.35 원인 · 시작 시각 CPU 90% 이상·가용 메모리 부족이면 500.37(여러 앱 동시 시작 경합)"
+      note: "Get-Counter 는 5초×3회만 · 권한: 관리자"
+  - stage: 2
+    steps:
+    - do: 시작 예외 수집을 위한 stdout 로그 한시 활성화 (500.30·502.5)
+      config:
+        file: '<앱경로>\web.config'
+        snippet: |
+          <!-- 기존 processPath·arguments·hostingModel 값은 그대로 두고 두 속성만 바꿈 -->
+          <aspNetCore ... stdoutLogEnabled="true" stdoutLogFile=".\logs\stdout" />
+          <!-- logs 폴더를 미리 만들고 앱 풀 ID 에 쓰기 권한 — 원인 수집 후 stdoutLogEnabled="false" 로 되돌림 -->
+        note: "stdout 로그는 회전·크기 제한이 없어 오래 켜 두면 디스크를 채움"
+      check: "성공: logs\\stdout_*.log 에 시작 예외(스택)가 기록되어 원인 확정 · 실패: 파일이 생기지 않으면 logs 폴더 존재·쓰기 권한과 processPath 경로 재확인"
+      note: "사전조건: web.config 날짜 복사본 보관, logs 폴더 생성 · 영향: web.config 변경으로 앱 재시작(진행 중 요청 실패 가능), 로그 디스크 사용 증가 · 승인: 웹 운영 담당·개발 담당 · 백업/롤백: Copy-Item 으로 web.config 날짜 복사본을 만든 뒤 수정, 수집 뒤 복사본 복원(stdoutLogEnabled=false) · 적용: ASP.NET Core 2.2+ ANCM V2"
+    - do: 원인별 정정 — 런타임 설치·32/64비트·앱 풀 분리·시작 시간
+      cmd: |
+        %windir%\system32\inetsrv\appcmd add backup "before_ancm_<날짜>"
+        # 500.31/502.5: 요구 버전의 .NET Hosting Bundle 설치 후  net stop was /y  →  net start w3svc
+        # 500.32: %windir%\system32\inetsrv\appcmd set apppool "<AppPool>" /enable32BitAppOnWin64:<true|false>
+        # 500.35: %windir%\system32\inetsrv\appcmd add apppool /name:"<새AppPool>"  후  appcmd set app "<site>/<app>" /applicationPool:"<새AppPool>"
+        # 500.37: web.config <aspNetCore startupTimeLimit="<초>"> 상향(기본 120초) 또는 앱 시작 시점 분산
+        # 500.38: PublishSingleFile=false 로 다시 게시(또는 Out-of-process 호스팅)
+      check: "성공: 사이트 첫 요청 200, ANCM 오류 이벤트 미발생 · 실패: 같은 하위 코드가 계속되면 변경을 원복하고 stdout 로그로 원인 재확인"
+      note: "사전조건: 1차·stdout 로그로 하위 코드 원인 확정, 호스팅 번들 설치 파일은 사내 승인 저장소에서 · 영향: 호스팅 번들 설치 후 net stop was /y 는 이 서버의 모든 IIS 사이트 중단, 앱 풀 변경은 해당 앱 재시작 · 승인: 웹 운영 담당·변경 관리 · 백업/롤백: appcmd add backup 후 변경, 이상 시 appcmd restore backup before_ancm_<날짜>, 설치한 런타임은 프로그램 제거에서 제거 · 적용: IIS 10·ASP.NET Core 2.2+"
+  - stage: 3
+    steps:
+    - do: Microsoft·개발 의뢰 자료
+      cmd: |
+        dotnet --info > dotnet_info.txt
+        Get-WinEvent -FilterHashtable @{LogName="Application"} -MaxEvents 500 | Where-Object { $_.ProviderName -like "*AspNetCore*" } | Export-Csv ancm_events.csv -NoTypeInformation
+      check: "ANCM 이벤트·stdout 로그·web.config·runtimeconfig.json·dotnet --info 출력"
+      note: "민감정보 마스킹: stdout 로그·web.config 의 연결 문자열·환경 변수(ASPNETCORE_*·비밀 키)·호스트명·사용자 경로를 가림 · 전달 승인: 보안 담당"
+
+- id: IIS-PROC-R6-HANDLER
+  scope: id
+  products: [iis]
+  category: internal
+  match: ['404.2', '404.3', '404.4', '500.22', '500.23', '500.50', '500.52']
+  title: 처리기·MIME·관리 파이프라인·URL 재작성 구성 오류 (404.2/404.3/404.4 · 500.22/500.23 · 500.50/500.52)
+  source: "Microsoft Learn 'HTTP status code overview'(404.2·404.3·404.4·500.22·500.23·500.50·500.52)·'ISAPI and CGI Restrictions <isapiCgiRestriction>'·'Static Content MIME Types <mimeMap>'·'Handlers <handlers>'·'Appcmd migrate config'·'URL Rewrite Module configuration reference'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 하위 상태·확장자 집계 (읽기 전용)
+      cmd: |
+        Get-Content "C:\inetpub\logs\LogFiles\W3SVC<siteID>\u_ex$(Get-Date -Format yyMMdd).log" -Tail 50000 | Select-String " (404 [234]|500 (22|23|50|52)) " | ForEach-Object { $f = $_.Line -split " "; "{0}.{1} {2}" -f $f[-4],$f[-3],[IO.Path]::GetExtension($f[4]) } | Group-Object | Sort-Object Count -Descending | Select-Object -First 15 Count,Name
+      check: "하위 상태+확장자로 원인 범위 결정 — 404.3 해당 확장자 mimeMap 없음, 404.4 처리기 매핑 없음, 404.2 ISAPI/CGI 제한, 500.22/500.23 통합 파이프라인과 맞지 않는 system.web 구성, 500.50/500.52 URL 재작성 규칙 오류"
+      note: "기본 W3C 필드(cs-uri-stem 5번째, sc-status 뒤에서 4번째) 기준 · 적용: IIS 7.0+ · 권한: 로그 폴더 읽기"
+    - do: 관련 구성 조회
+      cmd: |
+        %windir%\system32\inetsrv\appcmd list config "<site>" -section:handlers
+        %windir%\system32\inetsrv\appcmd list config -section:system.webServer/security/isapiCgiRestriction
+        %windir%\system32\inetsrv\appcmd list config "<site>" -section:staticContent
+        %windir%\system32\inetsrv\appcmd list apppool "<AppPool>" /text:managedPipelineMode
+        %windir%\system32\inetsrv\appcmd list config "<site>" -section:system.webServer/rewrite/rules
+      check: "요청 확장자에 맞는 handler·mimeMap·allowed=true 항목이 없으면 원인 확정 · managedPipelineMode=Integrated 이고 web.config 에 system.web/httpModules·httpHandlers 가 있으면 500.22/500.23 · rewrite 섹션 조회가 알 수 없는 섹션 오류면 URL Rewrite 모듈 미설치"
+      note: "조회 전용(set·unlock 아님) · rewrite 섹션은 URL Rewrite 모듈 설치 시에만 · 적용: IIS 7.0+ · 권한: 관리자"
+    - do: 최근 구성 변경 시각 확인
+      cmd: |
+        Get-ChildItem <사이트경로>\web.config, $env:windir\System32\inetsrv\config\applicationHost.config | Select-Object FullName,LastWriteTime
+      check: "오류 시작 직전에 web.config·applicationHost.config 가 바뀌었으면 그 변경이 원인 후보(특히 500.50/500.52 재작성 규칙)"
+      note: "조회 전용 · 권한: 관리자"
+  - stage: 2
+    steps:
+    - do: 원인별 구성 정정 (필요한 최소 범위)
+      cmd: |
+        %windir%\system32\inetsrv\appcmd add backup "before_handler_<날짜>"
+        Copy-Item <사이트경로>\web.config <사이트경로>\web.config.$(Get-Date -Format yyyyMMddHHmm)
+        # 404.3: %windir%\system32\inetsrv\appcmd set config "<site>" -section:staticContent /+"[fileExtension='.<확장자>',mimeType='<MIME형식>']"
+        # 404.2: %windir%\system32\inetsrv\appcmd set config -section:system.webServer/security/isapiCgiRestriction /[path='<dll·exe 경로>'].allowed:True
+        # 500.22/500.23: %windir%\system32\inetsrv\appcmd migrate config "<site>/<app>"
+        # 404.4: 필요한 역할 서비스 설치(Install-WindowsFeature Web-Asp-Net45 등) 또는 처리기 매핑 추가
+      check: "성공: 해당 URL 이 200(또는 의도한 응답), 하위 상태 코드 사라짐 · 실패: 다른 하위 코드로 바뀌면 백업 복원 후 그 코드 기준으로 재확인"
+      note: "사전조건: 1차에서 하위 코드·확장자·대상 경로 확정, 허용하려는 확장자·ISAPI 가 업무상 필요한지 보안 담당 확인(실행 파일 허용은 공격면 확대) · 영향: 구성 변경은 앱 도메인 재시작·앱 풀 재활용을 일으킬 수 있음, migrate config 는 web.config 를 고쳐 씀 · 승인: 웹 운영 담당·보안 담당 · 백업/롤백: appcmd add backup(서버 수준) + web.config 날짜 복사본, 이상 시 appcmd restore backup before_handler_<날짜> 와 web.config 복사본 복원 · 적용: IIS 7.0+, Install-WindowsFeature 는 Windows Server 전용"
+    - do: URL 재작성 규칙 실패 지점 특정 후 수정 (500.50·500.52)
+      cmd: |
+        %windir%\system32\inetsrv\appcmd configure trace "<site>/<path>" /enable /statuscodes:500
+        Copy-Item <사이트경로>\web.config <사이트경로>\web.config.$(Get-Date -Format yyyyMMddHHmm)
+      check: "성공: FREB 의 URL Rewrite 이벤트로 실패 규칙 이름을 특정해 수정한 뒤 500.50/500.52 사라짐 · 실패: 500.52 가 계속이면 동적 압축된 응답에 outbound 규칙이 걸리는지 확인"
+      note: "사전조건: 추적 기능 설치·디스크 여유 · 영향: 규칙 수정은 앱 도메인 재시작, 추적 중 디스크·CPU 소폭 증가 · 승인: 웹 운영 담당 · 백업/롤백: web.config 날짜 복사본 복원, 추적은 appcmd configure trace \"<site>/<path>\" /disable 로 해제 · 적용: URL Rewrite 2.x"
+  - stage: 3
+    steps:
+    - do: Microsoft 의뢰 자료
+      cmd: |
+        %windir%\system32\inetsrv\appcmd list config "<site>" -section:handlers > handlers.txt
+        Compress-Archive -Path "$env:SystemDrive\inetpub\logs\FailedReqLogFiles\W3SVC<siteID>\*" -DestinationPath freb_<siteID>.zip
+      check: "처리기·MIME·재작성 구성, FREB 추적, W3C 로그(해당 하위 상태 구간)"
+      note: "민감정보 마스킹: FREB·로그의 쿼리 문자열·쿠키·인증 헤더·클라이언트 IP, web.config 의 연결 문자열·비밀값을 가림 · 전달 승인: 보안 담당"
+
+- id: IIS-PROC-R6-BADREQ
+  scope: id
+  products: [iis]
+  category: internal
+  match: ['400.0', '404.0', IIS-HTTPERR-HOSTNAME, IIS-HTTPERR-INTERNAL]
+  title: 잘못된 요청·대상 없음·HTTP.sys 거부 (400.0 · 404.0 · HTTPERR Hostname/Internal)
+  source: "Microsoft Learn 'HTTP status code overview (400·404.0)'·'Types of Errors Logged by the HTTP Server API'(Hostname·Internal·BadRequest)·'Configuring HTTP Server API Error Logging'·'Netsh commands for HTTP (show servicestate, show sslcert, add sslcert)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: W3C 400/404.0 출처·경로 집계 (읽기 전용)
+      cmd: |
+        Get-Content "C:\inetpub\logs\LogFiles\W3SVC<siteID>\u_ex$(Get-Date -Format yyMMdd).log" -Tail 50000 | Select-String " (400|404) 0 " | ForEach-Object { $f = $_.Line -split " "; "{0} {1} {2}" -f $f[-4],$f[8],$f[4] } | Group-Object | Sort-Object Count -Descending | Select-Object -First 15 Count,Name
+      check: "한 IP 가 여러 경로를 404 로 훑으면 스캐닝(보안 담당 통보) · 다수 사용자가 같은 경로 404 면 배포 누락·링크 오류 · 400.0 이 특정 연계 장비에서만 나면 그 장비의 요청 형식 문제"
+      note: "기본 W3C 필드 순서(cs-uri-stem 5번째·c-ip 9번째) 기준 · 적용: IIS 7.0+ · 권한: 로그 폴더 읽기"
+    - do: HTTP.sys 단계 거부 사유·이벤트 확인
+      cmd: |
+        Select-String -Path "$env:SystemRoot\System32\LogFiles\HTTPERR\httperr*.log" -Pattern " (BadRequest|Hostname|Internal|Header|Verb) " | Group-Object { $_.Matches[0].Value.Trim() } | Select-Object Count,Name
+        Get-WinEvent -FilterHashtable @{LogName="System"; ProviderName="Microsoft-Windows-HttpEvent"} -MaxEvents 20 -ErrorAction SilentlyContinue | Format-List TimeCreated,Id,Message
+        netsh http show servicestate view=requestq
+      check: "Hostname 다수면 잘못된 Host 헤더(스캐너·IP 직접 접속) — 업무 장비면 바인딩 확인 · Internal 이 반복되고 HttpEvent 오류가 같이 있으면 HTTP.sys·SSL 바인딩 이상(Windows 담당) · 한두 건이면 정보성"
+      note: "HTTPERR 기본 경로 %SystemRoot%\\System32\\LogFiles\\HTTPERR(레지스트리 ErrorLoggingDir 로 바꿨으면 그 경로) · 적용: Windows Server 2008 R2+ · 권한: 관리자"
+    - do: 바인딩·인증서 바인딩·실제 파일 존재 확인
+      cmd: |
+        %windir%\system32\inetsrv\appcmd list site
+        netsh http show sslcert
+        Test-Path "<사이트경로>\<경로>"
+        Get-HotFix | Sort-Object InstalledOn -Descending | Select-Object -First 5
+      check: "업무 장비가 쓰는 호스트명이 사이트 바인딩에 없으면 Hostname 거부 원인 · 404.0 상위 경로가 실제로 없으면 배포 누락 또는 호출 측 링크 오류 · Internal 반복인데 누적 업데이트가 오래됐으면 Windows 담당과 패치 수준 확인"
+      note: "조회 전용 · 권한: 관리자"
+  - stage: 2
+    steps:
+    - do: 바인딩 추가 또는 누락 파일 재배포 (정상 업무 요청으로 확인된 경우만)
+      cmd: |
+        %windir%\system32\inetsrv\appcmd add backup "before_badreq_<날짜>"
+        %windir%\system32\inetsrv\appcmd set site /site.name:"<site>" /+bindings.[protocol='http',bindingInformation='*:<port>:<호스트명>']
+      check: "성공: 해당 호스트명·경로 요청이 200, HTTPERR Hostname·W3C 404.0 감소 · 실패: 다른 사이트와 바인딩이 겹쳐 사이트 시작이 실패하면 즉시 백업 복원"
+      note: "사전조건: 요청이 정상 업무(연계 장비·사용자)임을 담당과 확인 — 스캐너·공격이면 조치하지 않고 보안 담당 통보, 404.0 은 배포 담당과 누락 파일 확인 · 영향: 바인딩 추가는 해당 사이트의 수신 범위 확대 · 승인: 웹 운영 담당·보안 담당 · 백업/롤백: appcmd add backup 후 변경, 이상 시 appcmd restore backup before_badreq_<날짜> 또는 /-bindings.[…] 로 제거"
+    - do: HTTP.sys Internal 이 SSL 포트에 집중될 때 인증서 바인딩 재등록 (Windows 담당)
+      cmd: |
+        netsh http show sslcert > sslcert_before.txt
+        netsh http delete sslcert ipport=0.0.0.0:<port>
+        netsh http add sslcert ipport=0.0.0.0:<port> certhash=<인증서 지문> appid={<기존 appid>}
+      check: "성공: HTTPERR Internal·HttpEvent 오류 재발 없음, 브라우저 HTTPS 접속 정상 · 실패: 등록 오류나 접속 실패면 sslcert_before.txt 의 원래 값으로 즉시 재등록, 지속되면 3차 Microsoft 의뢰"
+      note: "사전조건: 1차에서 Internal 이 해당 포트에 집중됨을 확인, 기존 certhash·appid 를 sslcert_before.txt 에 보관, 인증서가 저장소(LocalMachine\\My)에 개인키와 함께 있음 확인 · 영향: 삭제~재등록 사이 해당 포트 HTTPS 접속 실패 · 승인: Windows 담당·웹 운영 담당·변경 관리 · 백업/롤백: sslcert_before.txt 의 값으로 add sslcert 재등록 · 적용: Windows Server 2008 R2+ (SNI 바인딩은 hostnameport= 사용)"
+  - stage: 3
+    steps:
+    - do: Microsoft·보안 담당 의뢰 자료
+      cmd: |
+        New-Item -ItemType Directory -Path .\iis_badreq -Force | Out-Null
+        Copy-Item "$env:SystemRoot\System32\LogFiles\HTTPERR\httperr*.log" .\iis_badreq\
+        netsh http show servicestate > .\iis_badreq\servicestate.txt
+      check: "HTTPERR 로그·servicestate·HttpEvent 이벤트·W3C 로그(400/404 구간)"
+      note: "민감정보 마스킹: 로그의 클라이언트 IP·호스트명·쿼리 문자열, sslcert 출력의 인증서 지문을 가림 · 전달 승인: 보안 담당"
+
+- id: IIS-PROC-R6-REQLIMIT
+  scope: id
+  products: [iis]
+  category: capacity
+  match: [IIS-HTTPERR-URL-LENGTH, IIS-HTTPERR-REQUEST-LENGTH, '404.13', '404.15']
+  title: 요청 크기 한도 초과 — URL·헤더·본문·쿼리 문자열 (HTTPERR URL_Length/RequestLength · 404.13/404.15)
+  source: "Microsoft Learn 'Http.sys registry settings for Windows'(MaxFieldLength·MaxRequestBytes·UrlSegmentMaxLength)·'Request Limits <requestLimits>'(maxAllowedContentLength·maxUrl·maxQueryString)·'Types of Errors Logged by the HTTP Server API'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 거부 단계·출처 확인 (읽기 전용)
+      cmd: |
+        Select-String -Path "$env:SystemRoot\System32\LogFiles\HTTPERR\httperr*.log" -Pattern "URL_Length|RequestLength|FieldLength|EntityTooLarge" | Select-Object -Last 20
+        Get-Content "C:\inetpub\logs\LogFiles\W3SVC<siteID>\u_ex$(Get-Date -Format yyMMdd).log" -Tail 50000 | Select-String " 404 1[35] " | ForEach-Object { $f = $_.Line -split " "; "{0}.{1} {2} {3}" -f $f[-4],$f[-3],$f[8],$f[4] } | Group-Object | Sort-Object Count -Descending | Select-Object -First 10 Count,Name
+      check: "HTTPERR 에 있으면 HTTP.sys(커널) 한도, W3C 404.13/404.15 면 IIS 요청 필터링 한도 · 소수 외부 IP 의 긴 URL·쿼리는 스캐너(보안 담당), 사내 사용자 다수의 RequestLength/FieldLength 는 큰 쿠키·Kerberos 토큰"
+      note: "기본 W3C 필드 순서 기준 · 적용: IIS 7.0+ / Windows Server 2008 R2+ · 권한: 관리자(HTTPERR 폴더)"
+    - do: 현재 한도 확인
+      cmd: |
+        reg query HKLM\System\CurrentControlSet\Services\HTTP\Parameters
+        %windir%\system32\inetsrv\appcmd list config "<site>" -section:requestFiltering
+      check: "레지스트리에 MaxFieldLength·MaxRequestBytes·UrlSegmentMaxLength 값이 없으면 기본값(16384·16384·260) · requestLimits 가 없으면 기본 maxAllowedContentLength 30000000(약 28.6MB)·maxUrl 4096·maxQueryString 2048"
+      note: "조회 전용(reg query) · 권한: 관리자"
+  - stage: 2
+    steps:
+    - do: IIS 요청 필터링 한도 상향 (404.13·404.15, 필요한 사이트·경로만)
+      cmd: |
+        Copy-Item <사이트경로>\web.config <사이트경로>\web.config.$(Get-Date -Format yyyyMMddHHmm)
+        %windir%\system32\inetsrv\appcmd set config "<site>/<path>" -section:requestFiltering /requestLimits.maxAllowedContentLength:<바이트>
+        %windir%\system32\inetsrv\appcmd set config "<site>/<path>" -section:requestFiltering /requestLimits.maxQueryString:<길이>
+      check: "성공: 해당 업로드·URL 이 200, 404.13/404.15 사라짐 · 실패: 413·500 으로 바뀌면 ASP.NET maxRequestLength(KB 단위)·애플리케이션 한도도 같은 크기로 맞춤, 공격 요청이 통과되기 시작하면 즉시 원복"
+      note: "사전조건: 업무상 최대 업로드 크기·URL 길이를 업무 담당과 확정(공격 요청이면 상향 금지) · 영향: 큰 요청 허용으로 메모리·디스크 사용과 공격 노출 증가, web.config 변경 시 앱 도메인 재시작 · 승인: 웹 운영 담당·보안 담당 · 백업/롤백: web.config 날짜 복사본 복원(값이 applicationHost.config 에 기록되면 appcmd add backup/restore backup) · 적용: IIS 7.0+"
+    - do: HTTP.sys 레지스트리 한도 상향 (URL_Length·RequestLength·FieldLength — 정상 업무로 확인된 경우만)
+      cmd: |
+        reg export HKLM\System\CurrentControlSet\Services\HTTP\Parameters http_params_before.reg
+        reg add HKLM\System\CurrentControlSet\Services\HTTP\Parameters /v MaxFieldLength /t REG_DWORD /d <바이트> /f
+        reg add HKLM\System\CurrentControlSet\Services\HTTP\Parameters /v MaxRequestBytes /t REG_DWORD /d <바이트> /f
+        net stop http /y ; net start http ; net start w3svc
+      check: "성공: HTTPERR 의 해당 사유 사라짐·사용자 접속 정상 · 실패: 서비스가 기동하지 않거나 다른 HTTP.sys 사용 서비스에 이상이 생기면 reg import http_params_before.reg 로 원복 후 같은 방식으로 재시작(또는 재부팅)"
+      note: "사전조건: 실제 요청 헤더 크기(Kerberos 토큰·쿠키) 확인 후 필요한 최소값만(MaxFieldLength 최대 65534), net stop http 로 함께 멈추는 의존 서비스 목록 확인 · 영향: HTTP 서비스 재시작 동안 이 서버의 모든 IIS 사이트와 HTTP.sys 사용 서비스(WinRM 등) 중단, 한도 상향은 메모리·공격 노출 증가 · 승인: Windows 담당·웹 운영 담당·보안 담당·변경 관리 · 백업/롤백: reg export 파일을 reg import 로 원복 후 재시작 · 적용: Windows Server 2008 R2+ HTTP.sys"
+  - stage: 3
+    steps:
+    - do: Microsoft 의뢰 자료
+      cmd: |
+        reg export HKLM\System\CurrentControlSet\Services\HTTP\Parameters http_params.reg
+        Copy-Item "$env:SystemRoot\System32\LogFiles\HTTPERR\httperr*.log" .\
+      check: "HTTP.sys 레지스트리 값·HTTPERR 로그·requestFiltering 구성·W3C 로그(404.13/404.15 구간)"
+      note: "민감정보 마스킹: 로그의 클라이언트 IP·URL 쿼리(토큰·개인정보)·호스트명을 가림 · 전달 승인: 보안 담당"
+
+- id: IIS-PROC-R6-FASTCGI
+  scope: id
+  products: [iis]
+  category: capacity
+  match: ['503.4']
+  title: FastCGI 요청 대기열 포화 (503.4)
+  source: "Microsoft Learn 'FastCGI <fastCgi> — Application settings'(maxInstances·queueLength·activityTimeout·requestTimeout·instanceMaxRequests)·'HTTP status code overview (503.4)'·'Appcmd list requests'"
+  stages:
+  - stage: 1
+    steps:
+    - do: FastCGI 설정·프로세스 수·CPU 확인 (읽기 전용)
+      cmd: |
+        %windir%\system32\inetsrv\appcmd list config -section:system.webServer/fastCgi
+        Get-Process -Name php-cgi -ErrorAction SilentlyContinue | Measure-Object | Select-Object Count
+        Get-Counter "\Processor(_Total)\% Processor Time" -SampleInterval 5 -MaxSamples 3
+      check: "프로세스 수가 maxInstances 에 닿고 CPU 가 높으면 처리 능력 포화, CPU 가 낮은데 꽉 차 있으면 스크립트가 외부 자원(DB·API)을 기다리는 지연 · queueLength(기본 1000)를 넘는 대기가 503.4"
+      note: "php-cgi 가 아닌 FastCGI 실행 파일이면 fullPath 의 파일 이름으로 바꿔 확인 · 적용: IIS 7.0+ FastCGI · 권한: 관리자"
+    - do: 오래 걸리는 요청 확인
+      cmd: |
+        %windir%\system32\inetsrv\appcmd list requests /elapsed:10000
+      check: "같은 스크립트 URL 이 10초 이상 다수면 그 처리 지연이 대기열 포화 원인(개발·DB 담당 통보)"
+      note: "조회 전용 · 권한: 관리자"
+  - stage: 2
+    steps:
+    - do: FastCGI 인스턴스 수 조정
+      cmd: |
+        %windir%\system32\inetsrv\appcmd add backup "before_fastcgi_<날짜>"
+        %windir%\system32\inetsrv\appcmd set config -section:system.webServer/fastCgi /[fullPath='<실행파일 경로>'].maxInstances:<수> /commit:apphost
+      check: "성공: 503.4 사라짐, CPU 85% 이하 유지 · 실패: CPU 포화·메모리 부족이 생기면 이전 값으로 원복하고 지연 스크립트 조치로 전환"
+      note: "사전조건: 지연 원인이 외부 자원 대기가 아님을 확인(대기면 인스턴스 증가가 DB 부하만 키움), 인스턴스당 메모리 × 수가 가용 메모리 이내 · 영향: 인스턴스 증가로 CPU·메모리 사용 증가 · 승인: 웹 운영 담당·변경 관리 · 백업/롤백: appcmd add backup 후 변경, 이상 시 appcmd restore backup before_fastcgi_<날짜> · 적용: IIS 7.0+"
+  - stage: 3
+    steps:
+    - do: 개발·Microsoft 의뢰 자료
+      cmd: |
+        %windir%\system32\inetsrv\appcmd list config -section:system.webServer/fastCgi > fastcgi.txt
+        %windir%\system32\inetsrv\appcmd list requests > requests.txt
+      check: "FastCGI 구성·실행 중 요청 목록·W3C 로그(503.4 구간)·스크립트 오류 로그"
+      note: "민감정보 마스킹: 요청 URL 의 쿼리 문자열(토큰·개인정보)·환경 변수 값·호스트명을 가림 · 전달 승인: 보안 담당"
+
+- id: IIS-PROC-R6-APPPOOLID
+  scope: id
+  products: [iis]
+  category: internal
+  match: [IIS-W3SVC-1117]
+  title: 앱 풀 시작 실패 — 앱 풀 ID 계정·권한 (W3SVC 1117 · WAS 5021/5057/5059 동반)
+  source: "Microsoft Learn 'Application Pool Identities'·'Process Model Settings for an Application Pool <processModel>'·'Appcmd.exe'·'WebAdministration Set-ItemProperty'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 앱 풀 상태·ID 종류 확인 (읽기 전용)
+      cmd: |
+        %windir%\system32\inetsrv\appcmd list apppool "<AppPool>" /text:state
+        %windir%\system32\inetsrv\appcmd list apppool "<AppPool>" /text:processModel.identityType
+        %windir%\system32\inetsrv\appcmd list apppool "<AppPool>" /text:processModel.userName
+      check: "state 가 Stopped 이고 identityType 이 SpecificUser 면 계정 문제 가능성 큼 · ApplicationPoolIdentity 면 계정보다 구성·폴더 권한 확인"
+      note: "비밀번호(processModel.password)는 조회하지 않음 · 적용: IIS 7.5+ · 권한: 관리자"
+    - do: WAS 원인 이벤트·계정 상태 확인
+      cmd: |
+        Get-WinEvent -FilterHashtable @{LogName="System"; ProviderName="Microsoft-Windows-WAS"} -MaxEvents 50 | Where-Object { $_.Id -in 5021,5057,5059,5002 } | Format-List TimeCreated,Id,Message
+        net user <user> /domain
+      check: "5021/5057 이 있으면 ID 계정 문제 — net user 의 Account active 가 No 이거나 Password expires 가 지났으면 확정 · 5002 만 있으면 크래시 반복(빠른 실패 보호)이므로 IIS-PROC-INTERNAL 절차"
+      note: "로컬 계정은 /domain 없이 · 권한: 관리자(도메인 조회는 도메인 사용자 권한)"
+    - do: 배치 작업 로그온 권한 확인
+      cmd: |
+        secedit /export /areas USER_RIGHTS /cfg $env:TEMP\user_rights.inf
+        Select-String -Path $env:TEMP\user_rights.inf -Pattern "SeBatchLogonRight|SeDenyBatchLogonRight"
+      check: "앱 풀 계정(또는 그 그룹·IIS_IUSRS)이 SeBatchLogonRight 에 없거나 SeDenyBatchLogonRight 에 있으면 원인 확정(SID 로 표시될 수 있음)"
+      note: "secedit /export 는 현재 정책을 파일로 내보내기만 함 · 적용: Windows Server 2008 R2+ · 권한: 관리자"
+  - stage: 2
+    steps:
+    - do: 앱 풀 ID 자격 증명 재설정 후 시작 (비밀번호를 명령줄에 쓰지 않음)
+      cmd: |
+        %windir%\system32\inetsrv\appcmd add backup "before_apppoolid_<날짜>"
+        Import-Module WebAdministration
+        $c = Get-Credential -UserName "<domain>\<user>" -Message "앱 풀 ID 비밀번호 입력"
+        Set-ItemProperty IIS:\AppPools\<AppPool> -Name processModel -Value @{userName=$c.UserName; password=$c.GetNetworkCredential().Password; identityType=3}
+        Start-WebAppPool -Name "<AppPool>"
+      check: "성공: Get-WebAppPoolState 가 Started, 첫 요청 200, 5021/5057 재발 없음 · 실패: 다시 Stopped 면 배치 로그온 권한·계정 잠금 재확인 — 원인 미해결 상태로 시작을 반복하지 않음(5002 빠른 실패 보호로 이어짐)"
+      note: "사전조건: 계정 담당이 비밀번호 재설정·잠금 해제·배치 로그온 권한 부여를 마침, 화면 공유 중 입력 금지 · 영향: 앱 풀 시작 동안 해당 앱 응답 지연 · 승인: 웹 운영 담당·계정(보안) 담당 · 백업/롤백: appcmd add backup 후 변경, 이상 시 appcmd restore backup before_apppoolid_<날짜> · 대안: IIS 관리자 › 응용 프로그램 풀 › 고급 설정 › ID › 설정 대화 상자에서 입력 · 적용: IIS 7.5+ WebAdministration(PowerShell 3.0+)"
+  - stage: 3
+    steps:
+    - do: 계정·Microsoft 의뢰 자료
+      cmd: |
+        %windir%\system32\inetsrv\appcmd list apppool "<AppPool>" /config | findstr /v /i "password" > apppool_config.txt
+        Get-WinEvent -FilterHashtable @{LogName="System"; ProviderName="Microsoft-Windows-WAS"} -MaxEvents 200 | Export-Csv was_events.csv -NoTypeInformation
+      check: "앱 풀 설정(비밀번호 줄 제외)·WAS 이벤트·권한 정책(SeBatchLogonRight) 확인 결과"
+      note: "민감정보 마스킹: 계정 이름·도메인·SID·호스트명을 가림, 비밀번호·암호화 값은 어떤 자료에도 넣지 않음 · 전달 승인: 보안 담당"
+
+# ───────────────────────── nginx ─────────────────────────
+- id: NGX-PROC-R6-FASTCGI
+  scope: id
+  products: [nginx]
+  category: upstream
+  match: [NGX-FASTCGI-FAIL, NGX-FASTCGI-STDERR]
+  title: FastCGI(PHP-FPM) 연결 실패·스크립트 오류 (nginx)
+  source: "nginx 'ngx_http_fastcgi_module (fastcgi_pass, fastcgi_param SCRIPT_FILENAME, fastcgi_read_timeout)' — nginx.org/en/docs/http/ngx_http_fastcgi_module.html / PHP 매뉴얼 'FPM configuration (listen.owner·listen.group·listen.mode, pm.max_children, request_terminate_timeout)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: FastCGI 오류 문맥 확인 (읽기 전용)
+      cmd: |
+        grep -n "fastcgi\|FastCGI sent in stderr" /var/log/nginx/error.log | tail -20
+        nginx -T 2>/dev/null | grep -n "fastcgi_pass\|SCRIPT_FILENAME\|root " | head -20
+      check: "connect() to unix:… failed (2: No such file) 면 FPM 미기동·소켓 경로 불일치, (13: Permission denied) 면 소켓 권한, (111) 이면 TCP 포트 미수신, (11: Resource temporarily unavailable) 면 FPM 수신 대기열 포화 · Primary script unknown 이면 SCRIPT_FILENAME·root 경로 오류, PHP Fatal error 등은 애플리케이션 오류(개발 담당)"
+      note: "적용: nginx 1.9.2+(nginx -T, 하위는 설정 파일 직접 확인) · 권한: 로그·설정 읽기(root 가 필요한 경우 많음)"
+    - do: FPM 상태·소켓 권한·프로세스 고갈 확인
+      cmd: |
+        systemctl status php-fpm --no-pager | head -15
+        ls -l <소켓경로> ; ps -o user= -C nginx | sort -u
+        grep -n "max_children\|execution timed out" /var/log/php-fpm/error.log 2>/dev/null | tail -5
+      check: "FPM 이 inactive 면 백엔드 중지 · 소켓 소유자·모드가 nginx 실행 계정에 쓰기를 허용하지 않으면 권한 원인 · server reached pm.max_children 경고가 있으면 FPM 프로세스 고갈(느린 스크립트·한도 과소)"
+      note: "서비스명·로그 경로는 배포판·PHP 버전별(php8.1-fpm, /var/log/php8.1-fpm.log 등 — FPM 설정 error_log 값) · systemctl status 는 조회만 · 권한: root 권장"
+  - stage: 2
+    steps:
+    - do: 소켓 권한·스크립트 경로·풀 한도 정정
+      config:
+        file: /etc/php-fpm.d/www.conf (Debian 계열 /etc/php/<버전>/fpm/pool.d/www.conf) · /etc/nginx/conf.d/<site>.conf
+        snippet: |
+          ; FPM 풀
+          listen = /run/php-fpm/www.sock
+          listen.owner = nginx
+          listen.group = nginx
+          listen.mode = 0660
+          pm.max_children = <가용 메모리 ÷ 프로세스당 RSS>
+          # nginx
+          location ~ \.php$ {
+              fastcgi_pass unix:/run/php-fpm/www.sock;
+              fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+              include fastcgi_params;
+              fastcgi_read_timeout 60s;
+          }
+        note: "nginx 실행 계정은 nginx.conf 의 user 값(Debian 은 www-data)"
+      cmd: |
+        php-fpm -t && nginx -t
+        systemctl reload php-fpm ; nginx -s reload
+      check: "성공: php-fpm -t test is successful·nginx -t syntax is ok, error.log 의 connect() failed·Primary script unknown 사라짐 · 실패: 시험이 실패하면 반영하지 않음, 반영 뒤 502 증가면 백업 설정 복원 후 다시 시험·reload"
+      note: "사전조건: nginx 실행 계정·FPM 소켓 경로·document root 확인, pm.max_children 상향은 메모리 여유 계산 후 · 영향: FPM reload 는 처리 중 요청을 마친 뒤 프로세스 교체, 설정 오류 시 PHP 전체 502 · 승인: 웹 운영 담당·애플리케이션 담당 · 백업/롤백: www.conf·<site>.conf 를 .bak.<날짜> 로 복사 후 수정, 이상 시 복원 후 시험·reload · 적용: nginx 1.x, PHP-FPM 7.x/8.x(RHEL 계열 경로 기준)"
+  - stage: 3
+    steps:
+    - do: 개발·백엔드 의뢰 자료
+      cmd: |
+        nginx -T > nginx_config_$(date +%Y%m%d).txt 2>&1
+        tar czf fpm_$(date +%Y%m%d).tgz /etc/php-fpm.d /var/log/php-fpm 2>/dev/null
+      check: "nginx 설정 덤프·error.log(장애 구간)·FPM 풀 설정·FPM 로그"
+      note: "민감정보 마스킹: FPM env[]·php_admin_value 의 비밀값, 설정의 내부 호스트명·IP, 로그의 클라이언트 IP·요청 파라미터·쿠키를 가림 · 전달 승인: 보안 담당"
+
+- id: NGX-PROC-R6-STREAM
+  scope: id
+  products: [nginx]
+  category: upstream
+  match: [NGX-STREAM-UPSTREAM-FAIL]
+  title: TCP/UDP 스트림 업스트림 연결·전달 실패 (nginx stream)
+  source: "nginx 'ngx_stream_proxy_module (proxy_connect_timeout, proxy_timeout, proxy_next_upstream)'·'ngx_stream_upstream_module (server max_fails/fail_timeout)' — nginx.org/en/docs/stream/ngx_stream_proxy_module.html"
+  stages:
+  - stage: 1
+    steps:
+    - do: stream 오류 문맥·설정 확인 (읽기 전용)
+      cmd: |
+        grep -n "while proxying\|while connecting to upstream" /var/log/nginx/error.log | tail -20
+        nginx -T 2>/dev/null | grep -n -A20 "stream {" | head -40
+      check: "connect() failed (111) 면 백엔드 미수신, (110) timed out … while connecting 이면 방화벽·경로, timed out … while proxying 이면 proxy_timeout(기본 10분) 동안 양방향 데이터 없음 — 업무 유휴 시간과 비교"
+      note: "stream 모듈은 --with-stream 빌드(nginx -V 로 확인) · 적용: nginx 1.9.0+ · 권한: 로그·설정 읽기"
+    - do: 백엔드 포트 도달·세션 수 확인
+      cmd: |
+        nc -zvw3 <upstream_ip> <port>
+        ss -tn state established "( dport = :<port> )" | wc -l
+      check: "nc 실패면 백엔드 장애·방화벽(백엔드·네트워크 담당), 성공인데 오류가 이어지면 백엔드 수용 한도·유휴 시간 불일치"
+      note: "nc 는 연결만 시험하고 바로 닫음 · 권한: 일반 사용자"
+  - stage: 2
+    steps:
+    - do: stream 시간 제한·재시도·장애 격리 설정
+      config:
+        file: /etc/nginx/nginx.conf (stream 블록) 또는 include 된 stream 설정 파일
+        snippet: |
+          stream {
+            upstream <name> {
+              server <ip1>:<port> max_fails=3 fail_timeout=30s;
+              server <ip2>:<port> max_fails=3 fail_timeout=30s;
+            }
+            server {
+              listen <port>;
+              proxy_pass <name>;
+              proxy_connect_timeout 5s;
+              proxy_timeout <업무 최대 유휴 시간>;
+              proxy_next_upstream on;
+            }
+          }
+      cmd: |
+        nginx -t && nginx -s reload
+      check: "성공: while connecting 오류 감소·장애 멤버 자동 제외, 세션 정상 유지 · 실패: nginx -t 오류면 반영하지 않음, 정상 세션이 끊기면(proxy_timeout 과소) 백업 복원 후 reload"
+      note: "사전조건: 업무 프로토콜(DB·MQ 등)의 최대 유휴 시간을 업무 담당과 확인 — proxy_timeout 을 그보다 짧게 두면 정상 세션이 끊김 · 영향: reload 시 기존 TCP 세션은 기존 워커가 유지하다 종료 · 승인: 웹·네트워크 담당·변경 관리 · 백업/롤백: 설정 파일 날짜 복사본, 이상 시 복원 후 nginx -t && nginx -s reload · 적용: nginx 1.9.0+ stream"
+  - stage: 3
+    steps:
+    - do: 네트워크·백엔드 의뢰 자료
+      cmd: |
+        nginx -T > nginx_config_$(date +%Y%m%d).txt 2>&1 ; grep "while proxying\|while connecting" /var/log/nginx/error.log | tail -500 > stream_errors.txt
+      check: "stream 설정·오류 발췌·백엔드 측 연결 로그(같은 시각)"
+      note: "민감정보 마스킹: 내부 IP·포트·호스트명, 클라이언트 IP 를 가림 · 전달 승인: 보안 담당"
+
+- id: NGX-PROC-R6-BADRESP
+  scope: id
+  products: [nginx]
+  category: upstream
+  match: [NGX-UPSTREAM-SENT-INVALID-HEADER, NGX-UPSTREAM-RESPONSE-EMPTY, NGX-UPSTREAM-CLOSED]
+  title: 백엔드 비정상 응답 — 잘못된 헤더·빈 응답·조기 종료 (nginx 502)
+  source: "nginx 'ngx_http_proxy_module (proxy_pass, proxy_http_version, proxy_next_upstream invalid_header)'·'ngx_http_upstream_module (keepalive, keepalive_timeout)' — nginx.org/en/docs/http/ngx_http_proxy_module.html"
+  stages:
+  - stage: 1
+    steps:
+    - do: 오류 문맥·대상 upstream 집계 (읽기 전용)
+      cmd: |
+        grep -n -E "upstream sent invalid|upstream sent no valid HTTP|prematurely closed|empty response" /var/log/nginx/error.log | tail -20
+        grep -E "upstream sent invalid|upstream sent no valid|prematurely closed" /var/log/nginx/error.log | grep -o -E 'upstream: "[^"]*"' | sort | uniq -c | sort -rn | head
+      check: "한 upstream 에 몰리면 그 백엔드 프로세스 이상(충돌·재기동), 전 멤버 고르게면 프로토콜·keepalive 설정 불일치 · while reading response header 면 응답 시작 전 종료, while reading upstream 이면 응답 도중 종료(백엔드 시간 초과·예외)"
+      note: "적용: nginx 1.x · 권한: 로그 읽기"
+    - do: 백엔드 응답 형식·연결 재사용 설정 확인
+      cmd: |
+        curl -sv http://<upstream_ip>:<port>/<경로> -o /dev/null 2>&1 | head -30
+        nginx -T 2>/dev/null | grep -n -E "proxy_pass|proxy_http_version|keepalive" | head -20
+      check: "응답 첫 줄이 HTTP/1.x <상태> 가 아니면 프로토콜 불일치(https·AJP 포트에 http 로 전달 등) · upstream keepalive 사용 중인데 proxy_http_version 1.1 과 Connection 헤더 비우기가 없거나 백엔드 keep-alive 유지 시간이 nginx 보다 짧으면 재사용 연결이 닫혀 조기 종료"
+      note: "curl 은 GET 조회만(본문 버림) — 조회 전용 경로 사용 · 권한: 일반 사용자(nginx -T 는 root)"
+  - stage: 2
+    steps:
+    - do: 프로토콜·연결 재사용 설정 정렬
+      config:
+        file: /etc/nginx/conf.d/<site>.conf
+        snippet: |
+          upstream was_pool {
+            server <ip>:<port>;
+            keepalive 32;
+            keepalive_timeout 50s;          # 백엔드 keep-alive 유지 시간보다 짧게 (1.15.3+)
+          }
+          location /app/ {
+            proxy_pass http://was_pool;     # 백엔드가 TLS 면 https://
+            proxy_http_version 1.1;
+            proxy_set_header Connection "";
+            proxy_next_upstream error timeout invalid_header;
+          }
+      cmd: |
+        nginx -t && nginx -s reload
+      check: "성공: prematurely closed·invalid header 건수가 평소 수준으로 감소, 502 비율 감소 · 실패: 특정 백엔드에서 계속되면 설정을 원복하고 백엔드 담당에 예외·충돌 로그 확인 요청"
+      note: "사전조건: 백엔드 keep-alive 유지 시간·프로토콜(http/https/ajp)을 WAS 담당과 확인, POST 등 비멱등 요청 재시도 허용 여부 확인(1.9.13+ 는 기본 재시도 안 함) · 영향: reload 는 새 워커로 교체(기존 연결 유지), proxy_next_upstream 은 같은 요청을 다른 멤버로 다시 보냄 · 승인: 웹·WAS 담당·변경 관리 · 백업/롤백: <site>.conf 날짜 복사본, 이상 시 복원 후 nginx -t && nginx -s reload · 적용: nginx 1.1.4+(upstream keepalive), keepalive_timeout 은 1.15.3+"
+  - stage: 3
+    steps:
+    - do: WAS·백엔드 의뢰 자료
+      cmd: |
+        grep -E "upstream sent|prematurely closed|empty response" /var/log/nginx/error.log | tail -500 > upstream_badresp.txt
+        nginx -T > nginx_config_$(date +%Y%m%d).txt 2>&1
+      check: "오류 발췌(시각·URL·upstream)·설정 덤프·같은 시각 백엔드 애플리케이션 로그"
+      note: "민감정보 마스킹: 요청 URL 의 쿼리 문자열·쿠키, 클라이언트 IP, 내부 호스트명·IP 를 가림 · 전달 승인: 보안 담당"
+
+- id: NGX-PROC-R6-SIZE
+  scope: id
+  products: [nginx]
+  category: capacity
+  match: [NGX-UPSTREAM-BIG-BODY, NGX-CLIENT-BODY-TOO-LARGE, NGX-CLIENT-HEADER-TOO-LARGE, NGX-UPSTREAM-BIG-HEADER]
+  title: 요청·응답 크기 한도와 버퍼 (413 · 400/414/494 · upstream too big header · 임시 파일 버퍼링)
+  source: "nginx 'ngx_http_core_module (client_max_body_size, client_header_buffer_size, large_client_header_buffers)'·'ngx_http_proxy_module (proxy_buffer_size, proxy_buffers, proxy_busy_buffers_size, proxy_max_temp_file_size, proxy_temp_path)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 크기 관련 오류 종류·대상 URL (읽기 전용)
+      cmd: |
+        grep -o -E "too large body|too big header|buffered to a temporary file|client sent too long [a-z ]+" /var/log/nginx/error.log | sort | uniq -c
+        grep -n -E "too large body|too big header|buffered to a temporary file|too long" /var/log/nginx/error.log | tail -15
+      check: "too large body = 업로드가 client_max_body_size 초과(413) · client sent too long … = 요청 줄·헤더가 large_client_header_buffers 초과(414/400/494) · too big header = 백엔드 응답 헤더가 proxy_buffer_size 초과(502) · buffered to a temporary file = [warn] 대용량 응답(정보성 — I/O·공간 여유 있으면 조치 불필요)"
+      note: "적용: nginx 1.x · 권한: 로그 읽기"
+    - do: 현재 한도·임시 경로 여유 확인
+      cmd: |
+        nginx -T 2>/dev/null | grep -n -E "client_max_body_size|client_header_buffer_size|large_client_header_buffers|proxy_buffer_size|proxy_buffers|proxy_max_temp_file_size|proxy_temp_path"
+        nginx -V 2>&1 | grep -o -E "http-proxy-temp-path=[^ ]+" ; df -h <proxy_temp_path 상위 경로>
+      check: "설정이 없으면 기본값(client_max_body_size 1m·large_client_header_buffers 4 8k·proxy_buffer_size 4k 또는 8k) · 임시 경로 사용률 85% 이상이면 버퍼링 경고가 공간 장애로 번질 수 있음"
+      note: "조회 전용 · 적용: nginx 1.9.2+(nginx -T) · 권한: root(설정 덤프)"
+  - stage: 2
+    steps:
+    - do: 필요한 location 에 한해 한도·버퍼 상향
+      config:
+        file: /etc/nginx/conf.d/<site>.conf
+        snippet: |
+          location /upload/ {
+            client_max_body_size 50m;            # 업무 최대 업로드 크기(백엔드 한도와 같게)
+          }
+          server {
+            large_client_header_buffers 4 16k;   # 큰 쿠키·인증 토큰
+          }
+          location /app/ {
+            proxy_buffer_size 16k;               # 백엔드 응답 헤더 크기 이상
+            proxy_buffers 8 16k;
+            proxy_busy_buffers_size 32k;
+          }
+      cmd: |
+        nginx -t && nginx -s reload
+      check: "성공: 해당 오류가 사라지고 요청 정상 응답 · 실패: nginx -t 오류(proxy_busy_buffers_size 는 proxy_buffers 전체에서 버퍼 1개를 뺀 크기보다 작아야 함 등)면 반영하지 않음, 반영 후 메모리 급증·공격 요청 통과 시 원복"
+      note: "사전조건: 업무 최대 크기를 업무 담당과 확정(외부 스캐너·공격 요청이면 상향 금지 — 보안 담당), 헤더 과대는 쿠키 축소가 근본 조치 · 영향: 버퍼 상향은 연결당 메모리 증가, 업로드 한도 상향은 디스크·백엔드 부하 증가 · 승인: 웹 운영 담당·보안 담당 · 백업/롤백: <site>.conf 날짜 복사본, 이상 시 복원 후 nginx -t && nginx -s reload · 적용: nginx 1.x"
+  - stage: 3
+    steps:
+    - do: 의뢰 자료
+      cmd: |
+        nginx -T > nginx_config_$(date +%Y%m%d).txt 2>&1 ; grep -E "too large|too big|too long|temporary file" /var/log/nginx/error.log | tail -300 > size_errors.txt
+      check: "설정 덤프·크기 오류 발췌·업무 담당이 확인한 정상 최대 크기"
+      note: "민감정보 마스킹: 클라이언트 IP·요청 URL 쿼리·쿠키·인증 헤더, 내부 호스트명을 가림 · 전달 승인: 보안 담당"
+
+- id: NGX-PROC-R6-LIMIT
+  scope: id
+  products: [nginx]
+  category: capacity
+  match: [NGX-LIMIT-REQ, NGX-LIMIT-CONN]
+  title: 요청 속도·연결 수 제한 동작 (limit_req · limit_conn)
+  source: "nginx 'ngx_http_limit_req_module (limit_req_zone, burst/nodelay, limit_req_status, limit_req_log_level)'·'ngx_http_limit_conn_module (limit_conn_zone, limit_conn_status)'·'ngx_http_geo_module'·'ngx_http_map_module'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 제한된 zone·출처 집계 (읽기 전용)
+      cmd: |
+        grep -E "limiting requests|limiting connections" /var/log/nginx/error.log | grep -o -E 'zone "[^"]*"' | sort | uniq -c
+        grep -E "limiting requests|limiting connections" /var/log/nginx/error.log | grep -o -E "client: [0-9a-fA-F.:]+" | sort | uniq -c | sort -rn | head -15
+      check: "소수 IP 가 대부분이면 과다 호출·봇(보안 담당 확인) · 사내 프록시·NAT 주소가 상위면 한도 과소(여러 사용자가 한 IP 로 보임) · 다수 IP 고르게면 정상 사용자 급증"
+      note: "limiting requests 는 거부, delaying request 는 지연(거부보다 한 단계 낮은 로그 수준) · 적용: nginx 1.x · 권한: 로그 읽기"
+    - do: 제한 설정·거부 응답 코드 확인
+      cmd: |
+        nginx -T 2>/dev/null | grep -n -E "limit_req_zone|limit_req |limit_conn_zone|limit_conn |limit_req_status|limit_conn_status"
+        tail -n 200000 /var/log/nginx/access.log | awk '$9==503 || $9==429 {print $9}' | sort | uniq -c
+      check: "limit_req_status·limit_conn_status 를 지정하지 않았으면 거부 응답은 503(기본) — 503 이 백엔드 장애가 아니라 제한 때문인지 구분 · rate·burst 가 업무 최대 초당 요청보다 작으면 정책 과소"
+      note: "access.log 는 combined 형식($9 상태) 기준 — log_format 을 바꿨으면 상태 칸 위치 확인 · 권한: root(설정 덤프)"
+  - stage: 2
+    steps:
+    - do: 정상 호출처 예외 또는 한도 조정
+      config:
+        file: /etc/nginx/nginx.conf (http 블록) · /etc/nginx/conf.d/<site>.conf
+        snippet: |
+          geo $limit_exempt {
+            default 0;
+            <사내 프록시·NAT 대역>  1;
+          }
+          map $limit_exempt $limit_key {
+            0 $binary_remote_addr;
+            1 "";                          # 빈 키는 제한 계산에서 빠짐
+          }
+          limit_req_zone  $limit_key zone=req_per_ip:10m rate=<초당 요청>r/s;
+          limit_conn_zone $limit_key zone=conn_per_ip:10m;
+          location /api/ {
+            limit_req  zone=req_per_ip burst=<허용 순간 초과> nodelay;
+            limit_conn conn_per_ip <동시 연결 수>;
+            limit_req_status 429;          # 선택: 백엔드 장애(503)와 구분
+          }
+      cmd: |
+        nginx -t && nginx -s reload
+      check: "성공: 정상 호출처의 limiting 로그가 사라지고 이상 호출처는 계속 제한 · 실패: 백엔드 부하 급증·응답 지연이면 즉시 원복"
+      note: "사전조건: 예외 대역·한도를 보안 담당·서비스 책임자와 확정, 백엔드 처리 여유 확인 · 영향: 한도 완화·예외는 백엔드 부하 증가와 남용 노출, 429 로 바꾸면 클라이언트 재시도 동작이 달라질 수 있음 · 승인: 서비스 책임자·보안 담당·변경 관리 · 백업/롤백: 설정 파일 날짜 복사본, 이상 시 복원 후 nginx -t && nginx -s reload · 적용: nginx 1.3.15+(limit_req_status·limit_conn_status)"
+  - stage: 3
+    steps:
+    - do: 보안·연계 담당 전달 자료
+      cmd: |
+        grep -E "limiting requests|limiting connections" /var/log/nginx/error.log | grep -o -E "client: [0-9a-fA-F.:]+" | sort | uniq -c | sort -rn > limited_clients.txt
+      check: "제한된 출처별 건수·zone·시각 추이·설정값"
+      note: "민감정보 마스킹: 외부 전달 시 IP 마지막 옥텟·사용자 식별자를 가림 · 전달 승인: 보안 담당"
+
+# ───────────────────────── WebtoB ─────────────────────────
+- id: WTB-PROC-R6-REQUEST
+  scope: id
+  products: [webtob]
+  category: capacity
+  match: [WEBTOB-HEADER-TOO-LARGE, WEBTOB-REQUEST-TOO-LARGE, REQ_0, WEBTOB-INVALID-REQUEST]
+  title: 잘못된·과대 요청 거부 (400 · 413 · 헤더 크기 초과 · REQ_0, WebtoB)
+  source: "TmaxSoft WebtoB Administrator's Guide '환경 파일(http.m) NODE/VHOST 절 요청 제한 항목'·'LOGGING 절(Format: DEFAULT·COMMON·COMBINED)'·'wscfl'·'wsboot/wsdown' / WebtoB 5·6 오류 코드 체계(REQ_)"
+  verify_note: "미검증 — 요청 크기 한도 http.m 항목 이름·단위·적용 절(NODE/VHOST)을 TmaxSoft 공식 문서로 확인하지 못해 항목 이름을 적지 않음(2차 전에 설치 판 매뉴얼로 확인)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 거부 응답 상태·출처 집계 (읽기 전용)
+      cmd: |
+        tail -n 10000 <access_log> | awk -F'"' 'NF>=3 {s=$3; sub(/^[[:space:]]+/,"",s); split(s,a,/[[:space:]]+/); if(a[1] ~ /^(400|413|414|431)$/) {split($1,b,/[[:space:]]+/); print a[1], b[1]}}' | sort | uniq -c | sort -rn | head -15
+      check: "외부 다수 IP·이상한 요청 줄이면 스캐너·공격(보안 담당 통보 — 한도 조정 대상 아님) · 내부 연계 장비 한두 대 반복이면 그 장비의 요청 형식 문제 · 사내 사용자 다수의 413/431 이면 업로드·쿠키 크기가 한도보다 큼"
+      note: "따옴표로 나눠 요청 줄 뒤 첫 칸을 상태로 읽음 — WebtoB DEFAULT·COMMON·COMBINED 형식 공통(상태 칸이 $9 가 아닐 수 있음) · 최근 1만 줄만 · 적용: WebtoB 4.1/5/6 · 권한: WebtoB 실행 계정"
+    - do: 오류 로그의 REQ_·헤더·크기 기록 확인
+      cmd: |
+        ls -lt $WEBTOBDIR/log | head
+        grep -n -E "REQ_0|[Hh]eader|too large|[Ii]nvalid request|malformed" <오류로그> | tail -20
+      check: "REQ_0 은 Request-Line 형식 오류 — L4 헬스체크(TCP 접속만)·비HTTP 접속 주소에서만 나면 정보성 · 헤더·크기 문구면 한도 초과"
+      note: "권한: WebtoB 실행 계정"
+    - do: 현재 요청 제한 설정 확인
+      cmd: |
+        grep -n -i -E "Limit|Header|Request" $WEBTOBDIR/config/http.m
+      check: "요청 제한 항목이 없으면 제품 기본값 적용 — 기본값·단위는 설치 판 매뉴얼로 확인(미검증)"
+      note: "조회 전용 · 적용: WebtoB 4.1/5(http.m), WebtoB 6 은 설정 형식 확인 · 권한: WebtoB 실행 계정"
+  - stage: 2
+    steps:
+    - do: 정상 업무 요청으로 확인된 경우에만 요청 한도 조정
+      cmd: |
+        cp -p $WEBTOBDIR/config/http.m $WEBTOBDIR/config/http.m.$(date +%Y%m%d%H%M)
+        cp -p $WEBTOBDIR/config/wsconfig $WEBTOBDIR/config/wsconfig.$(date +%Y%m%d%H%M)
+        vi $WEBTOBDIR/config/http.m          # 매뉴얼에서 확인한 요청 크기 한도 항목만 수정
+        cd $WEBTOBDIR/config && $WEBTOBDIR/bin/wscfl -i http.m
+        $WEBTOBDIR/bin/wsdown ; $WEBTOBDIR/bin/wsboot
+      check: "성공: wscfl 오류 없음, 해당 업무 요청 정상 응답·413/431 감소 · 실패: wscfl 오류(CFL-)면 wsdown 하지 않고 백업 http.m 복원, 기동 후 이상이면 백업 http.m·wsconfig 로 복원 후 재기동"
+      note: "사전조건: 요청 출처가 정상 업무이고 크기가 업무상 필요함을 업무·보안 담당과 확정(공격·잘못된 연계 요청은 한도를 올리지 말고 차단·형식 수정 요청), JEUS 쪽 요청 한도도 함께 확인 · 영향: wsdown~wsboot 동안 웹 서비스 중단, 한도 상향은 메모리·공격 노출 증가 · 승인: 웹 운영 담당·보안 담당·변경 관리 · 백업/롤백: 날짜 붙은 http.m·wsconfig 복사본으로 복원 후 wsdown/wsboot · 적용: WebtoB 4.1/5(http.m)"
+    - do: 공격·잘못된 연계 요청이면 차단·수정 요청
+      check: "성공: 해당 출처의 400/REQ_0 감소 · 실패: 출처가 계속 바뀌면 보안 담당이 상위(방화벽·WAF) 정책으로 처리"
+      note: "보안 담당에 출처 IP·요청 줄 목록 전달(차단은 보안 담당 절차), 내부 연계 장비면 그 시스템 담당에 요청 형식(Request-Line·헤더) 수정 요청"
+  - stage: 3
+    steps:
+    - do: TmaxSoft·보안 담당 의뢰 자료
+      cmd: |
+        tail -n 10000 <access_log> | awk -F'"' 'NF>=3 {s=$3; sub(/^[[:space:]]+/,"",s); split(s,a,/[[:space:]]+/); if(a[1] ~ /^(400|413|414|431)$/) print}' > bad_requests.txt
+      check: "거부 요청 목록·http.m(요청 제한 부분)·오류 로그 발췌·WebtoB 버전(Fix)"
+      note: "민감정보 마스킹: 클라이언트 IP·요청 URL 쿼리·쿠키·인증 헤더를 가림 · 전달 승인: 보안 담당"
+
+- id: WTB-PROC-R6-CONNRES
+  scope: id
+  products: [webtob]
+  category: capacity
+  match: [WEBTOB-FD-EXHAUSTED, WEBTOB-KEEPALIVE-MAX]
+  title: 연결 자원 한도 — 파일 디스크립터 고갈·Keep-Alive 한도 (WebtoB)
+  source: "TmaxSoft WebtoB Administrator's Guide '환경 파일 NODE 절 (MaxUser, HTH, Keep-Alive 관련 항목)' / Linux 'getrlimit(2) RLIMIT_NOFILE'·'limits.conf(5) pam_limits' — man7.org"
+  verify_note: "미검증 — Keep-Alive 관련 http.m 항목 이름·범위와 MaxUser·FD 관계를 TmaxSoft 공식 문서로 확인하지 못함"
+  stages:
+  - stage: 1
+    steps:
+    - do: 프로세스별 FD 사용량·한도 (읽기 전용)
+      cmd: |
+        for p in $(pgrep -f "hth|htl"); do echo "$p $(ls /proc/$p/fd 2>/dev/null | wc -l) $(grep 'open files' /proc/$p/limits | awk '{print $4}')"; done
+        grep -n -i -E "MaxUser|HTH|KeepAlive" $WEBTOBDIR/config/http.m
+      check: "사용 FD(둘째 칸)가 한도(셋째 칸, Soft)의 90% 이상이면 고갈 확정 · 한도가 1024 처럼 작으면 실행 계정 nofile 과소"
+      note: "Linux /proc 기준(AIX·HP-UX·Solaris 는 lsof -p <PID> | wc -l) · 권한: WebtoB 실행 계정(다른 계정 프로세스는 root)"
+    - do: 연결 상태·누적 원인 확인
+      cmd: |
+        ss -tan "( sport = :<port> )" | awk 'NR>1 {print $1}' | sort | uniq -c
+        tail -n 10000 <access_log> | awk -F'"' 'NF>=3 {split($1,b,/[[:space:]]+/); print b[1]}' | sort | uniq -c | sort -rn | head
+      check: "ESTAB 이 많고 wsadmin st -s 큐가 쌓이면 응답 지연으로 연결 누적, CLOSE-WAIT 다수면 연결 정리 지연, 소수 IP 가 대부분이면 폭주 출처 · Keep-Alive 한도 메시지만 있고 오류·지연이 없으면 정보성"
+      note: "접근 로그는 따옴표로 나눠 첫 칸(출처)만 읽음 — 형식 공통 · 권한: WebtoB 실행 계정"
+  - stage: 2
+    steps:
+    - do: 실행 계정 nofile 한도 상향 (재기동 필요)
+      config:
+        file: /etc/security/limits.d/webtob.conf (systemd 로 기동하면 서비스 유닛의 LimitNOFILE)
+        snippet: |
+          <WebtoB 실행 계정>  soft  nofile  65536
+          <WebtoB 실행 계정>  hard  nofile  65536
+      cmd: |
+        ls -l /etc/security/limits.d/ > limits_d_before.txt ; cp -p /etc/security/limits.conf /etc/security/limits.conf.$(date +%Y%m%d)
+        su - <WebtoB 실행 계정> -c "ulimit -n"
+        $WEBTOBDIR/bin/wsdown ; $WEBTOBDIR/bin/wsboot
+      check: "성공: 새 로그인 셸의 ulimit -n 이 65536, 재기동 뒤 /proc/<PID>/limits 의 open files 반영, Too many open files 미발생 · 실패: 반영되지 않으면 기동 방식(systemd·cron·스크립트)별 한도 설정 위치 재확인"
+      note: "사전조건: OS fs.file-max 여유, 연결 누적 원인이 백엔드 지연이 아님을 확인(지연이면 한도만 올려도 다시 참) · 영향: 반영에 wsdown~wsboot 필요 — 웹 서비스 중단 · 승인: OS 담당·웹 운영 담당·변경 관리 · 백업/롤백: 추가한 webtob.conf 를 limits.d 밖으로 옮겨 원복 후 재기동(limits.conf 는 날짜 복사본 보관) · 적용: Linux PAM(pam_limits) — UNIX 는 OS 별 방식"
+    - do: Keep-Alive 한도 조정 (연결 재생성 부하가 확인된 경우만)
+      cmd: |
+        cp -p $WEBTOBDIR/config/http.m $WEBTOBDIR/config/http.m.$(date +%Y%m%d%H%M)
+        cp -p $WEBTOBDIR/config/wsconfig $WEBTOBDIR/config/wsconfig.$(date +%Y%m%d%H%M)
+        vi $WEBTOBDIR/config/http.m          # 매뉴얼에서 확인한 Keep-Alive 항목만
+        cd $WEBTOBDIR/config && $WEBTOBDIR/bin/wscfl -i http.m
+      check: "성공: wscfl 오류 없음, 적용 후 연결 재생성 감소·FD 여유 유지 · 실패: FD·MaxUser 소진이 빨라지면 백업 http.m 으로 되돌림"
+      note: "사전조건: Keep-Alive 항목 이름·범위를 매뉴얼로 확인(미검증), 한도 상향은 연결 점유를 늘려 FD·MaxUser 소진을 앞당길 수 있음 · 영향: 적용에 wsdown~wsboot 필요(서비스 중단) · 승인: 웹 운영 담당·변경 관리 · 백업/롤백: 날짜 붙은 http.m·wsconfig 로 복원 후 wscfl·재기동"
+  - stage: 3
+    steps:
+    - do: TmaxSoft·OS 의뢰 자료
+      cmd: |
+        for p in $(pgrep -f "hth|htl"); do echo "== $p"; cat /proc/$p/limits; ls /proc/$p/fd | wc -l; done > wtb_fd.txt
+        ss -s > ss_summary.txt
+      check: "프로세스별 한도·FD 사용량·연결 상태 요약·http.m(NODE 절)"
+      note: "민감정보 마스킹: 계정명·호스트명·내부 IP 를 가림 · 전달 승인: 보안 담당"
+
+- id: WTB-PROC-R6-JSVLINK
+  scope: id
+  products: [webtob]
+  category: capacity
+  match: [LEG-WEBTOB-WAS, LEG-WEBTOB-WJP-001-AB52, HTH0063, HTH0292]
+  title: JSV(JEUS) 연동 연결 부족·연동 실패 (WJP · HTH0063/HTH0292, WebtoB)
+  source: "TmaxSoft WebtoB Administrator's Guide 'wsadmin (si, st -s, st -p)'·'환경 파일 NODE 절 JSVPORT·SERVER 절 MinProc/MaxProc' / JEUS Web Engine 'WebtoB 연결(커넥터) 설정'"
+  verify_note: "미검증 — wsadmin si 출력의 열 이름·상태 값과 JEUS 판별 WebtoB 커넥터 설정 이름을 TmaxSoft 공식 문서로 확인하지 못함(wsadmin 은 대화형 입력으로만 적음)"
+  stages:
+  - stage: 1
+    steps:
+    - do: JSV 서버 상태·연결 수 확인 (읽기 전용)
+      cmd: |
+        $WEBTOBDIR/bin/wsadmin
+        #  프롬프트에서 차례로 입력(조회 전용): si   st -s   st -p
+      check: "si 에서 JSV 서버의 연결(프로세스) 수가 MinProc 보다 적거나 0 이면 JEUS 쪽 연결 미복구·JEUS 다운 · st -s 큐 대기가 늘면 연결 부족으로 요청 적체"
+      note: "JSV 상태는 si(서버 정보)로 본다 — ci 는 클라이언트 정보 · wsadmin 에서는 조회 명령만(down·boot·set 금지) · 적용: WebtoB 4.1/5/6 · 권한: WebtoB 실행 계정"
+    - do: 연동 오류 시각·JSVPORT 연결 수 확인
+      cmd: |
+        ls -lt $WEBTOBDIR/log | head
+        grep -n -E "WJP-|HTH0063|HTH0292|JSV|jeus" <오류로그> | tail -20
+        grep -n -i -E "JSVPORT|MinProc|MaxProc" $WEBTOBDIR/config/http.m
+        ss -tn state established "( sport = :<JSVPORT> )" | wc -l
+      check: "JSVPORT ESTABLISHED 수가 JEUS 설정 연결 수보다 적으면 연결 부족 · 오류가 JEUS 재기동 시각에 몰리면 재연결 지연(JEUS 기동 완료 후 회복되는지 관찰) · 계속 0 이면 JEUS 다운·방화벽"
+      note: "JEUS 가 WebtoB 의 JSVPORT 로 접속하는 구조 기준 · 권한: WebtoB 실행 계정"
+  - stage: 2
+    steps:
+    - do: JEUS 쪽 연결 복구·연결 수 정렬 (WAS 담당과 함께)
+      cmd: |
+        cp -p $WEBTOBDIR/config/http.m $WEBTOBDIR/config/http.m.$(date +%Y%m%d%H%M)
+        cp -p $WEBTOBDIR/config/wsconfig $WEBTOBDIR/config/wsconfig.$(date +%Y%m%d%H%M)
+        vi $WEBTOBDIR/config/http.m          # *SERVER MinProc/MaxProc 를 JEUS WebtoB 연결 수와 맞춤
+        cd $WEBTOBDIR/config && $WEBTOBDIR/bin/wscfl -i http.m
+      check: "성공: 적용 후 si 의 JSV 연결 수가 설정값까지 회복, HTH0063/HTH0292·WJP 미발생 · 실패: JEUS 가 연결을 다시 맺지 못하면 JEUS 쪽 연결 설정·로그 확인(WAS 담당), WebtoB 설정은 백업으로 복원"
+      note: "사전조건: JEUS 기동 상태·연결 설정(연결 수·WebtoB 주소/포트)을 WAS 담당과 확인 — JEUS 다운이 원인이면 WebtoB 설정을 바꾸지 않음 · 영향: http.m 변경은 wsdown~wsboot 후 적용(서비스 중단), JEUS 연결 설정 변경은 JEUS 재기동이 필요할 수 있음 · 승인: 웹·WAS 담당·변경 관리 · 백업/롤백: 날짜 붙은 http.m·wsconfig 로 복원 후 wscfl·재기동"
+  - stage: 3
+    steps:
+    - do: TmaxSoft·WAS 의뢰 자료
+      cmd: |
+        tar czf webtob_jsv_$(date +%Y%m%d).tgz $WEBTOBDIR/config/http.m $WEBTOBDIR/log
+      check: "http.m·WebtoB 로그·wsadmin si/st -s 화면 기록·같은 시각 JEUS 로그·스레드 덤프"
+      note: "민감정보 마스킹: 내부 IP·호스트명·클라이언트 IP·URL 파라미터를 가림 · 전달 승인: 보안 담당"
+
+- id: WTB-PROC-R6-PROCESS
+  scope: id
+  products: [webtob]
+  category: internal
+  match: [WEBTOB-SERVER-DOWN, WEBTOB-HTH-RESTART, WEBTOB-SVR-RESTART, LEG-WEBTOB-HTH-001-8F18]
+  title: 일부 프로세스 비정상 종료·자동 재기동 (HTH·서버 프로세스, WebtoB)
+  source: "TmaxSoft WebtoB Administrator's Guide 'WSM 프로세스 관리'·'wsadmin (st -p, si)'·'기동과 종료 (wsboot, wsdown)'"
+  verify_note: "미검증 — 서버 프로세스 단위 기동·종료 명령과 WSM 자동 재기동 조건을 TmaxSoft 공식 문서로 확인하지 못해 전체 재기동 절차만 적음"
+  stages:
+  - stage: 1
+    steps:
+    - do: 프로세스 생존·기동 시각 확인 (읽기 전용)
+      cmd: |
+        ps -eo pid,lstart,cmd | grep -E "[w]sm|[h]tl|[h]th"
+        $WEBTOBDIR/bin/wsadmin
+        #  프롬프트에서 입력(조회 전용): st -p   si
+      check: "HTH·서버 프로세스 기동 시각이 WSM 보다 늦으면 도중에 죽었다 다시 뜬 것 · st -p·si 에 RDY 가 아닌 프로세스나 MinProc 보다 적은 서버가 남아 있으면 자동 복구 실패"
+      note: "적용: WebtoB 4.1/5/6 · wsadmin 에서는 조회 명령만 · 권한: WebtoB 실행 계정"
+    - do: 종료 직전 원인 확인
+      cmd: |
+        ls -lt $WEBTOBDIR/log | head
+        grep -n -E "HTH-|ERR-|signal|core|restart|down" <오류로그> | tail -30
+        dmesg -T | grep -i -E "oom|segfault|killed process" | tail -10
+        ls -lt $WEBTOBDIR/bin/core* $WEBTOBDIR/core* 2>/dev/null | head
+      check: "같은 시각 OOM·segfault 기록이면 메모리 부족·프로세스 결함, 코어 파일이 있으면 3차 자료 · JSV 서버만 반복되면 연동 대상(JEUS) 장애 영향 — WTB-PROC-R6-JSVLINK"
+      note: "dmesg -T 는 util-linux 2.20+ (없으면 dmesg | tail) · 권한: dmesg 는 root 가 필요할 수 있음"
+    - do: FD 한도 근접 여부 (HTH 반복 종료 시)
+      cmd: |
+        for p in $(pgrep -f hth); do echo "$p $(ls /proc/$p/fd 2>/dev/null | wc -l)"; done
+        grep "open files" /proc/$(pgrep -f hth | head -1)/limits
+      check: "사용 FD 가 한도에 근접하면 FD 고갈 절차(WTB-PROC-R6-CONNRES)로"
+      note: "Linux /proc 기준 · 권한: WebtoB 실행 계정"
+  - stage: 2
+    steps:
+    - do: 상태·코어 보존 후 정비 시간에 전체 재기동 (자동 복구 실패 시만)
+      cmd: |
+        ps -eo pid,lstart,cmd | grep -E "[w]sm|[h]tl|[h]th" > wtb_ps_before.txt
+        tar czf wtb_core_$(date +%Y%m%d%H%M).tgz $WEBTOBDIR/log $WEBTOBDIR/bin/core* 2>/dev/null
+        $WEBTOBDIR/bin/wsdown ; $WEBTOBDIR/bin/wsboot
+      check: "성공: st -p·si 에서 모든 프로세스 RDY·서버 수 MinProc 이상, 서비스 URL 정상 · 실패: 기동 오류면 로그 첫 오류(포트·공유 메모리)를 기준으로 WTB-PROC-INTERNAL 절차"
+      note: "사전조건: 자동 재기동으로 이미 정상이면 재기동하지 않음(원인 분석만), 코어·로그 보존, JEUS 장애가 원인이면 JEUS 복구 먼저 · 영향: wsdown~wsboot 동안 웹 서비스 전면 중단 · 승인: 웹 운영 담당·변경 관리(업무 외 시간 또는 L4 우회 후) · 백업/롤백: 설정 변경이 없어 되돌릴 대상 없음 — 기동 실패 시 이전 http.m·wsconfig 복사본으로 복원 후 wsboot"
+  - stage: 3
+    steps:
+    - do: TmaxSoft 의뢰 자료
+      cmd: |
+        gdb -batch -ex bt $WEBTOBDIR/bin/hth <코어파일> > hth_backtrace.txt 2>&1
+        $WEBTOBDIR/bin/wsadmin -v > wtb_version.txt 2>&1
+      check: "backtrace·로그 발췌·ps 기록·dmesg·WebtoB 버전(Fix)·http.m"
+      note: "민감정보 마스킹: 코어 원본은 메모리 내용(세션·개인정보)을 담으므로 전달하지 않고 backtrace 만, 로그의 클라이언트 IP·URL 파라미터·호스트명을 가림 · 전달 승인: 보안 담당"
+
+- id: WTB-PROC-R6-ERRRESP
+  scope: id
+  products: [webtob]
+  category: internal
+  match: [WEBTOB-FILE-NOT-FOUND, ERR-05065, COM_0, ERR-00122]
+  title: 오류 응답 원인 추적 — 대상 없음(404·ERR-05065)·Worker 처리 오류(ERR-00122)·기본 오류 코드(COM_0)
+  source: "TmaxSoft WebtoB Administrator's Guide '환경 파일 NODE/VHOST 절 (DOCROOT)·ALIAS 절·URI 절'·'LOGGING 절' / WebtoB 5·6 오류 코드 체계(COM_·RSC_·CONN_·DST_·ERR-)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 오류 응답 상태·경로 집계 (읽기 전용)
+      cmd: |
+        tail -n 10000 <access_log> | awk -F'"' 'NF>=3 {s=$3; sub(/^[[:space:]]+/,"",s); split(s,a,/[[:space:]]+/); if(a[1] ~ /^[45][0-9][0-9]$/) {r=$2; sub(/\?.*/,"",r); print a[1], r}}' | sort | uniq -c | sort -rn | head -15
+      check: "404 가 다수 사용자·같은 경로에 몰리면 배포 누락·DOCROOT/ALIAS 오류, 한 출처가 여러 경로를 훑으면 스캐닝(보안 담당) · 5xx 가 섞이면 다음 단계 선행 코드 확인"
+      note: "따옴표로 나눠 요청 줄 뒤 첫 칸을 상태로 읽음(WebtoB DEFAULT·COMMON·COMBINED 공통 — 상태 칸이 $9 가 아닐 수 있음) · 쿼리 문자열은 지우고 집계 · 적용: WebtoB 4.1/5/6 · 권한: WebtoB 실행 계정"
+    - do: 선행·하위 오류 코드 확인 (COM_0·ERR-00122)
+      cmd: |
+        ls -lt $WEBTOBDIR/log | head
+        grep -n -B3 -A2 -E "COM_0|ERR-00122|ERR-05065" <오류로그> | tail -40
+      check: "COM_0 바로 앞의 CONN_·DST_·RSC_ 코드, ERR-00122 와 같은 줄·다음 줄의 하위 ERR 코드가 실제 원인 — 그 코드의 판정·절차를 따름 · 선행 코드가 없으면 응답 코드 기준으로 판단"
+      note: "권한: WebtoB 실행 계정"
+    - do: DOCROOT·ALIAS·URI 매핑과 실제 파일 대조
+      cmd: |
+        grep -n -i -E "DOCROOT|ALIAS|URI" $WEBTOBDIR/config/http.m
+        ls -l <DOCROOT>/<요청경로>
+      check: "상위 404 경로가 DOCROOT 아래 없으면 배포 누락·호출 측 링크 오류, 다른 위치에 있으면 ALIAS·URI 설정 오류"
+      note: "조회 전용 · 권한: WebtoB 실행 계정"
+  - stage: 2
+    steps:
+    - do: 누락 파일 재배포 또는 ALIAS·URI 정정
+      cmd: |
+        cp -p $WEBTOBDIR/config/http.m $WEBTOBDIR/config/http.m.$(date +%Y%m%d%H%M)
+        cp -p $WEBTOBDIR/config/wsconfig $WEBTOBDIR/config/wsconfig.$(date +%Y%m%d%H%M)
+        vi $WEBTOBDIR/config/http.m          # ALIAS·URI 정정이 필요한 경우만
+        cd $WEBTOBDIR/config && $WEBTOBDIR/bin/wscfl -i http.m
+      check: "성공: 해당 경로 200 응답·404/ERR-05065 감소 · 실패: 계속 404 면 요청 URL 자체 오류(호출 측 수정), wscfl 오류면 백업 http.m 복원"
+      note: "사전조건: 배포 담당과 파일 위치·누락 여부 확인(재배포는 배포 절차로), 설정 변경은 매핑 오류가 확인된 경우만 · 영향: http.m 변경 적용에 wsdown~wsboot 필요(서비스 중단 — 일정 협의) · 승인: 웹 운영 담당·변경 관리 · 백업/롤백: 날짜 붙은 http.m·wsconfig 로 복원 후 wscfl·재기동"
+  - stage: 3
+    steps:
+    - do: 의뢰 자료
+      cmd: |
+        grep -n -B3 -A2 -E "COM_0|ERR-00122|ERR-05065" <오류로그> | tail -500 > wtb_errresp.txt
+      check: "오류 코드 발췌(선행·하위 코드 포함)·오류 응답 집계·http.m DOCROOT/ALIAS/URI 부분"
+      note: "민감정보 마스킹: 클라이언트 IP·URL 파라미터·쿠키·내부 경로의 사용자명을 가림 · 전달 승인: 보안 담당"
+
+- id: WTB-PROC-R6-IPC
+  scope: id
+  products: [webtob]
+  category: internal
+  match: [WEBTOB-IPC-FAIL]
+  title: 프로세스 간 통신(IPC) 자원 생성·사용 실패 — 세마포어·메시지 큐 (WebtoB)
+  source: "TmaxSoft WebtoB Administrator's Guide '기동과 종료 (wsboot, wsdown)' / Linux 'ipcs(1)'·'ipcrm(1)'·'proc(5) kernel.sem·kernel.msgmni' — man7.org"
+  stages:
+  - stage: 1
+    steps:
+    - do: 프로세스·잔존 IPC 자원 확인 (읽기 전용)
+      cmd: |
+        ps -ef | grep -E "[w]sm|[h]tl|[h]th"
+        ipcs -s | grep "$(id -un)" ; ipcs -q | grep "$(id -un)"
+      check: "WebtoB 프로세스가 없는데 실행 계정 소유 세마포어·메시지 큐가 남아 있으면 비정상 종료 잔여(기동 실패 원인)"
+      note: "WebtoB 실행 계정으로 실행(grep 의 계정명) · Linux 기준(AIX·HP-UX·Solaris 는 ipcs 출력 형식 다름) · 권한: WebtoB 실행 계정"
+    - do: 커널 IPC 한도·사용량 확인
+      cmd: |
+        ipcs -l
+        ipcs -u
+        sysctl kernel.sem kernel.msgmni
+      check: "ipcs -u 사용량이 ipcs -l 한도에 근접하면 커널 한도 부족(같은 서버의 DB·Tmax 등과 공유)"
+      note: "조회 전용 · 권한: 일반 사용자 조회 가능"
+  - stage: 2
+    steps:
+    - do: 잔존 IPC 정리 후 기동 (WebtoB 완전 정지 상태에서만)
+      cmd: |
+        ipcs -a > ipcs_before_$(date +%Y%m%d%H%M).txt
+        ipcrm -s <semid> ; ipcrm -q <msqid>
+        $WEBTOBDIR/bin/wsboot
+      check: "성공: wsboot 정상·wsadmin st -p 모두 RDY · 실패: 같은 오류면 다른 잔존 자원·한도 부족 확인(아래 단계)"
+      note: "사전조건: wsm·htl·hth 프로세스 0개, 대상 id 가 WebtoB 실행 계정 소유이고 사용 프로세스 없음 — 다른 제품(DB·Tmax) 자원은 지우지 않음 · 영향: 잘못 지우면 해당 제품 장애, 정리~기동 동안 웹 서비스 불가 · 승인: 웹 운영 담당·OS 담당 · 백업/롤백: ipcs_before 기록 보관(IPC 자원은 복원 불가 — 대상 확인이 유일한 안전장치)"
+    - do: 커널 IPC 한도 상향 (한도 부족 시, OS 담당)
+      cmd: |
+        sysctl kernel.sem kernel.msgmni > sysctl_ipc_before.txt
+        sysctl -w kernel.sem="<SEMMSL> <SEMMNS> <SEMOPM> <SEMMNI>"
+        # 영구 반영: /etc/sysctl.d/99-webtob.conf 에 같은 값 기록 후 sysctl --system
+      check: "성공: ipcs -l 에 새 한도 반영, wsboot 정상 · 실패: 다른 제품 이상이 생기면 sysctl_ipc_before.txt 값으로 즉시 원복"
+      note: "사전조건: 같은 서버 다른 제품(DB 등)의 IPC 요구량 합산 · 영향: 커널 파라미터는 서버 전체에 적용 · 승인: OS 담당·변경 관리 · 백업/롤백: sysctl_ipc_before.txt 값으로 sysctl -w 원복, 영구 파일은 날짜 복사본으로 복원"
+  - stage: 3
+    steps:
+    - do: TmaxSoft·OS 의뢰 자료
+      cmd: |
+        ipcs -a > ipcs.txt ; ipcs -l >> ipcs.txt ; tar czf webtob_ipc_$(date +%Y%m%d).tgz ipcs.txt $WEBTOBDIR/log
+      check: "IPC 현황·한도·WebtoB 로그(오류 시각)"
+      note: "민감정보 마스킹: 계정명·호스트명·내부 IP 를 가림 · 전달 승인: 보안 담당"
+
+# ───────────────────────── Apache ─────────────────────────
+- id: APA-PROC-R6-CONFWARN
+  scope: id
+  products: [apache]
+  category: internal
+  match: [AH00548, AH00111, AH00112, AH00082, AH01144, AH01302, AH02296]
+  title: 설정 경고·모듈/지시자 누락 — 서비스는 동작 중 (AH00548 · AH00111 · AH00112 · AH00082 · AH01144 · AH02296 · AH01302)
+  source: "Apache 2.4 'apachectl (-t, -S, -M)'·'core (Define, DocumentRoot, AllowOverride Nonfatal)'·'Upgrading to 2.4 from 2.2 (NameVirtualHost)'·'mod_filter'·'mod_proxy (프로토콜 하위 모듈)'·'mod_ldap (LDAPOpCacheEntries)' — httpd.apache.org/docs/2.4/"
+  stages:
+  - stage: 1
+    steps:
+    - do: 경고 종류·대상 집계 (읽기 전용)
+      cmd: |
+        grep -o -E "AH00548|AH00111|AH00112|AH00082|AH01144|AH01302|AH02296" <error_log> | sort | uniq -c
+        grep -n -E "AH00111|AH00112|AH00082|AH01144|AH02296" <error_log> | tail -15
+      check: "기동 때만 1회씩이면 설정 경고(AH00548·AH01302 는 정보성), 요청마다 반복(AH00082·AH01144·AH02296)이면 해당 기능이 실제로 동작하지 않는 상태 — AH02296 으로 무시된 지시자가 인증·접근 제한이면 보안 담당 즉시 통보"
+      note: "<error_log> 는 apachectl -S 의 Main ErrorLog · 적용: Apache 2.4 · 권한: 로그 읽기"
+    - do: 설정 검사·가상호스트·모듈 확인
+      cmd: |
+        apachectl -t
+        apachectl -S 2>&1 | head -30
+        apachectl -M 2>/dev/null | grep -i -E "proxy|filter|deflate|ldap|rewrite"
+      check: "-t 가 경고와 함께 Syntax OK 면 기동은 되나 값이 틀어진 상태(AH00111 은 변수 자리에 글자 그대로, AH00112 는 없는 경로) · ProxyPass 스킴(ajp·fcgi·https)에 맞는 proxy_<스킴>_module 이 없으면 AH01144 · 필터(DEFLATE 등)·.htaccess 지시자를 제공하는 모듈이 없으면 AH00082/AH02296"
+      note: "설정을 읽기만 함(서비스 영향 없음) · Debian/Ubuntu 는 apache2ctl — envvars 를 거치지 않은 직접 실행은 AH00111 을 낼 수 있음 · 권한: root 또는 설정 읽기 권한"
+    - do: 남은 지시자·경로 위치 확인
+      cmd: |
+        grep -rn -E "NameVirtualHost|DocumentRoot|SetOutputFilter|AddOutputFilter|Define " /etc/httpd/conf /etc/httpd/conf.d | head -30
+        ls -ld <DocumentRoot> ; findmnt -T <DocumentRoot>
+      check: "DocumentRoot 가 없거나 마운트되지 않은 볼륨이면 AH00112 원인(해당 가상호스트 404/403)"
+      note: "RHEL 계열 경로 기준(Debian 은 /etc/apache2) · 조회 전용 · 권한: 설정 읽기"
+  - stage: 2
+    steps:
+    - do: 설정 정정 후 시험·graceful 적용
+      cmd: |
+        cp -a /etc/httpd/conf /etc/httpd/conf.bak.$(date +%Y%m%d%H%M) ; cp -a /etc/httpd/conf.d /etc/httpd/conf.d.bak.$(date +%Y%m%d%H%M)
+        vi <해당 conf 또는 .htaccess>      # NameVirtualHost 주석, Define·경로 정정, LoadModule 추가, 지시자 철자 수정
+        apachectl configtest && apachectl graceful
+      check: "성공: configtest Syntax OK 에 해당 경고 없음, graceful 뒤 경고 재발 없음 — 기능(압축·프록시·인증)은 실제 요청으로 확인 · 실패: configtest 오류면 graceful 하지 않고 백업 복원"
+      note: "사전조건: 경고 원인 지시자·모듈 확정, 새 모듈 적재는 보안 담당 검토(mod_proxy 계열은 ProxyRequests Off 로 열린 프록시 방지), .htaccess 는 수정 전 개별 복사본 · 영향: graceful 은 처리 중 요청을 마친 뒤 자식 교체(서비스 유지), 모듈 추가는 메모리 증가 · 승인: 웹 운영 담당·변경 관리 · 백업/롤백: conf·conf.d 날짜 복사본으로 복원 후 configtest·graceful · 적용: Apache 2.4(RHEL 경로 기준, Debian 은 a2enmod·a2enconf)"
+  - stage: 3
+    steps:
+    - do: 의뢰 자료
+      cmd: |
+        apachectl -S > vhosts.txt 2>&1 ; apachectl -M > modules.txt 2>&1 ; httpd -V > httpd_V.txt
+      check: "가상호스트·모듈 목록·버전·경고 발췌·해당 설정 조각"
+      note: "민감정보 마스킹: 설정의 호스트명·내부 IP·인증 파일 경로·LDAP 바인드 정보(AuthLDAPBindPassword 등)를 가림, 개인키는 포함하지 않음 · 전달 승인: 보안 담당"
+
+- id: APA-PROC-R6-LIFECYCLE
+  scope: id
+  products: [apache]
+  category: internal
+  match: [AH00169, AH00170, AH00171, AH00098]
+  title: 종료·재시작 기록 — 요청 주체와 원인 확인 (AH00169 SIGTERM · AH00170 graceful-stop · AH00171 graceful · AH00098 비정상 종료 흔적)
+  source: "Apache 2.4 'Stopping and Restarting Apache HTTP Server (TERM·USR1·WINCH)'·'core (PidFile)' — httpd.apache.org/docs/2.4/stopping.html / systemd journalctl"
+  stages:
+  - stage: 1
+    steps:
+    - do: 종료·재시작 시각과 직후 기동 여부 (읽기 전용)
+      cmd: |
+        grep -n -E "AH00169|AH00170|AH00171|AH00098|AH00489|AH00094" <error_log> | tail -20
+        systemctl status httpd --no-pager | head -10
+      check: "AH00169/AH00170 뒤 AH00489(기동)가 없고 프로세스가 없으면 서비스 중단 상태 — 즉시 2차 · AH00171 뒤 AH00489·AH00094 가 바로 이어지면 graceful 정상 완료 · AH00098 은 직전 종료가 정상 절차 없이 끝났다는 뜻"
+      note: "적용: Apache 2.4 systemd 환경(Debian 계열 서비스명 apache2) · 권한: 로그 읽기"
+    - do: 요청 주체(운영자·스크립트·패키지·OOM) 추적
+      cmd: |
+        journalctl -u httpd --since "-1d" --no-pager | tail -30
+        last -x | head -10
+        grep -rln -E "httpd|apachectl|graceful" /etc/logrotate.d /etc/cron.d /etc/cron.daily 2>/dev/null
+        dmesg -T | grep -i -E "oom|killed process" | tail -5
+      check: "logrotate·배포 스크립트 시각과 같으면 계획된 동작(정보성) · 패키지 갱신·운영자 명령이면 변경 기록과 대조 · AH00098 직전 OOM·재부팅 기록이면 메모리 부족·전원 문제"
+      note: "조회 전용 · 권한: journalctl·dmesg 는 root 또는 systemd-journal 그룹"
+  - stage: 2
+    steps:
+    - do: 비계획 중단이면 설정 확인 후 기동
+      cmd: |
+        apachectl configtest && systemctl start httpd
+      check: "성공: systemctl is-active httpd 가 active, error_log 에 AH00489 기록 · 실패: 기동 오류면 journalctl -u httpd 원인으로 APA-PROC-INTERNAL 절차"
+      note: "사전조건: 계획 작업이 아님을 운영 담당과 확인(계획 정지 중이면 기동 금지), configtest Syntax OK · 영향: 기동 직후 첫 요청 지연 · 승인: 웹 운영 담당 · 백업/롤백: 설정 변경 없음 — 기동 실패 시 직전 정상 설정 복사본으로 복원 후 기동"
+    - do: OOM 이 원인이면 워커 한도를 메모리에 맞춤
+      config:
+        file: /etc/httpd/conf.modules.d/00-mpm.conf 또는 httpd.conf (IfModule mpm_*)
+        snippet: |
+          MaxRequestWorkers <가용 메모리 ÷ 자식 프로세스 평균 RSS(prefork) 또는 프로세스당 RSS ÷ ThreadsPerChild 로 환산(event)>
+      cmd: |
+        apachectl configtest && apachectl graceful
+      check: "성공: 피크 시간 가용 메모리 유지·OOM 미발생 · 실패: AH00161(MaxRequestWorkers 도달)이 늘면 APA-PROC-CAPACITY 로 용량 재산정"
+      note: "사전조건: ps -o rss 로 자식 RSS 측정, 다른 프로세스 메모리 제외한 가용량 산정 · 영향: 한도를 낮추면 동시 처리 수 감소(대기 증가) · 승인: 웹 운영 담당·변경 관리 · 백업/롤백: 설정 파일 날짜 복사본으로 복원 후 configtest·graceful · 적용: Apache 2.4"
+  - stage: 3
+    steps:
+    - do: 의뢰 자료
+      cmd: |
+        journalctl -u httpd --since "-2d" --no-pager > httpd_journal.txt ; grep -E "AH00169|AH00170|AH00171|AH00098|AH00489" <error_log> > lifecycle.txt
+      check: "종료·기동 기록·journal·변경 기록(작업 주체)·dmesg 발췌"
+      note: "민감정보 마스킹: 운영자 계정명·호스트명·IP 를 가림 · 전달 승인: 보안 담당"
+
+- id: APA-PROC-R6-NOTFOUND
+  scope: id
+  products: [apache]
+  category: internal
+  match: [AH00128, AH00130, AH00687, AH01276]
+  title: 요청 대상 없음·제공 불가 (AH00128 404 · AH00130 PATH_INFO · AH00687 협상 실패 · AH01276 인덱스 없음)
+  source: "Apache 2.4 'core (DocumentRoot, AcceptPathInfo, Options)'·'mod_dir (DirectoryIndex)'·'mod_negotiation (MultiViews)'·'Log Files (Common/Combined Log Format)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 404/403 경로·출처 집계 (읽기 전용)
+      cmd: |
+        tail -n 200000 <access_log> | awk '$9==404 || $9==403 {sub(/\?.*/,"",$7); print $9, $7}' | sort | uniq -c | sort -rn | head -15
+        tail -n 200000 <access_log> | awk '$9==404 {print $1}' | sort | uniq -c | sort -rn | head -10
+      check: "한 IP 가 여러 경로를 404 로 훑으면 스캐닝(보안 담당 통보) · 다수 사용자가 같은 경로면 배포 누락·링크 오류 · favicon 등 한두 건은 정상 범위"
+      note: "Apache common/combined 형식 기준($9 상태·$7 경로) — LogFormat 을 바꾼 경우 확인 · 쿼리 문자열은 지우고 집계 · 적용: Apache 2.2/2.4 · 권한: 로그 읽기"
+    - do: 코드별 원인 확인
+      cmd: |
+        grep -n -E "AH00128|AH00130|AH00687|AH01276" <error_log> | tail -15
+        ls -l <DocumentRoot>/<경로>
+        grep -rn -E "DirectoryIndex|MultiViews|AcceptPathInfo" /etc/httpd/conf /etc/httpd/conf.d
+      check: "AH00128 파일 없음, AH00130 파일 뒤 추가 경로(/a.html/x) 거부, AH00687 MultiViews 로 고를 변형 파일 없음, AH01276 index 파일 없고 Indexes 꺼짐(403, 정상 보호) — 업무 경로면 2차, 탐색이면 그대로 둠"
+      note: "조회 전용 · 권한: 설정·콘텐츠 읽기"
+  - stage: 2
+    steps:
+    - do: 누락 파일 재배포 또는 설정 정정 (업무 경로로 확인된 경우만)
+      cmd: |
+        cp -a /etc/httpd/conf.d /etc/httpd/conf.d.bak.$(date +%Y%m%d%H%M)
+        vi <해당 conf>      # 필요 시: Options -MultiViews, DirectoryIndex 파일 이름, <Location> 의 AcceptPathInfo On
+        apachectl configtest && apachectl graceful
+      check: "성공: 해당 업무 경로 200, 해당 AH 코드 감소 · 실패: configtest 오류면 반영하지 않고 백업 복원, 계속 404 면 요청 URL 자체 오류(호출 측 수정)"
+      note: "사전조건: 배포 담당과 누락 파일·경로 확인(재배포는 배포 절차로), Options Indexes 켜기는 디렉터리 목록 노출이라 금지 · 영향: graceful 은 서비스 유지, AcceptPathInfo On 은 해당 범위 요청 처리 방식 변경 · 승인: 웹 운영 담당 · 백업/롤백: conf.d 날짜 복사본으로 복원 후 configtest·graceful · 적용: Apache 2.4"
+  - stage: 3
+    steps:
+    - do: 배포·보안 담당 전달 자료
+      cmd: |
+        tail -n 200000 <access_log> | awk '$9==404 {sub(/\?.*/,"",$7); print $1, $7}' | sort | uniq -c | sort -rn > notfound.txt
+      check: "404 경로·출처 집계(쿼리 제거)·해당 AH 코드 발췌·DocumentRoot 설정"
+      note: "민감정보 마스킹: 외부 전달 시 클라이언트 IP 마지막 옥텟·내부 경로의 사용자명을 가림 · 전달 승인: 보안 담당"
+
+- id: APA-PROC-R6-FCGI
+  scope: id
+  products: [apache]
+  category: upstream
+  match: [AH01067, AH01071, AH01215, AH02429]
+  title: FastCGI·CGI 스크립트 오류와 비정상 응답 헤더 (AH01067 · AH01071 · AH01215 · AH02429)
+  source: "Apache 2.4 'mod_proxy_fcgi (SetHandler proxy:unix:…|fcgi://)'·'mod_cgi'·'mod_proxy (ProxyTimeout)' — httpd.apache.org/docs/2.4/mod/mod_proxy_fcgi.html / PHP 매뉴얼 'FPM configuration (pm.max_children, request_terminate_timeout)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 오류 문자열·스크립트 확인 (읽기 전용)
+      cmd: |
+        grep -n -E "AH01067|AH01071|AH01215|AH02429" <error_log> | tail -20
+        grep -o -E "AH01071: Got error '[^']{0,80}" <error_log> | sort | uniq -c | sort -rn | head
+      check: "Primary script unknown 이면 스크립트 경로 전달(SetHandler·ProxyPassMatch) 오류, PHP Fatal error 등 애플리케이션 메시지면 개발 담당 · AH01067 은 백엔드가 응답 도중 끊김(FPM 시간 초과·프로세스 종료) · AH01215 는 CGI 의 stderr(내용이 원인) · AH02429 는 응답 헤더 이름에 허용되지 않는 문자(헤더를 만드는 코드 결함)"
+      note: "적용: Apache 2.4 mod_proxy_fcgi·mod_cgi · 권한: 로그 읽기"
+    - do: 백엔드(FPM·CGI) 상태 확인
+      cmd: |
+        systemctl status php-fpm --no-pager | head -10
+        grep -n -E "max_children|execution timed out" /var/log/php-fpm/error.log 2>/dev/null | tail -10
+        ls -l <스크립트> ; head -1 <스크립트>
+      check: "server reached pm.max_children·execution timed out 이면 FPM 고갈·시간 초과(AH01067 원인) · CGI 스크립트 실행 권한이나 첫 줄 인터프리터 경로가 틀리면 AH01215"
+      note: "서비스명·로그 경로는 PHP 버전별 · 조회 전용 · 권한: root 권장"
+  - stage: 2
+    steps:
+    - do: 경로 전달·FPM 한도 정정
+      config:
+        file: /etc/httpd/conf.d/php.conf · /etc/php-fpm.d/www.conf
+        snippet: |
+          <FilesMatch \.php$>
+            SetHandler "proxy:unix:/run/php-fpm/www.sock|fcgi://localhost"
+          </FilesMatch>
+          ; FPM: pm.max_children = <가용 메모리 ÷ 프로세스당 RSS>
+          ; FPM: request_terminate_timeout = <Apache ProxyTimeout 이하>
+        note: "SetHandler proxy:unix: 형식은 2.4.10+"
+      cmd: |
+        php-fpm -t && apachectl configtest
+        systemctl reload php-fpm ; apachectl graceful
+      check: "성공: Primary script unknown·AH01067 감소, 해당 URL 200 · 실패: 시험 실패면 반영하지 않음, 반영 뒤 503/502 증가면 백업 복원 후 reload·graceful"
+      note: "사전조건: 스크립트 경로·소켓 경로·메모리 여유 확인, AH01071 의 애플리케이션 오류·AH01215·AH02429 는 코드 수정이 필요하므로 개발 담당 이관 · 영향: FPM reload·graceful 은 처리 중 요청을 마친 뒤 교체 · 승인: 웹 운영 담당·애플리케이션 담당 · 백업/롤백: php.conf·www.conf 를 .bak.<날짜> 로 복사 후 수정, 이상 시 복원 · 적용: Apache 2.4.10+, PHP-FPM 7.x/8.x"
+  - stage: 3
+    steps:
+    - do: 개발 의뢰 자료
+      cmd: |
+        grep -E "AH01067|AH01071|AH01215|AH02429" <error_log> | tail -500 > script_errors.txt
+      check: "오류 발췌(시각·URL·메시지)·FPM 로그·스크립트 버전"
+      note: "민감정보 마스킹: 오류 메시지 안의 SQL·파라미터 값·파일 경로의 사용자명, 클라이언트 IP·쿠키를 가림 · 전달 승인: 보안 담당"
+
+- id: APA-PROC-R6-BODY
+  scope: id
+  products: [apache]
+  category: upstream
+  match: [AH01097, AH01084, AH00996, LEG-AH-WARN-SLOW]
+  title: 요청 본문 전달 실패·느린 요청·AJP 패킷 크기 불일치 (AH01097 · AH01084 · AH00996 · 느린 요청)
+  source: "Apache 2.4 'mod_proxy (ProxyTimeout, ProxyIOBufferSize)'·'mod_proxy_ajp'·'mod_reqtimeout (RequestReadTimeout)'·'Log Files (%D)' / Tomcat 'AJP Connector (packetSize)' — tomcat.apache.org"
+  stages:
+  - stage: 1
+    steps:
+    - do: 오류 시각·URL 확인 (읽기 전용)
+      cmd: |
+        grep -n -E "AH01097|AH01084|AH00996|read timeout" <error_log> | tail -20
+      check: "AH01097/AH01084 가 대용량 업로드 URL 에 몰리면 클라이언트 중단 또는 백엔드 수신 한도·시간 초과 — 같은 시각 백엔드 로그로 구분 · AH00996 이 큰 응답에서만이면 AJP 패킷 크기 불일치 · read timeout 은 mod_reqtimeout 이 느린 클라이언트를 끊은 것"
+      note: "적용: Apache 2.4 · 권한: 로그 읽기"
+    - do: 응답 시간 기록·워커 점유 확인
+      cmd: |
+        grep -n "LogFormat" /etc/httpd/conf/httpd.conf
+        tail -n 200000 <access_log> | awk '{print $NF, $7}' | sort -rn | head -15
+        curl -s "http://localhost/server-status?auto" | grep -E "BusyWorkers|IdleWorkers"
+      check: "LogFormat 마지막이 %D(마이크로초)일 때만 둘째 줄이 의미 있음 — 특정 URL 이 상위면 백엔드 지연(WAS 담당), 고르게 느리면 클라이언트 회선 · BusyWorkers 가 MaxRequestWorkers 에 근접하면 느린 요청이 워커를 묶는 중"
+      note: "%D 가 없으면 응답 시간 분석 불가(추가는 2차) · server-status 는 mod_status 가 켜져 있고 localhost 허용일 때만 · 권한: 로그 읽기"
+    - do: AJP 패킷 크기 설정 대조 (AH00996)
+      cmd: |
+        grep -rn -E "ProxyIOBufferSize|ajp://" /etc/httpd/conf /etc/httpd/conf.d
+        grep -n "packetSize" <WAS 설치경로>/conf/server.xml
+      check: "WAS AJP packetSize 를 기본(8192)보다 크게 두었는데 Apache ProxyIOBufferSize 가 같은 값이 아니면 큰 응답에서 파싱 실패"
+      note: "Tomcat 기준 경로(JEUS 등은 해당 WAS 의 AJP 설정) · 조회 전용 · 권한: 설정 읽기"
+  - stage: 2
+    steps:
+    - do: 시간 제한·버퍼 정렬
+      config:
+        file: /etc/httpd/conf/httpd.conf 또는 /etc/httpd/conf.d/proxy.conf
+        snippet: |
+          RequestReadTimeout header=20-40,MinRate=500 body=20,MinRate=500    # 느린 클라이언트(mod_reqtimeout)
+          ProxyTimeout <업무 최대 처리 시간(초)>
+          ProxyIOBufferSize 65536      # AJP: WAS packetSize 와 같은 값(Tomcat <Connector protocol="AJP/1.3" packetSize="65536">)
+          LogFormat "%h %l %u %t \"%r\" %>s %b \"%{Referer}i\" \"%{User-Agent}i\" %D" combined_time
+      cmd: |
+        apachectl configtest && apachectl graceful
+      check: "성공: AH01097/AH01084/AH00996 감소, 느린 요청이 워커를 오래 묶지 않음 · 실패: 정상 대용량 업로드가 끊기면 body MinRate·ProxyTimeout 을 해당 경로만 완화하거나 원복"
+      note: "사전조건: 업무 최대 업로드 크기·처리 시간과 WAS packetSize 를 WAS 담당과 확인(packetSize 변경은 WAS 재기동 필요) · 영향: RequestReadTimeout 강화는 느린 회선 사용자의 요청을 끊을 수 있음, ProxyIOBufferSize 상향은 연결당 메모리 증가 · 승인: 웹·WAS 담당·변경 관리 · 백업/롤백: 설정 파일 날짜 복사본으로 복원 후 configtest·graceful · 적용: Apache 2.4(mod_reqtimeout 은 2.2.15+)"
+  - stage: 3
+    steps:
+    - do: WAS·의뢰 자료
+      cmd: |
+        grep -E "AH01097|AH01084|AH00996|read timeout" <error_log> | tail -500 > body_errors.txt
+      check: "오류 발췌·느린 URL 상위·WAS AJP/HTTP 커넥터 설정·같은 시각 WAS 로그"
+      note: "민감정보 마스킹: 클라이언트 IP·요청 URL 쿼리·쿠키·내부 WAS 호스트명/IP 를 가림 · 전달 승인: 보안 담당"
+
+- id: APA-PROC-R6-CERTVERIFY
+  scope: id
+  products: [apache]
+  category: upstream
+  match: [AH02039, AH01977, AH00963]
+  title: 인증서 검증·OCSP 조회·SSL 프록시 연결 실패 (AH02039 · AH01977 · AH00963)
+  source: "Apache 2.4 'mod_ssl (SSLVerifyClient, SSLCACertificateFile, SSLOCSPEnable, SSLUseStapling, SSLProxyEngine, SSLProxyCACertificateFile, SSLProxyCheckPeerName)' — httpd.apache.org/docs/2.4/mod/mod_ssl.html"
+  stages:
+  - stage: 1
+    steps:
+    - do: 오류 번호·관련 설정 확인 (읽기 전용)
+      cmd: |
+        grep -n -E "AH02039|AH01977|AH00963|AH00957|OCSP|Certificate Verification" <error_log> | tail -20
+        grep -rn -E "SSLVerifyClient|SSLCACertificate|SSLOCSP|SSLUseStapling|SSLProxy" /etc/httpd/conf /etc/httpd/conf.d
+      check: "AH02039 괄호 안 숫자는 OpenSSL 검증 코드 — 10 만료, 20 발급 CA 없음, 19·21 체인 문제 · AH01977 은 OCSP 응답자 접속·응답 실패(SSLOCSPEnable 또는 SSLUseStapling 사용 시) · AH00963 이 ProxyPass https:// 대상에서 나면 SSLProxyEngine·백엔드 인증서 검증 설정 확인, AH00957 동반이면 연결 자체 실패(APA-PROC-UPSTREAM)"
+      note: "적용: Apache 2.4 mod_ssl · 권한: 로그·설정 읽기"
+    - do: CA·OCSP 경로·백엔드 인증서·서버 시각 확인
+      cmd: |
+        openssl x509 -in <CA 파일> -noout -subject -enddate ; date
+        openssl x509 -in <인증서> -noout -ocsp_uri
+        curl -sI --max-time 5 <ocsp_uri> | head -3
+        openssl s_client -connect <backend_host>:<port> -servername <backend_host> </dev/null 2>/dev/null | grep -E "Verify return code|subject=|issuer="
+      check: "CA 만료·서버 시각 어긋남(5분 이상)이면 검증 실패 원인 · OCSP URL 에 서버가 도달하지 못하면(폐쇄망) AH01977 원인 · 백엔드 s_client 의 Verify return code 가 0 이 아니면 SSL 프록시 검증 실패"
+      note: "인증서(.crt)만 읽고 개인키는 열지 않음 · 적용: OpenSSL 1.0.2+ · 권한: 인증서 읽기"
+  - stage: 2
+    steps:
+    - do: 신뢰 CA·OCSP·SSL 프록시 설정 정정
+      config:
+        file: /etc/httpd/conf.d/ssl.conf
+        snippet: |
+          SSLCACertificateFile      /etc/pki/tls/certs/<client_ca_chain>.crt   # 클라이언트 인증서 발급 CA 체인(AH02039)
+          SSLUseStapling            off     # 폐쇄망에서 OCSP 응답자에 갈 수 없을 때(AH01977, 클라이언트 OCSP 는 SSLOCSPEnable) — 또는 프록시 경로 확보
+          SSLProxyEngine            on      # ProxyPass https:// 사용 시(AH00963)
+          SSLProxyCACertificateFile /etc/pki/tls/certs/<backend_ca>.crt
+      cmd: |
+        apachectl configtest && apachectl graceful
+      check: "성공: AH02039/AH01977/AH00963 미발생, 클라이언트 인증·백엔드 HTTPS 요청 정상 · 실패: 정상 클라이언트까지 거부되거나 백엔드 502 가 늘면 백업 복원 후 graceful"
+      note: "사전조건: CA 체인 출처·교체 일정을 보안 담당과 확인, 검증 끄기(SSLVerifyClient none·SSLProxyVerify none·SSLProxyCheckPeerName off)는 보안 승인 없이 금지 · 영향: CA 변경 시 일부 클라이언트 인증서 거부 가능, OCSP 를 끄면 폐기 인증서 확인 불가 · 승인: 보안 담당·웹 운영 담당 · 백업/롤백: ssl.conf·CA 파일 날짜 복사본, 이상 시 복원 후 configtest·graceful · 적용: Apache 2.4"
+  - stage: 3
+    steps:
+    - do: 보안 담당·의뢰 자료
+      cmd: |
+        grep -E "AH02039|AH01977|AH00963|OCSP" <error_log> | tail -300 > ssl_verify_errors.txt
+        openssl s_client -connect <backend_host>:<port> -servername <backend_host> -showcerts </dev/null > backend_chain.txt 2>&1
+      check: "검증 오류 발췌·CA 체인 정보·OCSP URL·백엔드 제공 체인"
+      note: "민감정보 마스킹: 개인키는 절대 포함하지 않음, 클라이언트 인증서의 주체(이름·이메일)·호스트명·내부 IP 를 가림 · 전달 승인: 보안 담당"
+
+- id: APA-PROC-R6-FSPERM
+  scope: id
+  products: [apache]
+  category: security
+  match: [AH00035, AH00036, AH00037, LEG-AH-SELINUX]
+  title: 파일 경로 권한·심볼릭 링크·SELinux 로 접근 거부 (AH00035 · AH00036 · AH00037 · SELinux AVC)
+  source: "Apache 2.4 'core (Options FollowSymLinks/SymLinksIfOwnerMatch)'·'Security Tips' / Red Hat 'Using SELinux — httpd_sys_content_t·semanage fcontext·restorecon·setsebool' — access.redhat.com"
+  stages:
+  - stage: 1
+    steps:
+    - do: 거부 경로·실행 계정·경로 권한 확인 (읽기 전용)
+      cmd: |
+        grep -n -E "AH00035|AH00036|AH00037" <error_log> | tail -10
+        namei -l <경로>
+        ps -o user= -C httpd | sort -u
+      check: "namei 결과에서 실행 계정(apache 등)이 x(검색) 권한을 갖지 못한 디렉터리가 있으면 AH00035/AH00036 원인 · AH00037 은 링크 대상 권한 또는 Options FollowSymLinks 누락"
+      note: "Debian 계열 실행 계정·프로세스 이름은 www-data·apache2 · 권한: 로그 읽기"
+    - do: SELinux 거부·라벨 확인
+      cmd: |
+        getenforce
+        ausearch -m AVC -ts recent 2>/dev/null | grep -i httpd | tail -10
+        ls -Z <경로> ; restorecon -n -v <경로>
+      check: "Enforcing 이고 AVC denied(comm=httpd)가 있으면 SELinux 원인 · restorecon -n 이 바꿀 라벨을 출력하면 라벨이 정책 기본값과 다름(라벨 복원으로 해결) · 출력이 없는데 거부되면 정책 규칙(boolean) 문제"
+      note: "restorecon -n 은 바꾸지 않고 미리보기만 · ausearch 는 root 필요 · 적용: RHEL 7/8/9"
+  - stage: 2
+    steps:
+    - do: 최소 권한 부여 또는 SELinux 라벨 정정
+      cmd: |
+        namei -l <경로> > perm_before.txt ; ls -Z <경로> >> perm_before.txt
+        chmod o+x <x 권한 없는 상위 디렉터리>        # 또는 실행 계정 그룹에만 g+x
+        semanage fcontext -a -t httpd_sys_content_t "<경로>(/.*)?" && restorecon -R -v <경로>
+        # 네트워크 접속 거부(AVC name_connect)면: setsebool -P httpd_can_network_connect on
+      check: "성공: 해당 요청 200, AH00035~37·AVC denied 재발 없음 · 실패: 계속 거부되면 perm_before.txt 기준으로 원복 후 ausearch 내용으로 보안 담당과 정책 검토(audit2allow 정책 추가는 보안 검토 후)"
+      note: "사전조건: 공개해야 할 경로인지 보안 담당 확인(홈 디렉터리 공개 금지), SELinux 끄기(setenforce 0)는 금지 · 영향: 권한·라벨 확대로 다른 프로세스도 접근 가능, setsebool -P 는 영구 정책 변경 · 승인: 보안 담당·시스템 담당 · 백업/롤백: perm_before.txt 기록 — chmod 는 이전 모드로, semanage fcontext -d 후 restorecon 으로, setsebool 은 off 로 원복"
+    - do: 심볼릭 링크 허용 (AH00037, 필요한 디렉터리만)
+      config:
+        file: /etc/httpd/conf.d/<site>.conf
+        snippet: |
+          <Directory "<링크가 있는 디렉터리>">
+            Options +SymLinksIfOwnerMatch
+          </Directory>
+      cmd: |
+        apachectl configtest && apachectl graceful
+      check: "성공: 링크 경로 200·AH00037 미발생 · 실패: 링크와 대상 소유자가 달라 계속 거부되면 링크 대신 실제 경로 배포(FollowSymLinks 전체 허용은 보안 검토 후)"
+      note: "사전조건: 링크 대상이 공개해도 되는 경로인지 보안 담당 확인 · 영향: 링크를 통한 DocumentRoot 밖 파일 노출 가능 · 승인: 보안 담당·웹 운영 담당 · 백업/롤백: <site>.conf 날짜 복사본으로 복원 후 configtest·graceful · 적용: Apache 2.4"
+  - stage: 3
+    steps:
+    - do: 보안 담당 전달 자료
+      cmd: |
+        ausearch -m AVC -ts today 2>/dev/null | grep -i httpd > avc_httpd.txt ; namei -l <경로> > path_perm.txt
+      check: "AVC 기록·경로 권한·라벨·거부 로그 발췌"
+      note: "민감정보 마스킹: 경로의 사용자명·호스트명·클라이언트 IP 를 가림 · 전달 승인: 보안 담당"
+
+- id: APA-PROC-R6-PROCRES
+  scope: id
+  products: [apache]
+  category: capacity
+  match: [AH00159, AH00483]
+  title: 자식 프로세스 생성 실패·활성 워커 소멸 — OS 자원 (AH00159 · AH00483)
+  source: "Apache 2.4 'MPM Common Directives (MaxRequestWorkers, ServerLimit)'·'event MPM' / Linux 'getrlimit(2) RLIMIT_NPROC'·'proc(5) pid_max·threads-max' — man7.org"
+  stages:
+  - stage: 1
+    steps:
+    - do: 서비스 생존·직전 오류 확인 (읽기 전용)
+      cmd: |
+        ps -ef | grep -c "[h]ttpd" ; systemctl status httpd --no-pager | head -10
+        grep -n -B10 -E "AH00159|AH00483" <error_log> | tail -30
+        dmesg -T | grep -i -E "oom|segfault" | tail -10
+      check: "AH00483 뒤 프로세스 0 이면 Apache 종료 상태(즉시 2차) · 직전 AH00052(자식 시그널 종료)·OOM 이면 워커가 죽어 소멸 · AH00159 는 fork 실패 — 다음 단계로 자원 한도 확인"
+      note: "Debian 계열은 apache2 · 권한: dmesg 는 root 가 필요할 수 있음"
+    - do: 프로세스·메모리 한도 확인
+      cmd: |
+        grep -E "processes|open files" /proc/$(cat /run/httpd/httpd.pid)/limits
+        ps -L -u apache --no-headers | wc -l ; ps -eLf --no-headers | wc -l ; cat /proc/sys/kernel/pid_max /proc/sys/kernel/threads-max
+        free -m
+      check: "실행 계정 스레드 수가 Max processes 에 근접, 전체 스레드가 threads-max·pid_max 에 근접, available 메모리가 바닥이면 fork 실패 원인 확정"
+      note: "Linux 의 Max processes(nproc)는 계정의 스레드까지 셈 · PID 파일은 PidFile 설정(Debian /run/apache2/apache2.pid) · 실행 계정 apache(Debian www-data) · 권한: root"
+  - stage: 2
+    steps:
+    - do: 종료 상태면 설정 확인 후 기동
+      cmd: |
+        apachectl configtest && systemctl start httpd
+      check: "성공: active·AH00489 기록 · 실패: 같은 AH00159/AH00483 로 다시 멈추면 아래 자원 조정 전까지 L4 에서 노드 제외"
+      note: "사전조건: 1차에서 원인(OOM·nproc) 기록, configtest Syntax OK · 영향: 원인이 남아 있으면 곧 다시 멈춤 · 승인: 웹 운영 담당 · 백업/롤백: 설정 변경 없음 — 기동 실패 시 직전 정상 설정 복사본으로 복원"
+    - do: 프로세스 한도·워커 수를 자원에 맞춤
+      config:
+        file: /etc/systemd/system/httpd.service.d/override.conf · /etc/httpd/conf.modules.d/00-mpm.conf
+        snippet: |
+          [Service]
+          LimitNPROC=<실행 계정 최대 스레드 수 이상>
+          # MPM: MaxRequestWorkers 는 (가용 메모리 ÷ 자식 RSS) 이내로
+      cmd: |
+        cp -p /etc/httpd/conf.modules.d/00-mpm.conf /etc/httpd/conf.modules.d/00-mpm.conf.$(date +%Y%m%d)
+        systemctl daemon-reload ; apachectl configtest && systemctl restart httpd
+      check: "성공: /proc/<PID>/limits 의 Max processes 반영, AH00159/AH00483 미발생, 피크 시간 가용 메모리 유지 · 실패: 기동 실패면 override.conf·00-mpm.conf 백업 복원 후 daemon-reload·start"
+      note: "사전조건: OS 메모리·pid_max 여유 확인(메모리 부족이 원인이면 한도 상향 금지 — 워커 수 축소), 업무 영향 적은 시간 · 영향: restart 동안 수 초 서비스 중단 · 승인: 웹 운영 담당·OS 담당·변경 관리 · 백업/롤백: override.conf 는 추가 전 상태(없음)로 되돌리고 00-mpm.conf 날짜 복사본 복원 → daemon-reload → restart · 적용: Apache 2.4 systemd 환경"
+  - stage: 3
+    steps:
+    - do: 의뢰 자료
+      cmd: |
+        cat /proc/$(cat /run/httpd/httpd.pid)/limits > httpd_limits.txt ; free -m > free.txt ; dmesg -T | tail -200 > dmesg_tail.txt
+      check: "한도·메모리·dmesg·error_log 발췌·MPM 설정"
+      note: "민감정보 마스킹: 호스트명·계정명·IP 를 가림 · 전달 승인: 보안 담당"
+
+- id: APA-PROC-R6-SCOREBOARD
+  scope: id
+  products: [apache]
+  category: capacity
+  match: [AH00288]
+  title: 스코어보드 가득참 — 종료 대기 프로세스가 슬롯 점유 (AH00288, event/worker MPM)
+  source: "Apache 2.4 'event MPM (graceful 중 종료 대기 프로세스)'·'MPM Common Directives (ServerLimit, MaxRequestWorkers, ThreadsPerChild, MaxConnectionsPerChild)' — httpd.apache.org/docs/2.4/mod/event.html"
+  stages:
+  - stage: 1
+    steps:
+    - do: 스코어보드·설정 확인 (읽기 전용)
+      cmd: |
+        curl -s "http://localhost/server-status?auto" | grep -E "BusyWorkers|IdleWorkers|Processes|Stopping|Scoreboard"
+        grep -n -E "AH00288|AH00171|AH00161" <error_log> | tail -15
+        httpd -V | grep -i mpm ; grep -rn -E "ServerLimit|MaxRequestWorkers|ThreadsPerChild|MaxConnectionsPerChild" /etc/httpd/conf /etc/httpd/conf.modules.d
+      check: "Scoreboard 에 G(종료 중)가 많고 AH00288 이 graceful(AH00171) 직후·자식 교체 때 몰리면 종료 대기 프로세스가 슬롯을 잡은 상태 · ServerLimit × ThreadsPerChild 가 MaxRequestWorkers 와 같으면(여유 0) 발생하기 쉬움 · AH00161 이 함께면 실제 한도 부족 → APA-PROC-CAPACITY"
+      note: "server-status 는 mod_status 가 켜져 있고 localhost 허용일 때만(Processes·Stopping 항목은 판에 따라 없을 수 있음) · 적용: Apache 2.4 event/worker MPM · 권한: 설정·로그 읽기"
+  - stage: 2
+    steps:
+    - do: ServerLimit 에 종료 대기 몫 여유 확보 (재기동 필요)
+      config:
+        file: /etc/httpd/conf.modules.d/00-mpm.conf (IfModule mpm_event_module)
+        snippet: |
+          <IfModule mpm_event_module>
+            ThreadsPerChild        64
+            MaxRequestWorkers    1024     # 기존 값 유지
+            ServerLimit            24     # MaxRequestWorkers ÷ ThreadsPerChild(=16) 보다 크게 — 종료 대기 프로세스 몫
+          </IfModule>
+      cmd: |
+        cp -p /etc/httpd/conf.modules.d/00-mpm.conf /etc/httpd/conf.modules.d/00-mpm.conf.$(date +%Y%m%d)
+        apachectl configtest && systemctl restart httpd
+      check: "성공: graceful 뒤에도 AH00288 미발생·새 연결 정상 · 실패: configtest 오류면 반영하지 않음, 메모리 부족이 생기면 백업 복원"
+      note: "사전조건: 여유 프로세스분 메모리(프로세스 RSS × 늘린 수) 확인, graceful 빈도(logrotate·배포)를 줄일 수 있는지 함께 검토 · 영향: ServerLimit 변경은 graceful 로 반영되지 않아 restart 필요(수 초 서비스 중단) · 승인: 웹 운영 담당·변경 관리 · 백업/롤백: 00-mpm.conf 날짜 복사본 복원 후 configtest·restart · 적용: Apache 2.4 event/worker MPM"
+  - stage: 3
+    steps:
+    - do: 의뢰 자료
+      cmd: |
+        curl -s "http://localhost/server-status?auto" > server_status.txt ; httpd -V > httpd_V.txt
+      check: "server-status(발생 시각)·MPM 설정·graceful 시각 기록"
+      note: "민감정보 마스킹: server-status 의 클라이언트 IP·요청 URL·호스트명을 가림 · 전달 승인: 보안 담당"

@@ -1,0 +1,17 @@
+product: iis
+title: Microsoft IIS 운영 참고 (GPT 수집 — 벤더 문서 대조 필요)
+sections:
+- heading: 로그 위치
+  body: 기본 W3C 사이트 로그는 %SystemDrive%\inetpub\logs\LogFiles\W3SVC<SiteID>이다. HTTPERR은
+    %SystemRoot%\System32\LogFiles\HTTPERR, WAS/W3SVC 장애는 Windows System/Application
+    이벤트 로그도 확인한다.
+- heading: 장애 시 수집 방법
+  body: W3C·HTTPERR 로그, System/Application Event Log와 applicationHost.config, Failed
+    Request Tracing 사용 시 FREB 로그를 수집하고 AppPool 상태와 worker process PID도 기록한다.
+- heading: 대표 장애 신호
+  body: HTTP 500.19 설정 오류, 502.3 ARR 연결 오류, 503.0 AppPool 중지, 503.2 동시요청 한도, 503.3
+    ASP.NET 큐 포화, WAS/W3SVC 반복 종료를 우선 확인한다.
+- heading: 1차 확인 명령
+  body: '%windir%\system32\inetsrv\appcmd list sites, appcmd list apppools, appcmd
+    list wp를 실행하고 PowerShell Get-WinEvent -LogName System -MaxEvents 100으로 WAS/W3SVC
+    오류를 확인한다.'

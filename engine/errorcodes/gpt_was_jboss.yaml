@@ -1,0 +1,277 @@
+product: jboss
+layer: was
+note: GPT 협업 수집분 — 벤더 공식 문서와 대조 후 확정 · 2026-10-16 G7a 4단 보강(1차 읽기 전용화 — 롤백·격리는 2차로 이동, WildFly 34·EAP 7.3 Log Message Reference 대조)
+codes:
+- code: WFLYSRV0055
+  severity: error
+  category: internal
+  title: 부팅 중 예외 발생
+  immediate:
+  - "`grep -n -A20 'WFLYSRV0055' $JBOSS_HOME/standalone/log/server.log | grep -E 'Caused by|Exception' | head -10` 로 부팅 예외의 최초 원인 확인"
+  - "`$JBOSS_HOME/bin/jboss-cli.sh -c '/core-service=management:read-boot-errors'` 로 실패 작업·서비스 목록 확인(읽기 전용, EAP 7+), 직전 standalone.xml·모듈 변경 이력 대조"
+  short:
+  - "(2차·승인 후, 롤백: 현재 설정 별도 보관) 원인 설정·모듈 수정 또는 standalone_xml_history 의 직전 정상 설정으로 되돌린 뒤 기동"
+  mid:
+  - 원인 설정과 모듈을 수정하고 검증환경에서 재기동 시험
+  long:
+  - 부팅 검증과 구성 변경 추적 및 자동 롤백을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html)
+  note: 공식 Level=ERROR
+  vendor_cause: 서버 부팅 과정에서 예외가 발생했다. standalone.xml 설정 오류, 확장 모듈 누락·손상, 배포 의존성 문제가 흔한 원인.
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: WFLY* 접두 코드는 WildFly 9/EAP 7.0 이후 — EAP 6.x 는 JBAS0xxxxx(룰 LEG-JBOSS-JBAS001 로 보완)
+- code: WFLYSRV0071
+  severity: warn
+  category: capacity
+  title: 파일 한도 부족
+  immediate:
+  - 현재 open files 한도와 프로세스 FD 사용량을 확인
+  - "`grep 'Max open files' /proc/<PID>/limits` 와 `ls /proc/<PID>/fd | wc -l` 로 한도·사용량 확인 — 한도 4096 미만이면 권고 미달"
+  short:
+  - 소켓과 파일 사용량 증가 및 OS limit 설정을 분석
+  - "(2차·승인 후, 롤백: limits.conf·서비스 유닛 백업 복원) LimitNOFILE(또는 limits.conf nofile)을 4096 이상으로 상향 후 서버 재기동 일정 반영"
+  mid:
+  - 권고 수준 이상으로 FD 한도를 조정하고 누수를 수정
+  long:
+  - FD 사용률과 한도 여유분을 지속 모니터링
+  source: GPT 수집·벤더 문서 대조 완료(https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html)
+  note: 공식 Level=WARN
+  vendor_cause: 운영체제가 프로세스의 열린 파일 수를 낮은 값으로 제한하고 있다.
+  vendor_action: 열린 파일 수 한도를 최소 4096 이상으로 설정하는 것이 권장된다.
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: WFLY* 접두 코드는 WildFly 9/EAP 7.0 이후 — EAP 6.x 는 JBAS0xxxxx(룰 LEG-JBOSS-JBAS001 로 보완)
+- code: WFLYSRV0082
+  severity: critical
+  category: connection
+  title: 인터페이스 해석 실패
+  immediate:
+  - 설정된 인터페이스 주소와 호스트 이름 및 NIC 상태를 확인
+  - "`grep -n -A3 '<interface' $JBOSS_HOME/standalone/configuration/standalone*.xml` 와 `ip -4 addr` 로 설정 주소가 실제 NIC 에 있는지, `getent hosts $(hostname)` 로 이름 해석 확인"
+  short:
+  - interface 기준과 DNS 또는 hosts 설정을 점검
+  - "(2차·승인 후, 롤백: standalone.xml·hosts 백업 복원) 기동 인자 -b/-bmanagement 또는 interface inet-address 를 실제 주소로 수정 후 기동"
+  mid:
+  - 바인딩 주소와 이름해석 구성을 표준화
+  long:
+  - 기동 전 인터페이스와 DNS 유효성 검사를 자동화
+  source: GPT 수집·벤더 문서 대조 완료(https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html)
+  note: StartException
+  vendor_cause: 지정 서버 인터페이스를 해석하지 못했다. 설정한 주소가 NIC 에 없음, 호스트 이름 해석 실패, 서버 IP 변경이 흔한 원인.
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: WFLY* 접두 코드는 WildFly 9/EAP 7.0 이후 — EAP 6.x 는 JBAS0xxxxx(룰 LEG-JBOSS-JBAS001 로 보완)
+- code: WFLYSRV0083
+  severity: critical
+  category: connection
+  title: 관리 HTTP 기동 실패
+  immediate:
+  - 관리 인터페이스 바인딩 주소와 포트 점유 및 선행 예외를 확인
+  - "`ss -ltnp | grep -E ':(9990|9993) '` 로 관리 포트 선점 프로세스 확인, `grep -n -A10 'WFLYSRV0083' $JBOSS_HOME/standalone/log/server.log | grep 'Caused by'` 로 원인 확인"
+  short:
+  - socket-binding과 인증 또는 TLS 설정을 점검
+  - "(2차·승인 후, 롤백: standalone.xml 백업 복원) 포트 충돌 해소 또는 management-http socket-binding·TLS 설정 수정 후 기동"
+  mid:
+  - 관리 인터페이스 구성을 수정하고 포트 정책을 표준화
+  long:
+  - 관리 포트 헬스체크와 기동검증을 자동화
+  source: GPT 수집·벤더 문서 대조 완료(https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html)
+  note: StartException
+  vendor_cause: HTTP 관리 인터페이스 서비스 시작에 실패했다. 관리 포트(9990/9993) 충돌, 바인드 주소 오류, 관리 TLS·인증 설정 오류가 흔한 원인.
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: WFLY* 접두 코드는 WildFly 9/EAP 7.0 이후 — EAP 6.x 는 JBAS0xxxxx(룰 LEG-JBOSS-JBAS001 로 보완)
+- code: WFLYSRV0153
+  severity: error
+  category: internal
+  title: 배포 단계 처리 실패
+  immediate:
+  - "`grep -n -A20 'WFLYSRV0153' $JBOSS_HOME/standalone/log/server.log | grep -E 'Failed to process phase|Caused by' | head -10` 로 실패 deployment unit·phase(PARSE·DEPENDENCIES·INSTALL)와 원인 확인"
+  - "`$JBOSS_HOME/bin/jboss-cli.sh -c 'deployment-info'` 로 배포 상태 확인(읽기 전용) — 다른 배포는 정상인지 구분"
+  short:
+  - descriptor와 클래스 로딩 및 모듈 의존성을 분석
+  - "(2차·승인 후, 롤백: 실패 배포본 별도 보관) 원인 수정본 재배포 또는 이전 정상 배포본으로 되돌림"
+  mid:
+  - 패키징과 의존성 구성을 수정해 재배포
+  long:
+  - CI 단계에서 배포 검증과 호환성 회귀시험을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html)
+  note: 'StartException: Failed to process phase'
+  vendor_cause: 배포 처리 중 지정 단계(phase)의 처리가 실패했다. 디스크립터 오류, 클래스 로딩·모듈 의존성 누락, 지원되지 않는 API 사용이 흔한 원인.
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: WFLY* 접두 코드는 WildFly 9/EAP 7.0 이후 — EAP 6.x 는 JBAS0xxxxx(룰 LEG-JBOSS-JBAS001 로 보완)
+- code: WFLYJCA0003
+  severity: warn
+  category: upstream
+  title: JDBC 드라이버 생성 실패
+  immediate:
+  - 드라이버 클래스와 모듈 파일 및 배포 상태를 확인
+  - "`$JBOSS_HOME/bin/jboss-cli.sh -c '/subsystem=datasources:read-children-resources(child-type=jdbc-driver)'` 로 등록 드라이버·모듈·클래스 확인(읽기 전용), `ls -l $JBOSS_HOME/modules/<드라이버모듈>/main/`"
+  short:
+  - 드라이버 버전과 module.xml 및 클래스패스를 점검
+  - "(2차·승인 후, 롤백: modules·standalone.xml 백업 복원) 드라이버 JAR·module.xml 수정 또는 드라이버 클래스명 정정 후 :reload"
+  mid:
+  - 지원 드라이버 버전과 모듈 배포 방식을 표준화
+  long:
+  - 드라이버 호환성 검증을 배포 파이프라인에 포함
+  source: GPT 수집·벤더 문서 대조 완료(https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html)
+  note: 공식 Level=WARN
+  vendor_cause: 지정 JDBC 드라이버 클래스를 인스턴스화하지 못했다. 드라이버 클래스명 오류, JDK 와 맞지 않는 드라이버 판, module.xml 의존성 누락이 흔한 원인.
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: WFLY* 접두 코드는 WildFly 9/EAP 7.0 이후 — EAP 6.x 는 JBAS0xxxxx(룰 LEG-JBOSS-JBAS001 로 보완)
+- code: WFLYJCA0031
+  severity: error
+  category: internal
+  title: DS/XA DS 검증·배포 실패
+  immediate:
+  - 실패한 ds 또는 xads 설정과 관련 예외를 확인
+  - "`grep -n -A15 'WFLYJCA0031' $JBOSS_HOME/standalone/log/server.log | grep -E 'IJ|Caused by' | head -10` 로 검증 실패 항목(드라이버·JNDI 이름·풀 설정) 확인"
+  short:
+  - JNDI 이름과 JDBC URL 및 드라이버와 인증정보를 검증
+  - "(2차·승인 후, 롤백: 배포본·설정 백업) *-ds.xml 또는 datasources 설정 수정 후 재배포/:reload"
+  mid:
+  - 데이터소스 구성을 수정하고 환경별 설정을 표준화
+  long:
+  - 배포 전 DB 연결검증과 데이터소스 회귀시험을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html)
+  note: DeployException
+  vendor_cause: 데이터소스 또는 XA 데이터소스를 검증하고 배포하지 못했다(unable to validate and deploy ds or xads). 존재하지 않는 드라이버 참조, 잘못된 풀·보안 설정, JNDI 이름 중복이 흔한 원인.
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: WFLY* 접두 코드는 WildFly 9/EAP 7.0 이후 — EAP 6.x 는 JBAS0xxxxx(룰 LEG-JBOSS-JBAS001 로 보완)
+- code: WFLYJCA0041
+  severity: error
+  category: upstream
+  title: 드라이버 모듈 로드 실패
+  immediate:
+  - 지정된 드라이버 모듈 존재 여부와 모듈 로더 오류를 확인
+  - "`ls -l $JBOSS_HOME/modules/<드라이버모듈경로>/main/` 와 `grep -n 'resource-root' $JBOSS_HOME/modules/<드라이버모듈경로>/main/module.xml` 로 JAR 이름이 module.xml 과 일치하는지 확인"
+  short:
+  - module.xml 의존성과 JAR 위치 및 권한을 점검
+  - "(2차·승인 후, 롤백: modules 디렉터리 백업 복원) module.xml 의 resource-root·dependencies(javax.api 등) 수정 후 :reload"
+  mid:
+  - 드라이버 모듈 배포 구조와 버전을 표준화
+  long:
+  - 모듈 무결성과 의존성 검사를 자동화
+  source: GPT 수집·벤더 문서 대조 완료(https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html)
+  note: Failed to load module for driver
+  vendor_cause: 지정 JDBC 드라이버의 모듈을 로드하지 못했다. 모듈 경로·이름 불일치, module.xml 의 resource-root JAR 이름 오류, 파일 권한 문제가 흔한 원인.
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: WFLY* 접두 코드는 WildFly 9/EAP 7.0 이후 — EAP 6.x 는 JBAS0xxxxx(룰 LEG-JBOSS-JBAS001 로 보완)
+- code: WFLYTX0001
+  severity: error
+  category: undo
+  title: 활성 트랜잭션 롤백 실패
+  immediate:
+  - "`grep -n -B5 -A15 'WFLYTX0001' $JBOSS_HOME/standalone/log/server.log | grep -E 'ARJUNA|XAException|Caused by' | head -15` 로 rollback 실패 자원(DB·JMS)과 XA 오류 코드 확인"
+  - "`$JBOSS_HOME/bin/jboss-cli.sh -c '/subsystem=transactions/log-store=log-store:read-children-names(child-type=transactions)'` 로 object store 에 남은 트랜잭션 확인(읽기 전용 — probe 는 2차), 업무 담당에 부분 처리 여부 확인 요청"
+  short:
+  - "(2차·승인 후, 롤백: 처리 전 object store 디렉터리 백업) 대상 자원 복구 후 Narayana 복구 주기 결과 확인, 남은 heuristic 트랜잭션은 DBA 와 DB 측 상태를 대조해 수동 처리"
+  mid:
+  - XA 구성과 타임아웃 및 복구 정책을 검증하고 수정
+  long:
+  - 트랜잭션 복구훈련과 XA 리소스 상태 모니터링을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html)
+  note: 공식 Level=ERROR
+  vendor_cause: 요청 종료 시점에 남아 있던 활성 트랜잭션을 롤백하지 못했다(Unable to roll back active transaction). 롤백 도중 DB·JMS 자원 연결 끊김, XA 자원 오류, 트랜잭션을 정리하지 않은 앱 코드가 흔한 원인.
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: WFLY* 접두 코드는 WildFly 9/EAP 7.0 이후 — EAP 6.x 는 JBAS0xxxxx(룰 LEG-JBOSS-JBAS001 로 보완)
+- code: WFLYTX0017
+  severity: warn
+  category: undo
+  title: 트랜잭션 롤백 실패
+  immediate:
+  - '`grep -n -B10 -A20 ''WFLYTX0017'' "$JBOSS_HOME/standalone/log/server.log" | head -80` 로 예외 원문·Caused by 를 그대로 확인 — 원인은 원문으로 판단(필터로 줄을 버리지 않는다)'
+  - '`grep -n -E ''ARJUNA012117|IJ0'' "$JBOSS_HOME/standalone/log/server.log" | tail -20` 로 같은 시각 트랜잭션 타임아웃·연결 오류 동반 여부 확인 — 동반이면 그 원인이 선행'
+  short:
+  - "(2차) 선행 원인(타임아웃·자원 장애) 해소, 트랜잭션 누수(요청 종료 후 남은 트랜잭션) 코드 위치를 개발 담당에 전달(수정 배포는 승인 후, 롤백: 이전 배포본)"
+  mid:
+  - 트랜잭션 경계와 복구 설정을 개선
+  long:
+  - 롤백 실패율과 미완료 트랜잭션을 지속 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/7.3/mgmt_model/log-message-reference.html)
+  note: 공식 Level=WARN
+  vendor_cause: 트랜잭션 롤백 실패(Failed to rollback transaction) — 트랜잭션 관리자가 롤백을 끝내지 못했다는 뜻으로, 원인은 같은 위치의 예외 원문(Caused by)이 알려 준다. 자원(DB·JMS) 연결이 이미 끊긴 경우, 타임아웃으로 이미 정리된 트랜잭션, EE Concurrent 작업의 트랜잭션 정리 과정 오류 등이 보고된 예다.
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/7.3/mgmt_model/log-message-reference.html
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: WFLY* 접두 코드는 WildFly 9/EAP 7.0 이후 — EAP 6.x 는 JBAS0xxxxx(룰 LEG-JBOSS-JBAS001 로 보완)
+- code: WFLYUT0001
+  severity: error
+  category: internal
+  title: JSP 초기화 실패
+  immediate:
+  - "`grep -n -A15 'WFLYUT0001' $JBOSS_HOME/standalone/log/server.log | grep -E 'Caused by|Exception' | head -10` 로 JSP 엔진 init 실패 원인 확인"
+  - "`$JBOSS_HOME/bin/jboss-cli.sh -c 'deployment-info'` 로 영향 배포 확인(읽기 전용), 배포에 JSP/Jasper·EL 라이브러리를 직접 포함했는지 `unzip -l <앱>.war | grep -i -E 'jasper|jsp-api|el-api'` 로 확인"
+  short:
+  - JSP 엔진 모듈과 배포 라이브러리 및 설정을 점검
+  - "(2차·승인 후, 롤백: 이전 배포본) 배포에 포함된 충돌 JSP 라이브러리 제거한 수정본 재배포, 필요 시 해당 배포만 undeploy 로 격리"
+  mid:
+  - 호환 모듈과 애플리케이션 패키지를 수정
+  long:
+  - 배포 전 JSP 컴파일 및 기동검증을 자동화
+  source: GPT 수집·벤더 문서 대조 완료(https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html)
+  note: 공식 Level=ERROR
+  vendor_cause: Jakarta Server Pages 초기화에 실패했다. 배포에 포함된 JSP·EL 라이브러리와 서버 모듈 충돌, JSP 설정 오류가 흔한 원인.
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: WFLY* 접두 코드는 WildFly 9/EAP 7.0 이후 — EAP 6.x 는 JBAS0xxxxx(룰 LEG-JBOSS-JBAS001 로 보완)
+- code: WFLYUT0005
+  severity: warn
+  category: security
+  title: 보안 리스너 없음
+  immediate:
+  - "`$JBOSS_HOME/bin/jboss-cli.sh -c '/subsystem=undertow/server=default-server:read-children-names(child-type=https-listener)'` 로 HTTPS 리스너 존재 확인(읽기 전용)"
+  - "`grep -n 'WFLYUT0005' $JBOSS_HOME/standalone/log/server.log | tail -5` 로 요청 프로토콜·발생 빈도 확인 — 평문 포트로 처리된 요청이 있다는 뜻이므로 보안 담당에 통보"
+  short:
+  - undertow listener와 socket-binding 및 TLS 설정을 검증
+  - "(2차·승인 후, 롤백: standalone.xml 백업 복원) https-listener·ssl-context(elytron) 구성 정상화 후 :reload, 평문 리다이렉트 제거"
+  mid:
+  - 보안 리스너와 인증서 구성을 정상화하고 평문 fallback을 제거
+  long:
+  - TLS 설정 정책과 보안 리스너 헬스체크를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html)
+  note: 공식 Level=WARN; 비보안 포트 사용
+  vendor_cause: 요청 프로토콜의 보안 리스너를 찾지 못해 비보안 포트를 사용한다. HTTPS 리스너 미구성·기동 실패, 보안 제약(CONFIDENTIAL)과 리스너 구성 불일치가 흔한 원인.
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: WFLY* 접두 코드는 WildFly 9/EAP 7.0 이후 — EAP 6.x 는 JBAS0xxxxx(룰 LEG-JBOSS-JBAS001 로 보완)

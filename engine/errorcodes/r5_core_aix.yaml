@@ -1,0 +1,98 @@
+product: aix
+layer: os
+note: 5차 핵심 코드 보강(2026-10-16) — errpt 이벤트는 code=IDENTIFIER(8자리 16진)로 조회되므로 IBM 문서에서 LABEL↔IDENTIFIER 를 확인한 것만 IDENTIFIER 로 등록(LABEL 은 title·note 에 표기). syslog 로 넘어온 문구는 _aliases.yaml 의 LABEL 별칭으로 연결
+codes:
+- code: F7FA22C9
+  severity: error
+  category: disk
+  title: J2_FS_FULL 파일시스템 공간 할당 불가
+  note: J2_FS_FULL
+  vendor_cause: 'J2_FS_FULL(UNABLE TO ALLOCATE SPACE IN FILE SYSTEM) — JFS2 파일시스템이 가득 차 공간을 할당하지 못했다(Probable Causes: FILE SYSTEM FULL). IBM 예시는 Type INFO·Class O 이며 Detail Data 에 장치와 마운트 지점이 찍힌다. 로그·덤프 누적, 지워졌지만 열려 있는 파일이 흔한 원인이다.'
+  vendor_action: '파일시스템 크기 증설, 불필요한 데이터 정리, fuser 로 아직 참조 중인 unlink 파일 확인(INCREASE THE SIZE … / REMOVE UNNECESSARY DATA … / USE FUSER UTILITY TO LOCATE UNLINKED FILES STILL REFERENCED)'
+  vendor_url: https://www.ibm.com/support/pages/diagnosing-full-file-systems-powervm-vios
+  immediate:
+  - "`errpt -a -j F7FA22C9 | head -60` 로 Detail Data 의 FILE SYSTEM DEVICE AND MOUNT POINT 와 발생 시각 기록"
+  - "`df -g <mount>` 로 %Used·%Iused 확인(95% 이상이면 확정), `find <mount> -xdev -size +2097152 -ls | sort -k7 -n | tail -20` 로 1GB 이상 파일과 소유자 식별(정리는 2차·담당 승인 후)"
+  - "`fuser -dV <mount>` 로 지워졌지만 열려 있는 파일을 잡은 프로세스 확인(IBM 권고) — df 사용량과 파일 합계가 크게 다르면 이 경우"
+  short:
+  - "(2차·승인 후, 롤백: 증설은 되돌리지 않음 — 계획 반영) VG 여유를 `lsvg <vg>` FREE PPs 로 확인 후 `chfs -a size=+<n>G <mount>` 로 증설, 또는 소유 담당 승인 후 불필요 파일 정리 — 열린 unlink 파일은 해당 프로세스 재시작 일정으로 해소"
+  mid:
+  - "증설 직후 J2_DMAP_CORRUPT·J2_FSCK_REQUIRED 가 이어지면 IBM APAR(IJ36237 7200-05·IJ38487 7200-04·IJ37202 7300-00) 해당 여부를 `instfix -ik <APAR>` 로 확인하고 수정 적용, 애플리케이션 로그·덤프 경로를 별도 파일시스템으로 분리"
+  long:
+  - "파일시스템 사용률 85%/95% 감시 임계와 errpt F7FA22C9 경보 등록, 로그 순환·보존 주기 표준화"
+  versions:
+  - AIX 7.2
+  - AIX 7.3
+  - VIOS
+  version_note: IBM VIOS 문서 예시(LABEL J2_FS_FULL, IDENTIFIER F7FA22C9)와 AIX 7.2/7.3 APAR 원문 확인 — 6.1/7.1 은 같은 LABEL 이 쓰이나 IDENTIFIER 는 미대조
+  source: 공식 문서 대조(2026-10-16 5차 보강)
+- code: 9C110A13
+  severity: error
+  category: storage
+  title: J2_SNAP_EIO JFS2 스냅숏 쓰기 불가
+  note: J2_SNAP_EIO
+  vendor_cause: 'J2_SNAP_EIO(Unable to write into a JFS2 snapshot) — JFS2 스냅숏에 쓰지 못해 그 파일시스템의 스냅숏이 모두 무효가 되었다(Probable Causes: Write error on JFS2 snapshot). 스냅숏 LV 의 I/O 오류나, rmlv 로 스냅숏 LV 를 지운 뒤 원본을 다시 마운트한 경우에 나타난다.'
+  vendor_action: 'JFS2 파일시스템의 스냅숏은 무효가 되었으므로 I/O 문제를 바로잡은 뒤 새 스냅숏을 만든다(Correct the I/O problem and then create a new snapshot)'
+  vendor_url: https://www.ibm.com/support/pages/jfs2-snapshots-and-j2snapeio-error
+  immediate:
+  - "`errpt -a -j 9C110A13 | head -60` 로 Detail Data 의 FILE SYSTEM DEVICE AND MOUNT POINT·스냅숏 장치 번호 기록"
+  - "`snapshot -q <mount>` 로 남은 스냅숏 목록 확인, `lsvg -l <vg>` 로 스냅숏 LV 가 실제로 있는지 확인 — 없으면 rmlv 로 지운 경우"
+  - "`errpt | head -30` 로 같은 시각 SC_DISK_ERR·LVM_IO_FAIL 동반 여부 확인 — 동반이면 디스크 I/O 원인"
+  short:
+  - "(2차·승인 후, 롤백: 해당 없음 — 스냅숏은 이미 무효) 디스크 I/O 원인을 먼저 바로잡고 새 스냅숏 생성, rmlv 로 지운 경우는 작업 창에서 원본 umount → `fsck -y` → mount 로 실패 스냅숏 정리(IBM 절차) 후 새 스냅숏 생성"
+  mid:
+  - "백업 절차에서 스냅숏 제거는 `snapshot -d <스냅숏 LV>` 로만 하도록(rmlv 금지) 표준화하고 스냅숏 기반 백업 성공 여부를 매회 확인"
+  long:
+  - "errpt 9C110A13 경보 등록과 스냅숏 백업 결과 일일 점검"
+  versions:
+  - AIX 6.1
+  - AIX 7.1
+  version_note: IBM 기술 문서(적용 6.1·7.1)에서 LABEL J2_SNAP_EIO·IDENTIFIER 9C110A13 원문 확인 — 7.2/7.3 은 미대조
+  source: 공식 문서 대조(2026-10-16 5차 보강)
+- code: CF71B5B3
+  severity: warn
+  category: storage
+  title: J2_LOG_WAIT(JFS_LOG_WAIT) 파일시스템 로그 대기
+  note: J2_LOG_WAIT / JFS_LOG_WAIT (같은 IDENTIFIER)
+  vendor_cause: J2_LOG_WAIT(JFS 는 JFS_LOG_WAIT, IDENTIFIER 공통) — 파일시스템 활동이 로그 장치가 감당하기에 너무 많거나 잦아 로그 공간을 기다렸다는 기록. IBM 은 로그 장치가 작을 때 J2_LOG_WRAP(061675CF)과 함께 나타난다고 본다. 메타데이터 갱신이 많은 작업(대량 파일 생성·삭제) 중 I/O 지연으로 이어진다.
+  vendor_action: '로그 장치 크기를 데이터 1GB 당 2MB 또는 파일시스템 512 PP 당 1 PP 로 맞춰 증설(Increasing the Size of a JFS/JFS2 Log Device)'
+  vendor_url: https://www.ibm.com/support/pages/increasing-size-jfsjfs2-log-device
+  immediate:
+  - "`errpt -a -j CF71B5B3 | head -40` 로 Device Major/Minor Number(16진) 기록 → 10진으로 바꿔 `ls -al /dev | grep '<주>, *<부>'` 로 어느 로그 LV 인지 확인(IBM 절차)"
+  - "`lslv <loglv>` 로 로그 LV 크기(PP 수) 확인, `lsvg -l <vg>` 로 그 로그를 쓰는 파일시스템과 크기 합계를 비교 — 1GB 당 2MB 미만이면 작음"
+  - "`iostat -D <hdisk> 5 3` 로 로그 LV 가 있는 디스크의 서비스 시간·큐 확인(AIX 5.3+)"
+  short:
+  - "(2차·승인 후, 롤백: 이전 로그 LV 로 `chfs -a log=` 원복) 작업 창에서 해당 파일시스템 umount 후 로그 LV 증설(extendlv)·logform 또는 새 jfs2log LV 지정, 다시 mount — IBM 'Increasing the Size of a JFS/JFS2 Log Device' 절차 따름"
+  mid:
+  - "메타데이터 부하가 큰 파일시스템은 전용 로그 LV 또는 inline log 로 분리하고, 로그 LV 를 부하 낮은 디스크에 배치"
+  long:
+  - "errpt CF71B5B3·061675CF 건수를 주간 점검에 넣고 파일시스템 증설 때 로그 크기 비율 재계산을 절차에 포함"
+  versions:
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: IBM 기술 문서(Version Independent)에서 J2_LOG_WAIT·JFS_LOG_WAIT 모두 IDENTIFIER CF71B5B3 원문 확인
+  source: 공식 문서 대조(2026-10-16 5차 보강)
+- code: 4B97B439
+  severity: critical
+  category: storage
+  title: J2_METADATA_CORRUPT JFS2 메타데이터 손상 감지
+  note: J2_METADATA_CORRUPT
+  vendor_cause: J2_METADATA_CORRUPT — JFS2 가 메타데이터 검증에 실패(VALIDATION FAILURE)해 손상을 기록했다. Detail Data 에 블록·inode·파일셋 번호와 커널 스택이 남으며, 파일시스템이 읽기 전용으로 바뀔 수 있다. 하위 디스크 I/O 오류가 흔한 원인이고, AIX 7.2 TL3 에서는 defragfs -f 결함(APAR IJ24101)으로도 기록되었다.
+  vendor_action: ''
+  vendor_url: https://www.ibm.com/support/pages/apar/IJ24101
+  immediate:
+  - "`errpt -a -j 4B97B439 | head -80` 로 BLOCK/INODE NUMBER·VALIDATION FAILURE·STACK 과 대상 장치 기록(IBM 지원 의뢰 자료)"
+  - "`mount | grep <mount>` 로 읽기 전용(ro)으로 바뀌었는지 확인, `errpt | head -40` 로 같은 시각 SC_DISK_ERR·LVM_IO_FAIL·J2_FSCK_REQUIRED 동반 여부 확인"
+  - "직전 `defragfs` 실행 여부를 운영자·cron 기록으로 확인하고 `oslevel -s` 로 TL·SP 기록(APAR 대조용) — fsck 는 1차에서 하지 않음"
+  short:
+  - "(2차·승인 후, 롤백: 사전 백업에서 복원) IBM 'Data Collection for JFS/JFS2 Filesystem Corruption' 에 따라 수정 전 snap·메타데이터를 먼저 수집하고, 작업 창에서 umount → `fsck -y` → mount 로 복구, 손상 범위가 크면 백업 복원"
+  mid:
+  - "디스크 I/O 원인이면 경로·디스크 교체, defragfs 원인이면 `instfix -ik IJ24101` 로 수정 적용 여부 확인 후 TL/SP 갱신"
+  long:
+  - "errpt 4B97B439 즉시 경보와 파일시스템 백업 복원 시험 정례화"
+  versions:
+  - AIX 7.2
+  version_note: IBM APAR IJ24101(AIX 7.2 TL3) 원문에서 LABEL J2_METADATA_CORRUPT·IDENTIFIER 4B97B439 확인 — 다른 버전은 미대조
+  source: 공식 문서 대조(2026-10-16 5차 보강)

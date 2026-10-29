@@ -1,0 +1,100 @@
+# WEB — IIS HTTP.sys 오류 로그(HTTPERR) 시그니처
+rules:
+- id: WEB-IIS-HTTPERR-001
+  layer: web
+  product:
+  - iis
+  match:
+    regex: HTTPERR (QueueFull|AppOffline|AppPoolTimer|AppShutdown)
+  severity: critical
+  category: capacity
+  verdict: HTTP.sys 요청 큐 포화/앱 풀 오프라인 — 워커 프로세스가 요청을 받지 못함
+  immediate:
+  - 앱 풀 상태 확인(`Get-WebAppPoolState <pool>` 또는 `appcmd list apppool`), Rapid-Fail Protection 으로 멈췄는지 System 이벤트 WAS 5002 확인
+  - 큐 길이(queueLength)와 현재 요청 수 확인(`netsh http show servicestate`), 워커 프로세스 행 여부(`Get-Process w3wp` CPU·응답) 확인
+  short:
+  - '(2차·승인 후, 롤백: 없음) 멈춘 앱 풀 시작(`Start-WebAppPool <pool>`) — Rapid-Fail 로 반복 중지면 원인 확인 전 시작 보류'
+  - 앱 풀 재활용 이력·크래시(이벤트 1000/5009) 분석
+  - 요청 폭주 출처 확인
+  mid:
+  - 큐 길이·앱 풀 분리·워커 수 조정
+  long:
+  - 앱 안정화·용량 계획
+  versions:
+  - IIS 6.0 (2003)
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: HTTPERR 사유 2003+
+- id: WEB-IIS-HTTPERR-002
+  layer: web
+  product:
+  - iis
+  match:
+    regex: HTTPERR (Connection_Abandoned_By_ReqQueue|Connection_Abandoned_By_AppPool)
+  severity: critical
+  category: thread
+  verdict: 워커 프로세스가 요청을 포기 — 앱 풀 크래시/행
+  immediate:
+  - '이벤트 로그(Application: 1000/1002, System: WAS 5009/5010/5011) 확인 — `Get-WinEvent -FilterHashtable @{LogName=''System'';ProviderName=''Microsoft-Windows-WAS''} -MaxEvents 20`'
+  - '`Get-WebAppPoolState <pool>` 와 w3wp 프로세스 CPU·메모리(`Get-Process w3wp`) 확인'
+  short:
+  - '(2차·승인 후, 롤백: 없음) 덤프 확보 후 앱 풀 재활용(`Restart-WebAppPool <pool>`)으로 임시 복구'
+  - 크래시 덤프(DebugDiag/procdump) 확보·분석
+  mid:
+  - 앱 코드·모듈 수정
+  long:
+  - 크래시 감시
+  versions:
+  - IIS 6.0 (2003)
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: HTTPERR 2003+
+- id: WEB-IIS-HTTPERR-003
+  layer: web
+  product:
+  - iis
+  match:
+    regex: HTTPERR (ConnLimit|Connection_Dropped_List_Full)
+  severity: critical
+  category: capacity
+  verdict: HTTP.sys 연결 한도 초과
+  immediate:
+  - 현재 연결 수(netstat -an | find ":80" | find /c "ESTABLISHED") 확인, 폭주 출처 IP 확인
+  short:
+  - MaxConnections·connectionTimeout 설정 점검
+  mid:
+  - 연결 한도·타임아웃 조정, L4 분산
+  long:
+  - 연결 감시
+  versions:
+  - IIS 6.0 (2003)
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: HTTPERR 2003+
+- id: WEB-IIS-HTTPERR-004
+  layer: web
+  product:
+  - iis
+  match:
+    regex: HTTPERR (BadRequest|Verb|Hostname|Header|URL_Length|RequestLength|EntityTooLarge|Forbidden|FieldLength)
+  severity: warn
+  category: security
+  verdict: HTTP.sys 요청 거부(잘못된 요청·크기 초과) — 공격 또는 클라이언트 오류
+  immediate:
+  - '`Select-String -Path ''C:\Windows\System32\LogFiles\HTTPERR\httperr*.log'' -Pattern ''BadRequest|FieldLength|RequestLength|URL_Length|Verb|Hostname'' | ForEach-Object { ($_.Line -split '' '')[2] } | Group-Object | Sort-Object Count -Descending | Select-Object -First 10` 로 거부 출처 IP 상위 확인 (c-ip 는 3번째 칸, Windows Server 2008 R2+ PowerShell)'
+  - '`Select-String -Path ''C:\Windows\System32\LogFiles\HTTPERR\httperr*.log'' -Pattern ''FieldLength|RequestLength'' | Measure-Object` 로 크기 초과 건수 확인 — 여러 IP 에 고르게 많으면 정상 클라이언트의 큰 헤더(쿠키 누적), 한 IP 집중이면 보안 담당 통보'
+  short:
+  - 요청 필터링 규칙·한도(maxRequestBytes 등) 점검
+  mid:
+  - WAF·요청 필터링 정책 정비
+  long:
+  - 요청 거부 감시
+  versions:
+  - IIS 6.0 (2003)
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: HTTPERR 2003+

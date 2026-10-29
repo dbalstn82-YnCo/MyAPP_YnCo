@@ -1,0 +1,263 @@
+product: altibase
+layer: db
+note: GPT 협업 수집분 — 벤더 공식 문서와 대조 후 확정
+codes:
+- code: ERR-50032
+  severity: error
+  category: connection
+  title: 클라이언트 접속 실패
+  immediate:
+  - "서버 측: `ps -ef | grep [a]ltibase` 와 `netstat -an | grep <PORT_NO> | grep LISTEN` — 리슨이 없으면 서버 미기동"
+  - "클라이언트 측: `nc -zvw3 <server> <PORT_NO>` — 거부·시간초과면 IP·포트·방화벽 원인, 연결되면 계정 쪽 확인"
+  - "계정 상태: isql 로 sys 접속 후 `SELECT USER_NAME, ACCOUNT_LOCK, FAILED_LOGIN_COUNT, DISABLE_TCP FROM SYSTEM_.DBA_USERS_ WHERE USER_NAME = '<USER>';` — 잠금·TCP 금지면 ERR-31370/410E3 절차로 (7.x 컬럼)"
+  short:
+  - 계정, IP, PORT_NO와 TCP 제한을 확인
+  mid:
+  - 접속 구성과 연결풀 정책을 표준화
+  long:
+  - 연결 헬스체크와 장애구간 모니터링을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.altibase.com/pages/viewpage.action?pageId=15138837)
+  note: 클라이언트 연결 수립 실패로 단독 코드만으로 서비스 전체 중단을 뜻하지 않음
+  vendor_cause: IP·포트·비밀번호 오입력, 계정 잠금 또는 TCP 접속 제한 등 접속 설정 문제가 있을 수 있다.
+  vendor_action: 사용자 계정·비밀번호·접속 IP와 altibase.properties의 PORT_NO를 확인한다.
+  vendor_url: https://docs.altibase.com/pages/viewpage.action?pageId=15138837
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR-xxxxx(16진 5자리) 코드는 5.x~7.3 공통. 6.3.1 부터 qp 로그에 ERR-xxxxx 직접 출력, 6.1.1 이하는 8자리 10진 errorcode(예 822329545=0x3103C049→ERR-3103C) → 파서가 변환해 대응
+- code: ERR-91015
+  severity: error
+  category: connection
+  title: 통신 실패
+  immediate:
+  - "`tail -100 $ALTIBASE_HOME/trc/altibase_boot.log` — 오류 시각 전후 서버 시작·종료·timeout 기록 확인"
+  - "버전 비교: isql 로 sys 접속 후 `SELECT PRODUCT_VERSION, PROTOCOL_VERSION FROM V$VERSION;` 와 클라이언트 드라이버(`ls -l <app_lib>/Altibase*.jar`) — 클라이언트가 서버보다 상위면 호환 원인"
+  - "`SELECT STARTUP_PHASE, WORKING_TIME_SEC FROM V$INSTANCE;` — SERVICE 단계가 아니거나 가동 시간이 짧으면 서버 측 원인 (7.x 컬럼)"
+  short:
+  - 서버와 클라이언트 버전, 네트워크, 세션 종료 원인을 분석
+  mid:
+  - 호환 버전과 타임아웃, 네트워크 구성을 정비
+  long:
+  - 버전 호환성 검증과 연결 SLO를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.altibase.com/display/FAQE/ERR-91015%2B%28%2B593941%29%2BCommunication%2Bfailure)
+  note: 다양한 접속·통신 실패에 사용되는 오류로 단독 코드만으로 서비스 전체 중단을 뜻하지 않음
+  vendor_cause: 상위 버전 클라이언트의 하위 서버 접속, timeout 세션 종료 또는 잘못된 서버 프로퍼티 등으로 발생할 수 있다.
+  vendor_action: 서버·클라이언트 버전을 맞추고 timeout 종료 로그를 확인하며, 서버 기동 시 터미널·boot.log·properties를 점검한다.
+  vendor_url: https://docs.altibase.com/display/FAQE/ERR-91015%2B%28%2B593941%29%2BCommunication%2Bfailure
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR-xxxxx(16진 5자리) 코드는 5.x~7.3 공통. 6.3.1 부터 qp 로그에 ERR-xxxxx 직접 출력, 6.1.1 이하는 8자리 10진 errorcode(예 822329545=0x3103C049→ERR-3103C) → 파서가 변환해 대응
+- code: ERR-71016
+  severity: critical
+  category: capacity
+  title: accept 시스템호출 실패
+  immediate:
+  - "`ps -ef | grep [a]ltibase` 로 PID 확인 뒤 `grep \"open files\" /proc/<PID>/limits` 와 `ls /proc/<PID>/fd | wc -l` (Linux, AIX 는 `procfiles <PID> | wc -l`) — 사용 수가 한도에 닿았으면 확정"
+  - "altibase 계정 `ulimit -n` — 4096 미만이면 제조사 권고 미달(값 변경·재기동은 2차)"
+  - "isql 로 sys 접속 후 `SELECT COUNT(*) FROM V$SESSION;` — 접속 수에 비해 FD 가 과다하면 파일·소켓 누수"
+  short:
+  - 열린 파일과 소켓 누수, OS 제한값을 점검
+  mid:
+  - 파일디스크립터 한도를 업무량에 맞게 조정
+  long:
+  - FD 사용률과 접속 폭주 조기경보를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.altibase.com/pages/viewpage.action?pageId=15138837)
+  vendor_cause: 사용자 계정의 파일 디스크립터 수 한도를 초과한 상태에서 접속을 시도했다.
+  vendor_action: ulimit -n 값을 확인해 늘리고 Altibase를 재시작한다. file descriptor는 unlimited, 최소 4096 이상을 권장한다.
+  vendor_url: https://docs.altibase.com/pages/viewpage.action?pageId=15138837
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR-xxxxx(16진 5자리) 코드는 5.x~7.3 공통. 6.3.1 부터 qp 로그에 ERR-xxxxx 직접 출력, 6.1.1 이하는 8자리 10진 errorcode(예 822329545=0x3103C049→ERR-3103C) → 파서가 변환해 대응
+- code: ERR-01052
+  severity: critical
+  category: disk
+  title: 파일 open/write 호출 실패
+  immediate:
+  - "`grep -rn \"ERR-01052\" $ALTIBASE_HOME/trc | tail -20` 로 errno·대상 파일 확인 — ENOSPC 면 공간, EMFILE 이면 FD 한도"
+  - "`df -h <대상 디렉터리>` · `df -i <대상 디렉터리>` 와 `ls -l <대상 파일>` (소유자·권한) — 사용률 100%·권한 불일치면 확정"
+  - "FD: `grep \"open files\" /proc/<PID>/limits` 와 `ls /proc/<PID>/fd | wc -l` (Linux) — 온라인 로그 파일은 지우지 말 것"
+  short:
+  - 데이터파일과 redo 로그 존재 여부, OS 로그를 점검
+  mid:
+  - 손상 또는 누락 파일을 백업으로 복구하고 스토리지 원인을 제거
+  long:
+  - 스토리지 이중화와 파일 무결성 검증을 정례화
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.altibase.com/pages/viewpage.action?pageId=15138837)
+  note: 공식 예시는 open 또는 write 시스템 호출 실패이며 단순한 일반 I/O 코드로 한정되지 않음
+  vendor_cause: 파일 디스크립터 수 한도 초과 또는 디스크 공간 부족으로 open/write 호출이 실패할 수 있다.
+  vendor_action: ulimit -n을 늘려 재기동하거나 df/bdf로 공간을 확보한다. 온라인 로그 파일은 삭제하지 않는다.
+  vendor_url: https://docs.altibase.com/pages/viewpage.action?pageId=15138837
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR-xxxxx(16진 5자리) 코드는 5.x~7.3 공통. 6.3.1 부터 qp 로그에 ERR-xxxxx 직접 출력, 6.1.1 이하는 8자리 10진 errorcode(예 822329545=0x3103C049→ERR-3103C) → 파서가 변환해 대응
+- code: ERR-110F1
+  severity: error
+  category: memory
+  title: 메모리TS MAXSIZE 초과
+  immediate:
+  - iSQL(SYS) `SELECT * FROM V$MEM_TABLESPACES;` 로 대상 메모리 테이블스페이스의 현재 크기·MAXSIZE 확인(읽기 전용)
+  - 같은 시각 대량 INSERT·배치 세션 확인 — `SELECT * FROM V$SESSION;` 의 CLIENT_APP_INFO·LOGIN_TIME
+  short:
+  - '(2차·승인 후, 롤백: 없음) 불필요 대량 작업 중지 요청, MAXSIZE 확장(ALTER TABLESPACE … AUTOEXTEND ON MAXSIZE …)은 메모리 여유 산정 후'
+  - 불필요 데이터와 대량 작업을 점검하고 확장 가능 범위를 산정
+  mid:
+  - 메모리 tablespace와 물리 메모리 용량을 함께 재산정
+  long:
+  - 메모리 DB 증가율 예측과 사전 증설 기준을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.altibase.com/display/arch/2.%2BProcedure%2Bby%2Btype%2Bof%2Bfailure)
+  note: 메모리 테이블스페이스 MAXSIZE 초과로 확장 작업이 실패하므로 error가 타당함
+  vendor_cause: 메모리 테이블스페이스의 현재 크기가 설정된 MAXSIZE에 도달해 확장할 수 없다.
+  vendor_action: 사용자 메모리 TS는 MAXSIZE를 늘리고, 시스템 TS나 총합 한도 문제면 데이터 정리 후 MEM_MAX_DB_SIZE를 늘려 재시작한다.
+  vendor_url: https://docs.altibase.com/display/arch/2.%2BProcedure%2Bby%2Btype%2Bof%2Bfailure
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR-xxxxx(16진 5자리) 코드는 5.x~7.3 공통. 6.3.1 부터 qp 로그에 ERR-xxxxx 직접 출력, 6.1.1 이하는 8자리 10진 errorcode(예 822329545=0x3103C049→ERR-3103C) → 파서가 변환해 대응
+- code: ERR-11123
+  severity: error
+  category: storage
+  title: 테이블스페이스 공간 부족
+  immediate:
+  - "isql 로 sys 접속 후 `SELECT ID, NAME, TYPE, TOTAL_PAGE_COUNT, ALLOCATED_PAGE_COUNT, PAGE_SIZE FROM V$TABLESPACES;` — 대상 테이블스페이스의 ALLOCATED/TOTAL 이 95% 이상이면 확정 (7.x 컬럼)"
+  - "`SELECT NAME, SPACEID, CURRSIZE, MAXSIZE, AUTOEXTEND FROM V$DATAFILES;` 와 `df -h <datafile 디렉터리>` — AUTOEXTEND 꺼짐·MAXSIZE 도달·디스크 여유 없음 구분"
+  - "UNDO 원인 여부: `SELECT * FROM V$DISK_UNDO_USAGE;` 와 `SELECT ID, SESSION_ID, FIRST_UPDATE_TIME FROM V$TRANSACTION WHERE FIRST_UPDATE_TIME > 0 ORDER BY FIRST_UPDATE_TIME LIMIT 10;` — 오래된 미완료 트랜잭션이 있으면 UNDO 원인"
+  short:
+  - "(2차·승인 후, 롤백: 추가 파일은 줄일 수 없어 용량 계획 반영) `ALTER TABLESPACE <TBS> ADD DATAFILE '<path>' SIZE <크기> AUTOEXTEND ON MAXSIZE <크기>;` 로 공간 확보 뒤 실패 DML 재수행"
+  - AUTOEXTEND와 디스크 여유공간, 대량 DML을 점검
+  mid:
+  - 증가율에 맞춰 datafile과 tablespace 구조를 재산정
+  long:
+  - 용량 임계치와 예측증설 정책을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.altibase.com/display/FAQE/ERR-11123%2BThe%2Btablespace%2Bdoes%2Bnot%2Bhave%2Benough%2Bfree%2Bspace)
+  note: 공간 부족으로 DML이 실패하지만 단독 코드만으로 서비스 전체 중단을 뜻하지 않음
+  vendor_cause: 테이블스페이스 공간 부족으로 INSERT 또는 UPDATE 데이터 입력이 실패했다.
+  vendor_action: 해당 테이블스페이스에 데이터파일을 추가하고, UNDO가 원인이면 장시간 미완료 트랜잭션을 확인한 뒤 재시도한다.
+  vendor_url: https://docs.altibase.com/display/FAQE/ERR-11123%2BThe%2Btablespace%2Bdoes%2Bnot%2Bhave%2Benough%2Bfree%2Bspace
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR-xxxxx(16진 5자리) 코드는 5.x~7.3 공통. 6.3.1 부터 qp 로그에 ERR-xxxxx 직접 출력, 6.1.1 이하는 8자리 10진 errorcode(예 822329545=0x3103C049→ERR-3103C) → 파서가 변환해 대응
+- code: ERR-11049
+  severity: critical
+  category: memory
+  title: 메모리 페이지 한도 초과
+  immediate:
+  - '`SELECT NAME, VALUE1 FROM V$PROPERTY WHERE NAME = ''MEM_MAX_DB_SIZE'';` 로 한도, `SELECT * FROM V$MEM_TABLESPACES;` 로 현재 메모리 DB 크기 확인(읽기 전용)'
+  - 같은 시각 대량 DML 세션 확인 — `SELECT * FROM V$SESSION;` 의 CLIENT_APP_INFO
+  short:
+  - '(2차·승인 후, 롤백: 설정 원복) 대량 작업 중지 요청, MEM_MAX_DB_SIZE 상향(서버 재기동 필요 — 변경 관리)'
+  - 테이블별 메모리 사용량과 불필요 데이터를 점검
+  mid:
+  - MEM_MAX_DB_SIZE와 물리 메모리를 검증 후 증설
+  long:
+  - 메모리 tablespace 성장률과 한도 사용률을 상시 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.altibase.com/display/FAQE/ERR-11049%2BToo%2Bmany%2Bpages%2Bwere%2Ballocated)
+  vendor_cause: 메모리 DB가 크기 한도를 초과해 모든 메모리 테이블스페이스 공간을 사용했다.
+  vendor_action: 불필요한 테이블을 삭제하거나 MEM_MAX_DB_SIZE를 늘려 서버를 재시작하고 메모리 TS 사용량 증가 원인을 확인한다.
+  vendor_url: https://docs.altibase.com/display/FAQE/ERR-11049%2BToo%2Bmany%2Bpages%2Bwere%2Ballocated
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR-xxxxx(16진 5자리) 코드는 5.x~7.3 공통. 6.3.1 부터 qp 로그에 ERR-xxxxx 직접 출력, 6.1.1 이하는 8자리 10진 errorcode(예 822329545=0x3103C049→ERR-3103C) → 파서가 변환해 대응
+- code: ERR-11075
+  severity: error
+  category: lock
+  title: 트랜잭션 잠금 시간초과
+  immediate:
+  - "isql 로 sys 접속 후 `SELECT TRANS_ID, WAIT_FOR_TRANS_ID FROM V$LOCK_WAIT;` — WAIT_FOR_TRANS_ID 가 잠금 보유 트랜잭션 (7.x 컬럼)"
+  - "보유 트랜잭션의 세션·문장: `SELECT T.ID, T.SESSION_ID, T.FIRST_UPDATE_TIME, S.QUERY FROM V$TRANSACTION T, V$STATEMENT S WHERE S.TX_ID = T.ID AND T.ID IN (SELECT WAIT_FOR_TRANS_ID FROM V$LOCK_WAIT);` — 미커밋 장기 트랜잭션·DDL 이면 확정"
+  short:
+  - "(2차·승인 후, 롤백: 해당 없음 — 종료 세션의 미커밋 변경은 취소됨) 업무 담당 확인 뒤 보유 세션에 COMMIT/ROLLBACK 요청, 응답이 없으면 SYS 가 해당 세션 종료"
+  - 장기 DML과 DDL, lock escalation 영향을 분석
+  mid:
+  - 대량 DML을 분할하고 객체 접근 순서를 개선
+  long:
+  - 잠금 대기와 replication lock 모니터링을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.altibase.com/pages/viewpage.action?pageId=16876388)
+  vendor_cause: 이미 잠긴 객체의 잠금을 획득하려 했으나 지정 시간 안에 잠금을 얻지 못했다.
+  vendor_action: DDL 재시도, 미커밋 거래 COMMIT/ROLLBACK, 대량 UPDATE 분할, WAIT 증가 등 발생 유형에 맞는 조치를 수행한다.
+  vendor_url: https://docs.altibase.com/pages/viewpage.action?pageId=16876388
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR-xxxxx(16진 5자리) 코드는 5.x~7.3 공통. 6.3.1 부터 qp 로그에 ERR-xxxxx 직접 출력, 6.1.1 이하는 8자리 10진 errorcode(예 822329545=0x3103C049→ERR-3103C) → 파서가 변환해 대응
+- code: ERR-11118
+  severity: error
+  category: capacity
+  title: UPDATE 로그 크기 한도 초과
+  immediate:
+  - "isql 로 sys 접속 후 `SELECT NAME, VALUE1 FROM V$PROPERTY WHERE NAME IN ('TRX_UPDATE_MAX_LOGSIZE','LOCK_ESCALATION_MEMORY_SIZE');` 로 한도 확인"
+  - "실패 UPDATE 범위: 앱 로그의 SQL 조건으로 `SELECT COUNT(*) FROM <owner>.<table> WHERE <조건>;` — 한 트랜잭션 대상 건수가 매우 크면(수십만 건 이상) 확정"
+  - "세션 값: `SELECT ID, TRX_UPDATE_MAX_LOGSIZE FROM V$SESSION WHERE ID = <세션ID>;` (7.x 컬럼)"
+  short:
+  - "(2차·승인 후, 롤백: 원래 값) 진행 중인 대량 UPDATE 는 업무 담당 확인 뒤 멈추고 커밋 단위를 나눠 재수행, 필요하면 TRX_UPDATE_MAX_LOGSIZE 를 LOCK_ESCALATION_MEMORY_SIZE 보다 작은 범위에서 상향"
+  - TRX_UPDATE_MAX_LOGSIZE와 변경 건수, 트랜잭션 범위를 점검
+  mid:
+  - 배치 커밋 단위와 관련 로그 한도를 재산정
+  long:
+  - 대량 DML 사전검증과 트랜잭션 크기 기준을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.altibase.com/pages/viewpage.action?pageId=16876399)
+  note: TRX_UPDATE_MAX_LOGSIZE 초과 오류로 UNDO 부족 오류가 아니므로 유형을 capacity로 수정
+  vendor_cause: UPDATE 시 생성된 redo log 크기가 TRX_UPDATE_MAX_LOGSIZE를 초과했다.
+  vendor_action: UPDATE 대상을 나눠 수행하거나 TRX_UPDATE_MAX_LOGSIZE를 조정하되 LOCK_ESCALATION_MEMORY_SIZE보다 작게 유지한다.
+  vendor_url: https://docs.altibase.com/pages/viewpage.action?pageId=16876399
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR-xxxxx(16진 5자리) 코드는 5.x~7.3 공통. 6.3.1 부터 qp 로그에 ERR-xxxxx 직접 출력, 6.1.1 이하는 8자리 10진 errorcode(예 822329545=0x3103C049→ERR-3103C) → 파서가 변환해 대응
+- code: ERR-41059
+  severity: critical
+  category: thread
+  title: 태스크 풀 오버플로
+  immediate:
+  - "isql 로 sys 접속 후 `SELECT TYPE, STATE, RUN_MODE, COUNT(*) FROM V$SERVICE_THREAD GROUP BY TYPE, STATE, RUN_MODE;` — 서비스 스레드 대부분이 EXECUTE 상태면 포화 확정 (7.x 컬럼)"
+  - "`SELECT COUNT(*) FROM V$SESSION;` 와 `SELECT NAME, VALUE1 FROM V$PROPERTY WHERE NAME IN ('MAX_CLIENT','TRANSACTION_TABLE_SIZE');` — 접속 수가 MAX_CLIENT 근처면 접속 폭주"
+  - "장시간 실행: `SELECT SESSION_ID, TOTAL_TIME, QUERY FROM V$STATEMENT WHERE EXECUTE_FLAG = 1 ORDER BY TOTAL_TIME DESC LIMIT 10;` — 오래 붙잡은 문장이 스레드를 점유"
+  short:
+  - "(2차·승인 후, 롤백: 원래 값) 배치·대량 조회 동시 실행을 낮추고 장시간 문장은 업무 담당 확인 뒤 취소, MAX_CLIENT·TRANSACTION_TABLE_SIZE 상향은 properties 수정 뒤 계획 재기동"
+  - 장기 실행 작업과 동시성 패턴, 관련 자원 한도를 분석
+  mid:
+  - 워크로드에 맞게 task pool 관련 구성을 검증 후 조정
+  long:
+  - 동시성 제어와 task pool 사용률 경보를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.altibase.com/display/FAQE/ERR-41059%2BTask%2Bpool%2Boverflow)
+  vendor_cause: 신규 접속 증가, task 미정리, 모든 서비스 스레드 EXECUTE 또는 TRANSACTION_TABLE_SIZE 초과로 발생한다.
+  vendor_action: MAX_CLIENT를 늘리고 task close 여부를 확인하며 필요하면 TRANSACTION_TABLE_SIZE를 늘린다.
+  vendor_url: https://docs.altibase.com/display/FAQE/ERR-41059%2BTask%2Bpool%2Boverflow
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR-xxxxx(16진 5자리) 코드는 5.x~7.3 공통. 6.3.1 부터 qp 로그에 ERR-xxxxx 직접 출력, 6.1.1 이하는 8자리 10진 errorcode(예 822329545=0x3103C049→ERR-3103C) → 파서가 변환해 대응

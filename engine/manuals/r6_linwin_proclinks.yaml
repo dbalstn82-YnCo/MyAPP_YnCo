@@ -1,0 +1,27 @@
+# 아이디어 3 (2026-10-16) — linux / windows / auditd 판정 중 기존 절차가 실제로 맞는 것을 '이 판정 전용' 으로 잇는다(절차 파일은 고치지 않음)
+# 맞지 않은 판정은 r6_linwin_procedures.yaml 의 전용 절차(LNX-PROC-R6-* / WIN-PROC-R6-*)로 따로 만들었다.
+links:
+- procedure: LNX-PROC-MEMORY
+  match: [LEG-RHEL-OOM, LEG-RHEL-OOM-KILLER-A548, LEG-RHEL-SWAP]
+  reviewed: "2026-10-16 판정 적합성 확인 — 시스템 전체 OOM killer·스왑 고갈 룰: 1차 OOM 기록·free/vmstat(si/so)·상위 RSS, 2차 스왑 파일 추가·메모리 파라미터가 그대로 맞음"
+- procedure: LNX-PROC-DISK
+  match: [OS-LNX-011, LEG-RHEL-INODE, LNX-FS-INODE-FULL]
+  reviewed: "2026-10-16 판정 적합성 확인 — 파일시스템 공간·inode 고갈: 1차 df -hT·df -i(IUse%)·큰 디렉터리, 2차 정리·LVM 확장이 그대로 맞음(LNX-FS-INODE-FULL 은 capacity 유형이지만 원인·조치가 이 절차와 같음)"
+- procedure: LNX-PROC-CAPACITY
+  match: [LNX-CONNTRACK-FULL, LNX-TCP-SYN-FLOOD]
+  reviewed: "2026-10-16 판정 적합성 확인 — conntrack 포화·SYN 큐 넘침: 1차 nf_conntrack_count/max·somaxconn·tcp_max_syn_backlog·'SYN flooding' 기록, 2차 한도·syncookies 조정(공격이면 보안 담당 선통보)이 그대로 맞음(SYN 플러딩은 security 유형이지만 조치는 이 절차)"
+- procedure: LNX-PROC-HARDWARE
+  match: [LNX-BUFFER-IO, LEG-RHEL-DISK-IO, LEG-RHEL-I-O-ERROR-B055, LNX-MCE-HARDWARE, OS-LNX-015]
+  reviewed: "2026-10-16 판정 적합성 확인 — 블록 I/O 오류·MCE·패닉: 1차 커널 I/O error·Machine check 기록·multipath -ll·smartctl -H·ras-mc-ctl·SEL, 2차 경로 격리·kdump, 3차 제조사 자료가 맞음(공간 부족용 LNX-PROC-DISK 보다 정확)"
+- procedure: LNX-PROC-SECURITY
+  match: [LNX-SELINUX-DENIAL, OS-AUD-001, OS-AUD-003, OS-AUD-004]
+  reviewed: "2026-10-16 판정 적합성 확인 — SELinux AVC 거부·인증 실패·계정 잠금: 1차 ausearch AVC·faillock·실패 출처, 2차 faillock --reset·audit2allow 검토·출처 차단(보안 담당 승인)이 그대로 맞음(auditd 제품 포함 절차)"
+- procedure: WIN-PROC-DISK
+  match: ['2013', OS-WIN-004]
+  reviewed: "2026-10-16 판정 적합성 확인 — 디스크 공간 부족 경고(2013): 1차 드라이브 여유·이벤트 2013, 2차 큰 폴더 조사·임시 파일/로그 정리·볼륨 확장이 그대로 맞음"
+- procedure: WIN-PROC-R5-STORAGE
+  match: ['7', '11', '15', '51']
+  reviewed: "2026-10-16 판정 적합성 확인 — 디스크 불량 블록·컨트롤러 오류·장치 준비 안 됨·페이징 I/O 오류: 1차 Disk 7/11/51·Storport 129·Disk 153 시간순·Get-PhysicalDisk·mpclaim 경로, 2차 chkdsk·저장 경로 복구가 맞음(공간 부족용 WIN-PROC-DISK 보다 정확, 15 는 이벤트 목록에 없으나 볼륨·디스크·경로 단계로 확인)"
+- procedure: WIN-PROC-INTERNAL
+  match: ['1000', '7031', '7034', OS-WIN-001]
+  reviewed: "2026-10-16 판정 적합성 확인 — 서비스 비정상 종료(7031/7034)·응용 프로그램 크래시(1000): 1차 SCM 7031/7034·Application 1000 기록·서비스 상태, 2차 재시작·복구 동작·LocalDumps 덤프 설정이 그대로 맞음"

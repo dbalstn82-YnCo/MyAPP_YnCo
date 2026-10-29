@@ -1,0 +1,155 @@
+product: postgresql
+layer: db
+note: GPT 협업 수집분 — 벤더 공식 문서와 대조 후 확정
+codes:
+- code: '40001'
+  severity: warn
+  category: lock
+  title: 직렬화 실패
+  immediate:
+  - "서버 로그의 could not serialize access due to … 문구와 트랜잭션 isolation level 기록, 대기 서버면 canceling statement due to conflict with recovery 여부 구분: `grep -n -E 'could not serialize access|conflict with recovery' <로그 경로> | tail -30` (읽기 전용)"
+  - "동시 갱신 대상 확인: `SELECT pid, state, xact_start, LEFT(query,80) FROM pg_stat_activity WHERE state <> 'idle' ORDER BY xact_start;` — 같은 테이블을 갱신하는 긴 트랜잭션이 있으면 충돌 상대"
+  short:
+  - "(2차) 애플리케이션이 40001 수신 시 트랜잭션 전체를 처음부터 재시도하도록 보강, 대기 서버 충돌이면 max_standby_streaming_delay·hot_standby_feedback 검토(승인 후, 롤백: 이전 값 기록)"
+  mid:
+  - "재시도 로직 표준화(재시도 횟수·지연)와 동시 갱신 범위 축소"
+  long:
+  - "40001 직렬화 실패율과 재시도 횟수 감시"
+  source: GPT 수집·벤더 문서 대조 완료(https://www.postgresql.org/docs/current/errcodes-appendix.html)
+  vendor_cause: 동시 트랜잭션의 실행 결과를 직렬 순서로 보장할 수 없어 serialization failure가 발생함
+  vendor_action: 트랜잭션이 결정한 SQL·값 선택 로직까지 포함해 전체 트랜잭션을 처음부터 재시도
+  vendor_url: https://www.postgresql.org/docs/current/mvcc-serialization-failure-handling.html
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: SQLSTATE 5자리 코드 — 9.2 오류 코드 표에 전부 존재(부록 확인), 18 까지 동일
+- code: '58000'
+  severity: error
+  category: internal
+  title: PostgreSQL 외부 시스템 오류
+  immediate:
+  - "서버 로그의 58000 원문과 함께 기록된 OS 오류(errno 문구·대상 파일) 기록 (읽기 전용)"
+  - "같은 시각 OS 상태: `dmesg -T | tail -50` · `df -h <data_directory>` · postgres 계정 `ulimit -a`"
+  short:
+  - "(2차·승인 후) OS 오류 원인별 조치(권한·공간·자원 한도) — 롤백: 변경 전 설정·권한(`ls -l`) 기록"
+  mid:
+  - "OS 자원 한도와 PostgreSQL 설정 정합 점검"
+  long:
+  - "커널·OS 오류 로그 감시"
+  source: GPT 수집·벤더 문서 대조 완료(https://www.postgresql.org/docs/current/errcodes-appendix.html)
+  note: 공식 분류는 PostgreSQL 자체 외부의 일반 시스템 오류이며 디스크 오류로 한정되지 않음
+  vendor_cause: PostgreSQL 자체 외부의 시스템 오류가 발생함
+  vendor_action: ''
+  vendor_url: https://www.postgresql.org/docs/current/errcodes-appendix.html
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: SQLSTATE 5자리 코드 — 9.2 오류 코드 표에 전부 존재(부록 확인), 18 까지 동일
+- code: PG-PANIC
+  severity: critical
+  category: internal
+  title: PANIC 발생
+  immediate:
+  - "서버 로그의 PANIC 줄과 직전 ERROR(could not fsync·could not write 등) 문구 기록 후 로그 파일 사본 보존 (읽기 전용)"
+  - "프로세스 상태: `systemctl status postgresql*` 또는 `pg_ctl status -D <data_directory>` — `SHOW restart_after_crash;` 로 크래시 후 자동 복구 설정 확인"
+  - "같은 시각 디스크 오류·공간: `dmesg -T | tail -50` · `df -h <data_directory>`"
+  short:
+  - "(2차·승인 후) 디스크·공간 원인 해소 후 기동(WAL 재생 복구 진행) — 영향: 복구 중 접속 불가, 롤백: 기동 실패 시 백업·복제본 전환 절차로"
+  mid:
+  - "결함 스토리지 교체와 마이너 버전 패치 적용"
+  long:
+  - "PANIC·FATAL 로그 경보와 HA(스트리밍 복제) 구성"
+  source: GPT 수집·벤더 문서 대조 완료(https://www.postgresql.org/docs/current/runtime-config-error-handling.html)
+  note: 의사코드
+  vendor_cause: 수정된 데이터 파일을 파일시스템에 flush하지 못하면 기본 설정에서 PANIC으로 서버가 중단됨
+  vendor_action: 근본 원인을 조사하고 결함 하드웨어를 교체한 뒤 WAL에서 복구하는 것이 데이터 손실 방지에 권장됨
+  vendor_url: https://www.postgresql.org/docs/current/runtime-config-error-handling.html
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: PANIC 레벨 — 전 버전
+- code: PG-ARCHIVE-FAIL
+  severity: critical
+  category: storage
+  title: WAL 아카이브 실패
+  immediate:
+  - "보관 상태: `SELECT archived_count, last_archived_wal, failed_count, last_failed_wal, last_failed_time FROM pg_stat_archiver;` (9.4+, 읽기 전용)"
+  - "서버 로그의 archive command failed with exit code N 과 실패 명령 원문 기록, `SHOW archive_command;` 의 보관 경로 공간·권한(`df -h <보관경로>` · `ls -ld <보관경로>`) 확인"
+  - "pg_wal 누적: `du -sh <data_directory>/pg_wal` (10+, 9.x 는 pg_xlog) — 디스크 고갈 위험도 판단"
+  short:
+  - "(2차·승인 후) 보관 경로 공간·권한·네트워크 복구 후 archive_command 를 postgres 계정으로 수동 실행해 검증 — 성공: failed_count 증가 멈춤·last_archived_wal 갱신, 롤백: archive_command 변경 시 이전 값 기록"
+  mid:
+  - "보관 경로 이중화와 보관 실패 즉시 알림"
+  long:
+  - "pg_stat_archiver failed_count·pg_wal 사용률 감시"
+  source: GPT 수집·벤더 문서 대조 완료(https://www.postgresql.org/docs/current/runtime-config-wal.html)
+  note: 의사코드
+  vendor_cause: archive_command·archive_library 실패 또는 archive_command 공백으로 WAL 아카이빙이 진행되지 않음
+  vendor_action: archive_command가 성공할 때만 0을 반환하도록 구성하고 archive_command 또는 archive_library를 올바르게 설정
+  vendor_url: https://www.postgresql.org/docs/current/runtime-config-wal.html
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: '''archiving write-ahead log file'' 문구는 10+, 9.x 는 ''archiving transaction log file'' — 별칭에 두 문구 포함; ''archive command failed'' 는 공통'
+- code: PG-STANDBY-DISCONNECT
+  severity: error
+  category: upstream
+  title: 스탠바이 연결 끊김
+  immediate:
+  - "대기 서버 수신 상태: `SELECT status, last_msg_receipt_time FROM pg_stat_wal_receiver;` (9.6+) 와 서버 로그의 could not connect to the primary server 줄 (읽기 전용)"
+  - "원본에서 `SELECT application_name, state, client_addr FROM pg_stat_replication;` · `SELECT slot_name, active FROM pg_replication_slots;` 와 대기 서버에서 `nc -vzw3 <primary> <port>` 로 도달성 확인"
+  short:
+  - "(2차·승인 후) 네트워크·pg_hba.conf(replication 항목)·복제 계정 문제 해소 후 대기 서버 재시작, 원본 WAL 이 이미 정리됐으면 pg_basebackup 으로 재구축 — 롤백: 기존 대기 데이터 디렉터리 보관"
+  mid:
+  - "wal_receiver_timeout·wal_sender_timeout 과 복제 슬롯 사용 정책 정비"
+  long:
+  - "pg_stat_replication 연결 상태 감시 알림"
+  source: GPT 수집·벤더 문서 대조 완료(https://www.postgresql.org/docs/current/runtime-config-replication.html)
+  note: 의사코드
+  vendor_cause: primary 장애·네트워크 중단 등으로 replication 연결이 지정 시간 이상 비활성 상태가 됨
+  vendor_action: ''
+  vendor_url: https://www.postgresql.org/docs/current/runtime-config-replication.html
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: 스트리밍 복제(walsender)는 9.0 도입

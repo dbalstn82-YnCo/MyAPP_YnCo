@@ -1,0 +1,237 @@
+# 기존 'AI 로그분석기 v2.2' 내장 룰에서 변환 반입(tools/import_legacy_rules.py) — 중복(코드·패턴) 제외
+# 심각도 CRITICAL→critical HIGH→error MEDIUM→warn LOW→info · immediate_actions→즉시 · root_actions→중기 · negative_patterns→exclude
+rules:
+- id: LEG-RHEL-OOM
+  layer: os
+  product:
+  - linux
+  match:
+    regex: '(?:Out of memory: Kill process \d+)|(?:oom_kill_process)|(?:Killed process \d+.*score \d+)|(?:oom-kill:constraint=CONSTRAINT_NONE)|(?:memory cgroup out of memory)|(?:oom_reaper: reaped process)|(?:Task.*killer.*process.*\d+)|(?:kernel:.*oom.*kill)'
+  severity: critical
+  category: memory
+  verdict: OOM Killer 동작 — 시스템 메모리 고갈로 커널 OOM Killer 동작
+  immediate:
+  - '`dmesg | grep -i ''out of memory'' | tail -20` 와 `journalctl -k | grep -i oom | tail -20` (RHEL 7+, RHEL 6 은 /var/log/messages) 로 종료된 프로세스·시각 확인'
+  - '`free -m && vmstat 1 5` 로 가용 메모리·si/so 확인, `ps -eo pid,rss,comm --sort=-rss | head` 로 상위 사용 프로세스 확인'
+  short:
+  - '영향: 중요 서비스 프로세스 강제 종료 — 종료된 서비스 기동 여부 확인 후 (2차·승인 후) 재기동'
+  - (2차) /proc/meminfo 의 Committed_AS·CommitLimit 과 상위 프로세스 RSS 추세(`sar -r`)로 누수·과할당 여부 판정
+  mid:
+  - 메모리 증설
+  - '(2차·승인 후, 롤백: swapoff 후 파일 제거) 스왑 추가: `dd if=/dev/zero of=/swapfile bs=1M count=4096` → `chmod 600 /swapfile` → `mkswap /swapfile` → `swapon /swapfile`'
+  - '(2차·승인 후, 롤백: 0 으로 원복) 중요 프로세스 보호: `echo -1000 > /proc/<PID>/oom_score_adj` 또는 systemd `OOMScoreAdjust=` (구 oom_adj -17 은 폐기 예정 인터페이스)'
+  - 메모리 누수 프로세스 튜닝(JVM -Xmx·캐시 크기 재산정)
+  long:
+  - 메모리 사용률·Committed_AS 감시(85% 경고)와 OOM 커널 메시지 경보, 분기별 메모리 용량 계획
+  source_note: 'legacy-analyzer-v2.2 rhel_rules.json RHEL-OOM (원 출처: builtin)'
+  versions:
+  - RHEL 5~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: '기존 도구 룰 — ''Out of memory: Kill process''·''Killed process … score'' 형식(2.6.32~4.18). 5.x+ 형식은 OS-LNX-003 이 판정'
+- id: LEG-RHEL-DISK-IO
+  layer: os
+  product:
+  - linux
+  match:
+    regex: (?:blk_update_request.*I/O error)|(?:Buffer I/O error on device)|(?:EXT4-fs error.*I/O failure)|(?:XFS.*I/O error)|(?:XFS.*corruption detected)|(?:end_request.*I/O error)|(?:SCSI error.*return
+      code)|(?:device-mapper.*I/O error)|(?:read error.*sector \d+)|(?:write error.*sector \d+)|(?:hard resetting link)|(?:ata\d+:.*failed)
+  severity: error
+  category: disk
+  verdict: 블록 디바이스 I/O 오류 — 스토리지 장치 불량 또는 파일시스템 손상
+  immediate:
+  - dmesg -T | grep -i 'error\|fail' | tail -30 (RHEL 7+, RHEL 6 은 -T 없이 `dmesg` 또는 /var/log/messages)
+  - smartctl -a /dev/sdX로 SMART 확인 (smartmontools, 하드웨어 RAID 뒤는 벤더 도구)
+  - iostat -xz 1 5
+  short:
+  - '영향: 파일 읽기/쓰기 실패, 데이터 손상 위험 — `grep -E '' ro[ ,]'' /proc/mounts` 로 읽기 전용 전환 여부 확인 후 2차 통보'
+  - (2차) 오류 장치가 쓰이는 볼륨(`lsblk -o NAME,HCTL,MOUNTPOINT`)과 멀티패스 경로(`multipath -ll`) 확인 후 하드웨어 진단 의뢰
+  mid:
+  - '(2차·승인 후, 롤백: 교체 전 디스크 보관) 불량 디스크 교체'
+  - 'EXT4 점검: `fsck -n /dev/sdX` (읽기 전용 점검, 수리는 언마운트 후 `e2fsck -fy`·2차 승인)'
+  - RAID 구성으로 중복화
+  long:
+  - I/O 오류·SMART 재할당 섹터 추세 감시와 디스크 예방 교체 기준 운영
+  source_note: 'legacy-analyzer-v2.2 rhel_rules.json RHEL-DISK-IO (원 출처: builtin)'
+  versions:
+  - RHEL 5~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: blk_update_request(3.17+·RHEL7 백포트)·Buffer I/O error(전 버전)·EXT4(RHEL 6+)
+- id: LEG-RHEL-SELINUX
+  layer: os
+  product:
+  - linux
+  match:
+    regex: (?:type=AVC.*denied)|(?:SELinux.*is preventing)|(?:avc:.*denied)|(?:audit.*type=AVC)|(?:SELinux.*blocking)
+  severity: warn
+  category: internal
+  verdict: SELinux 접근 차단 — SELinux 정책이 프로세스의 파일/네트워크 접근 차단
+  immediate:
+  - '`ausearch -m AVC -ts recent -i | tail -40` 으로 scontext·tcontext·comm 확인 — 같은 comm·tcontext 가 반복되면 레이블·정책 원인 (RHEL 5+, audit 패키지)'
+  - '`ausearch -m AVC -ts recent | audit2why` 로 거부 사유(레이블·boolean·정책 없음) 확인 (전체 audit.log 대신 최근 범위만, policycoreutils-python / RHEL 8+ policycoreutils-python-utils 필요)'
+  - '`getenforce` 로 모드 확인 — Enforcing 이면 실제 거부, Permissive 면 기록만'
+  short:
+  - '영향: 서비스 기동 실패 또는 특정 기능 동작 불가 — `getenforce` 와 `ls -Z <경로>` 로 모드·레이블 확인'
+  mid:
+  - '(2차·보안 담당 승인 후, 롤백: `semodule -r <모듈>`) audit2allow -M mypolicy 로 만든 모듈 검토 후 `semodule -i mypolicy.pp`'
+  - (2차·승인 후) restorecon -Rv <경로>
+  - '(2차·승인 후, 롤백: 원래 값으로 setsebool) setsebool -P 명령으로 SELinux boolean 조정'
+  long:
+  - AVC 발생 건수 감시와 배포 절차에 레이블 점검(`restorecon -n -v`) 포함 — setenforce 0 운영 금지
+  source_note: 'legacy-analyzer-v2.2 rhel_rules.json RHEL-SELINUX (원 출처: builtin)'
+  versions:
+  - RHEL 5~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  version_note: SELinux — RHEL 계열 전용
+- id: LEG-RHEL-NETDOWN
+  layer: os
+  product:
+  - linux
+  match:
+    regex: (?:kernel:.*eth\d+.*link.*down)|(?:kernel:.*ens\d+.*link.*down)|(?:kernel:.*bond\d+.*link.*down)|(?:NetworkManager.*device.*eth\d+.*down)|(?:NETDEV WATCHDOG.*eth\d+.*timeout)|(?:carrier lost.*eth\d+)|(?:eth\d+:.*link
+      is not ready)|(?:network.*interface.*down)|(?:kernel:.*eth\d+:.*link is not ready)|(?:NETDEV WATCHDOG:.*eth\d+)|(?:kernel:.*carrier.*lost)|(?:NetworkManager.*device.*disconnected)
+  severity: error
+  category: internal
+  verdict: 네트워크 인터페이스 다운 — Linux 서버 네트워크 인터페이스 비활성화
+  immediate:
+  - ip link show (RHEL 6 은 `ifconfig -a`) 로 DOWN·NO-CARRIER 인터페이스 확인
+  - ethtool <iface> 로 Link detected·속도 확인, `ip -s link show <iface>` 로 오류 카운터 확인
+  - journalctl -k | grep -i '<iface>' | tail -20 (RHEL 7+) 로 다운·업 반복 시각 확인 후 네트워크 담당에 스위치 포트 확인 요청
+  short:
+  - '영향: 서버 네트워크 통신 완전 차단.'
+  - '(2차·네트워크 담당 합의 후, 롤백: `ip link set <iface> down`) 관리상 down 이면 `ip link set <iface> up`, 물리 장애면 케이블·SFP 교체'
+  mid:
+  - NIC 드라이버 업데이트
+  - 케이블 및 스위치 포트 점검
+  - Bonding/Teaming 구성으로 이중화
+  long:
+  - 링크 상태·플래핑 횟수 감시와 단일 링크 서버 이중화 표준 적용
+  source_note: 'legacy-analyzer-v2.2 rhel_rules.json RHEL-NETDOWN (원 출처: builtin)'
+  exclude: (?:LINEPROTO)|(?:GigabitEthernet)
+  versions:
+  - RHEL 5~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: eth/ens/bond 인터페이스명 — ens* 는 systemd 예측 가능 이름(RHEL 7+·Ubuntu 16.04+)
+- id: LEG-RHEL-SWAP
+  layer: os
+  product:
+  - linux
+  match:
+    regex: (?:swap.*full)|(?:out of swap space)|(?:swapping.*heavily)|(?:kswapd.*cpu.*high)|(?:allocation.*failed.*swap)|(?:si.*\d{3,}.*so.*\d{3,})
+  severity: error
+  category: memory
+  verdict: 스왑 공간 고갈 — 시스템 스왑 공간 고갈. 과도한 스와핑
+  immediate:
+  - free -h
+  - vmstat 1 5로 si/so 컬럼 확인
+  - swapon --show
+  short:
+  - '영향: 시스템 전체 성능 급저하.'
+  mid:
+  - 스왑 파일 추가
+  - 메모리 증설
+  - vm.swappiness 값 조정
+  long:
+  - 메모리·스왑 사용률(70% 경고)과 vmstat si/so 추세 감시, 분기별 메모리 용량 계획
+  source_note: 'legacy-analyzer-v2.2 rhel_rules.json RHEL-SWAP (원 출처: builtin)'
+  versions:
+  - RHEL 5~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: 일반 문구
+- id: LEG-RHEL-SOFTLOCKUP
+  layer: os
+  product:
+  - linux
+  match:
+    regex: '(?:BUG: soft lockup - CPU#\d+)|(?:watchdog: BUG: soft lockup)|(?:CPU#\d+.*stuck for.*seconds)|(?:RCU stall.*detected)'
+  severity: critical
+  category: lock
+  verdict: CPU Soft Lockup — CPU가 장시간 스케줄러에 의해 선점되지 않음
+  immediate:
+  - dmesg | grep -i 'lockup\|stuck'
+  - journalctl -k --since '-2 hours' | grep -i -A 25 'soft lockup' | tail -60 (RHEL 7+) 로 CPU·프로세스·스택 모듈 확보
+  - mpstat -P ALL 1 3 (sysstat) 로 CPU 별 %steal·%sys 확인 — VM 이면 호스트 과할당 의심
+  short:
+  - '영향: 시스템 응답 불가, 패닉 유발 가능 — 반복되면 kdump 설정 상태(`systemctl status kdump`) 확인 후 2차 통보'
+  mid:
+  - 커널 업데이트
+  - CPU/마더보드 펌웨어 업데이트
+  long:
+  - soft lockup 커널 메시지 실시간 경보와 커널·펌웨어 업데이트 주기 관리
+  source_note: 'legacy-analyzer-v2.2 rhel_rules.json RHEL-SOFTLOCKUP (원 출처: builtin)'
+  versions:
+  - RHEL 5~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: '''BUG: soft lockup - CPU#N stuck'' 2.6.32+ / ''watchdog: BUG: soft lockup'' 4.x+'
+- id: LEG-RHEL-NFS
+  layer: os
+  product:
+  - linux
+  match:
+    regex: '(?:NFS: server.*not responding)|(?:nfs: mount.*failed)|(?:Stale file handle)|(?:rpc.*timedout)|(?:nfs.*I/O error)'
+  severity: error
+  category: performance
+  verdict: NFS 마운트 오류 — NFS 서버 응답 없음 또는 네트워크 단절
+  immediate:
+  - grep nfs /proc/mounts 로 대상 마운트·옵션(hard/soft·timeo·vers) 확인
+  - showmount -e <NFS서버> 와 `rpcinfo -t <NFS서버> nfs` 로 서버 응답 확인 (마운트 경로 ls·df 는 멈출 수 있어 금지)
+  short:
+  - '영향: NFS 마운트된 파일시스템 접근 불가.'
+  - '(2차·승인 후, 롤백: 원래 옵션으로 재마운트) 서버 복구가 늦고 업무 영향이 크면 `umount -l /<마운트>` 로 지연 언마운트 — 사용 중 프로세스 영향 확인 후'
+  mid:
+  - NFS 서버 상태 점검
+  - 방화벽 NFS 포트 확인
+  - autofs 사용으로 자동 재마운트
+  long:
+  - NFS 응답 시간·재전송률(`nfsstat -rc`) 감시와 NFS 서버 이중화 검토
+  source_note: 'legacy-analyzer-v2.2 rhel_rules.json RHEL-NFS (원 출처: builtin)'
+  versions:
+  - RHEL 5~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: NFS 클라이언트 문구 전 버전
+- id: LEG-RHEL-INODE
+  layer: os
+  product:
+  - linux
+  match:
+    regex: (?:No space left.*inode)|(?:inode.*exhausted)|(?:df -i.*100%)|(?:cannot create.*file.*inode)
+  severity: error
+  category: disk
+  verdict: Inode 고갈 — 파일 수 과다로 Inode 소진
+  immediate:
+  - '`df -i` 로 IUse% 가 높은 마운트(<mount>)를 먼저 특정 — 95% 이상이면 확정, 100% 면 그 파일시스템에 새 파일을 만들 수 없음(읽기 전용)'
+  - '그 마운트 한 곳만: `find <mount> -xdev -type f -printf ''%h\n'' | sort | uniq -c | sort -rn | head -20` 로 파일 수가 많은 디렉터리 확인 — 파일이 수백만 개면 수 분간 디스크 I/O 를 쓰므로 루트 전체(/)가 아니라 가득 찬 마운트만 보고, 삭제는 2차'
+  short:
+  - '(2차·승인 후, 롤백: 정리 전 tar 보관본 복원) 소형 파일이 몰린 디렉터리(세션·캐시·메일 큐 등)의 소유 서비스 확인 뒤 보존 기간이 지난 파일 정리'
+  - '영향: 파일 생성 불가, 서비스 이상.'
+  mid:
+  - 소형 임시 파일 정기 삭제
+  - 파티션 재구성 시 -i 옵션으로 Inode 수 증가
+  long:
+  - inode 사용률 80% 경고 감시와 소파일 생성 디렉터리 정리 정책(systemd-tmpfiles·cron) 운영
+  source_note: 'legacy-analyzer-v2.2 rhel_rules.json RHEL-INODE (원 출처: builtin)'
+  versions:
+  - RHEL 5~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: 일반 문구

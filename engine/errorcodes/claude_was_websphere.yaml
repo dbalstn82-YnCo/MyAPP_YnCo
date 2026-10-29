@@ -1,0 +1,1107 @@
+product: websphere
+layer: was
+note: GPT 협업 수집분 — 벤더 공식 문서와 대조 후 확정
+codes:
+- code: WSVR0100W
+  severity: warn
+  category: internal
+  title: 애플리케이션 초기화 오류
+  immediate:
+  - "`grep -n -A 20 \"WSVR0100W\" <PROFILE_ROOT>/logs/<server>/SystemOut.log | head -40` 으로 init 실패 대상과 동반 예외 확인"
+  - "같은 시각 FFDC `ls -lt <PROFILE_ROOT>/logs/ffdc/ | head` 와 해당 FFDC 파일의 예외 확인 — 특정 애플리케이션이면 그 앱만 영향"
+  short:
+  - 동반 예외가 가리키는 구성(리소스 참조·클래스 로더·공유 라이브러리)을 점검해 담당에 전달, 지속되면 메시지 ID 로 IBM 지원 문서 검색
+  mid:
+  - '(2차·승인 후, 롤백: 이전 EAR 재배포) 원인 수정본 배포 후 애플리케이션 시작 확인'
+  long:
+  - 기동 시 WSVR0100W 출력 여부를 기동 점검 항목에 포함
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/docs/en/was-nd/8.5.5?topic=deployment-application-startup-problems)
+  note: 서버 전체가 아닌 애플리케이션 초기화 경고
+  vendor_cause: 예기치 않은 초기화 예외이며 원인을 즉시 알 수 없음
+  vendor_action: 지속되면 메시지 ID로 IBM WebSphere Application Server Support의 문제 판별 정보를 확인
+  vendor_url: https://www.ibm.com/docs/en/was-nd/8.5.5?topic=deployment-application-startup-problems
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  version_note: WSVR 메시지 ID 는 traditional 7.0~9.0 동일 — traditional 전용(Liberty 는 CWWK* 체계)
+- code: WSVR0194I
+  severity: warn
+  category: internal
+  title: 앱 기동 실패 알림
+  immediate:
+  - '`grep -n -A 20 "WSVR0194" <PROFILE_ROOT>/logs/<server>/SystemOut.log | head -40` 으로 실제 접미사(I·E)·composition unit·BLA 이름과 동반 예외 확인'
+  - '`<PROFILE_ROOT>/bin/wsadmin.sh -lang jython -c "print AdminControl.queryNames(''type=Application,process=<server>,*'')"` 로 실행 중 애플리케이션 목록 확인 — 목록에 없으면 시작 실패 확정'
+  short:
+  - '동반 예외(클래스 로딩·리소스 참조)를 배포 담당에 전달, (2차·승인 후, 롤백: 이전 버전) 수정본 배포'
+  mid:
+  - 배포 전 스테이징 서버 기동 검증
+  long:
+  - 애플리케이션 시작 상태 감시
+  source: GPT 수집·공식 문서 미확인(보류)(https://www.ibm.com/docs/SS7K4U_8.5.5/com.ibm.websphere.messages.doc/WSVR.html)
+  verify_note: 미검증 — IBM WAS 8.5.5 WSVR 메시지 문서에 WSVR0194I 없음(WSVR0194E 'Composition unit failed to start' 만 확인), 접미사·레벨 미확인
+  vendor_cause: IBM 메시지 문서에는 WSVR0194E(BLA 의 composition unit 시작 실패)만 있고 I 접미사는 확인되지 않음 — 같은 번호라면 비즈니스 수준 애플리케이션(BLA) 구성 단위가 시작되지 못한 상태를 가리킨다.
+  note: IBM WSVR 레퍼런스에서 WSVR0194E만 확인
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  version_note: WSVR 메시지 ID 는 traditional 7.0~9.0 동일 — traditional 전용(Liberty 는 CWWK* 체계)
+- code: WSVR0606W
+  severity: warn
+  category: thread
+  title: 행 스레드 해제
+  immediate:
+  - '`grep -nE "WSVR0605W|WSVR0606W" <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -20` 으로 같은 스레드의 행 보고(0605W)와 해제(0606W) 시각·지속 시간 확인 — 짝이 맞고 재발이 없으면 일시 지연'
+  - 해제되지 않은 행 스레드가 남아 있으면 `<PROFILE_ROOT>/bin/wsadmin.sh -lang jython -c "AdminControl.invoke(AdminControl.completeObjectName('type=JVM,process=<server>,*'), 'dumpThreads')"` 로 javacore 확보(스레드 덤프, 프로세스는 유지)
+  short:
+  - 반복되는 대기 지점(DB·외부 호출·동기화)을 javacore 분석(IBM TMDA)으로 확인해 담당에 전달
+  mid:
+  - JDBC·외부 호출 타임아웃 설정, com.ibm.websphere.threadmonitor.threshold 를 업무 응답 기준에 맞춤
+  long:
+  - 행 스레드 수·WebContainer 스레드 풀 activeCount 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/docs/en/was/8.5.5?topic=messages-wsvr)
+  note: 이전에 hung 보고된 스레드가 완료됨
+  vendor_cause: 이전에 hung으로 보고된 스레드의 작업이 완료되어 더 이상 활성 상태가 아님
+  vendor_action: 문제가 지속되면 메시지 ID로 IBM WebSphere Application Server Support 정보를 확인
+  vendor_url: https://www.ibm.com/docs/en/was/8.5.5?topic=messages-wsvr
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  version_note: WSVR 메시지 ID 는 traditional 7.0~9.0 동일 — traditional 전용(Liberty 는 CWWK* 체계)
+- code: WSVR0623W
+  severity: warn
+  category: internal
+  title: deprecated ThreadLocal 옵션 적용
+  immediate:
+  - '`grep -n "WSVR0623W" <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -3` 로 경고 확인 — 서비스 영향 없는 구성 경고'
+  - 사용 위치 확인 `grep -n "clearThreadLocal" <PROFILE_ROOT>/config/cells/<cell>/nodes/<node>/servers/<server>/server.xml`
+  short:
+  - '(2차·승인 후, 롤백: 변경 전 server.xml 사본) JVM 사용자 정의 특성에서 com.ibm.websphere.threadpool.clearThreadLocal 제거, 다음 기동 시 반영'
+  mid:
+  - 폐기 예정 JVM 특성 목록을 버전 업그레이드 점검표에 포함
+  long:
+  - 기동 경고 메시지 정기 검토
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/docs/SS7K4U_8.5.5/com.ibm.websphere.messages.doc/WSVR.html)
+  note: 서버 종료 예외가 아님
+  vendor_cause: com.ibm.websphere.threadpool.clearThreadLocal 속성이 아직 사용 중이나 향후 제거될 deprecated 옵션임
+  vendor_action: JVM 특성에서 com.ibm.websphere.threadpool.clearThreadLocal 속성을 제거
+  vendor_url: https://www.ibm.com/docs/SS7K4U_8.5.5/com.ibm.websphere.messages.doc/WSVR.html
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  version_note: WSVR 메시지 ID 는 traditional 7.0~9.0 동일 — traditional 전용(Liberty 는 CWWK* 체계)
+- code: DSRA0010E
+  severity: error
+  category: upstream
+  title: DB SQL상태·오류코드 보고
+  immediate:
+  - '`grep -n -B2 -A5 "DSRA0010E" <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -30` 으로 SQL State·DB 오류 코드(ORA-·SQLCODE) 확인'
+  - 오류 코드 종류로 분기 — 인증(ORA-01017·SQLState 28000)·연결(08xxx)·제약 위반(23xxx); 연결 계열이면 `nc -zvw3 <db_host> <port>` 로 DB 도달성 확인
+  short:
+  - DB 담당과 해당 오류 코드 원인(계정 잠김·세션 초과·공간 부족) 확인 후 DB 측 조치 요청
+  mid:
+  - 데이터소스 인증 별칭(J2C alias) 비밀번호 변경 절차와 DB 계정 정책 정합
+  long:
+  - SQL State 별 오류 건수 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/docs/en/was-nd/8.5.5?topic=messages-dsra)
+  note: 임의 JDBC 연결 오류가 아닌 DB 오류 코드 보고
+  vendor_cause: 데이터베이스 오류가 발생했으며 SQL State와 DB 오류 코드가 함께 보고됨
+  vendor_action: 보고된 오류 코드 정보를 사용해 데이터베이스 문제를 수정
+  vendor_url: https://www.ibm.com/docs/en/was-nd/8.5.5?topic=messages-dsra
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  - WAS Liberty (공유 코드)
+  version_note: DSRA 메시지 ID 는 traditional 7.0~9.0 동일 — Liberty 도 같은 ID 사용
+- code: DSRA0080E
+  severity: error
+  category: upstream
+  title: Data Store Adapter 예외 수신
+  immediate:
+  - '`grep -n -A 15 "DSRA0080E" <PROFILE_ROOT>/logs/<server>/SystemOut.log | head -40` 으로 원본 DB 예외 메시지와 오류 코드 확인'
+  - 같은 시각 `grep -nE "J2CA0045E|StaleConnection" <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -20` 로 연결 단절·풀 문제 동반 여부 확인
+  short:
+  - DB 측 로그(alert log 등)와 시각 대조, 네트워크 단절이면 네트워크 담당 확인
+  mid:
+  - '(2차·승인 후, 롤백: 원래 값 기록) Purge policy EntirePool·Pretest connections 설정으로 단절 후 복구 시간 단축'
+  long:
+  - DB 예외(DSRA0080E) 건수 임계 경보 등록
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/docs/en/was-nd/8.5.5?topic=messages-dsra)
+  note: 원본 데이터스토어 예외를 함께 보고
+  vendor_cause: DB 백엔드가 생성한 예외를 Data Store Adapter가 수신함
+  vendor_action: 데이터베이스가 보고한 오류 메시지를 참조해 원인을 확인
+  vendor_url: https://www.ibm.com/docs/en/was-nd/8.5.5?topic=messages-dsra
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  - WAS Liberty (공유 코드)
+  version_note: DSRA 메시지 ID 는 traditional 7.0~9.0 동일 — Liberty 도 같은 ID 사용
+- code: DSRA8040I
+  severity: info
+  category: connection
+  title: 데이터소스 연결 테스트 실패
+  immediate:
+  - '`grep -n -A 10 "DSRA8040I" <PROFILE_ROOT>/logs/<server>/SystemOut.log` 으로 실패 데이터소스와 함께 기록된 예외(DSRA8xxx·드라이버 오류) 확인'
+  - DB 도달성 `nc -zvw3 <db_host> <port>` 와 JDBC provider 드라이버 파일 `ls -l <path>` 확인 — 연결 테스트는 실행 범위(노드 에이전트·서버)에 따라 결과가 다를 수 있음
+  short:
+  - '데이터소스 URL·인증 별칭·드라이버 경로 WebSphere 변수(예: ORACLE_JDBC_DRIVER_PATH) 정합 점검'
+  mid:
+  - '(2차·승인 후, 롤백: 변경 전 설정 기록) 잘못된 데이터소스 속성 수정 후 Test connection 재확인'
+  long:
+  - 데이터소스 정기 연결 시험
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/docs/en/was-nd/8.5.5?topic=messages-dsra)
+  note: 접미사 I의 정보 메시지
+  vendor_cause: 데이터소스 연결 테스트가 정상적으로 완료되지 않음
+  vendor_action: 데이터소스 구성을 검토해 오류를 수정
+  vendor_url: https://www.ibm.com/docs/en/was-nd/8.5.5?topic=messages-dsra
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  - WAS Liberty (공유 코드)
+  version_note: DSRA 메시지 ID 는 traditional 7.0~9.0 동일 — Liberty 도 같은 ID 사용
+- code: J2CA0045E
+  severity: error
+  category: capacity
+  title: 관리 연결 사용 불가·대기 실패
+  immediate:
+  - '`grep -n "J2CA0045E" <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -20` 으로 대상 풀(데이터소스 JNDI)·발생 빈도 확인'
+  - '`<PROFILE_ROOT>/bin/wsadmin.sh -lang jython -c "print AdminControl.queryNames(''type=J2CConnectionPool,process=<server>,*'')"` 로 풀 목록 확인 후 대상 풀에 `AdminControl.invoke(<pool>, ''showPoolContents'')` — free 0·대기 존재면 고갈 확정'
+  - '`<PROFILE_ROOT>/bin/wsadmin.sh -lang jython -c "AdminControl.invoke(AdminControl.completeObjectName(''type=JVM,process=<server>,*''), ''dumpThreads'')"` 로 javacore 확보(스레드 덤프, 프로세스 유지)해 커넥션을 쥔 스레드의 대기 지점 확인'
+  short:
+  - '장기 점유 SQL·연결 누수(close 누락) 확인, 필요 시 (2차·승인 후, 롤백: 원래 값 기록) Maximum connections·Connection timeout 조정'
+  mid:
+  - Diagnose Connection Usage·PMI JDBC 통계 활성으로 누수 추적
+  long:
+  - PMI 풀 사용률·WaitTime 경보(사용률 90%)
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/support/pages/how-troubleshoot-j2ca0045e-connection-pooling-problems)
+  note: 풀 고갈로 한정할 수 없으며 공식 레벨 Error
+  vendor_cause: 연결 풀이 최대치에 도달하거나 연결이 적시에 반환되지 않아 제한시간 내 연결을 얻지 못함
+  vendor_action: 연결 사용·반환 상태와 풀 최대 연결·Connection Timeout을 점검하고 연결 누수·장기 점유 원인을 진단
+  vendor_url: https://www.ibm.com/support/pages/how-troubleshoot-j2ca0045e-connection-pooling-problems
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  version_note: J 메시지 ID 는 traditional 7.0~9.0 동일 — traditional 전용(Liberty 는 CWWK* 체계)
+- code: J2CA0056I
+  severity: info
+  category: connection
+  title: Resource Adapter 치명 연결 오류
+  immediate:
+  - '`grep -n -A 15 "J2CA0056I" <PROFILE_ROOT>/logs/<server>/SystemOut.log | head -40` 으로 리소스 어댑터·풀 이름과 동반 예외(StaleConnection·소켓 오류) 확인'
+  - DB·메시징 공급자 도달성 `nc -zvw3 <db_host> <port>` 와 같은 시각 DB 가동 중단·네트워크 장애 이력 확인
+  short:
+  - 원인 계층(DB·네트워크) 담당 확인, 풀의 Purge policy 동작 확인
+  mid:
+  - '(2차·승인 후, 롤백: 원래 값 기록) Purge policy EntirePool·Pretest connections 설정'
+  long:
+  - 치명 연결 오류 건수 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/docs/en/radfws/9.7.0?topic=messages-j2ca0056i)
+  note: 치명 연결 오류 내용이나 메시지 레벨은 Information
+  vendor_cause: Resource Adapter가 치명적 연결 오류를 반환해 Connection Manager가 해당 오류를 수신함
+  vendor_action: 함께 기록된 Resource Adapter 예외를 확인하고 DB 또는 MessageProvider 사용 가능 여부를 확인
+  vendor_url: https://www.ibm.com/docs/en/radfws/9.7.0?topic=messages-j2ca0056i
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  version_note: J 메시지 ID 는 traditional 7.0~9.0 동일 — traditional 전용(Liberty 는 CWWK* 체계)
+- code: J2CA0206W
+  severity: warn
+  category: connection
+  title: JCA 연결 오류 발생
+  immediate:
+  - '`grep -n -A 15 "J2CA0206W" <PROFILE_ROOT>/logs/<server>/SystemOut.log | head -40` 으로 연결 오류 상세와 데이터소스 확인'
+  - 같은 시각 `grep -nE "DSRA0010E|StaleConnection" <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -20` — 동반이면 DB 단절, 없으면 연결 핸들 오용(스레드 간 공유) 의심
+  short:
+  - '(2차·승인 후, 롤백: 설정 해제) 해당 데이터소스에 Diagnose Connection Usage 활성 후 재현해 연결 핸들 공유 코드 식별'
+  mid:
+  - 애플리케이션의 연결 핸들 스레드 간 공유 금지 코드 수정
+  long:
+  - J2CA0206W 건수 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/support/pages/websphere-application-server-staleconnectionexceptions)
+  note: 공식 Warning
+  vendor_cause: 연결 핸들이 여러 스레드나 최초 생성 컴포넌트와 다른 컴포넌트에서 부적절하게 사용됐을 수 있음
+  vendor_action: 해당 DataSource/Connection Factory에서 Diagnose Connection Usage를 활성화하고 재시작 후 문제를 재현
+  vendor_url: https://www.ibm.com/support/pages/websphere-application-server-staleconnectionexceptions
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  version_note: J 메시지 ID 는 traditional 7.0~9.0 동일 — traditional 전용(Liberty 는 CWWK* 체계)
+- code: J2CA0075W
+  severity: warn
+  category: undo
+  title: 활성 트랜잭션 필요 경고
+  immediate:
+  - '`grep -n -B5 -A10 "J2CA0075W" <PROFILE_ROOT>/logs/<server>/SystemOut.log | head -40` 으로 연결을 요청한 컴포넌트·메서드와 리소스 확인'
+  - 해당 컴포넌트의 트랜잭션 속성(EJB 트랜잭션 속성·LTC 설정) 확인 — 비관리 스레드(사용자 생성 스레드·타이머)에서 연결 사용이면 확정
+  short:
+  - 개발 담당에 트랜잭션 경계(UserTransaction 또는 컨테이너 트랜잭션) 시작 후 연결을 쓰도록 수정 요청
+  mid:
+  - 비관리 스레드 대신 관리 스레드(WorkManager·ManagedExecutor) 사용 기준 수립
+  long:
+  - J2CA0075W 건수 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/docs/en/was/8.5.5?topic=messages-j2ca)
+  note: 풀 최대치 도달 메시지가 아님
+  vendor_cause: 현재 메서드의 정상 연결 관리 처리에 필요한 활성 트랜잭션이 존재하지 않음
+  vendor_action: 연결을 정상적으로 사용하기 위해 필요한 트랜잭션을 시작
+  vendor_url: https://www.ibm.com/docs/en/was/8.5.5?topic=messages-j2ca
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  version_note: J 메시지 ID 는 traditional 7.0~9.0 동일 — traditional 전용(Liberty 는 CWWK* 체계)
+- code: WTRN0006W
+  severity: warn
+  category: undo
+  title: 트랜잭션 시간초과·롤백
+  immediate:
+  - '`grep -n -B3 -A10 "WTRN0006W" <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -40` 으로 타임아웃된 트랜잭션 ID·설정 시간 확인, 직전 WSVR0605W(행 스레드) 동반 여부 확인'
+  - '`<PROFILE_ROOT>/bin/wsadmin.sh -lang jython -c "AdminControl.invoke(AdminControl.completeObjectName(''type=JVM,process=<server>,*''), ''dumpThreads'')"` 로 javacore 확보(스레드 덤프, 프로세스 유지)해 트랜잭션 스레드의 대기 지점(DB·외부 호출) 확인'
+  short:
+  - 대기 지점 계층(DB 잠금·장기 SQL·외부 응답) 담당과 원인 확인
+  mid:
+  - '(2차·승인 후, 롤백: 원래 값 기록) Total transaction lifetime timeout·Maximum transaction timeout 을 업무 처리 시간에 맞추고 장기 배치 분리'
+  long:
+  - 트랜잭션 타임아웃·롤백 건수 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/docs/en/was-nd/8.5.5?topic=messages-wtrn)
+  note: 공식 Warning
+  vendor_cause: 애플리케이션이 Total transaction lifetime timeout 안에 트랜잭션 작업을 완료하지 못함
+  vendor_action: OOM·hung thread·장기 DB 쿼리·GC·백엔드 응답 및 자원 경합을 확인해 실제 지연 원인을 해결
+  vendor_url: https://www.ibm.com/docs/en/was-nd/8.5.5?topic=messages-wtrn
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  - WAS Liberty (공유 코드)
+  version_note: WTRN 메시지 ID 는 traditional 7.0~9.0 동일 — Liberty 도 같은 ID 사용
+- code: WTRN0037W
+  severity: warn
+  category: undo
+  title: XA 복구 xa_recover 오류
+  immediate:
+  - '`grep -n -A 10 "WTRN0037W" <PROFILE_ROOT>/logs/<server>/SystemOut.log` 으로 XA 자원 이름과 XA 오류 코드(XAER_RMERR 등) 확인'
+  - 해당 자원 도달성 `nc -zvw3 <db_host> <port>` 와 데이터소스의 XA 복구 인증 별칭 설정 확인
+  short:
+  - 'DB 담당에 XA 복구 권한(Oracle: DBA_PENDING_TRANSACTIONS 조회 권한 등) 확인 요청, tranlog 의 미결 트랜잭션 존재 여부 확인'
+  mid:
+  - XA 데이터소스 복구 별칭·권한 표준
+  long:
+  - 트랜잭션 복구 경고 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/docs/en/was-nd/8.5.5?topic=messages-wtrn)
+  note: XA prepare 실패가 아님
+  vendor_cause: 준비된 트랜잭션 조회를 위해 자원에 xa_recover를 호출했으나 오류가 발생함
+  vendor_action: 보고된 XA 오류 코드를 조사해 문제 원인을 확인
+  vendor_url: https://www.ibm.com/docs/en/was-nd/8.5.5?topic=messages-wtrn
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  - WAS Liberty (공유 코드)
+  version_note: WTRN 메시지 ID 는 traditional 7.0~9.0 동일 — Liberty 도 같은 ID 사용
+- code: WTRN0075W
+  severity: warn
+  category: undo
+  title: 커밋 중 heuristic 예외
+  immediate:
+  - '`grep -n -A 15 "WTRN0075W" <PROFILE_ROOT>/logs/<server>/SystemOut.log` 으로 트랜잭션 ID·heuristic 결과·참가 자원 확인'
+  - '`<PROFILE_ROOT>/bin/wsadmin.sh -lang jython` 에서 `ts=AdminControl.queryNames(''type=TransactionService,process=<server>,*'')` 후 `print Help.operations(ts)` 로 조회용 list 연산 확인·실행(읽기 전용 연산만)'
+  short:
+  - '업무 담당과 해당 트랜잭션의 자원별 반영 상태 확인 후 (2차·승인 후, 롤백: 보정 전 데이터 백업) 데이터 보정'
+  mid:
+  - 자원 관리자 측 XA 타임아웃을 WAS 트랜잭션 타임아웃보다 길게 정합
+  long:
+  - heuristic 발생 즉시 경보
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/docs/en/was-nd/8.5.5?topic=messages-wtrn)
+  note: 일반 트랜잭션 롤백 메시지가 아님
+  vendor_cause: 트랜잭션 참가자에게 commit 결과를 전달하는 중 heuristic 응답을 수신함
+  vendor_action: heuristic 결과 때문에 발생한 애플리케이션 데이터 문제를 수정
+  vendor_url: https://www.ibm.com/docs/en/was-nd/8.5.5?topic=messages-wtrn
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  - WAS Liberty (공유 코드)
+  version_note: WTRN 메시지 ID 는 traditional 7.0~9.0 동일 — Liberty 도 같은 ID 사용
+- code: SRVE0068E
+  severity: error
+  category: internal
+  title: 서블릿 예외
+  immediate:
+  - '`grep -n -A 30 "SRVE0068E" <PROFILE_ROOT>/logs/<server>/SystemOut.log | head -60` 으로 서블릿 이름·예외 확인, 같은 시각 `tail -200 <PROFILE_ROOT>/logs/<server>/SystemErr.log` 스택 대조'
+  - 발생 건수 `grep -c "SRVE0068E" <PROFILE_ROOT>/logs/<server>/SystemOut.log` 와 최근 배포 이력 대조 — 특정 서블릿 집중이면 애플리케이션 결함
+  short:
+  - '예외 스택·서블릿 이름을 개발 담당에 전달, 배포 직후면 (2차·승인 후, 롤백: 이전 버전) 이전 버전 복귀 검토'
+  mid:
+  - 서블릿 예외 처리·입력 검증 보강
+  long:
+  - 서블릿 예외 건수·HTTP 500 비율 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/support/pages/apar/PK92140)
+  note: Uncaught exception from servlet invocation
+  vendor_cause: 서블릿의 service 메서드 중 하나에서 애플리케이션 예외가 발생함
+  vendor_action: 예외 메시지·서블릿 소스·서버 로그를 이용해 실제 원인을 확인하고 수정
+  vendor_url: https://www.ibm.com/support/pages/apar/PK92140
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  - WAS Liberty (공유 코드)
+  version_note: SRVE 메시지 ID 는 traditional 7.0~9.0 동일 — Liberty 도 같은 ID 사용
+- code: SRVE0100E
+  severity: error
+  category: internal
+  title: 서블릿 초기화 실패
+  immediate:
+  - "`grep -n -A 30 \"SRVE0100E\" <PROFILE_ROOT>/logs/<server>/SystemOut.log | head -60` 으로 init() 실패 서블릿과 원인 예외(ClassNotFound·NoClassDefFound) 확인"
+  - "서블릿 클래스 존재 확인 `ls <PROFILE_ROOT>/installedApps/<cell>/<app>.ear/` 하위 WAR 의 WEB-INF/classes·WEB-INF/lib — 클래스 누락이면 배포 결함"
+  short:
+  - '(2차·승인 후, 롤백: 이전 EAR) 누락 클래스·라이브러리를 포함한 수정본 재배포'
+  mid:
+  - 공유 라이브러리·클래스 로더 순서(PARENT_FIRST·PARENT_LAST) 표준
+  long:
+  - 배포 후 서블릿 초기화 결과 점검
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/docs/en/was-zos/8.5.5?topic=messages-srve)
+  note: 서블릿 init() 예외
+  vendor_cause: 지정된 서블릿을 초기화하지 못한 애플리케이션 오류가 발생함
+  vendor_action: 서블릿 클래스 파일이 애플리케이션 클래스 경로에 존재하는지 확인
+  vendor_url: https://www.ibm.com/docs/en/was-zos/8.5.5?topic=messages-srve
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  - WAS Liberty (공유 코드)
+  version_note: SRVE 메시지 ID 는 traditional 7.0~9.0 동일 — Liberty 도 같은 ID 사용
+- code: SRVE0190E
+  severity: error
+  category: internal
+  title: 요청 파일 없음 404
+  immediate:
+  - '`grep -n "SRVE0190E" <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -20` 으로 요청된 파일 경로 확인, 같은 경로 반복 여부 집계'
+  - 해당 파일 존재 `ls -l <PROFILE_ROOT>/installedApps/<cell>/<app>.ear/<war>/<path>` 확인 — 없으면 배포 누락, 있으면 요청 URL 오류(외부 스캔 등)
+  short:
+  - 배포 누락이면 배포 담당에 전달, 외부 스캔성 요청이면 앞단 웹서버 차단 검토
+  mid:
+  - 정적 파일 배포 목록 검증과 앞단 웹서버 정적 파일 분리
+  long:
+  - 404 상위 경로 정기 점검
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/support/pages/redirecting-admin-ibmconsole)
+  note: 접미사 E이므로 Error
+  vendor_cause: 요청된 파일을 찾을 수 없는 애플리케이션 오류임
+  vendor_action: 지정된 파일이 올바른 위치에 존재하는지 확인
+  vendor_url: https://www.ibm.com/support/pages/redirecting-admin-ibmconsole
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  - WAS Liberty (공유 코드)
+  version_note: SRVE 메시지 ID 는 traditional 7.0~9.0 동일 — Liberty 도 같은 ID 사용
+- code: SRVE0232E
+  severity: error
+  category: internal
+  title: 내부 서버 오류·예외 발생
+  immediate:
+  - '`grep -n -A 30 "SRVE0232E" <PROFILE_ROOT>/logs/<server>/SystemOut.log | head -60` 으로 동반 예외 클래스 확인'
+  - 같은 시각 `ls -lt <PROFILE_ROOT>/logs/ffdc/ | head` 의 FFDC 파일 예외 확인 — OutOfMemoryError·행 스레드 동반 여부 확인
+  short:
+  - 예외 원인 계층(애플리케이션·리소스) 담당에 전달
+  mid:
+  - 애플리케이션 예외 처리 보강과 회귀 시험
+  long:
+  - 내부 서버 오류 건수 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/docs/en/was-zos/8.5.5?topic=messages-srve)
+  note: 특정 servlet service 예외로 한정되지 않음
+  vendor_cause: 내부 서버 오류가 발생했으며 구체 원인은 함께 출력된 예외에 따라 달라짐
+  vendor_action: 함께 출력된 예외와 서버 로그를 확인해 실제 원인을 수정
+  vendor_url: https://www.ibm.com/docs/en/was-zos/8.5.5?topic=messages-srve
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  - WAS Liberty (공유 코드)
+  version_note: SRVE 메시지 ID 는 traditional 7.0~9.0 동일 — Liberty 도 같은 ID 사용
+- code: SRVE0777E
+  severity: error
+  category: internal
+  title: 애플리케이션 예외
+  immediate:
+  - '`grep -n -A 30 "SRVE0777E" <PROFILE_ROOT>/logs/<server>/SystemOut.log | head -60` 으로 예외를 던진 애플리케이션 클래스·메서드 확인'
+  - 같은 시각 SystemErr 스택 `grep -n -A 20 "Exception" <PROFILE_ROOT>/logs/<server>/SystemErr.log | tail -60` 대조, Caused by 최하단 원인 기록
+  short:
+  - 근본 원인 예외를 개발 담당에 전달, DB·외부 연동 예외면 해당 계층 담당 확인
+  mid:
+  - 애플리케이션 예외 처리 보강
+  long:
+  - 애플리케이션 예외 건수 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/support/pages/node/508025)
+  note: Exception thrown by application class
+  vendor_cause: 애플리케이션 코드에서 예기치 않은 예외가 발생함
+  vendor_action: 스택 추적을 검토해 문제의 근본 원인을 식별
+  vendor_url: https://www.ibm.com/support/pages/node/508025
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  - WAS Liberty (공유 코드)
+  version_note: SRVE 메시지 ID 는 traditional 7.0~9.0 동일 — Liberty 도 같은 ID 사용
+- code: SRVE8094W
+  severity: warn
+  category: internal
+  title: 응답 커밋 후 헤더 설정 불가
+  immediate:
+  - '`grep -n "SRVE8094W" <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -20` 으로 설정하려던 헤더 이름·요청 URI 확인'
+  - 같은 URI 응답이 정상인지 웹서버·액세스 로그로 확인 — 기능 영향 없으면 코드 개선 대상 경고
+  short:
+  - 개발 담당에 응답 commit(출력 flush) 전에 헤더를 설정하도록 수정 요청
+  mid:
+  - 필터·서블릿의 헤더 설정 순서를 코드 리뷰 항목화
+  long:
+  - SRVE8094W 경고 건수 추세를 배포 후 점검 항목으로 기록
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/support/pages/node/545777)
+  note: 응답 버퍼 초과가 아님
+  vendor_cause: 응답이 이미 commit된 뒤 추가 HTTP 응답 헤더를 설정하려고 함
+  vendor_action: 호출 필요성을 확인하고 필요한 헤더는 응답을 commit하기 전에 설정
+  vendor_url: https://www.ibm.com/support/pages/node/545777
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  - WAS Liberty (공유 코드)
+  version_note: SRVE 메시지 ID 는 traditional 7.0~9.0 동일 — Liberty 도 같은 ID 사용
+- code: SECJ0118E
+  severity: error
+  category: security
+  title: 인증 오류
+  immediate:
+  - '`grep -n "SECJ0118E" <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -20` 으로 실패 사용자 ID·시각 확인(공유 시 사용자 ID 가림)'
+  - 건수 `grep -c "SECJ0118E" <PROFILE_ROOT>/logs/<server>/SystemOut.log` — 단일 계정 반복은 비밀번호 변경 미반영, 다수 계정·단시간 대량은 무차별 대입 의심
+  short:
+  - 사용자 레지스트리(LDAP) 상태·계정 잠김 확인, 서비스 계정이면 비밀번호 변경 미반영 위치(J2C 인증 별칭·스크립트) 확인
+  mid:
+  - 서비스 계정 비밀번호 변경 절차에 WAS 인증 별칭 갱신 포함
+  long:
+  - '인증 실패 건수 임계(예: 5분 50건) 경보 등록'
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/support/pages/maximo-websphere-secj0369e-secj0118e-and-secj0053e-errors-when-application-server-security-enabled)
+  note: Authentication error during authentication
+  vendor_cause: 인증 중 오류가 발생했으며 사용자명 또는 비밀번호가 유효하지 않을 수 있음
+  vendor_action: 지정한 사용자명과 비밀번호가 유효한지 확인
+  vendor_url: https://www.ibm.com/support/pages/maximo-websphere-secj0369e-secj0118e-and-secj0053e-errors-when-application-server-security-enabled
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  - WAS Liberty (공유 코드)
+  version_note: SECJ 메시지 ID 는 traditional 7.0~9.0 동일 — Liberty 도 같은 ID 사용
+- code: SECJ0369E
+  severity: error
+  category: security
+  title: LTPA 인증 실패
+  immediate:
+  - '`grep -n -B2 -A5 "SECJ0369E" <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -30` 으로 사용자 ID 와 실패 사유(PasswordCheckFailedException 등) 확인'
+  - LDAP 도달성 `nc -zvw3 <ldap_host> <port>` 와 같은 시각 다른 SECJ 오류 동반 여부 확인
+  short:
+  - LDAP 계정 상태·바인드 계정 확인, 셀 안 서버 정의 중복 여부 확인
+  mid:
+  - '(2차·승인 후, 롤백: 변경 전 security.xml 사본) 사용자 레지스트리 바인드 설정 정비'
+  long:
+  - LTPA 인증 실패 경보
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/support/pages/multiple-server-definitions-cause-passwordcheckfailed-error)
+  note: 사용자 없음으로 한정되지 않음
+  vendor_cause: LTPA 인증 중 사용자 비밀번호 불일치·사용자 레지스트리 인증 실패 등이 발생함
+  vendor_action: 사용자 ID·비밀번호와 사용자 레지스트리의 계정·비밀번호 설정을 확인
+  vendor_url: https://www.ibm.com/support/pages/multiple-server-definitions-cause-passwordcheckfailed-error
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  - WAS Liberty (공유 코드)
+  version_note: SECJ 메시지 ID 는 traditional 7.0~9.0 동일 — Liberty 도 같은 ID 사용
+- code: SECJ0053E
+  severity: error
+  category: security
+  title: 권한 부족
+  immediate:
+  - '`grep -n "SECJ0053E" <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -20` 으로 사용자·대상 메서드·필요 역할 확인'
+  - 사용자가 UNAUTHENTICATED 이면 인증 전파(LTPA 만료·SSO) 문제, 특정 사용자면 역할 매핑 문제로 분기
+  short:
+  - 애플리케이션 보안 역할과 사용자·그룹 매핑을 관리 콘솔에서 확인
+  mid:
+  - '(2차·승인 후, 롤백: 변경 전 매핑 기록) 필요한 역할 매핑 추가'
+  long:
+  - 권한 거부(SECJ0053E) 건수 감시와 역할 매핑 정기 검토
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/support/pages/error-secj0053e-authorization-failed-unauthenticated-written-systemerr-log-file)
+  note: Authorization failed
+  vendor_cause: 호출 주체에게 EJB 또는 애플리케이션 작업에 필요한 보안 역할이 부여되지 않음
+  vendor_action: 사용자·그룹과 애플리케이션 보안 역할 매핑을 확인하고 필요한 역할을 부여
+  vendor_url: https://www.ibm.com/support/pages/error-secj0053e-authorization-failed-unauthenticated-written-systemerr-log-file
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  - WAS Liberty (공유 코드)
+  version_note: SECJ 메시지 ID 는 traditional 7.0~9.0 동일 — Liberty 도 같은 ID 사용
+- code: SECJ0270E
+  severity: error
+  category: security
+  title: 실제 보안 자격증명 획득 실패
+  immediate:
+  - '`grep -n -A 20 "SECJ0270E" <PROFILE_ROOT>/logs/<server>/SystemOut.log | head -40` 으로 예외 확인'
+  - 같은 시각 FFDC `ls -lt <PROFILE_ROOT>/logs/ffdc/ | head` 와 LDAP 도달성 `nc -zvw3 <ldap_host> <port>` 확인
+  short:
+  - 예외가 레지스트리 접속이면 LDAP 담당 확인, 반복 시 메시지 ID 로 IBM 지원 문서 검색
+  mid:
+  - 사용자 레지스트리 연결 이중화(LDAP 페일오버 호스트) 설정
+  long:
+  - 보안 초기화 오류 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/support/pages/information-server-unable-start-websphere-application-server)
+  note: 보안 초기화 실패 메시지가 아님
+  vendor_cause: getActualCredential 실행 중 예기치 않은 예외가 발생함
+  vendor_action: 지속되면 메시지 ID로 IBM WebSphere Application Server Support의 문제 판별 정보를 확인
+  vendor_url: https://www.ibm.com/support/pages/information-server-unable-start-websphere-application-server
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  - WAS Liberty (공유 코드)
+  version_note: SECJ 메시지 ID 는 traditional 7.0~9.0 동일 — Liberty 도 같은 ID 사용
+- code: CWPKI0033E
+  severity: error
+  category: security
+  title: 키스토어 생성·로드 실패
+  immediate:
+  - '`grep -n -A 10 "CWPKI0033E" <PROFILE_ROOT>/logs/<server>/SystemOut.log` 으로 키스토어 경로·예외 확인'
+  - 파일 존재·권한 `ls -l <path>/key.p12` 와 `grep -n "keyStores" <PROFILE_ROOT>/config/cells/<cell>/security.xml | head` 의 경로 대조
+  short:
+  - '(2차·승인 후, 롤백: 기존 키스토어 사본) 손상·경로 오류면 백업 키스토어 복원 또는 경로 수정'
+  mid:
+  - 키스토어 백업·비밀번호 관리 표준
+  long:
+  - 키스토어 파일 변경 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/docs/en/wve/7.0?topic=cwpki-cwpki0033e)
+  note: 공식 Error
+  vendor_cause: 키스토어를 생성하거나 여는 중 오류가 발생함
+  vendor_action: 키스토어 구성 특성을 확인하고 지정된 키스토어가 실제로 존재하는지 확인
+  vendor_url: https://www.ibm.com/docs/en/wve/7.0?topic=cwpki-cwpki0033e
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  - WAS Liberty (공유 코드)
+  version_note: CWPKI(SSL/키스토어) 는 6.1 이후 — traditional 7~9 및 Liberty 공통
+- code: CWPKI0040I
+  severity: info
+  category: security
+  title: SSL signer 신뢰설정 안내
+  immediate:
+  - '`grep -n "CWPKI0040I" <PROFILE_ROOT>/logs/<server>/SystemOut.log <PROFILE_ROOT>/logs/<server>/SystemErr.log | tail -10` 으로 신뢰가 필요한 서버 signer 대상 호스트 확인'
+  - 클라이언트 truststore 확인 `keytool -list -keystore <PROFILE_ROOT>/etc/trust.p12 -storetype PKCS12 | head -30`(비밀번호 프롬프트는 Enter — 무결성 미검증 조회)
+  short:
+  - '(2차·승인 후, 롤백: 기존 trust.p12 사본) `retrieveSigners` 로 서버 signer 를 클라이언트 truststore 에 가져오기'
+  mid:
+  - ssl.client.props 의 signer exchange prompt 정책 정비
+  long:
+  - signer 인증서 만료 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/docs/en/wve/7.0?topic=cwpki-cwpki0040i)
+  note: 인증서 없음 오류가 아니라 복구 안내 정보
+  vendor_cause: 성공적인 SSL 연결에 필요한 서버 signer가 클라이언트 truststore에 없음
+  vendor_action: retrieveSigners를 실행하거나 ssl.client.props의 signer exchange prompt를 활성화
+  vendor_url: https://www.ibm.com/docs/en/wve/7.0?topic=cwpki-cwpki0040i
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  - WAS Liberty (공유 코드)
+  version_note: CWPKI(SSL/키스토어) 는 6.1 이후 — traditional 7~9 및 Liberty 공통
+- code: ADMR0104E
+  severity: error
+  category: disk
+  title: 구성 저장소 문서 읽기 실패
+  immediate:
+  - '`grep -n -A 10 "ADMR0104E" <PROFILE_ROOT>/logs/<server>/SystemOut.log` 으로 읽지 못한 구성 문서 경로 확인'
+  - 해당 파일 권한·소유자 `ls -l <PROFILE_ROOT>/config/cells/<cell>/<path>` 를 같은 디렉터리 다른 파일과 비교, `df -h <PROFILE_ROOT>` 로 공간 확인
+  short:
+  - '(2차·승인 후, 롤백: `backupConfig.sh` 로 구성 백업 후 진행) 권한을 다른 파일과 같게 맞추거나 손상 파일 복원'
+  mid:
+  - root 로 관리 명령을 실행해 소유자가 바뀌는 일 방지(기동·관리 계정 일원화)
+  long:
+  - config 디렉터리 정기 backupConfig
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/docs/en/tbsm/6.2.0?topic=errors-installation-fails-error-code-admr0104e)
+  note: 구성 저장 실패가 아닌 문서 읽기 실패
+  vendor_cause: 구성 디렉터리 파일의 접근 권한이 달라 WebSphere가 구성 문서를 읽지 못함
+  vendor_action: 문제 파일을 구성 디렉터리에서 제거하거나 다른 파일과 동일한 접근 권한을 부여한 뒤 설치를 재시작
+  vendor_url: https://www.ibm.com/docs/en/tbsm/6.2.0?topic=errors-installation-fails-error-code-admr0104e
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  version_note: ADMR(구성 저장소) — traditional 전용
+- code: ADMU0111E
+  severity: error
+  category: internal
+  title: 관리 도구 오류로 종료
+  immediate:
+  - '`tail -50 <PROFILE_ROOT>/logs/<server>/startServer.log`(정지 시 stopServer.log)에서 ADMU0111E 뒤 예외(ADMU3027E 이미 실행 중 등) 확인'
+  - 실제 상태 `<PROFILE_ROOT>/bin/serverStatus.sh <server>`(보안 사용 시 자격증명은 프롬프트)와 `ps -ef | grep <server> | grep -v grep` 확인
+  short:
+  - '(2차·승인 후, 롤백: 해당 없음) 원인(이미 실행 중·포트 충돌·권한) 해소 후 관리 명령 재실행'
+  mid:
+  - 기동·정지 명령 실행 계정과 순서 표준
+  long:
+  - 관리 명령(startServer·stopServer) 실행 결과·로그 보관
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/support/pages/admu0111e-program-exiting-error-comibmwebspheremanagementexceptionadminexception-admu3027e-instance-server-may-already-be-running-server1)
+  note: Program exiting with error
+  vendor_cause: 관리 명령이 후속 예외에 기록된 오류로 종료됨
+  vendor_action: 후속 메시지의 예외 정보를 저장하고 해당 예외를 이용해 문제를 판별
+  vendor_url: https://www.ibm.com/support/pages/admu0111e-program-exiting-error-comibmwebspheremanagementexceptionadminexception-admu3027e-instance-server-may-already-be-running-server1
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  version_note: ADMU(관리 유틸리티 startServer/stopServer) — traditional 전용
+- code: ADMU3011E
+  severity: error
+  category: internal
+  title: 서버 실행 후 초기화 실패
+  immediate:
+  - "`tail -100 <PROFILE_ROOT>/logs/<server>/startServer.log` 와 `grep -n \" E \" <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -30` 으로 시작 실패 메시지 확인"
+  - "`tail -50 <PROFILE_ROOT>/logs/<server>/native_stderr.log` 로 JVM 기동 오류(메모리·옵션) 확인"
+  short:
+  - '(2차·승인 후, 롤백: 변경 전 server.xml 사본 또는 restoreConfig) 원인 구성 수정 후 기동, WSVR0001I 확인'
+  mid:
+  - 패치·구성 변경 후 기동 검증 절차
+  long:
+  - 서버 기동 실패(ADMU3011E) 즉시 경보 등록
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/support/pages/admu3011e-servers-fail-start-after-applying-fixes)
+  note: 공식 Error
+  vendor_cause: 서버 프로세스는 실행됐지만 초기화에 실패해 시작하지 못함
+  vendor_action: startServer.log·SystemOut.log 등 해당 서버 로그에서 기록된 실패 메시지를 확인
+  vendor_url: https://www.ibm.com/support/pages/admu3011e-servers-fail-start-after-applying-fixes
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  version_note: ADMU(관리 유틸리티 startServer/stopServer) — traditional 전용
+- code: HMGR0152W
+  severity: warn
+  category: performance
+  title: CPU 기아·스레드 스케줄 지연
+  immediate:
+  - '`grep -n "HMGR0152W" <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -20` 으로 지연 시간(초)·빈도 확인'
+  - '`vmstat 5 5` 로 CPU 실행 대기열·swap(si/so) 확인, verbose GC(`native_stderr.log` 또는 verbosegc 파일)에서 같은 시각 긴 GC 정지 확인 — 수 초 이상이면 원인 확정'
+  short:
+  - CPU 과점유 프로세스·페이징 원인 제거, GC 정지면 힙 설정 담당 검토
+  mid:
+  - '(2차·승인 후, 롤백: 원래 값 기록) 힙·GC 정책(gencon) 조정, 서버 통합 밀도 축소'
+  long:
+  - CPU·페이징·GC 정지 시간 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/docs/en/was-nd/8.5.5?topic=messages-hmgr)
+  note: 공식 Warning, CPU·메모리 부하 원인 가능
+  vendor_cause: 실행 가능한 스레드가 제때 CPU에 dispatch되지 않으며 높은 CPU·낮은 메모리·긴 GC·paging 등이 가능함
+  vendor_action: 시스템 자원 분석을 수행해 CPU·메모리 사용과 GC·paging을 확인하고 부하 원인을 제거
+  vendor_url: https://www.ibm.com/docs/en/was-nd/8.5.5?topic=messages-hmgr
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  version_note: HA Manager — 6.0 이후
+- code: DCSV0004W
+  severity: warn
+  category: performance
+  title: DCS CPU 시간 할당 지연
+  immediate:
+  - '`grep -nE "DCSV0004W|HMGR0152W" <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -20` 으로 CPU 미할당 시간(초)과 HMGR0152W 동반 확인'
+  - '`vmstat 5 5` 와 `top -b -n 1 | head -20` 으로 CPU 포화·페이징 확인 (Linux, AIX 는 `topas` 대신 `vmstat`)'
+  short:
+  - 부하 원인 제거(배치 시간 조정·과점유 프로세스 확인)
+  mid:
+  - 코어 그룹 멤버 수·서버 통합 밀도 재설계
+  long:
+  - CPU 사용률·실행 대기열(vmstat r) 감시 경보
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/docs/en/was-zos/9.0.5?topic=messages-dcsv)
+  note: 멤버 연결 끊김이 아님
+  vendor_cause: 실행 가능한 DCS 스레드가 CPU에 dispatch되기까지 지나치게 오래 대기함
+  vendor_action: 시스템 부하를 확인하고 메모리·CPU 사용을 줄여 작업 부하를 낮춤
+  vendor_url: https://www.ibm.com/docs/en/was-zos/9.0.5?topic=messages-dcsv
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  version_note: DCS(코어 그룹 전송) — 6.0 이후
+- code: DCSV1115W
+  severity: warn
+  category: connection
+  title: DCS 연결 종료 감지
+  immediate:
+  - "`grep -nE \"DCSV1115W|DCSV1113W|DCSV8104W\" <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -20` 으로 연결이 닫힌 멤버 이름·시각 확인"
+  - "상대 멤버 SystemOut 의 같은 시각 정지·오류 이력 확인, `ping -c 5 <host>` 로 네트워크 확인"
+  short:
+  - 상대가 정상 정지가 아니면 해당 멤버 오류·GC 정지·네트워크 단절 원인 확인
+  mid:
+  - 코어 그룹 하트비트 사용자 정의 특성(IBM_CS_FD_PERIOD_SECS·IBM_CS_FD_CONSECUTIVE_MISSED) 검토
+  long:
+  - 클러스터 멤버 이탈 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/support/pages/apar/PI31401)
+  note: 공식 설명은 connection closed
+  vendor_cause: 다른 멤버와의 네트워크 연결이 닫혔으며 상대 중지·멤버 오류·네트워크 문제가 원인일 수 있음
+  vendor_action: 상대 멤버가 정상 중지된 것이 아니면 해당 멤버 오류와 멤버 간 네트워크 연결을 확인
+  vendor_url: https://www.ibm.com/support/pages/apar/PI31401
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  version_note: DCS(코어 그룹 전송) — 6.0 이후
+- code: TCPC0003E
+  severity: error
+  category: connection
+  title: TCP 소켓 bind 실패
+  immediate:
+  - '`grep -n -A 5 "TCPC0003E" <PROFILE_ROOT>/logs/<server>/SystemOut.log` 으로 bind 실패 호스트·포트 확인'
+  - '`ss -ltnp | grep <port>`(Linux) 또는 `netstat -an | grep <port>` 로 점유 프로세스 확인 — 다른 프로세스·이전 인스턴스면 확정'
+  short:
+  - '(2차·승인 후, 롤백: 원래 serverindex.xml 사본) 남은 인스턴스 정리 또는 포트 변경'
+  mid:
+  - 노드별 포트 배정 대장
+  long:
+  - 기동 시 포트 충돌 점검 자동화
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/docs/en/was-nd/8.5.5?topic=server-troubleshooting-proxy)
+  note: 포트 사용 중 등이 원인, 공식 Error
+  vendor_cause: 소켓 bind가 실패했으며 일반적으로 해당 TCP 포트가 이미 사용 중임
+  vendor_action: TCP Channel이 올바른 포트 번호를 사용하도록 구성됐는지 확인
+  vendor_url: https://www.ibm.com/docs/en/was-nd/8.5.5?topic=server-troubleshooting-proxy
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  - WAS Liberty (공유 코드)
+  version_note: TCPC(TCP 채널) — 6.0 이후 채널 프레임워크, Liberty 공통
+- code: CHFW0029E
+  severity: error
+  category: connection
+  title: 채널 체인 초기화 오류
+  immediate:
+  - '`grep -n -A 10 "CHFW0029E" <PROFILE_ROOT>/logs/<server>/SystemOut.log` 으로 체인 이름과 예외(포트 사용 중·권한) 확인'
+  - 해당 포트 점유 `ss -ltnp | grep <port>` 와 1024 미만 포트를 비 root 계정으로 쓰는지 확인
+  short:
+  - '(2차·승인 후, 롤백: 원래 설정 기록) 포트 충돌·권한·채널 구성 수정 후 기동'
+  mid:
+  - 채널 체인·포트 구성 표준
+  long:
+  - 기동 시 체인 시작 결과 점검
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/docs/en/was-nd/8.5.5?topic=server-troubleshooting-proxy)
+  note: 공식 Error
+  vendor_cause: 채널 체인을 초기화하지 못했으며 포트 충돌·권한 부족·잘못된 채널 구성 등이 예외에 기록됨
+  vendor_action: 기록된 예외를 확인하고 포트 충돌·권한 또는 채널 구성을 수정
+  vendor_url: https://www.ibm.com/docs/en/was-nd/8.5.5?topic=server-troubleshooting-proxy
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  - WAS Liberty (공유 코드)
+  version_note: CHFW(채널 프레임워크) — 6.0 이후, Liberty 공통
+- code: JSAS0240I
+  severity: warn
+  category: security
+  title: CSIv2 인증 실패
+  immediate:
+  - '`grep -n -A 5 "JSAS0240" <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -20` 으로 실제 접미사·사용자·대상 확인(사용자 ID 는 공유 시 가림)'
+  - 클라이언트 측 `sas.client.props` 의 com.ibm.CORBA.loginSource, 서버 측 `sas.server.props` 의 principalName 확인 — 비밀번호 값은 열람·복사 금지
+  short:
+  - 사용자 ID·비밀번호 유효성과 레지스트리 상태 확인, 서비스 계정 비밀번호 변경 미반영 위치 정리
+  mid:
+  - '(2차·승인 후, 롤백: 변경 전 props 사본) props 파일 자격증명 갱신 후 PropFilePasswordEncoder 로 인코딩'
+  long:
+  - CSIv2 인증 실패 감시
+  source: GPT 수집·공식 문서 미확인(보류)
+  verify_note: 미검증 — IBM WAS 8.5.5 JSAS 메시지 문서에 JSAS0240I 없음(JSAS0240E 'Login failed' 만 확인), 접미사·레벨 미확인
+  vendor_cause: IBM 문서에는 JSAS0240E(CSIv2·RMI-IIOP 로그인 실패)만 확인되며 I 접미사는 확인되지 않음 — 같은 번호라면 클라이언트 자격증명(사용자 ID·비밀번호) 인증 실패를 뜻한다.
+  note: IBM WAS 8.5/9.0 공식 Docs·Support에서 확인 불가
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  version_note: JSAS(CSIv2 보안) — traditional 전용
+- code: JMSCC0033E
+  severity: error
+  category: connection
+  title: JMS 연결 실패
+  immediate:
+  - '`grep -n -A 15 "JMSCC0033E" <PROFILE_ROOT>/logs/<server>/SystemOut.log | head -40` 으로 실제 문구와 동반 MQ 사유 코드(MQRC 2059·2035 등) 확인'
+  - 큐 관리자 리스너 도달성 `nc -zvw3 <mq_host> <port>` 확인 — MQRC 가 있으면 그 사유 코드 기준으로 MQ 담당에 전달
+  short:
+  - MQ 담당과 큐 관리자·채널 상태 확인(MQ 측 조회는 MQ 담당 수행)
+  mid:
+  - '(2차·승인 후, 롤백: 변경 전 설정 기록) 연결 팩토리 재연결(client reconnect·CCDT) 설정 정비'
+  long:
+  - MQ 연결 실패 건수·큐 관리자 가용성 감시
+  source: GPT 수집·공식 문서 미확인(보류)
+  verify_note: 미검증 — IBM MQ·WAS 공식 문서에서 JMSCC0033E 문구·원인 확인 못함
+  vendor_cause: IBM MQ classes for JMS(JMSCC 접두) 메시지로 보이나 공식 문서에서 이 ID 의 의미를 확인하지 못함 — 제목 기준으로는 큐 관리자 연결 실패 상태를 가리킨다.
+  note: IBM WAS 8.5/9.0 및 IBM MQ 공식 검색에서 확인 불가
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  version_note: JMSCC(IBM MQ classes for JMS) — MQ 7 이상 클라이언트 동봉 버전(7.0.0.x 이후)
+- code: WSWS3713E
+  severity: error
+  category: connection
+  title: 웹서비스 연결 거부
+  immediate:
+  - '`grep -n -A 10 "WSWS3713E" <PROFILE_ROOT>/logs/<server>/SystemOut.log` 으로 원격 호스트·포트와 동반 예외(Connection refused·timeout) 확인'
+  - 대상 엔드포인트 도달성 `nc -zvw3 <host> <port>` 와 프록시 JVM 특성(https.proxyHost 등) 설정 여부 확인
+  short:
+  - 대상 서비스 담당에 가용성 확인, 방화벽 경로 확인
+  mid:
+  - 엔드포인트 URL 을 바인딩·정책 집합 구성으로 외부화
+  long:
+  - 연동 대상 가용성 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/docs/en/was-nd/8.5.5?topic=services-web-client-runtime-troubleshooting-tips)
+  note: Connection to remote host failed
+  vendor_cause: 원격 호스트와 연결을 설정할 수 없음
+  vendor_action: 연결과 포트 설정을 확인하고 함께 보고된 오류를 검토
+  vendor_url: https://www.ibm.com/docs/en/was-nd/8.5.5?topic=services-web-client-runtime-troubleshooting-tips
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  version_note: WSWS37xx JAX-WS 엔진 — 7.0 이후(6.1 Feature Pack 포함)
+- code: WSWS3734W
+  severity: warn
+  category: internal
+  title: 웹서비스 디스패치 중 예외
+  immediate:
+  - '`grep -n -A 20 "WSWS3734W" <PROFILE_ROOT>/logs/<server>/SystemOut.log | head -40` 으로 대상 서비스·예외 확인'
+  - 같은 시각 FFDC `ls -lt <PROFILE_ROOT>/logs/ffdc/ | head` 의 예외와 대상 서비스 응답 시간 확인
+  short:
+  - 예외 원인(타임아웃·직렬화 오류·대상 오류) 담당에 전달, 반복 시 메시지 ID 로 IBM 지원 문서 검색
+  mid:
+  - '(2차·승인 후, 롤백: 원래 값 기록) JAX-WS 클라이언트 타임아웃 조정'
+  long:
+  - 웹서비스 오류 건수 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/docs/en/was-zos/9.0.5?topic=messages-wsws)
+  note: 소켓 타임아웃으로 한정되지 않음
+  vendor_cause: 웹서비스 요청 dispatch 중 예기치 않은 예외가 발생했으며 원인을 즉시 알 수 없음
+  vendor_action: 지속되면 메시지 ID로 IBM WebSphere Application Server Support의 문제 판별 정보를 확인
+  vendor_url: https://www.ibm.com/docs/en/was-zos/9.0.5?topic=messages-wsws
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  version_note: WSWS37xx JAX-WS 엔진 — 7.0 이후(6.1 Feature Pack 포함)
+- code: CWSJY0003W
+  severity: warn
+  category: internal
+  title: IBM MQ provider 경고 전달
+  immediate:
+  - '`grep -n "CWSJY0003W" <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -20` 으로 경고 문구에 browse-with-mark·MARKINT 관련 내용이 있는지 확인'
+  - 경고가 업무 메시지 누락과 연결되는지 MDB 처리 건수와 큐 깊이(MQ 담당 조회) 확인 — 누락이 없으면 경고성
+  short:
+  - MQ 담당과 큐 관리자 MARKINT 값 검토, 활성화 사양·리스너 포트 소비 지연 확인
+  mid:
+  - '(2차·승인 후, 롤백: 원래 값 기록) MARKINT 상향 또는 com.ibm.msg.client.wmq.suppressBrowseMarkMessageWarning=true 설정'
+  long:
+  - MDB 소비 지연·큐 깊이 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/docs/en/was-zos/8.5.5?topic=messages-cwsjy)
+  note: 메시징 엔진 연결 오류 고정 코드가 아님
+  vendor_cause: browse-with-mark한 메시지가 destructive get 시점에 이미 사용할 수 없으며 MARKINT 만료 등이 원인임
+  vendor_action: MQ MARKINT 값을 늘리거나 com.ibm.msg.client.wmq.suppressBrowseMarkMessageWarning을 true로 설정
+  vendor_url: https://www.ibm.com/docs/en/ibm-mq/9.3.x?topic=tjjp-cwsjy0003w-warning-messages-in-websphere-application-server-systemoutlog-file
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  - WAS Liberty (공유 코드)
+  version_note: CWSJY(IBM MQ 메시징 공급자) — traditional 7~9 및 Liberty wasJmsClient 공통
+- code: CWSIS1546I
+  severity: info
+  category: lock
+  title: 메시징 DB스토어 잠금 상실
+  immediate:
+  - '`grep -nE "CWSIS15|CWSID" <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -20` 으로 데이터 저장소 잠금 상실·메시징 엔진 상태 전이 확인'
+  - 데이터 저장소 DB 도달성 `nc -zvw3 <db_host> <port>` 와 같은 메시징 엔진이 다른 서버에서 동시에 시작됐는지 각 서버 SystemOut 대조
+  short:
+  - DB 장애면 DB 복구, 중복 시작이면 코어 그룹 정책(One of N)·match criteria 점검
+  mid:
+  - '(2차·승인 후, 롤백: 변경 전 정책 기록) HA 정책·데이터 저장소 잠금 설정 정비'
+  long:
+  - 메시징 엔진 상태 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/docs/en/was-zos/9.0.5?topic=tips-messaging-engine-troubleshooting)
+  note: 기존 lock 상실 또는 초기 lock 획득 실패
+  vendor_cause: 동일 messaging engine 중복 시작, DB 장애 또는 네트워크 문제로 데이터스토어 잠금을 잃거나 얻지 못함
+  vendor_action: DB와 네트워크를 확인하고 HA 구성의 messaging engine·core group policy·match criteria 설정을 점검
+  vendor_url: https://www.ibm.com/docs/en/was-zos/9.0.5?topic=tips-messaging-engine-troubleshooting
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  version_note: CWSIS(SIB 메시징 엔진 스토어) — traditional 6.0 이후
+- code: CWNEN0030E
+  severity: error
+  category: internal
+  title: 참조 객체 인스턴스 획득 실패
+  immediate:
+  - '`grep -n -A 20 "CWNEN0030E" <PROFILE_ROOT>/logs/<server>/SystemOut.log | head -40` 으로 참조 이름과 원인 예외 확인'
+  - 참조 대상 JNDI 이름 존재 확인 `<PROFILE_ROOT>/bin/dumpNameSpace.sh -host <host> -port <port> | grep <jndi>`(읽기 전용, port 는 bootstrap 포트)
+  short:
+  - 리소스 참조 바인딩(ibm-web-bnd·ibm-ejb-jar-bnd)과 실제 리소스 JNDI 일치 확인
+  mid:
+  - '(2차·승인 후, 롤백: 이전 EAR) 바인딩 수정본 재배포'
+  long:
+  - 배포 시 리소스 참조 검증
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/docs/en/was-nd/9.0.5?topic=messages-cwnen)
+  note: 일반 주입 실패와 의미 다름
+  vendor_cause: 지정된 참조에 대한 객체 인스턴스를 얻지 못함
+  vendor_action: 함께 출력된 예외 메시지를 확인해 상세 원인을 판별
+  vendor_url: https://www.ibm.com/docs/en/was-nd/9.0.5?topic=messages-cwnen
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  - WAS Liberty (공유 코드)
+  version_note: CWNEN(주입 엔진) — traditional 7.0 이후, Liberty 공통
+- code: CNTR0020E
+  severity: error
+  category: internal
+  title: EJB 예외
+  immediate:
+  - "① 대상 묶음 찾기 — 기본 로그면 `grep -n 'CNTR0020E' <PROFILE_ROOT>/logs/<server>/SystemOut.log | grep '<HH:MM>'`(첫 칸 = 머리 줄 번호, '[시각]' 뒤 8자리 16진 = 스레드 ID), HPEL 이면(SystemOut.log 가 장애 시각까지 갱신되지 않음) `<PROFILE_ROOT>/bin/logViewer.sh -startDate \"<MM/dd/yy H:m:s:S z>\" -stopDate \"<MM/dd/yy H:m:s:S z>\" > ~/cntr0020e_hpel.txt`(스레드 ID 를 알면 -thread <ID> 로 좁힘)로 꺼낸 파일에 같은 grep — EJB 이름·메서드·예외 데이터·스레드 ID 기록"
+  - "② 그 묶음의 Caused by 사슬: `awk -v s=<머리줄번호> 'NR<s {next} NR>s && /^[[:space:]]*\\[[0-9]/ {exit} {print NR, $0}' <SystemOut.log 또는 HPEL 출력 파일> | grep 'Caused by:'` — 다음 '[시각]' 줄 직전까지만 읽어 빈 줄·들여쓰기 없는 중간 예외 줄에서 끊기지 않고 다른 요청을 섞지 않는다, 마지막 줄이 맨 안쪽 원인(없으면 예외 데이터의 마지막 nested exception)"
+  - "③ 그 묶음 안의 FFDC 안내: ②와 같은 awk 로 뽑은 묶음 전체에서 `awk -v s=<머리줄번호> 'NR<s {next} NR>s && /^[[:space:]]*\\[[0-9]/ {exit} {print NR, $0}' <로그> | grep 'FFDC'` — FFDC 인시던트 안내는 시각 줄과 다른 줄에 있을 수 있어 같은 시각 한 줄만 보지 않는다(같은 시각·같은 스레드 ID 로 따로 찍힌 FFDC 줄도 함께 본다). 가리키는 인시던트 파일을 `ls -lt <PROFILE_ROOT>/logs/ffdc/ | head -20` 과 맞추되 확장자를 *.txt 로만 가정하지 않는다 — 최근 20개만 본 것은 부분 확인, 없으면 장애 시각 범위 파일까지 넓힌다. 맨 안쪽 원인 유형(DB·클래스 로딩·보안·자원·애플리케이션)으로 담당을 가르고, 스택에 어느 패키지가 보이는지만으로 앱/WAS 결함을 단정하지 않는다"
+  short:
+  - '(2차) 맨 안쪽 원인 유형별 이관 — DB(SQLException·DSRA)는 DBA·데이터소스, 자원(J2CA 풀)은 풀 설정, 보안(SECJ)은 보안 설정, 클래스 로딩은 배포·클래스 로더 순서, 업무 예외는 개발 담당. 유형이 불명확하면 메시지 ID·예외로 IBM 지원 문서 검색'
+  mid:
+  - EJB 예외 선언·처리 보강
+  long:
+  - EJB 예외 건수 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/support/pages/cntr0020e-error-message-seen-human-task-manager-websphere-process-server-wps)
+  note: EJB invocation 중 unexpected non-declared exception
+  vendor_cause: EJB 메서드 서명에 선언되지 않은 예외가 EJB 호출 중 발생함
+  vendor_action: 스택 추적을 확인해 사용자 코드가 원인이면 수정하고 아니면 IBM Support의 문제 판별 정보를 확인
+  vendor_url: https://www.ibm.com/support/pages/cntr0020e-error-message-seen-human-task-manager-websphere-process-server-wps
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  - WAS Liberty (공유 코드)
+  version_note: CNTR 메시지 ID 는 traditional 7.0~9.0 동일 — Liberty 도 같은 ID 사용
+- code: CNTR0019E
+  severity: error
+  category: internal
+  title: EJB 메서드 예외
+  immediate:
+  - "`grep -n -A 30 \"CNTR0019E\" <PROFILE_ROOT>/logs/<server>/SystemOut.log | head -60` 으로 호출 메서드와 선언되지 않은 예외 확인"
+  - "같은 시각 트랜잭션 rollback 동반 여부 `grep -n \"WTRN\" <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -10` 확인"
+  short:
+  - 예외 스택을 개발 담당에 전달, 롤백된 업무 건의 재처리 필요 여부를 업무 담당과 확인
+  mid:
+  - EJB 메서드 예외 선언·처리 보강
+  long:
+  - EJB 메서드 예외 건수 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/docs/en/was-zos/8.5.5?topic=messages-cntr)
+  note: EJB method invocation 중 unexpected exception
+  vendor_cause: EJB 메서드 호출 중 메서드 서명에 선언되지 않은 예외가 발생함
+  vendor_action: 스택 추적을 확인해 사용자 코드가 원인이면 수정하고 아니면 IBM Support의 문제 판별 정보를 확인
+  vendor_url: https://www.ibm.com/docs/en/was-zos/8.5.5?topic=messages-cntr
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  - WAS Liberty (공유 코드)
+  version_note: CNTR 메시지 ID 는 traditional 7.0~9.0 동일 — Liberty 도 같은 ID 사용
+- code: PMGR6022E
+  severity: error
+  category: upstream
+  title: Resource Adapter Interaction 오류
+  immediate:
+  - '`grep -n -A 20 "PMGR6022E" <PROFILE_ROOT>/logs/<server>/SystemOut.log | head -40` 으로 Bean·리소스 어댑터와 Interaction 예외 확인'
+  - 대상 백엔드(EIS·DB) 도달성 `nc -zvw3 <host> <port>` 와 같은 시각 J2CA 오류 동반 확인
+  short:
+  - 해당 Bean 의 연결 팩토리 JNDI·리소스 어댑터 구성 확인
+  mid:
+  - '(2차·승인 후, 롤백: 변경 전 설정 기록) 연결 팩토리 구성 수정'
+  long:
+  - 백엔드(EIS·DB) 연동 오류 건수 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/docs/ko/SSEQTP_9.0.5/com.ibm.websphere.messages.doc/PMGR.html)
+  note: 영속성 관리자 일반 오류가 아님
+  vendor_cause: Resource Adapter가 연결 요청을 처리하면서 Interaction 생성 또는 실행 예외를 발생시킴
+  vendor_action: 현재 Bean에 구성된 Java EE Connector/Resource Adapter가 유효한지 확인하고 getInteraction 또는 Interaction 실패를 점검
+  vendor_url: https://www.ibm.com/docs/ko/SSEQTP_9.0.5/com.ibm.websphere.messages.doc/PMGR.html
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  version_note: PMGR(EJB 2.x CMP 영속성 관리자) — traditional 전용(Liberty 미지원)
+- code: WSVR0001I
+  severity: info
+  category: internal
+  title: 서버 e-business 서비스 개방
+  immediate:
+  - '`grep -n "WSVR0001I" <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -5` 로 기동 완료 시각 확인 — 계획 기동이면 정상'
+  - 계획 외 기동이면 이전 SystemOut_*.log 와 `native_stderr.log` 의 비정상 종료 흔적, javacore·core 파일 생성 여부 확인
+  short:
+  - 비계획 기동이면 비정상 종료 원인(OOM·javacore·core 파일) 확인
+  mid:
+  - 노드 에이전트 모니터링 정책(자동 재기동) 확인
+  long:
+  - 비계획 기동(WSVR0001I) 발생 시 경보·원인 기록
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/docs/en/was-zos/9.0.5?topic=messages-wsvr)
+  note: 서버가 정상 시작되어 요청 처리 가능
+  vendor_cause: 서버 초기화가 완료되어 e-business 요청을 처리할 준비가 됨
+  vendor_action: 조치 불필요
+  vendor_url: https://www.ibm.com/docs/en/was-zos/9.0.5?topic=messages-wsvr
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  version_note: WSVR 메시지 ID 는 traditional 7.0~9.0 동일 — traditional 전용(Liberty 는 CWWK* 체계)

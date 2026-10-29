@@ -1,0 +1,372 @@
+# WAS 계층 조치 절차 카탈로그 — 제품 매뉴얼 기준 '실제 수행 가능한' 명령·설정 (2026-09-11)
+# stage 1 = 1차 선 대응(읽기 전용 확인·자료 보존) / 2 = 2차 유지보수 엔지니어(복구·설정 변경, 변경 관리 승인 후) / 3 = 3차 제조사 의뢰(수집)
+# 자리표시자: <PID> <server> <domain> <pw> <DOMAIN_HOME> <CATALINA_BASE> <JBOSS_HOME> <PROFILE_ROOT> <DS> …
+# 2026-10-16 안전 강화(GPT 45차 관문): 1차 = 읽기 전용·적용 버전·권한 명시 / 2차 = 사전조건·영향·승인·백업/롤백 + 성공/실패 판단 / 3차 = 민감정보 마스킹·전달 승인
+# jeusadmin 공통 주의: -p <pw> 를 명령줄에 쓰면 ps·셸 이력에 남음 — 가능하면 -p 를 빼고 프롬프트에서 입력, 보고서·화면 캡처에 비밀번호를 남기지 않음
+products: [jeus]
+procedures:
+- id: JEUS-PROC-MEMORY
+  category: memory
+  match: [WAS-JVM-001, JEUS-OOM, JEUS-METASPACE-OOM, JEUS-GC-OVERHEAD, LEG-JEUS-OOM-HEAP, LEG-JEUS-OOM-META, LEG-JEUS-GC]
+  title: JVM 힙/Metaspace 메모리 고갈 (OutOfMemoryError · GC overhead)
+  source: "JEUS 8.5 Server Guide '서버 설정 › JVM 옵션'·'로깅' / JEUS 9 Administration Guide 'jeusadmin server-info' / JDK Troubleshooting Guide (jcmd)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 서버 상태·PID 확인 (읽기 전용)
+      cmd: |
+        $JEUS_HOME/bin/jeusadmin -host localhost:9736 -u administrator "server-info -server <server> -state"
+        $JEUS_HOME/bin/jeusadmin -host localhost:9736 -u administrator "server-info -server <server> -pid"
+        ps -ef | grep -i "[j]eus.server" | grep <server>
+      check: 상태가 RUNNING 이 아니거나(STANDBY·FAILED) PID 가 없으면 서버 중단 — 2차 통보
+      note: "적용: JEUS 7/8/8.5/9 jeusadmin 문법(JEUS 6 은 jeusadmin <node> 형식으로 다름) · server-info 는 조회만 · 권한: JEUS 관리자 계정(조회 권한) + JEUS 실행 OS 계정 · 비밀번호는 -p 생략 후 프롬프트 입력 권장"
+    - do: 힙 사용량·GC 상황 기록 (재기동 전 필수)
+      cmd: |
+        jcmd <PID> GC.heap_info
+        jstat -gcutil <PID> 5000 6
+        tail -n 300 $DOMAIN_HOME/servers/<server>/logs/JeusServer.log | grep -n "OutOfMemoryError\|GC overhead\|Metaspace"
+      check: jstat 의 O(Old) 또는 M(Metaspace) 사용률이 95% 이상으로 유지되고 FGC(Full GC) 횟수가 계속 늘면 메모리 고갈 확정
+      note: "적용: JDK 8/11/17 (GC.heap_info 는 JDK 9+ — JDK 8 은 jstat 결과로 판단), JEUS 7/8/8.5/9 로그 경로 · 권한: JEUS 실행 OS 계정과 같은 사용자(jcmd attach)"
+    - do: 스레드 덤프 3회(10초 간격) 채취 후 2차 전달 (재기동 전)
+      cmd: |
+        for i in 1 2 3; do jcmd <PID> Thread.print > $DOMAIN_HOME/servers/<server>/logs/td_$(date +%H%M%S)_$i.txt; sleep 10; done
+      check: td_*.txt 3개 생성 — 힙 덤프(GC.heap_dump)는 stop-the-world·대용량이라 1차 금지, 2차가 디스크·부하 승인 후 수행(GPT 교차 B)
+      note: "적용: JDK 8/11/17 (jcmd 가 없으면 kill -3 <PID> — 스레드 덤프, 프로세스는 유지, 출력은 JeusLauncher/표준출력 로그) · 권한: JEUS 실행 OS 계정"
+  - stage: 2
+    steps:
+    - do: 힙 덤프 채취 (디스크 여유·서비스 중단 상태 확인 후)
+      cmd: |
+        df -h $DOMAIN_HOME/servers/<server>/logs ; jcmd <PID> GC.heap_dump $DOMAIN_HOME/servers/<server>/logs/heap_$(date +%Y%m%d_%H%M%S).hprof
+      check: "성공: hprof 파일(힙 크기만큼 용량) 생성, jcmd 가 'Heap dump file created' 출력 · 실패: 디스크 부족·권한 오류면 다른 경로 지정, 덤프 중 프로세스가 죽으면 JeusServer.log 확인 후 재기동 판단"
+      note: "덤프 중 서버가 수 초~수십 초 멈춤 — 이미 서비스 중단 상태이거나 우회된 인스턴스에서만 수행 · 사전조건: 해당 서버 L4/WebtoB 에서 제외 또는 이미 서비스 불능, 디스크 여유가 -Xmx 이상 · 영향: 전체 정지(stop-the-world)·디스크 대량 사용, hprof 에 세션·개인정보 포함 · 승인: WAS 담당·보안 담당 · 백업/롤백: 설정 변경 없음 — 분석 후 hprof 는 보안 규정대로 삭제·암호화 보관 · 적용: JDK 8/11/17"
+    - do: JVM 힙·Metaspace 크기와 GC 로그 옵션 조정 (domain.xml 의 서버 jvm-option)
+      config:
+        file: $DOMAIN_HOME/config/domain.xml  (servers › server › jvm-config › jvm-option)
+        snippet: |
+          <jvm-config>
+            <jvm-option>-Xms4096m -Xmx4096m -XX:MetaspaceSize=256m -XX:MaxMetaspaceSize=512m</jvm-option>
+            <jvm-option>-XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=${SERVER_HOME}/logs</jvm-option>
+            <jvm-option>-Xlog:gc*:file=${SERVER_HOME}/logs/gc_%t.log:time,uptime:filecount=5,filesize=50m</jvm-option>
+          </jvm-config>
+        note: "JDK 8 이면 -Xlog 대신 -XX:+PrintGCDetails -XX:+PrintGCDateStamps -Xloggc:${SERVER_HOME}/logs/gc.log · Xms=Xmx 로 고정, 물리 메모리의 50~60% 이내. 8.5 이후 jeusadmin modify-jvm-option 으로도 변경 가능"
+      cmd: |
+        $JEUS_HOME/bin/jeusadmin -host localhost:9736 -u administrator "modify-jvm-option -server <server> -old \"-Xmx2048m\" -new \"-Xmx4096m\""
+        $JEUS_HOME/bin/jeusadmin -host localhost:9736 -u administrator "stop-server <server> -g" ; $JEUS_HOME/bin/jeusadmin -host localhost:9736 -u administrator "start-server <server>"
+      check: "성공: 재기동 후 jstat -gcutil 에서 Old 사용률이 안정(70% 이하)되고 Full GC 가 반복되지 않음 · 실패: 기동 실패('Unrecognized VM option'·메모리 할당 실패)면 domain.xml 백업본 복원 후 기동, OOM 재발이면 힙 덤프 분석 단계로"
+      note: "사전조건: 1차 스레드 덤프·로그 보존 완료, 서버 물리 메모리 여유(같은 장비의 모든 JEUS 서버 -Xmx 합) 확인 · 영향: stop~start 동안 해당 서버 서비스 중단(클러스터면 다른 서버로 우회) · 승인: WAS 담당·변경 관리 · 백업/롤백: 변경 전 cp domain.xml domain.xml.bak.<날짜>, 이상 시 modify-jvm-option 으로 되돌리거나 백업본 복원 후 재기동 · 적용: JEUS 8/8.5/9 (modify-jvm-option), JEUS 7 은 WebAdmin 또는 domain.xml 직접, -Xlog 는 JDK 9+"
+    - do: 힙 덤프 분석으로 누수 객체 식별 (Eclipse MAT / jhat)
+      cmd: |
+        # MAT 설치 PC 에서: ./ParseHeapDump.sh heap_*.hprof org.eclipse.mat.api:suspects
+        jcmd <PID> GC.class_histogram | head -30
+      check: "성공: Leak Suspects 리포트에서 특정 애플리케이션 클래스(캐시·세션·컬렉션)가 힙의 대부분을 점유하면 애플리케이션 결함 → 개발팀 이관 · 실패(판단 불가): 상위가 byte[]·String 뿐이면 MAT dominator tree 로 보유 객체 추적"
+      note: "사전조건: hprof 를 보안 승인된 분석 PC 로만 옮김 · 영향: GC.class_histogram 은 Full GC 를 일으켜 잠시 정지 · 승인: WAS 담당·보안 담당(hprof 이동) · 백업/롤백: 설정 변경 없음(조회) — 되돌릴 것 없음 · 적용: JDK 8/11/17 (jhat 은 JDK 8 까지 — 9+ 는 MAT 사용)"
+    - do: 세션·캐시 한도 점검 (세션 타임아웃·최대 세션 수)
+      config:
+        file: 애플리케이션 WEB-INF/web.xml · jeus-web-dd.xml
+        snippet: |
+          <session-config><session-timeout>30</session-timeout></session-config>
+      check: "성공: 세션 객체가 힙의 상위 점유자였다면 타임아웃 단축·세션 저장 데이터 축소 후 Old 사용률 감소 · 실패: 사용자 작업 중 세션 만료 민원이 생기면 이전 값으로 원복"
+      note: "사전조건: 업무별 필요 세션 유지 시간을 업무 담당과 확인 · 영향: 타임아웃 단축 시 사용자 강제 로그아웃 증가, 적용은 재배포 필요 · 승인: 애플리케이션 담당·업무 담당·변경 관리 · 백업/롤백: 변경 전 web.xml·jeus-web-dd.xml 백업, 이상 시 이전 배포본으로 재배포 · 적용: Servlet 2.5+ web.xml, JEUS 7/8/8.5/9"
+  - stage: 3
+    steps:
+    - do: 제조사(TmaxSoft) 의뢰 자료 수집
+      cmd: |
+        tar czf jeus_$(hostname)_$(date +%Y%m%d).tgz $DOMAIN_HOME/config/domain.xml $DOMAIN_HOME/servers/<server>/logs/ $JEUS_HOME/lib/system/jeus.jar
+        java -version 2>&1; cat $JEUS_HOME/version.txt 2>/dev/null; $JEUS_HOME/bin/jeusadmin -host localhost:9736 -u administrator "server-info -server <server>"
+      check: JeusServer.log·JeusLauncher.log·gc 로그·hprof·스레드 덤프·domain.xml·JEUS 버전(Fix 레벨)·JDK 버전이 모두 포함
+      note: "민감정보 마스킹: domain.xml 의 데이터소스 계정·암호화 비밀번호·키스토어 비밀번호, 로그의 호스트명·IP·사용자 계정·세션 ID/쿠키·요청 파라미터를 가림 — hprof 는 메모리 전체(개인정보) 포함이라 원본 반출은 별도 보안 승인 · 전달 승인: 보안 담당 승인 후 TmaxSoft 에 반출"
+
+- id: JEUS-PROC-CONNECTION
+  category: connection
+  match: [JEUS-DS-POOL-EXHAUSTED, JEUS-DS-CONNECT-FAIL, JEUS-DS-CHECK-FAIL, CPOOL-0034, JDBC-0395, LEG-JEUS-JDBC, WAS-POOL-002]
+  title: JDBC 커넥션 풀 고갈·DB 연결 실패
+  source: "JEUS 8.5 JDBC Guide '커넥션 풀 설정(pooling › min/max/step/period)'·'connection-trace' / Administration Guide 'jeusadmin connection-pool-info · control-connection-pool'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 커넥션 풀 현재 사용량 확인 (읽기 전용)
+      cmd: |
+        $JEUS_HOME/bin/jeusadmin -host localhost:9736 -u administrator "connection-pool-info -server <server>"
+        $JEUS_HOME/bin/jeusadmin -host localhost:9736 -u administrator "connection-pool-info -server <server> -id <DS> -active"
+      check: active 가 max 와 같고 idle 0·wait 큐가 쌓이면 풀 고갈. 특정 SQL 이 장시간 점유하면 DB/애플리케이션 문제
+      note: "적용: JEUS 8/8.5/9/21 jeusadmin(JEUS 7 은 아래 미검증, JEUS 6 은 dbpoolinfo 계열로 다름) · connection-pool-info 는 조회만(control-connection-pool·refresh 는 2차) · 권한: JEUS 관리자 계정(조회)"
+      verify_note: "미검증 — JEUS 7 jeusadmin 의 connection-pool-info(별칭 cpinfo) 지원·옵션(-id·-active)을 JEUS 7 Reference 로 확인하지 못함(JEUS 8/9/21 문서만 확인). JEUS 7 에서는 jeusadmin 에서 help 로 명령 존재부터 확인"
+    - do: DB 자체 접속 가능 여부 확인 (DB 가 원인인지 분리)
+      cmd: |
+        nc -zvw3 <DB_HOST> <DB_PORT>
+        # Oracle: tnsping <tns>   (리스너 응답만 확인 — 비밀번호가 필요한 sqlplus <user> 접속은 명령줄·이력에 비밀번호가 남으므로 1차에서 쓰지 않음)
+      check: 포트 접속 실패·리스너 응답 없음이면 DB/네트워크 장애 → DB 담당 통보(풀 설정 변경 불필요)
+      note: "적용: Linux nc, Oracle Client(tnsping) — 다른 DB 는 nc 결과로 판단 · 권한: 일반 사용자"
+    - do: 스레드 덤프로 커넥션 대기 스레드 확인
+      cmd: |
+        jcmd <PID> Thread.print | grep -A 12 "waiting for connection\|ConnectionPool\|getConnection" | head -120
+      check: 다수 스레드가 getConnection 대기면 풀 고갈, 특정 SQL 실행 중이면 느린 쿼리
+      note: "적용: JDK 8/11/17 · 출력 120줄로 제한 · 권한: JEUS 실행 OS 계정과 같은 사용자"
+  - stage: 2
+    steps:
+    - do: 풀 크기·대기 시간·검사 설정 조정 (domain.xml database)
+      config:
+        file: $DOMAIN_HOME/config/domain.xml  (resources › data-source › database › pooling)
+        snippet: |
+          <pooling>
+            <min>10</min><max>60</max><step>5</step><period>600000</period>
+          </pooling>
+          <wait-free-connection><enable-wait>true</enable-wait><wait-time>10000</wait-time></wait-free-connection>
+          <max-use-count>0</max-use-count>
+          <check-query>SELECT 1 FROM DUAL</check-query><check-query-period>60000</check-query-period>
+          <use-sql-trace>true</use-sql-trace><stmt-caching-size>50</stmt-caching-size>
+        note: "max 는 DB 의 processes/sessions 한도(모든 WAS 인스턴스 합)를 넘지 않게. 동적 반영: jeusadmin modify-data-source 또는 재배포"
+      cmd: |
+        $JEUS_HOME/bin/jeusadmin -host localhost:9736 -u administrator "modify-data-source -id <DS> -max 60 -min 10"
+        $JEUS_HOME/bin/jeusadmin -host localhost:9736 -u administrator "control-connection-pool -server <server> -id <DS> -refresh"
+        # JEUS 9 공식 명령명: refresh-connection-pool -server <server> -id <DS>  (풀 연결을 새 연결로 교체 — 진행 중 DB 사용에 영향, 2차 승인 후)
+      check: "성공: connection-pool-info 에서 wait 0·active 가 max 아래로 안정 · 실패: DB 측 세션 한도 초과(ORA-00018/00020)·DB 부하 급증이면 이전 max 로 원복, 풀 고갈이 계속되면 누수 추적 단계로"
+      note: "사전조건: DBA 와 DB processes/sessions 여유 확인(모든 WAS 인스턴스 max 합), 1차에서 DB 자체 장애가 아님을 확인 · 영향: refresh 는 풀의 연결을 교체해 진행 중 트랜잭션 실패 가능, max 증가는 DB 부하 증가 · 승인: WAS 담당·DBA·변경 관리 · 백업/롤백: 변경 전 cp domain.xml domain.xml.bak.<날짜>, 이상 시 modify-data-source 로 이전 값 재설정 · 적용: JEUS 8/8.5(control-connection-pool), JEUS 9(refresh-connection-pool), use-sql-trace 는 운영 부하가 있어 원인 확인 후 끔"
+    - do: 커넥션 누수 추적 (connection-trace) 활성화 후 누수 지점 식별
+      config:
+        file: $DOMAIN_HOME/config/domain.xml  (database › connection-trace)
+        snippet: |
+          <connection-trace><enabled>true</enabled><get-connection-trace>true</get-connection-trace><auto-commit-trace>false</auto-commit-trace></connection-trace>
+      cmd: |
+        $JEUS_HOME/bin/jeusadmin -host localhost:9736 -u administrator "connection-pool-info -server <server> -id <DS> -active"
+      check: "성공: 반환되지 않은 커넥션의 스택 트레이스에 나온 애플리케이션 클래스 → 개발팀에 close() 누락 수정 요청 · 실패: 스택이 남지 않으면 get-connection-trace 활성 여부·반영(재기동/재배포) 확인"
+      note: "사전조건: 재현 구간을 정해 짧게 켬 · 영향: 커넥션마다 스택을 저장해 메모리·CPU 부하 증가 · 승인: WAS 담당·변경 관리 · 백업/롤백: domain.xml 백업 후 활성화, 원인 확인 즉시 enabled=false 로 원복 · 적용: JEUS 8/8.5/9 (JEUS 7 은 connection-pool-info 미검증 — 1차 단계 verify_note)"
+  - stage: 3
+    steps:
+    - do: 제조사 의뢰 자료
+      cmd: |
+        $JEUS_HOME/bin/jeusadmin -host localhost:9736 -u administrator "connection-pool-info -server <server>" > pool_$(date +%Y%m%d_%H%M).txt
+        tar czf jeus_ds_$(date +%Y%m%d).tgz $DOMAIN_HOME/config/domain.xml $DOMAIN_HOME/servers/<server>/logs/JeusServer.log* pool_*.txt td_*.txt
+      check: 풀 설정(domain.xml)·풀 상태 캡처·스레드 덤프·JDBC 드라이버 버전(jar 파일명)·DB 버전 포함
+      note: "민감정보 마스킹: domain.xml 의 DB 계정·비밀번호(암호화 값 포함)·DB 호스트명/IP/포트·서비스명, 로그·스레드 덤프의 SQL 바인드 값·요청 파라미터·세션 ID 를 가림 · 전달 승인: 보안 담당 승인 후 TmaxSoft 에 반출"
+
+- id: JEUS-PROC-THREAD
+  category: thread
+  match: [JEUS-THREAD-BLOCK, JEUS-THREADPOOL-FULL]
+  title: 요청 처리 스레드 고갈·블록
+  source: "JEUS 8.5 Server Guide '스레드 풀(thread-pool › service/system) 설정'·'서버 모니터링(thread-info)' / JDK Troubleshooting (jcmd Thread.print)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 스레드 풀 상태 확인 (읽기 전용)
+      cmd: |
+        $JEUS_HOME/bin/jeusadmin -host localhost:9736 -u administrator "thread-info -server <server>"
+        $JEUS_HOME/bin/jeusadmin -host localhost:9736 -u administrator "thread-info -server <server> -listener <listener>"
+        $JEUS_HOME/bin/jeusadmin -host localhost:9736 -u administrator "thread-info -server <server> -a -os"   # 9: -os 상태별, -r 실행 중, -a 전체(공식 reference)
+      check: active 가 max 에 도달하고 큐(queue) 가 쌓이면 스레드 고갈. 장시간 실행(수십 초 이상) 스레드가 있으면 블록
+      note: "적용: JEUS 8/8.5/9 thread-info(옵션 -a/-os/-r 는 9 기준, 8.x 는 jeusadmin help thread-info 로 확인) · 조회만(interrupt-thread·stop 계열 금지) · 권한: JEUS 관리자 계정(조회)"
+    - do: 스레드 덤프 3회(10초 간격) 채취
+      cmd: |
+        for i in 1 2 3; do jcmd <PID> Thread.print > $DOMAIN_HOME/servers/<server>/logs/td_$(date +%H%M%S)_$i.txt; sleep 10; done
+      check: "같은 스택(예: DB 대기·외부 HTTP 대기·synchronized 락)에 다수 스레드가 반복 나타나면 그 지점이 병목"
+      note: "적용: JDK 8/11/17 (jcmd 가 없으면 kill -3 <PID> — 스레드 덤프, 프로세스는 유지) · 로그 폴더 여유 확인 · 권한: JEUS 실행 OS 계정"
+  - stage: 2
+    steps:
+    - do: 스레드 풀 크기·큐·워커 타임아웃 조정
+      config:
+        file: $DOMAIN_HOME/config/domain.xml  (servers › server › thread-pools 또는 listeners › listener › thread-pool)
+        snippet: |
+          <thread-pool><min>20</min><max>200</max><max-queue>4096</max-queue><max-idle-time>300000</max-idle-time></thread-pool>
+          <!-- 블록 스레드 자동 감지·처리 -->
+          <max-thread-active-time>300000</max-thread-active-time>
+          <thread-state-notify><notify-threshold-ratio>0.9</notify-threshold-ratio><active-timeout-notification>true</active-timeout-notification></thread-state-notify>
+        note: "max 를 올리기 전에 병목(DB·외부 연동) 해소가 우선 — 스레드만 늘리면 DB 세션·메모리 고갈로 전이"
+      cmd: |
+        $JEUS_HOME/bin/jeusadmin -host localhost:9736 -u administrator "modify-thread-pool -server <server> -max 200"
+      check: "성공: thread-info 에서 active 가 max 의 70% 이하로 안정, 큐 0 · 실패: 스레드 증가 후 DB 풀 고갈·메모리(OOM) 증상이 생기면 이전 max 로 원복하고 병목 해소 우선"
+      note: "사전조건: 1차 스레드 덤프로 병목 지점 확인, DB 커넥션 풀·힙 여유 확인 · 영향: 스레드 증가는 메모리·DB 세션 증가, 리스너 풀 변경은 WebtoB MaxProc 과의 정합 필요 · 승인: WAS 담당·변경 관리 · 백업/롤백: 변경 전 cp domain.xml domain.xml.bak.<날짜>, 이상 시 modify-thread-pool 로 이전 값 재설정 · 적용: JEUS 8/8.5/9 (modify-thread-pool 반영 범위는 버전별 — 동적 반영 안 되면 재기동 필요)"
+    - do: 블록 원인이 외부 연동이면 타임아웃 설정 (HTTP 클라이언트·JDBC 쿼리 타임아웃)
+      config:
+        file: 애플리케이션 설정 / domain.xml data-source
+        snippet: |
+          <query-timeout>30000</query-timeout>   <!-- JEUS data-source: statement 실행 30초 제한 -->
+      check: "성공: 타임아웃 후 스레드가 반환되어 큐가 쌓이지 않음 · 실패: 정상 배치·보고서 쿼리가 30초를 넘어 실패하면 해당 데이터소스만 값 상향 또는 원복"
+      note: "사전조건: 업무별 최장 정상 쿼리 시간 확인(DBA·업무 담당) · 영향: 기준보다 오래 걸리는 쿼리는 강제 취소(업무 실패) · 승인: WAS 담당·DBA·업무 담당 · 백업/롤백: domain.xml 백업 후 변경, 이상 시 이전 값 복원 · 적용: JEUS 7/8/8.5/9 data-source"
+  - stage: 3
+    steps:
+    - do: 제조사 의뢰 자료
+      cmd: |
+        tar czf jeus_thread_$(date +%Y%m%d).tgz $DOMAIN_HOME/servers/<server>/logs/td_*.txt $DOMAIN_HOME/servers/<server>/logs/JeusServer.log* $DOMAIN_HOME/config/domain.xml
+      check: 스레드 덤프 3회 + thread-info 출력 + 서버 로그 + domain.xml
+      note: "민감정보 마스킹: domain.xml 의 계정·비밀번호·호스트명/IP, 스레드 덤프·로그의 요청 URL 파라미터·세션 ID·SQL 바인드 값·사용자 계정을 가림 · 전달 승인: 보안 담당 승인 후 TmaxSoft 에 반출"
+
+- id: JEUS-PROC-INTERNAL
+  category: internal
+  match: [JEUS-SERVER-BOOT-FAIL, JEUS-DEPLOY-FAIL, JEUS-CONFIG-PARSE-FAIL, JEUS-STARTUP-TIMEOUT, LAUNCHER-0052, SERVER-0250, LEG-JEUS-FAIL-ALL, LEG-JEUS-DEPLOY, LEG-JEUS-DEPLOY-CODES]
+  title: 서버 기동 실패·배포 실패·설정 오류 (SERVER-/LAUNCHER-/DEPLOY-)
+  source: "JEUS 8.5 Administration Guide '서버 기동·종료(startManagedServer / jeusadmin start-server)'·'애플리케이션 배포(deploy/undeploy/redeploy)' / Domain Guide 'domain.xml 검증'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 기동 실패 원인 줄 확인 (Launcher·서버 로그)
+      cmd: |
+        tail -n 200 $DOMAIN_HOME/servers/<server>/logs/JeusLauncher.log
+        grep -n "SEVERE\|\[SERVER-0250\]\|\[LAUNCHER-00\|Exception" $DOMAIN_HOME/servers/<server>/logs/JeusServer.log | tail -50
+        $JEUS_HOME/bin/jeusadmin -host localhost:9736 -u administrator "server-info"
+      check: SERVER-0250(STANDBY 유지)·LAUNCHER-0052(MASTER 설정 수신 실패)·포트 BindException·domain.xml 파싱 오류 중 어느 것인지 기록
+      note: "적용: JEUS 7/8/8.5/9 (도메인 구조·로그 경로), JEUS 6 은 로그 위치·명령 다름 · 조회만 · 권한: JEUS 실행 OS 계정(로그 읽기)·JEUS 관리자 계정(조회)"
+    - do: 포트 충돌·디스크·권한 기본 확인
+      cmd: |
+        ss -ltnp | grep -E ":(9736|8088|<port>)\b"
+        df -h $DOMAIN_HOME ; ls -l $DOMAIN_HOME/config/domain.xml
+      check: 포트를 다른 PID 가 점유하거나 디스크 100%·파일 권한 오류면 즉시 2차 통보
+      note: "적용: Linux(ss), 9736 은 JEUS 7+ 기본 base-port 기준 · 조회만(점유 프로세스 종료 금지 — 2차) · 권한: ss -p 의 PID 표시는 root"
+  - stage: 2
+    steps:
+    - do: MASTER(DAS) 통신 실패 시 — MASTER 기동 확인 후 서버 재기동, 불가하면 캐시 설정으로 INDEPENDENT 기동
+      cmd: |
+        $DOMAIN_HOME/bin/startMasterServer -u administrator
+        $DOMAIN_HOME/bin/startManagedServer -server <server> -u administrator
+        # MASTER 복구가 늦어질 때(로컬 캐시 설정 사용): startManagedServer -server <server> -u administrator -independent
+      check: "성공: JeusServer.log 에 [SERVER-0248] … RUNNING 이 기록되고 server-info 상태가 RUNNING · 실패: 다시 STANDBY·LAUNCHER 오류면 MASTER 로그와 네트워크(9736) 확인, INDEPENDENT 기동도 실패하면 3차 의뢰"
+      note: "INDEPENDENT 기동 중에는 MASTER 의 설정 변경이 반영되지 않음 — MASTER 복구 후 재동기화(SERVER-0308) 확인 · 사전조건: 1차에서 원인(MASTER 미기동·포트·디스크) 확인, 같은 서버가 다른 곳에서 떠 있지 않은지 확인 · 영향: 기동 과정에서 해당 서버 서비스 상태 변경, INDEPENDENT 기동은 설정 불일치 위험 · 승인: WAS 담당·변경 관리 · 백업/롤백: 기동 전 domain.xml 백업, INDEPENDENT 로 띄웠다면 MASTER 복구 후 정상 모드로 재기동 · 적용: JEUS 7/8/8.5/9 (-independent 옵션 지원 버전은 매뉴얼 확인) · 비밀번호는 -p 생략 후 프롬프트 입력 권장"
+    - do: 배포 실패 시 — 애플리케이션 재배포·롤백
+      cmd: |
+        $JEUS_HOME/bin/jeusadmin -host localhost:9736 -u administrator "application-info -detail"
+        $JEUS_HOME/bin/jeusadmin -host localhost:9736 -u administrator "undeploy <appid>" ; $JEUS_HOME/bin/jeusadmin -host localhost:9736 -u administrator "deploy <appid> -servers <server>"
+        # 직전 정상 버전으로 롤백: install-application -file <이전 war 경로> -id <appid> ; deploy <appid>
+      check: "성공: application-info 에서 상태 RUNNING, 서버 로그에 DEPLOY 오류 코드 없음 · 실패: 재배포도 같은 DEPLOY 오류면 직전 정상 war 로 롤백(주석 명령) 후 개발팀 이관"
+      note: "사전조건: 직전 정상 배포본(war/ear) 위치 확인, 같은 앱을 쓰는 다른 서버 영향 확인 · 영향: undeploy~deploy 동안 해당 애플리케이션 서비스 중단·세션 유실 · 승인: WAS 담당·애플리케이션 담당·변경 관리 · 백업/롤백: 현재·직전 배포본 보관, 실패 시 install-application 으로 직전 버전 재배포 · 적용: JEUS 7/8/8.5/9 (JEUS 6 은 ejbadmin/webadmin 배포 방식)"
+    - do: domain.xml 오류 시 — 백업본 복원 후 스키마 검증
+      cmd: |
+        cp $DOMAIN_HOME/config/domain.xml $DOMAIN_HOME/config/domain.xml.bad.$(date +%Y%m%d%H%M)
+        cp $DOMAIN_HOME/config/.domain.xml.bak $DOMAIN_HOME/config/domain.xml    # 또는 변경 전 백업본
+        xmllint --noout --schema $JEUS_HOME/lib/schemas/jeus/jeus-domain.xsd $DOMAIN_HOME/config/domain.xml
+      check: "성공: xmllint 'validates' 출력, 서버 기동 성공 · 실패: 'fails to validate' 면 오류 줄을 기록하고 다른 백업본으로 재시도, 복원본으로도 기동 실패면 domain.xml.bad 를 보관해 3차 의뢰"
+      note: "사전조건: 서버가 내려간 상태, 복원할 백업본이 정상 시점 것인지 날짜 확인 · 영향: 복원 시점 이후의 설정 변경이 사라짐 · 승인: WAS 담당·변경 관리 · 백업/롤백: 첫 줄에서 현재 파일을 domain.xml.bad.<시각> 으로 보관 — 되돌릴 때 그 파일을 다시 복사 · 적용: JEUS 7/8/8.5/9 도메인 구조"
+      verify_note: "미검증 — JEUS 가 자동으로 남기는 백업 파일 이름(.domain.xml.bak 등)과 스키마 경로(lib/schemas/jeus/jeus-domain.xsd)를 버전별 공식 문서에서 확인하지 못함"
+  - stage: 3
+    steps:
+    - do: 제조사 의뢰 자료
+      cmd: |
+        tar czf jeus_boot_$(date +%Y%m%d).tgz $DOMAIN_HOME/config/ $DOMAIN_HOME/servers/<server>/logs/ $DOMAIN_HOME/.workspace/ 2>/dev/null
+        cat $JEUS_HOME/version.txt; java -version 2>&1
+      check: domain.xml·JeusLauncher.log·JeusServer.log·JeusLoggerStatus.log(8.5+)·배포 앱 이름/버전·JEUS Fix 레벨
+      note: "민감정보 마스킹: config 폴더의 계정 파일(accounts.xml)·키스토어·암호화 키 파일은 빼고, domain.xml 의 데이터소스 계정·비밀번호·호스트명/IP, 로그의 사용자 계정·세션 ID·요청 파라미터를 가림 · 전달 승인: 보안 담당 승인 후 TmaxSoft 에 반출"
+
+- id: JEUS-PROC-UPSTREAM
+  category: upstream
+  match: [JEUS-WEBTOB-CONNECT-FAIL, JEUS-WEBTOB-DISCONNECT, WEB-3346, WAS-JEUS-HUB-005, LEG-JEUS-WEBTOB-CONN, LEG-JEUS-WEBTOB-DOWN, LEG-JEUS-WEBTOB-WJP, LEG-JEUS-WJP-ALL, Network-0708, WAS-JEUS-HUB-001]
+  title: WebtoB(WJP) 연계·원격 연결 실패
+  source: "JEUS 8.5 Web Engine Guide 'WebtoB 연동(webtob-listener: wjp-version, registration-id, reconnect-interval/timeout)' / WebtoB 5 Administrator Guide 'JSV·HTH 설정(http.m SERVER › MinProc/MaxProc, NODE › JSVPORT)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: WebtoB 프로세스·JSV 포트 상태 확인 (읽기 전용)
+      cmd: |
+        $WEBTOBDIR/bin/wsadmin -i "st -p"      # WebtoB 서버에서: 프로세스 상태
+        $WEBTOBDIR/bin/wsadmin -i "st -s"      # 서버(JSV) 별 연결 상태
+        nc -zvw3 <WEBTOB_HOST> <JSVPORT>
+      check: WSM/HTL/HTH 가 RDY 가 아니거나 JSV 포트 접속 실패면 WebtoB 측 장애
+      note: "적용: WebtoB 4.1/5 (wsadmin st), WebtoB 6 도 wsadmin 조회 · 조회만(wsdown·wsboot 금지 — 2차) · 권한: WebtoB 설치 계정"
+      verify_note: "미검증 — wsadmin -i \"<명령>\" 한 줄 실행 지원 버전을 공식 문서에서 확인하지 못함(안 되면 wsadmin 진입 후 st -p 입력)"
+    - do: JEUS 쪽 연결 상태·재접속 로그 확인
+      cmd: |
+        grep -n "WEB-3346\|WEB-3347\|Network-0708" $DOMAIN_HOME/servers/<server>/logs/JeusServer.log | tail -30
+        $JEUS_HOME/bin/jeusadmin -host localhost:9736 -u administrator "web-connection-info -server <server>"
+      check: 재접속 실패가 지속되면 WebtoB 미기동/주소·registration-id 불일치, 간헐이면 네트워크
+      note: "적용: JEUS 7/8/8.5/9 · 조회만 · 권한: JEUS 실행 OS 계정(로그)·JEUS 관리자 계정(조회)"
+  - stage: 2
+    steps:
+    - do: WebtoB 재기동 또는 JSV 재접속 (WebtoB 관리자와 협의)
+      cmd: |
+        $WEBTOBDIR/bin/wsdown -i ; $WEBTOBDIR/bin/wsboot
+        $JEUS_HOME/bin/jeusadmin -host localhost:9736 -u administrator "reconnect-webtob -server <server>"   # 8.5+ (없으면 서버 재기동)
+      check: "성공: wsadmin st -s 에서 해당 SERVER 의 연결 수가 JEUS 쪽 worker 수와 일치, JeusServer.log 에 WEB-3346 미발생 · 실패: wsboot 실패면 WebtoB 로그(CFL-·공유메모리) 확인 후 WebtoB 절차(WTB-PROC-INTERNAL), 재접속 실패 지속이면 설정 정합 단계로"
+      note: "사전조건: WebtoB 관리자와 일정 협의, 같은 WebtoB 에 붙은 다른 JEUS 서버·서비스 확인 · 영향: wsdown~wsboot 동안 해당 WebtoB 를 쓰는 모든 웹 서비스 중단 · 승인: 웹·WAS 담당·변경 관리 · 백업/롤백: 설정 변경 없음 — 재기동 실패 시 직전 http.m/wsconfig 백업으로 기동 · 적용: WebtoB 4.1/5, JEUS 8.5+(reconnect-webtob)"
+      verify_note: "미검증 — jeusadmin reconnect-webtob 명령의 존재·옵션을 JEUS 8.5/9 공식 레퍼런스에서 확인하지 못함"
+    - do: WJP 연동 설정 정합성 (JEUS webtob-listener ↔ WebtoB http.m)
+      config:
+        file: $DOMAIN_HOME/config/domain.xml (web-engine › web-connections › webtob-listener) ↔ $WEBTOBDIR/config/http.m
+        snippet: |
+          <webtob-listener><name>webtob1</name><wjp-version>2</wjp-version><webtob-address><WEBTOB_HOST></webtob-address><port>9900</port>
+            <registration-id>MyGroup</registration-id><reconnect-interval>5000</reconnect-interval><reconnect-count-for-backup>3</reconnect-count-for-backup>
+            <thread-pool><number>20</number></thread-pool></webtob-listener>
+          # http.m: *NODE  JSVPORT = 9900 / *SERVER MyGroup  SVGNAME = jsvg, MinProc = 20, MaxProc = 20
+        note: "JEUS thread-pool number 와 WebtoB SERVER MinProc/MaxProc 를 일치시킴. registration-id = WebtoB *SERVER 이름"
+      check: "성공: 양쪽 값 일치 후 재접속 오류 없음, st -s 연결 수 = thread-pool number · 실패: 값 변경 후 연결이 0 이면 registration-id·포트 오타 확인 후 양쪽 백업본 복원"
+      note: "사전조건: 양쪽 현재 값을 기록, WebtoB·JEUS 담당이 함께 작업 · 영향: 반영에 JEUS 서버 재기동·WebtoB 재컴파일(wscfl)·재기동이 필요해 서비스 중단 · 승인: 웹·WAS 담당·변경 관리 · 백업/롤백: domain.xml·http.m 을 날짜 붙여 백업, 이상 시 두 파일 모두 복원 후 재기동 · 적용: JEUS 7/8/8.5/9 + WebtoB 4.1/5 (WJP 버전 2 는 JEUS 7+)"
+  - stage: 3
+    steps:
+    - do: 제조사 의뢰 자료 (JEUS + WebtoB 동시 수집)
+      cmd: |
+        tar czf wjp_$(date +%Y%m%d).tgz $DOMAIN_HOME/config/domain.xml $DOMAIN_HOME/servers/<server>/logs/JeusServer.log* $WEBTOBDIR/config/http.m $WEBTOBDIR/log/
+      check: 양쪽 설정·로그 + WebtoB 버전(wsadmin -v)·JEUS Fix 레벨
+      note: "민감정보 마스킹: domain.xml·http.m 의 호스트명·IP·계정·비밀번호, WebtoB access 로그의 클라이언트 IP·요청 파라미터·쿠키/세션 ID 를 가림(로그는 장애 구간만) · 전달 승인: 보안 담당 승인 후 TmaxSoft 에 반출"
+
+- id: JEUS-PROC-UNDO
+  category: undo
+  match: [JEUS-TX-TIMEOUT, JEUS-TX-ROLLBACK, JEUS-TX-RECOVERY-FAIL, TM-6112, WAS-JEUS-HUB-004]
+  title: 트랜잭션 타임아웃·롤백·복구 실패 (TM-)
+  source: "JEUS 8.5 JTA Guide '트랜잭션 매니저 설정(active-timeout, prepare-timeout, recovery-timeout)'·'트랜잭션 복구'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 타임아웃 트랜잭션·롤백 빈도 확인
+      cmd: |
+        grep -c "TM-6112\|rolled back\|TransactionTimedOut" $DOMAIN_HOME/servers/<server>/logs/JeusServer.log
+        grep -n "TM-6112" $DOMAIN_HOME/servers/<server>/logs/JeusServer.log | tail -20
+        $JEUS_HOME/bin/jeusadmin -host localhost:9736 -u administrator "transaction-info -server <server>"
+      check: 특정 업무(URL·EJB)에서만 반복되면 느린 SQL/외부 연동, 전체적으로 늘면 DB 지연
+      note: "적용: JEUS 7/8/8.5/9 · transaction-info 는 조회만(트랜잭션 강제 commit/rollback 금지 — 2차) · 권한: JEUS 실행 OS 계정(로그)·JEUS 관리자 계정(조회)"
+  - stage: 2
+    steps:
+    - do: 트랜잭션 타임아웃 값 조정 (업무 특성에 맞게)
+      config:
+        file: $DOMAIN_HOME/config/domain.xml (servers › server › transaction-manager)
+        snippet: |
+          <transaction-manager><active-timeout>300000</active-timeout><prepare-timeout>60000</prepare-timeout><recovery-timeout>120000</recovery-timeout><incomplete-timeout>86400000</incomplete-timeout></transaction-manager>
+        note: "타임아웃을 늘리기보다 느린 SQL(DB AWR·실행계획) 해소가 우선. 값 변경 후 서버 재기동"
+      check: "성공: transaction-info 에서 활성 트랜잭션이 타임아웃 전에 완료, TM-6112 미발생 · 실패: 타임아웃을 늘린 뒤 DB 락 대기·스레드 적체가 생기면 이전 값으로 원복하고 느린 SQL 해소 우선"
+      note: "사전조건: DBA 와 느린 SQL·락 원인 확인, 업무별 최장 트랜잭션 시간 확인 · 영향: 반영에 서버 재기동 필요(서비스 중단), 타임아웃 확대는 락 보유 시간·스레드 점유 증가 · 승인: WAS 담당·DBA·변경 관리 · 백업/롤백: 변경 전 cp domain.xml domain.xml.bak.<날짜>, 이상 시 복원 후 재기동 · 적용: JEUS 7/8/8.5/9"
+    - do: 복구 실패(XA) 시 미완료 트랜잭션 처리
+      cmd: |
+        $JEUS_HOME/bin/jeusadmin -host localhost:9736 -u administrator "transaction-info -server <server> -xid"
+        # DB 측(Oracle): select * from dba_2pc_pending;  → DBA 와 협의해 commit force / rollback force
+      check: "성공: dba_2pc_pending 비어 있고 JEUS 복구 로그(TM-)에 실패 없음 · 실패: 강제 처리 후 업무 데이터 불일치가 발견되면 업무 담당과 보정 거래 협의(자동 되돌림 불가)"
+      note: "사전조건: 미완료 트랜잭션의 xid·참여 자원(DB 여러 개) 목록을 기록, 각 참여 DB 의 상태를 DBA 가 확인해 commit/rollback 방향 결정 · 영향: commit force/rollback force 는 데이터를 확정해 되돌릴 수 없음(잘못된 방향이면 데이터 불일치) · 승인: DBA·업무 담당·WAS 담당·변경 관리 · 백업/롤백: 실행 전 dba_2pc_pending·관련 테이블 현황을 보관, 강제 처리 자체는 롤백 불가 — 보정 거래로만 수습 · 적용: JEUS 7/8/8.5/9, Oracle(dba_2pc_pending) — 다른 DB 는 해당 XA 복구 절차"
+  - stage: 3
+    steps:
+    - do: 제조사 의뢰 자료
+      cmd: |
+        tar czf jeus_tx_$(date +%Y%m%d).tgz $DOMAIN_HOME/servers/<server>/logs/ $DOMAIN_HOME/config/domain.xml
+      check: TM- 코드 로그·transaction-info 출력·DB 2PC 상태
+      note: "민감정보 마스킹: domain.xml 의 데이터소스 계정·비밀번호·DB 호스트명/IP, 로그의 SQL 바인드 값·사용자 계정·요청 파라미터·세션 ID 를 가림 · 전달 승인: 보안 담당 승인 후 TmaxSoft 에 반출"
+
+- id: JEUS-PROC-SECURITY
+  category: security
+  match: [JEUS-AUTH-FAIL, JEUS-ADMIN-AUTH-FAIL, JEUS-SSL-INIT-FAIL, JEUS-LICENSE-FAIL]
+  title: 인증 실패·SSL 초기화 실패·라이선스 오류
+  source: "JEUS 8.5 Security Guide '보안 도메인·계정(accounts.xml)' / Server Guide 'SSL 리스너(keystore)' / Installation Guide '라이선스(license 파일)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 실패 계정·출처와 라이선스 상태 확인
+      cmd: |
+        grep -n "LoginException\|Authentication failed\|license" $DOMAIN_HOME/servers/<server>/logs/JeusServer.log | tail -20
+        ls -l $JEUS_HOME/license/ ; $JEUS_HOME/bin/jeusadmin -host localhost:9736 -u administrator "license-info"
+      check: 반복 실패 출처가 외부 IP 면 보안 담당 통보. 라이선스 만료/호스트 불일치면 2차
+      note: "적용: JEUS 7/8/8.5/9 · 계정 잠금 해제·비밀번호 변경은 2차(보안 담당) · 로그의 계정명·IP 는 보고 시 가림 · 권한: JEUS 실행 OS 계정(로그)·JEUS 관리자 계정(license-info 조회)"
+  - stage: 2
+    steps:
+    - do: SSL 키스토어·리스너 설정 확인·교체
+      config:
+        file: $DOMAIN_HOME/config/domain.xml (listeners › listener › ssl)
+        snippet: |
+          <ssl><key-store-file>${DOMAIN_HOME}/config/keystore.jks</key-store-file><key-store-password>...</key-store-password><trust-store-file>${DOMAIN_HOME}/config/truststore.jks</trust-store-file><ssl-protocol>TLSv1.2</ssl-protocol></ssl>
+      cmd: |
+        keytool -list -v -keystore $DOMAIN_HOME/config/keystore.jks | grep -i "valid\|alias"
+      check: "성공: 인증서 유효기간 내, 별칭·비밀번호 일치, 기동 로그에 SSL 오류 없음 · 실패: 키스토어 비밀번호 오류·별칭 불일치로 SSL 리스너 초기화 실패면 이전 키스토어·domain.xml 복원 후 재기동"
+      note: "사전조건: 새 키스토어의 인증서 체인·유효기간 확인, keytool 비밀번호는 프롬프트로 입력(명령줄 -storepass 금지) · 영향: 리스너 교체는 서버 재기동 필요(서비스 중단), 프로토콜을 TLSv1.2 로 제한하면 구형 클라이언트 접속 불가 · 승인: 보안 담당·WAS 담당·변경 관리 · 백업/롤백: keystore.jks·truststore.jks·domain.xml 을 날짜 붙여 백업, 이상 시 복원 후 재기동 · 적용: JEUS 7/8/8.5/9, JDK 8/11/17 keytool(JDK 9+ 기본 키스토어 형식 PKCS12)"
+    - do: 라이선스 재발급 파일 적용
+      cmd: |
+        cp <new-license-file> $JEUS_HOME/license/license ; chmod 600 $JEUS_HOME/license/license
+      check: "성공: license-info 에서 만료일·호스트 정상, 서버 기동 성공 · 실패: 호스트 불일치·만료 오류가 계속되면 기존 라이선스 복원 후 TmaxSoft 에 발급 정보(hostname) 재확인"
+      note: "사전조건: 새 라이선스의 대상 호스트명·에디션·만료일을 TmaxSoft 발급 내역과 대조, 파일 소유자가 JEUS 실행 계정인지 확인 · 영향: 잘못된 파일이면 다음 기동 시 서버가 뜨지 않음(반영에 재기동 필요할 수 있음) · 승인: WAS 담당·변경 관리 · 백업/롤백: cp $JEUS_HOME/license/license license.bak.<날짜> 후 교체, 이상 시 백업본 복원 · 적용: JEUS 7/8/8.5/9"
+  - stage: 3
+    steps:
+    - do: 제조사 의뢰 자료
+      cmd: |
+        hostname; $JEUS_HOME/bin/jeusadmin -host localhost:9736 -u administrator "license-info"; cat $JEUS_HOME/license/license | head -5
+      check: 호스트명·라이선스 파일·오류 로그
+      note: "민감정보 마스킹: 라이선스 파일은 TmaxSoft 요청 시에만 원본 전달, 그 외 보고서에는 라이선스 키 값을 가림 · 로그의 로그인 실패 계정명·클라이언트 IP·세션 ID, 키스토어 비밀번호는 절대 포함하지 않음 · 호스트명은 TmaxSoft 발급 확인용으로만 · 전달 승인: 보안 담당 승인 후 TmaxSoft 에 반출"

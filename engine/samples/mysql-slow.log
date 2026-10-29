@@ -1,0 +1,18 @@
+/usr/sbin/mysqld, Version: 8.0.36 (MySQL Community Server - GPL). started with:
+Tcp port: 3306  Unix socket: /var/lib/mysql/mysql.sock
+Time                 Id Command    Argument
+# Time: 2026-09-09T14:01:30.123456Z
+# User@Host: app[app] @ was1 [10.0.0.5]  Id:   812
+# Query_time: 2.412345  Lock_time: 0.000120 Rows_sent: 20  Rows_examined: 1200000
+SET timestamp=1757394090;
+SELECT o.id, o.status FROM orders o WHERE o.created_at > '2026-09-01' ORDER BY o.created_at DESC LIMIT 20;
+# Time: 2026-09-09T14:02:11.654321Z
+# User@Host: app[app] @ was1 [10.0.0.5]  Id:   815
+# Query_time: 34.876543  Lock_time: 12.500000 Rows_sent: 1  Rows_examined: 8500000
+SET timestamp=1757394131;
+UPDATE orders SET status='PAID' WHERE customer_id IN (SELECT id FROM customers WHERE region='KR');
+# Time: 2026-09-09T14:02:40.000000Z
+# User@Host: batch[batch] @ batch1 [10.0.0.7]  Id:   900
+# Query_time: 95.100000  Lock_time: 0.000050 Rows_sent: 0  Rows_examined: 42000000
+SET timestamp=1757394160;
+DELETE FROM order_log WHERE created_at < '2026-06-01';

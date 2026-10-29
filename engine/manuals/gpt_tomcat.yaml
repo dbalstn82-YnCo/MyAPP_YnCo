@@ -1,0 +1,16 @@
+product: tomcat
+title: Apache Tomcat 운영 참고 (GPT 수집 — 벤더 문서 대조 필요)
+sections:
+- heading: 로그 위치
+  body: 기본 인스턴스 로그는 ${CATALINA_BASE}/logs이다. JULI의 catalina.*, localhost.*, Manager
+    로그와 Unix 콘솔 출력 catalina.out을 확인하며 access log는 AccessLogValve 설정 경로를 따른다.
+- heading: 장애 시 수집 방법
+  body: ${CATALINA_BASE}/logs와 access log, conf/server.xml, conf/logging.properties를
+    보존하고 JVM PID에 jcmd <pid> Thread.print, 필요 시 GC.heap_info와 heap dump를 수집한다.
+- heading: 대표 장애 신호
+  body: OutOfMemoryError, GC overhead, stuck·blocked thread, connection reset/broken
+    pipe, Too many open files, Address already in use, Context start 실패와 DB pool 고갈을
+    우선 확인한다.
+- heading: 1차 확인 명령
+  body: ps -ef | grep org.apache.catalina.startup.Bootstrap, curl -s -o /dev/null -w '%{http_code} %{time_total}s' http://127.0.0.1:<port>/<헬스체크URL> (GET, 200·응답시간 확인),
+    jcmd <pid> Thread.print를 실행하고 ${CATALINA_BASE}/logs 최근 오류를 확인한다.

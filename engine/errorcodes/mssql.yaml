@@ -1,0 +1,150 @@
+product: mssql
+layer: db
+codes:
+- code: MSSQL-1205
+  severity: error
+  category: lock
+  title: 교착상태 희생 트랜잭션 선택
+  immediate:
+  - "system_health XEvent 세션의 데드락 그래프 조회(설정 변경 없음): `SELECT XEventData.query('.') FROM (SELECT CAST(target_data AS xml) AS t FROM sys.dm_xe_session_targets st JOIN sys.dm_xe_sessions s ON s.address=st.event_session_address WHERE s.name='system_health' AND st.target_name='ring_buffer') d CROSS APPLY t.nodes('//event[@name=\"xml_deadlock_report\"]') x(XEventData);` (2012~2022, 읽기 전용)"
+  - "ring_buffer 에서 밀려났으면 파일 대상: `SELECT CAST(event_data AS xml) FROM sys.fn_xe_file_target_read_file('system_health*.xel', NULL, NULL, NULL) WHERE object_name = 'xml_deadlock_report';` (2012+)"
+  - "그래프의 victim·owner 세션의 SQL·잠금 객체 기록 — 트레이스 플래그 1222 활성화는 설정 변경이라 2차"
+  short:
+  - "(2차) victim 측 애플리케이션이 1205 수신 시 트랜잭션 전체를 재시도하도록 보강, 반복 SQL·잠금 객체를 개발팀에 전달 — 트레이스 플래그 `DBCC TRACEON(1222, -1);` 는 승인 후, 롤백: `DBCC TRACEOFF(1222, -1);`"
+  mid:
+  - 인덱스·잠금 순서 개선
+  long:
+  - 트랜잭션 설계 표준화
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/sql/relational-databases/errors-events/mssqlserver-1205-database-engine-error?view=sql-server-ver17)
+  note: deadlock victim으로 선택되어 트랜잭션 재실행 필요
+  vendor_cause: 서로 다른 트랜잭션이 자원을 상충되는 순서로 잠가 서로 상대의 잠금 해제를 기다리는 deadlock이 발생함
+  vendor_action: 희생 트랜잭션을 다시 실행하고 모든 트랜잭션이 같은 순서로 행·자원에 접근하도록 애플리케이션을 수정
+  vendor_url: https://learn.microsoft.com/en-us/sql/relational-databases/errors-events/mssqlserver-1205-database-engine-error?view=sql-server-ver17
+  versions:
+  - SQL Server 2005
+  - SQL Server 2008/2008 R2
+  - SQL Server 2012
+  - SQL Server 2014
+  - SQL Server 2016
+  - SQL Server 2017
+  - SQL Server 2019
+  - SQL Server 2022
+  - SQL Server 2025
+  version_note: 'Msg 번호·Severity·State 체계는 2005~2025 동일 — ERRORLOG ''YYYY-MM-DD hh:mm:ss.nn spidNN Error: n, Severity: n, State: n.'' 형식 공통'
+- code: MSSQL-9002
+  severity: error
+  category: capacity
+  title: 트랜잭션 로그 공간 부족
+  immediate:
+  - "로그 재사용 대기 사유 확인: `SELECT name, recovery_model_desc, log_reuse_wait_desc FROM sys.databases WHERE name=N'<db>';` — LOG_BACKUP·ACTIVE_TRANSACTION·AVAILABILITY_REPLICA 등 기록 (읽기 전용)"
+  - "로그 사용률: `SELECT total_log_size_in_bytes/1048576 AS size_mb, used_log_space_in_percent FROM sys.dm_db_log_space_usage;` (해당 DB, 2012+) · 장기 트랜잭션 `DBCC OPENTRAN(<db>)`"
+  short:
+  - "(2차·승인 후) 사유별 조치 — LOG_BACKUP 이면 로그 백업 실행, 볼륨 여유가 있으면 `ALTER DATABASE <db> MODIFY FILE (NAME=<로그논리명>, SIZE=<값>)` 확장, 장기 트랜잭션은 소유자 확인 후 종료 — 롤백: 확장은 되돌리기 어려워 용량 계획 반영"
+  mid:
+  - 로그 백업 주기 조정
+  long:
+  - 복구 모델·용량 정책 재수립
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/ko-kr/sql/relational-databases/errors-events/mssqlserver-9002-database-engine-error?view=sql-server-ver17)
+  note: 로그 미절단·볼륨 부족·최대크기·동기화 문제 등
+  vendor_cause: 로그 미절단·디스크 가득 참·최대크기/자동증가 설정 또는 복제·AG 동기화 문제로 로그 공간이 부족함
+  vendor_action: log_reuse_wait_desc로 재사용 불가 이유를 확인하고 로그 백업이 중단됐다면 정기 트랜잭션 로그 백업을 재개
+  vendor_url: https://learn.microsoft.com/ko-kr/sql/relational-databases/errors-events/mssqlserver-9002-database-engine-error?view=sql-server-ver17
+  versions:
+  - SQL Server 2005
+  - SQL Server 2008/2008 R2
+  - SQL Server 2012
+  - SQL Server 2014
+  - SQL Server 2016
+  - SQL Server 2017
+  - SQL Server 2019
+  - SQL Server 2022
+  - SQL Server 2025
+  version_note: 'Msg 번호·Severity·State 체계는 2005~2025 동일 — ERRORLOG ''YYYY-MM-DD hh:mm:ss.nn spidNN Error: n, Severity: n, State: n.'' 형식 공통'
+- code: MSSQL-701
+  severity: error
+  category: memory
+  title: 쿼리 실행 시스템 메모리 부족
+  immediate:
+  - "메모리 소비 주체 확인: `SELECT TOP 10 type, SUM(pages_kb)/1024 AS mb FROM sys.dm_os_memory_clerks GROUP BY type ORDER BY 2 DESC;` — 특정 clerk 편중 여부 (2012+, 읽기 전용)"
+  - "OS 여유 메모리와 큰 메모리 부여 세션: `SELECT available_physical_memory_kb/1024 AS avail_mb, system_memory_state_desc FROM sys.dm_os_sys_memory;` · `SELECT TOP 10 session_id, requested_memory_kb FROM sys.dm_exec_query_memory_grants ORDER BY 2 DESC;` (2008+)"
+  short:
+  - "(2차·승인 후) 대량 메모리 세션 종료(`KILL <session_id>`, 롤백 시간 고려)·max server memory 조정(이전 값 기록 후 원복 가능), 조정 전 `DBCC MEMORYSTATUS` 결과 보존"
+  mid:
+  - "메모리 grant 가 큰 쿼리 튜닝(통계·인덱스)과 Resource Governor 메모리 상한 설정"
+  long:
+  - "메모리 증설 계획과 Memory Grants Pending·가용 메모리 경보 등록"
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/sql/relational-databases/errors-events/mssqlserver-701-database-engine-error?view=sql-server-ver17)
+  note: insufficient system memory to run this query
+  vendor_cause: OS 외부 메모리 압력, SQL 프로세스 내 외부 DLL 또는 SQL Engine 구성요소의 과다 메모리 사용으로 할당 실패
+  vendor_action: PerfMon·sys.dm_os_memory_clerks·DBCC MEMORYSTATUS로 소비 주체를 찾고 해당 부하·구성 문제를 줄이거나 메모리를 증설
+  vendor_url: https://learn.microsoft.com/en-us/sql/relational-databases/errors-events/mssqlserver-701-database-engine-error?view=sql-server-ver17
+  versions:
+  - SQL Server 2005
+  - SQL Server 2008/2008 R2
+  - SQL Server 2012
+  - SQL Server 2014
+  - SQL Server 2016
+  - SQL Server 2017
+  - SQL Server 2019
+  - SQL Server 2022
+  - SQL Server 2025
+  version_note: 'Msg 번호·Severity·State 체계는 2005~2025 동일 — ERRORLOG ''YYYY-MM-DD hh:mm:ss.nn spidNN Error: n, Severity: n, State: n.'' 형식 공통'
+- code: MSSQL-823
+  severity: critical
+  category: hardware
+  title: OS 반환 물리 I/O 오류
+  immediate:
+  - "손상 의심 페이지 확인: `SELECT * FROM msdb.dbo.suspect_pages;` 와 ERRORLOG 823 줄의 파일·오프셋·Operating system error 번호 기록 (읽기 전용)"
+  - "같은 시각 디스크 오류 확인: `Get-WinEvent -FilterHashtable @{LogName='System'; Level=2} -MaxEvents 50` 에서 disk·storport·Ntfs 이벤트"
+  - "마지막 정상 백업 시각(msdb.dbo.backupset) 확인 후 인프라팀에 스토리지 점검 요청"
+  short:
+  - "(2차·승인 후) 업무 외 시간 `DBCC CHECKDB(<db>) WITH NO_INFOMSGS, ALL_ERRORMSGS`(대량 I/O)로 손상 범위 확인, 손상 시 페이지/전체 복원 — 롤백: 복원 전 현재 파일·로그 백업 보관"
+  mid:
+  - "디스크·컨트롤러·드라이버 교체 후 SQLIOSim 으로 I/O 경로 검증"
+  long:
+  - "스토리지 이중화와 suspect_pages·823/824 경보, PAGE_VERIFY CHECKSUM 유지"
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/ko-kr/sql/relational-databases/errors-events/mssqlserver-823-database-engine-error?view=sql-server-ver17)
+  note: 저장장치·하드웨어·드라이버·파일시스템 등 원인 가능
+  vendor_cause: 스토리지/I/O 경로의 하드웨어·드라이버 문제, 파일시스템 불일치 또는 DB 파일 손상으로 OS I/O가 실패함
+  vendor_action: suspect_pages와 Windows 로그를 확인하고 DBCC CHECKDB·SQLIOSim을 수행하며 하드웨어·드라이버 상태를 점검
+  vendor_url: https://learn.microsoft.com/ko-kr/sql/relational-databases/errors-events/mssqlserver-823-database-engine-error?view=sql-server-ver17
+  versions:
+  - SQL Server 2005
+  - SQL Server 2008/2008 R2
+  - SQL Server 2012
+  - SQL Server 2014
+  - SQL Server 2016
+  - SQL Server 2017
+  - SQL Server 2019
+  - SQL Server 2022
+  - SQL Server 2025
+  version_note: 'Msg 번호·Severity·State 체계는 2005~2025 동일 — ERRORLOG ''YYYY-MM-DD hh:mm:ss.nn spidNN Error: n, Severity: n, State: n.'' 형식 공통'
+- code: MSSQL-824
+  severity: critical
+  category: storage
+  title: 일관성 기반 논리 I/O 오류
+  immediate:
+  - "손상 페이지 확인: `SELECT * FROM msdb.dbo.suspect_pages;` 와 ERRORLOG 824 줄의 DB·파일·페이지 ID·기대/실제 checksum 기록 (읽기 전용)"
+  - "같은 시각 디스크·드라이버 오류: `Get-WinEvent -FilterHashtable @{LogName='System'; Level=2} -MaxEvents 50`, 마지막 정상 백업 시각(msdb.dbo.backupset) 확인"
+  short:
+  - "(2차·승인 후) 업무 외 시간 `DBCC CHECKDB(<db>) WITH NO_INFOMSGS, ALL_ERRORMSGS`(대량 I/O)로 손상 범위 확인 후 페이지 복원(`RESTORE DATABASE … PAGE=`) 또는 전체 복원 — 롤백: 작업 전 꼬리 로그 백업 보관"
+  mid:
+  - "스토리지 진단·교체와 SQLIOSim 으로 I/O 경로 검증"
+  long:
+  - 페이지 검증(CHECKSUM) 표준화
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/ko-kr/sql/relational-databases/errors-events/mssqlserver-824-database-engine-error?view=sql-server-ver17)
+  note: 논리 I/O 무결성 오류이므로 hardware로 한정 불가
+  vendor_cause: 디스크·펌웨어·드라이버 등 I/O 하위시스템 문제나 파일시스템 불일치·DB 파일 손상으로 논리 검증에 실패함
+  vendor_action: DBCC CHECKDB를 실행하고 PAGE_VERIFY CHECKSUM을 활성화하며 OS·스토리지 로그와 하드웨어·드라이버를 점검
+  vendor_url: https://learn.microsoft.com/ko-kr/sql/relational-databases/errors-events/mssqlserver-824-database-engine-error?view=sql-server-ver17
+  versions:
+  - SQL Server 2005
+  - SQL Server 2008/2008 R2
+  - SQL Server 2012
+  - SQL Server 2014
+  - SQL Server 2016
+  - SQL Server 2017
+  - SQL Server 2019
+  - SQL Server 2022
+  - SQL Server 2025
+  version_note: 'Msg 번호·Severity·State 체계는 2005~2025 동일 — ERRORLOG ''YYYY-MM-DD hh:mm:ss.nn spidNN Error: n, Severity: n, State: n.'' 형식 공통'

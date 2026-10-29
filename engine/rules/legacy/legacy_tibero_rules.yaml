@@ -1,0 +1,252 @@
+# 기존 'AI 로그분석기 v2.2' 내장 룰에서 변환 반입(tools/import_legacy_rules.py) — 중복(코드·패턴) 제외
+# 심각도 CRITICAL→critical HIGH→error MEDIUM→warn LOW→info · immediate_actions→즉시 · root_actions→중기 · negative_patterns→exclude
+rules:
+- id: LEG-TBR-7111
+  layer: db
+  product:
+  - tibero
+  match:
+    regex: (?:Tibero.*shutdown)|(?:Tibero.*crash)|(?:tblistener.*down)|(?:tbsvr.*exit)|(?:Tibero.*abnormal)
+  severity: critical
+  category: internal
+  verdict: Tibero 인스턴스 비정상 종료 — Tibero 내부 오류 또는 리소스 고갈
+  immediate:
+  - "프로세스 생존: `ps -ef | grep -E \"[t]bsvr|[t]blistener\"`"
+  - "종료 직전 오류: `tail -200 $(ls -tr $TB_HOME/instance/$TB_SID/log/slog/* | tail -5)` 와 `ls -lt $TB_HOME/instance/$TB_SID/log/dlog/ | head` (Tibero 6/7)"
+  - "OS 메모리 고갈 종료 기록: `dmesg -T | grep -i \"out of memory\" | tail`"
+  short:
+  - "(2차·승인 후, 롤백: 해당 없음 — 기동 전 log 디렉터리 사본 보관) 남은 프로세스·공유메모리 정리가 필요하면 `tbdown abort` 후 원인 조치 뒤 `tbboot`"
+  - "영향: DB 전체 접속 불가."
+  mid:
+  - "slog·dlog·덤프 자료를 TmaxTibero 기술지원에 전달"
+  - "최신 패치 적용"
+  - "메모리(TOTAL_SHM_SIZE)·CPU·디스크 여유 점검"
+  long:
+  - "tbsvr 프로세스·리스너 포트 생존 감시와 비정상 종료 시 로그 자동 보존 스크립트"
+  source_note: 'legacy-analyzer-v2.2 tibero_rules.json TBR-7111 (원 출처: builtin)'
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR 코드·문구 — 4~7 공통(번호 재편 근거 없음)
+- id: LEG-TBR-LISTENER
+  layer: db
+  product:
+  - tibero
+  match:
+    regex: (?:tblistener)|(?:listener.*not started)|(?:TBR-7000)|(?:tbsql.*connect.*fail)|(?:tblistener.*error)|(?:cannot.*connect.*tibero)
+  severity: critical
+  category: connection
+  verdict: Tibero 리스너 오류 — tblistener 미기동 또는 포트 충돌(기본 8629)
+  immediate:
+  - "`ps -ef | grep [t]blistener` 로 리스너 프로세스 확인"
+  - "포트: `grep -i \"LISTENER_PORT\" $TB_HOME/config/$TB_SID.tip` 후 `ss -ltnp | grep <port>` (기본 8629)"
+  - "리스너 로그: `tail -100 $(ls -t $TB_HOME/instance/$TB_SID/log/lsnr/* | head -1)` (Tibero 6/7)"
+  short:
+  - "(2차·승인 후, 롤백: 해당 없음) 포트 충돌이면 점유 프로세스 확인(`ss -ltnp`), 리스너 재기동 방법은 버전별 관리자 안내서 확인 후 수행"
+  - "영향: DB 접속 전체 불가."
+  mid:
+  - $TB_SID.tip 파일의 LISTENER_PORT 확인
+  - 방화벽 Tibero 포트 오픈
+  long:
+  - "리스너 포트 생존 감시와 tip 의 LISTENER_PORT 변경 이력 관리"
+  source_note: 'legacy-analyzer-v2.2 tibero_rules.json TBR-LISTENER (원 출처: builtin)'
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR 코드·문구 — 4~7 공통(번호 재편 근거 없음)
+- id: LEG-TBR-SHARED
+  layer: db
+  product:
+  - tibero
+  match:
+    regex: (?:TBR-.*shared)|(?:shared pool.*tibero)|(?:tibero.*memory.*shared)|(?:tibero.*shared pool.*fail)
+  severity: error
+  category: memory
+  verdict: Tibero Shared Pool 부족 — Tibero SGA Shared Pool 메모리 부족
+  immediate:
+  - "메모리 설정: tbsql `select name, value from v$parameters where name in ('TOTAL_SHM_SIZE','DB_CACHE_SIZE');`"
+  - "발생 기록: `grep -h -i \"shared\" $(ls -tr $TB_HOME/instance/$TB_SID/log/slog/* | tail -5) | tail -20` (Tibero 6/7)"
+  short:
+  - "(2차·승인 후, 롤백: 해당 없음 — 플러시 직후 하드파싱 증가 가능) 임시 완화로 `ALTER SYSTEM FLUSH SHARED_POOL;`"
+  - "영향: SQL 파싱 실패, 서비스 지연."
+  mid:
+  - "공유 메모리(TOTAL_SHM_SIZE 등) 배분 조정 — 숨은 파라미터(_SHARED_POOL_SIZE)는 TmaxTibero 기술지원 확인 후"
+  - "바인드 변수 사용으로 파싱 감소"
+  long:
+  - "리터럴 SQL·하드파싱 상위 SQL 정기 점검과 공유 메모리 사용 추세 감시"
+  source_note: 'legacy-analyzer-v2.2 tibero_rules.json TBR-SHARED (원 출처: builtin)'
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR 코드·문구 — 4~7 공통(번호 재편 근거 없음)
+- id: LEG-TBR-UNDO
+  layer: db
+  product:
+  - tibero
+  match:
+    regex: (?:TBR-7156)|(?:undo.*full)|(?:undo tablespace.*full)|(?:rollback.*full)|(?:tibero.*undo.*exceed)
+  severity: error
+  category: undo
+  verdict: Tibero UNDO 공간 부족 — UNDO 테이블스페이스 공간 고갈
+  immediate:
+  - "UNDO 여유: tbsql `select tablespace_name, round(sum(bytes)/1024/1024) free_mb from dba_free_space where tablespace_name='<UNDO_TS>' group by tablespace_name;`"
+  - "파일·AUTOEXTEND: `select file_name, round(bytes/1024/1024) mb, autoextensible from dba_data_files where tablespace_name='<UNDO_TS>';`"
+  - "UNDO 테이블스페이스 이름: `select name, value from v$parameters where name='UNDO_TABLESPACE';`"
+  short:
+  - "(2차·승인 후, 롤백: 추가 파일은 축소 불가 — 용량 계획 반영) `alter tablespace <UNDO_TS> add datafile '<path>' size 4G autoextend on maxsize 32G;`"
+  - "영향: DML 실패."
+  mid:
+  - UNDO_RETENTION 파라미터 조정
+  - UNDO 테이블스페이스 AUTOEXTEND ON
+  long:
+  - "UNDO 사용률 감시와 대량 배치 커밋 주기 표준"
+  source_note: 'legacy-analyzer-v2.2 tibero_rules.json TBR-UNDO (원 출처: builtin)'
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR 코드·문구 — 4~7 공통(번호 재편 근거 없음)
+- id: LEG-TBR-DEADLOCK
+  layer: db
+  product:
+  - tibero
+  match:
+    regex: (?:TBR-7117)|(?:deadlock.*tibero)|(?:tibero.*deadlock)
+  severity: error
+  category: internal
+  verdict: Tibero 교착상태 — 두 세션 간 교착상태 발생
+  immediate:
+  - "발생 기록: `grep -h -i \"deadlock\" $TB_HOME/instance/$TB_SID/log/slog/* | tail -20` (Tibero 6/7)"
+  - "잠금 현황: tbsql `select * from v$lock where rownum <= 50;`"
+  short:
+  - "희생 트랜잭션 재처리 여부를 업무 담당과 확인하고 애플리케이션 재시도 로직 점검(2차)"
+  - "영향: 한 세션 강제 롤백."
+  mid:
+  - 트랜잭션 잠금 순서 일관화
+  - 짧은 트랜잭션으로 분할
+  long:
+  - "교착 발생 건수 감시와 트랜잭션 잠금 순서 표준"
+  source_note: 'legacy-analyzer-v2.2 tibero_rules.json TBR-DEADLOCK (원 출처: builtin)'
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR 코드·문구 — 4~7 공통(번호 재편 근거 없음)
+- id: LEG-TBR-ARCHFULL
+  layer: db
+  product:
+  - tibero
+  match:
+    regex: (?:archive.*full.*tibero)|(?:tibero.*archiver.*error)|(?:ORA-00257.*tibero)|(?:tibero.*archive.*full)
+  severity: critical
+  category: storage
+  verdict: Tibero 아카이브 로그 공간 부족 — Tibero 아카이브 로그 저장 공간 고갈
+  immediate:
+  - "아카이브 경로: `grep -i \"ARCHIVE\" $TB_HOME/config/$TB_SID.tip` 후 `df -h <archive_dir>`"
+  - "최신 아카이브 생성 시각: `ls -lt <archive_dir> | head` — 생성이 멈췄으면 DB hang 위험(즉시 DBA 호출)"
+  - "백업 완료 시퀀스를 백업 담당·백업 로그에서 확인"
+  short:
+  - "(2차·승인 후, 롤백: 이관한 아카이브 목록·위치 기록) 백업 완료된 아카이브만 다른 볼륨으로 이관하거나 아카이브 볼륨 증설"
+  - "영향: DB Hang, DML 불가."
+  mid:
+  - 아카이브 경로 디스크 증설
+  - 아카이브 자동 삭제 정책 설정
+  long:
+  - "아카이브 볼륨 사용률 80%/90% 감시와 백업 후 정리 자동화"
+  source_note: 'legacy-analyzer-v2.2 tibero_rules.json TBR-ARCHFULL (원 출처: builtin)'
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR 코드·문구 — 4~7 공통(번호 재편 근거 없음)
+- id: LEG-TBR-TEMP
+  layer: db
+  product:
+  - tibero
+  match:
+    regex: (?:temp.*tablespace.*full.*tibero)|(?:TBR-7300)|(?:unable.*extend.*temp.*tibero)
+  severity: error
+  category: storage
+  verdict: Tibero Temp 공간 부족 — Tibero TEMP 테이블스페이스 공간 부족
+  immediate:
+  - "TEMP 파일: tbsql `select tablespace_name, file_name, round(bytes/1024/1024) mb, autoextensible from dba_temp_files;`"
+  - "같은 시각 대용량 정렬·해시 SQL 확인(배치 일정·애플리케이션 로그)"
+  short:
+  - "(2차·승인 후, 롤백: 추가한 tempfile 제거) `ALTER TABLESPACE <TEMP> ADD TEMPFILE '<path>' SIZE 2G AUTOEXTEND ON;`"
+  - "영향: 대용량 정렬/해시 쿼리 실패."
+  mid:
+  - TEMP 테이블스페이스 증설
+  - 대용량 쿼리 튜닝
+  long:
+  - "TEMP 사용 상위 SQL 정기 보고와 TEMP 용량 계획"
+  source_note: 'legacy-analyzer-v2.2 tibero_rules.json TBR-TEMP (원 출처: builtin)'
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR 코드·문구 — 4~7 공통(번호 재편 근거 없음)
+- id: LEG-TBR-CORRUPT
+  layer: db
+  product:
+  - tibero
+  match:
+    regex: (?:TBR-7400)|(?:block.*corrupt.*tibero)|(?:tibero.*data.*corrupt)
+  severity: critical
+  category: internal
+  verdict: Tibero 데이터 블록 손상 — 데이터 블록 물리적 손상
+  immediate:
+  - "손상 위치: `grep -h -i \"corrupt\" $TB_HOME/instance/$TB_SID/log/slog/* | tail -20` 로 파일·블록 번호 확보(Tibero 6/7)"
+  - "데이터파일 상태: tbsql `select file#, name, status from v$datafile;`"
+  - "OS I/O 오류: `dmesg -T | grep -i \"i/o error\" | tail`"
+  short:
+  - "(2차·승인 후, 롤백: 복구 전 대상 파일 사본 보관) 백업(tbrmgr) 기반 데이터파일 복구 또는 손상 세그먼트 재생성 — 명령 옵션은 tbrmgr 안내서 확인"
+  - "영향: 데이터 접근 불가, 데이터 손실 위험."
+  mid:
+  - 정기적인 tbrmgr 백업 및 검증
+  - 스토리지 HW 점검
+  long:
+  - "정기 백업 검증과 스토리지 오류 감시"
+  source_note: 'legacy-analyzer-v2.2 tibero_rules.json TBR-CORRUPT (원 출처: builtin)'
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR 코드·문구 — 4~7 공통(번호 재편 근거 없음)
+- id: LEG-TBR-MAXSESSION
+  layer: db
+  product:
+  - tibero
+  match:
+    regex: (?:maximum sessions exceeded.*tibero)|(?:TBR-7001)|(?:tibero.*max.*session)|(?:_MAX_SESSION_COUNT)
+  severity: error
+  category: capacity
+  verdict: Tibero 최대 세션 초과 — Tibero 최대 세션 수 초과
+  immediate:
+  - "세션 수: tbsql `select count(*) from v$session;`"
+  - "한도: `select name, value from v$parameters where name like '%SESSION_COUNT%';` 와 `grep -i \"SESSION_COUNT\" $TB_HOME/config/$TB_SID.tip`"
+  short:
+  - "(2차·승인 후, 롤백: tip 백업본 복원 후 재기동) 누수 풀 회수 후 필요 시 MAX_SESSION_COUNT 상향(재기동 필요)"
+  - "영향: 신규 접속 불가."
+  mid:
+  - "MAX_SESSION_COUNT 파라미터 증가"
+  - "커넥션 풀 최적화"
+  long:
+  - "세션 수/MAX_SESSION_COUNT 비율 감시와 WAS 풀 총량 관리"
+  source_note: 'legacy-analyzer-v2.2 tibero_rules.json TBR-MAXSESSION (원 출처: builtin)'
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR 코드·문구 — 4~7 공통(번호 재편 근거 없음)

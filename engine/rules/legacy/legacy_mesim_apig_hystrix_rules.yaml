@@ -1,0 +1,149 @@
+# 기존 'AI 로그분석기 v2.2' 내장 룰에서 변환 반입(tools/import_legacy_rules.py) — 중복(코드·패턴) 제외
+# 심각도 CRITICAL→critical HIGH→error MEDIUM→warn LOW→info · immediate_actions→즉시 · root_actions→중기 · negative_patterns→exclude
+rules:
+- id: LEG-MESIM-APIG-HTTP-CALL-400
+  layer: sw
+  product:
+  - mesim-apig
+  match:
+    regex: (?:HTTP CALL ERROR.*RES CODE:?\s*400)|(?:HTTP CALL ERROR.*RES CODE.*4[0-9]{2})|(?:\[ERROR\].*hystrix-APIG-HYSTRIX.*HTTP CALL ERROR.*400)
+  severity: error
+  category: upstream
+  verdict: 백엔드 요청 오류 (400) — 백엔드 Provider 서비스가 400 응답 반환. 요청 XML/JSON 파라미터 누락·오류, 필수 헤더 미포함, 서비스 ID 불일치 등
+  immediate:
+  - "`grep -n \"HTTP CALL ERROR\" <apig_log> | grep -E \"RES CODE:? ?4[0-9]{2}\" | tail -30` 으로 대상 API·TX_ID·시각 확인, 특정 호출처·API 집중 여부 집계"
+  - "APIG 관리 화면의 API 모니터링에서 해당 TX_ID 요청 본문을 조회해 필수 파라미터(certServerId·useSystemCode·serviceName)·헤더 누락 확인(개인정보 가림)"
+  - "조회성 API 에 한해 `curl -v -H 'Content-Type: application/xml' --max-time 10 <provider_url>` 로 Provider 직접 응답 확인"
+  short:
+  - "(2차) Provider 서비스팀에 400 상세 사유 확인 요청, 호출 측 요청 규격 오류면 호출처 담당에 수정 요청(설정 변경 없음)"
+  mid:
+  - "API 요청 규격(필수 파라미터·헤더·서비스 ID)을 연계 명세로 관리하고 게이트웨이 요청 검증 규칙에 반영"
+  long:
+  - "API 별 4xx 비율을 감시하고 규격 변경 시 호출처 사전 공지 절차 운영"
+  verify_note: "미검증 — MESIM APIG 관리 화면 메뉴 이름·필수 파라미터 이름은 납품 매뉴얼로 확인하지 못함(레거시 룰 문구 기준)"
+  source_note: 'legacy-analyzer-v2.2 mesim_apig_hystrix_rules.json MESIM_APIG_HTTP_CALL_400 (원 출처: builtin)'
+  exclude: (?:RES CODE:?\s*200)|(?:RES CODE:?\s*201)
+  versions:
+  - MESIM ESB/APIG/EAI (메타빌드, 납품 버전 기준)
+  version_note: MESIM APIG 문구 룰 — 납품 버전 기준(HTTP CALL ERROR·CIRCUIT BREAK 등 Hystrix 1.5 문구)
+- id: LEG-MESIM-APIG-HTTP-CALL-500
+  layer: sw
+  product:
+  - mesim-apig
+  match:
+    regex: (?:HTTP CALL ERROR.*RES CODE:?\s*500)|(?:HTTP CALL ERROR.*RES CODE.*5[0-9]{2})|(?:\[ERROR\].*hystrix-APIG-HYSTRIX.*HTTP CALL ERROR.*500)
+  severity: error
+  category: upstream
+  verdict: 백엔드 서버 오류 (500) — 백엔드 Provider 서비스 내부 오류(500). Provider 서비스 장애, 데이터베이스 오류, 또는 NullPointerException 등
+  immediate:
+  - "`grep -n \"HTTP CALL ERROR\" <apig_log> | grep -E \"RES CODE:? ?5[0-9]{2}\" | tail -30` 으로 대상 Provider·API·시각과 반복 빈도 확인"
+  - "Provider 서버에서 `ps -ef | grep <provider_process> | grep -v grep` 와 `tail -200 <provider_log>` 로 프로세스 생존·500 원인(NPE·DB 오류) 확인"
+  - "APIG 관리 화면 API 모니터링에서 Provider 응답 본문 조회(변경 없이)"
+  short:
+  - "(2차·승인 후) Provider 원인(DB·애플리케이션 예외) 조치 후 필요 시 Provider 서비스 재기동(롤백: 재기동 전 스레드 덤프·로그 보존, 기동 실패 시 직전 배포본으로 원복)"
+  mid:
+  - "Provider 500 원인별(DB 오류·소스 결함) 수정과 게이트웨이 재시도·서킷 차단 임계(errorThresholdPercentage) 재검토"
+  long:
+  - "Provider 별 5xx 비율을 감시하고 임계 초과 시 Provider 담당 자동 통보"
+  verify_note: "미검증 — MESIM APIG 관리 화면 메뉴 이름은 납품 매뉴얼로 확인하지 못함(레거시 룰 문구 기준)"
+  source_note: 'legacy-analyzer-v2.2 mesim_apig_hystrix_rules.json MESIM_APIG_HTTP_CALL_500 (원 출처: builtin)'
+  exclude: (?:RES CODE:?\s*200)
+  versions:
+  - MESIM ESB/APIG/EAI (메타빌드, 납품 버전 기준)
+  version_note: MESIM APIG 문구 룰 — 납품 버전 기준(HTTP CALL ERROR·CIRCUIT BREAK 등 Hystrix 1.5 문구)
+- id: LEG-MESIM-APIG-PROVIDER-TIMEOUT
+  layer: sw
+  product:
+  - mesim-apig
+  match:
+    regex: (?:PROVIDER CALL ERROR.*Read timed out)|(?:circuitBreaker error.*PROVIDER CALL ERROR.*Read timed out)|(?:HTTP INVOKE ERROR.*Read timed out)|(?:SocketTimeoutException.*Read timed out)|(?:Failed
+      delivery.*PROVIDER CALL ERROR)
+  severity: error
+  category: capacity
+  verdict: 백엔드 Provider 응답 타임아웃 — 백엔드 Provider 서비스 응답이 Hystrix timeout 설정 시간 초과. Provider 서비스 과부하 또는 네트워크 지연
+  immediate:
+  - "`grep -n -E \"PROVIDER CALL ERROR|HTTP INVOKE ERROR\" <apig_log> | grep \"Read timed out\" | tail -30` 으로 대상 Provider·시각·빈도 확인"
+  - "조회성 API 에 한해 `curl -s -o /dev/null -w '%{time_total}\\n' --max-time 30 <provider_url>` 로 Provider 응답시간 측정, Provider 서버에서 `top -b -n 1 | head -15` 와 `ss -tan | grep :<provider_port> | wc -l` 로 부하 확인"
+  short:
+  - "(2차·승인 후) Provider 지연 원인 조치가 우선, 업무상 필요하면 hystrix timeout(execution.isolation.thread.timeoutInMilliseconds) 상향(롤백: 이전 값 기록 후 복원)"
+  - "(2차·승인 후) Provider 가 응답 정지 상태면 스레드 덤프 보존 후 재기동(롤백: 기동 실패 시 직전 배포본으로 원복)"
+  mid:
+  - "Provider 처리 지연 구간(DB·외부 호출)을 개선하고 hystrix timeout 을 Provider SLA 기준으로 문서화"
+  long:
+  - "Provider 별 응답시간 p95·timeout 건수를 감시하고 임계 초과 경보"
+  verify_note: "미검증 — hystrix timeout 기본값(1000ms)과 APIG 관리 화면 설정 위치는 납품 매뉴얼로 확인하지 못함(Hystrix 속성 이름은 레거시 룰 문구 기준)"
+  source_note: 'legacy-analyzer-v2.2 mesim_apig_hystrix_rules.json MESIM_APIG_PROVIDER_TIMEOUT (원 출처: builtin)'
+  versions:
+  - MESIM ESB/APIG/EAI (메타빌드, 납품 버전 기준)
+  version_note: MESIM APIG 문구 룰 — 납품 버전 기준(HTTP CALL ERROR·CIRCUIT BREAK 등 Hystrix 1.5 문구)
+- id: LEG-MESIM-APIG-CIRCUIT-OPEN
+  layer: sw
+  product:
+  - mesim-apig
+  match:
+    regex: (?:CIRCUIT BREAK RESULT:\s*false)|(?:check time.*circuit.*open)|(?:## hystrix internal.*circuit.*open)|(?:## determined to.*circuit.*open)|(?:circuitBreaker error.*PROVIDER CALL ERROR)
+  severity: critical
+  category: capacity
+  verdict: Circuit Breaker OPEN (서킷 차단)
+  immediate:
+  - "`grep -n -E \"CIRCUIT BREAK RESULT|circuit.*open|circuitBreaker error\" <apig_log> | tail -30` 으로 OPEN 된 Provider·OPEN 시작 시각과 직전 오류(timeout·5xx) 확인 — 같은 Provider 에 오류가 몰린 직후 OPEN 이면 Provider 원인"
+  - "Provider 도달·응답 확인: `curl -I --max-time 10 <provider_url>` (조회성 경로만) — Provider 정상화가 먼저이며 차단 해제는 2차"
+  short:
+  - "(2차·승인 후) Provider 정상화 확인 뒤 반개방(Half-Open) 자동 복구를 기다리고, 복구되지 않으면 APIG 관리 화면에서 Circuit Breaker 수동 Reset(롤백: 다시 OPEN 되면 Provider 원인 재조사)"
+  mid:
+  - "circuitBreaker 설정(errorThresholdPercentage·sleepWindowInMilliseconds)을 Provider 특성에 맞게 재산정"
+  long:
+  - "Provider 별 서킷 OPEN 횟수·지속 시간을 감시하고 Provider 이중화 검토"
+  verify_note: "미검증 — 반개방 대기 기본값(5초)과 관리 화면 수동 Reset 메뉴는 납품 매뉴얼로 확인하지 못함(레거시 룰 문구 기준)"
+  source_note: 'legacy-analyzer-v2.2 mesim_apig_hystrix_rules.json MESIM_APIG_CIRCUIT_OPEN (원 출처: builtin)'
+  exclude: (?:CIRCUIT BREAK RESULT:\s*true)
+  versions:
+  - MESIM ESB/APIG/EAI (메타빌드, 납품 버전 기준)
+  version_note: MESIM APIG 문구 룰 — 납품 버전 기준(HTTP CALL ERROR·CIRCUIT BREAK 등 Hystrix 1.5 문구)
+- id: LEG-MESIM-APIG-API-KEY-FAIL
+  layer: sw
+  product:
+  - mesim-apig
+  match:
+    regex: (?:API KEY ACCESS FAIL)|(?:API KEY ACCESS FAIL.*\[)|(?:CamelJettyServer.*API KEY ACCESS FAIL)
+  severity: error
+  category: security
+  verdict: API KEY 인증 실패 — 요청에 포함된 API KEY가 APIG에 등록되지 않았거나 만료·비활성화 상태
+  immediate:
+  - "`grep -n \"API KEY ACCESS FAIL\" <apig_log> | tail -30` 으로 실패 호출처·시각과 건수 확인 — 키 값은 앞 몇 자리만 남기고 가림"
+  - "APIG 관리 화면의 API KEY 관리에서 해당 키의 등록·만료일·활성 상태 조회(변경 없이)"
+  short:
+  - "(2차·승인 후) 만료면 신규 키 발급 후 호출처에 안전한 경로로 전달, 미등록이면 등록 절차 진행(롤백: 신규 키 폐기)"
+  mid:
+  - "API KEY 만료일 사전 통보와 갱신 절차(발급·전달·폐기)를 표준화"
+  long:
+  - "키별 인증 실패 건수 감시와 만료 30일 전 경보 운영"
+  verify_note: "미검증 — MESIM APIG 관리 화면 메뉴 이름은 납품 매뉴얼로 확인하지 못함(레거시 룰 문구 기준)"
+  source_note: 'legacy-analyzer-v2.2 mesim_apig_hystrix_rules.json MESIM_APIG_API_KEY_FAIL (원 출처: builtin)'
+  exclude: (?:API KEY ACCESS SUCCESS)
+  versions:
+  - MESIM ESB/APIG/EAI (메타빌드, 납품 버전 기준)
+  version_note: MESIM APIG 문구 룰 — 납품 버전 기준(HTTP CALL ERROR·CIRCUIT BREAK 등 Hystrix 1.5 문구)
+- id: LEG-MESIM-APIG-HTTP-INVOKE-ERROR
+  layer: sw
+  product:
+  - mesim-apig
+  match:
+    regex: (?:HTTP INVOKE ERROR)|(?:Failed delivery.*Message History)|(?:HTTP INVOKE ERROR.*Read timed out)|(?:throws exception\.\.\.)
+  severity: error
+  category: hardware
+  verdict: Camel 라우트 HTTP 호출 실패
+  immediate:
+  - "`grep -n -A10 -E \"HTTP INVOKE ERROR|Failed delivery\" <apig_log> | tail -60` 으로 RouteId·ProcessorId·원인 예외(Read timed out 등) 확인"
+  - "APIG 관리 화면에서 Dead Letter Channel 의 실패 메시지 건수 조회(재처리 없이), 조회성 Provider 는 `curl -s -o /dev/null -w '%{time_total}\\n' --max-time 30 <provider_url>` 로 응답시간 측정"
+  short:
+  - "(2차·승인 후) 원인 해소 뒤 해당 Camel Route 재시작·실패 메시지 재처리(롤백: 재처리 전 실패 메시지 목록 보관, 중복 처리 여부 업무 확인)"
+  mid:
+  - "Route 별 재시도·Dead Letter 정책과 hystrix timeout 을 Provider SLA 기준으로 정비"
+  long:
+  - "Route 별 실패 건수·Dead Letter 적체를 감시하고 임계 초과 경보"
+  verify_note: "미검증 — MESIM APIG 의 Camel Route 재시작·Dead Letter 조회 방법은 납품 매뉴얼로 확인하지 못함(레거시 룰 문구 기준)"
+  source_note: 'legacy-analyzer-v2.2 mesim_apig_hystrix_rules.json MESIM_APIG_HTTP_INVOKE_ERROR (원 출처: builtin)'
+  versions:
+  - MESIM ESB/APIG/EAI (메타빌드, 납품 버전 기준)
+  version_note: MESIM APIG 문구 룰 — 납품 버전 기준(HTTP CALL ERROR·CIRCUIT BREAK 등 Hystrix 1.5 문구)

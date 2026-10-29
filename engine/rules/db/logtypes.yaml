@@ -1,0 +1,225 @@
+# DBMS — 로그 종류 카탈로그 추가 파서용 시그니처 (Oracle listener · MySQL slow · PostgreSQL csvlog)
+rules:
+- id: DB-ORA-LSNR-001
+  layer: db
+  product:
+  - oracle
+  match:
+    regex: TNS-12514|rc=12514
+  severity: critical
+  category: connection
+  verdict: 리스너가 요청 서비스명을 모름 (TNS-12514) — 서비스 미등록·인스턴스/PDB 미기동 가능성
+  immediate:
+  - lsnrctl status 로 등록된 서비스명 확인, DB 인스턴스 기동 여부(ps -ef | grep pmon)와 PDB OPEN 상태 확인
+  - 인스턴스가 떠 있는데 미등록이면 DBA 가 ALTER SYSTEM REGISTER 수행
+  short:
+  - 접속 문자열의 SERVICE_NAME 과 리스너 등록 서비스·LOCAL_LISTENER/REMOTE_LISTENER 대조
+  - DB 재기동·장애 이력 확인
+  mid:
+  - local_listener 파라미터·정적 등록(SID_LIST) 정비
+  long:
+  - 리스너·서비스 등록 상태 헬스체크 자동화
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: TNS-12514 — 10g 텍스트 listener.log·11g+ ADR 로그 공통
+- id: DB-ORA-LSNR-002
+  layer: db
+  product:
+  - oracle
+  match:
+    regex: TNS-12518|TNS-12520|TNS-12547|TNS-12560|rc=12518|rc=12520
+  severity: critical
+  category: capacity
+  verdict: 리스너 접속 hand-off 실패 (TNS-12518/12520) — 핸들러 상태·서버 프로세스 생성 실패·processes/sessions 한도·메모리 부족 가능성
+  immediate:
+  - DB 에서 processes/sessions 사용량 확인(v$resource_limit), 불필요 세션 정리
+  - OS 메모리·swap 여유 확인, 리스너 로그의 동반 TNS-12547/12560 확인
+  short:
+  - 접속 폭주 출처(WAS 풀 총합) 분석
+  - 리스너 재기동 필요 여부 판단
+  mid:
+  - processes/sessions 파라미터 재산정, WAS 풀 총합 조정
+  long:
+  - 접속 총량 관리 체계
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: TNS-12518/12520/12547/12560 공통
+- id: DB-ORA-LSNR-003
+  layer: db
+  product:
+  - oracle
+  match:
+    regex: TNS-12541|TNS-12535|TNS-00511|rc=12541|listener stop|\bstop\b.*\* 0
+  severity: error
+  category: connection
+  verdict: 리스너 미기동/응답 없음 (TNS-12541/12535)
+  immediate:
+  - lsnrctl status 확인, 내려가 있으면 lsnrctl start
+  - 리스너 포트(1521) 점유·방화벽 확인
+  short:
+  - 리스너 정지 원인(수동 중지·크래시) 추적
+  mid:
+  - 리스너 자동 기동·감시 구성
+  long:
+  - 리스너 이중화(RAC SCAN 등) 검토
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: TNS-12541/12535/00511 공통
+- id: DB-ORA-LSNR-004
+  layer: db
+  product:
+  - oracle
+  match:
+    regex: TNS-12505|rc=12505
+  severity: critical
+  category: connection
+  verdict: 리스너가 요청 SID 를 모름 (TNS-12505) — 접속 문자열 SID 오류·정적 등록 누락
+  immediate:
+  - lsnrctl status 의 인스턴스/SID 목록과 접속 문자열 SID 대조
+  - SID 방식 접속이면 listener.ora SID_LIST 정적 등록 여부 확인(DBA)
+  short:
+  - SERVICE_NAME 방식 접속으로 표준화 검토
+  - 클라이언트 tnsnames 배포본 점검
+  mid:
+  - 정적 등록·접속 문자열 표준 정비
+  long:
+  - 접속 구성 중앙 관리
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: TNS-12505 공통
+- id: DB-MYS-SLOW-001
+  layer: db
+  product:
+  - mysql
+  match:
+    regex: slow query (?:[1-9]\d|\d{3,})\.\ds
+  severity: error
+  category: performance
+  verdict: 장기 실행 쿼리(10초 이상) — 잠금 대기·풀 스캔 의심
+  immediate:
+  - "같은 쿼리가 지금도 실행 중인지: `SELECT id, user, host, time, state, LEFT(info,100) FROM information_schema.PROCESSLIST WHERE command='Query' ORDER BY time DESC LIMIT 20;` (읽기 전용)"
+  - "Lock_time 이 크면 잠금 보유 트랜잭션 확인: `SHOW ENGINE INNODB STATUS\\G` 의 TRANSACTIONS 또는 `SELECT * FROM sys.innodb_lock_waits\\G` (5.7+)"
+  short:
+  - "(2차·승인 후) 서비스 영향 시 `KILL QUERY <id>`(연결 유지, 해당 문장 롤백), `EXPLAIN <SQL>`(실행 안 함)로 실행계획·인덱스 점검, Rows_examined 대비 Rows_sent 비율 확인"
+  mid:
+  - 인덱스 추가·쿼리 재작성, 배치 실행 시간대 분리
+  long:
+  - 슬로우 쿼리 임계치 감시·정기 튜닝 체계
+  versions:
+  - MySQL 5.5
+  - MySQL 5.6
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: 슬로우 쿼리 로그 — 5.5~9.x 공통
+- id: DB-MYS-SLOW-002
+  layer: db
+  product:
+  - mysql
+  match:
+    regex: slow query \d\.\ds .*lock [1-9]\d*\.\d+s|lock [5-9]\.\d+s
+  severity: warn
+  category: lock
+  verdict: 쿼리 잠금 대기 과다 (Lock_time 5초 이상)
+  immediate:
+  - "잠금 보유 트랜잭션: `SELECT trx_id, trx_started, trx_mysql_thread_id, trx_state FROM information_schema.INNODB_TRX ORDER BY trx_started LIMIT 10;` (읽기 전용)"
+  - "대기 관계: `SELECT * FROM sys.innodb_lock_waits\\G` (5.7+, 8.0 은 performance_schema.data_lock_waits·5.7 은 information_schema.INNODB_LOCK_WAITS 기반)"
+  short:
+  - "(2차·승인 후) 장기 미커밋 세션의 소유 앱 확인 후 커밋·종료 협의 — 영향: 종료 시 해당 트랜잭션 롤백"
+  mid:
+  - 트랜잭션 범위 축소, 잠금 순서 통일
+  long:
+  - "Lock_time 5초 이상 쿼리 건수와 잠금 대기 감시"
+  versions:
+  - MySQL 5.5
+  - MySQL 5.6
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: 슬로우 쿼리 로그 lock 시간 — 공통
+- id: DB-PG-ARCH-001
+  layer: db
+  product:
+  - postgresql
+  match:
+    regex: archive command failed|archiving write-ahead log file .* failed
+  severity: critical
+  category: storage
+  verdict: WAL 아카이브 실패 — pg_wal 누적으로 디스크 고갈 위험
+  immediate:
+  - "보관 상태: `SELECT archived_count, failed_count, last_failed_wal, last_failed_time FROM pg_stat_archiver;` (9.4+, 읽기 전용)"
+  - "pg_wal 크기·디스크 여유 `du -sh <data_directory>/pg_wal` · `df -h <data_directory>` 와 `SHOW archive_command;` 의 보관 경로 공간·권한(`df -h <보관경로>` · `ls -ld <보관경로>`) 확인 — 임계 근접 시 2차 즉시 호출"
+  short:
+  - "(2차·승인 후) archive_command 를 postgres 계정으로 수동 실행해 실패 원인(권한·경로·공간·네트워크) 확인·해소, 보관 대상 공간 확보, 복제 슬롯 지연 점검 — 성공: failed_count 증가 멈춤, 롤백: archive_command 변경 시 이전 값 기록"
+  mid:
+  - 아카이브 경로 이중화·실패 알림
+  long:
+  - WAL 보관·백업 정책 정비
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: '''archive command failed'' 공통, ''archiving write-ahead log file'' 은 10+(9.x 는 transaction log file)'
+- id: DB-PG-CKPT-001
+  layer: db
+  product:
+  - postgresql
+  match:
+    regex: 'checkpoint complete: .*total=(?:[6-9]\d|\d{3,})\.\d s|checkpoints are occurring too frequently'
+  severity: warn
+  category: performance
+  verdict: 체크포인트 지연/과다 — I/O 병목 또는 max_wal_size 부족
+  immediate:
+  - "서버 로그의 checkpoint complete … total= 값과 checkpoints are occurring too frequently 빈도 기록 (log_checkpoints 설정 시, 읽기 전용)"
+  - "디스크 대기 `iostat -x 5 3` (await·%util) 와 요청형 비율 `SELECT checkpoints_timed, checkpoints_req FROM pg_stat_bgwriter;` (16 이하) / `SELECT num_timed, num_requested FROM pg_stat_checkpointer;` (17+)"
+  short:
+  - "(2차·승인 후) checkpoint_timeout·max_wal_size·checkpoint_completion_target 조정(`ALTER SYSTEM SET …` + `SELECT pg_reload_conf();`) — 롤백: 이전 값으로 ALTER SYSTEM"
+  mid:
+  - WAL 설정 조정, 스토리지 성능 개선
+  long:
+  - "checkpoints_req 비율·체크포인트 소요 시간 감시"
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: '''checkpoints are occurring too frequently''·''checkpoint complete: … total='' 문구 — 9.x~18 공통'

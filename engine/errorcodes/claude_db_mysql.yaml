@@ -1,0 +1,898 @@
+product: mysql
+layer: db
+note: GPT 협업 수집분 — 벤더 공식 문서와 대조 후 확정
+codes:
+- code: MY-1021
+  severity: critical
+  category: disk
+  title: 디스크 가득참
+  immediate:
+  - "데이터·binlog·임시 경로 확인: `SELECT @@datadir, @@tmpdir, @@log_bin_basename;` (5.6+) 후 `df -h <경로>` · `df -i <경로>` — 사용률 100% 면 확정 (Linux, 읽기 전용)"
+  - "큰 파일 식별: `du -xsh <datadir>/* | sort -h | tail -20` — 이 단계에서 지우지 않음(binlog 를 OS 에서 직접 지우면 복제·복구가 깨짐)"
+  short:
+  - "(2차·승인 후) binlog 는 복제본 적용 위치 확인 후 `PURGE BINARY LOGS BEFORE '<시각>';` 으로만 정리, 불필요 덤프·임시파일은 소유자 확인 후 정리 — 롤백: 정리 대상 목록·백업 위치 기록"
+  mid:
+  - "데이터 볼륨 증설과 binlog 보관 기간 설정(binlog_expire_logs_seconds 8.0+ / expire_logs_days 5.7)"
+  long:
+  - "데이터·binlog 볼륨 사용률 85% 경보와 월별 증가량 기반 용량 계획"
+  source: GPT 수집·벤더 문서 대조 완료(https://dev.mysql.com/doc/mysql-errors/5.7/en/server-error-reference.html#error_er_disk_full)
+  vendor_cause: 디스크가 가득 차 파일을 기록할 수 없어 공간이 확보되기를 기다리고 있다.
+  vendor_action: 디스크 공간을 확보한다.
+  vendor_url: https://dev.mysql.com/doc/mysql-errors/5.7/en/server-error-reference.html#error_er_disk_full
+  versions:
+  - MySQL 5.5
+  - MySQL 5.6
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: 서버 오류 번호(ER_) 1000번대 — 5.5~9.x 동일(SQL 클라이언트 오류·에러 로그 문구 공통)
+- code: MY-1023
+  severity: error
+  category: storage
+  title: 파일 닫기 오류
+  immediate:
+  - "error log 에서 대상 파일명·errno 기록(`SELECT @@log_error;` 로 경로 확인 후 `tail -200 <log_error 경로>`), errno 의미는 `perror <errno>` 로 확인 (5.7 이하 코드)"
+  - "대상 파일 경로(tmpdir·datadir)의 공간·상태: `df -h <경로>` 와 같은 시각 `dmesg -T | tail -50` 의 I/O·NFS 오류 확인 (읽기 전용)"
+  short:
+  - "(2차·승인 후) errno 원인(공간 부족·NFS 끊김·I/O 오류) 해소 후 해당 작업 재실행, 파일시스템 점검은 스토리지 담당과 일정 협의"
+  mid:
+  - "tmpdir·datadir 를 로컬 안정 볼륨에 두고 NFS 등 원격 파일시스템 사용 배제"
+  long:
+  - "파일시스템 I/O 오류(dmesg·syslog)와 디스크 사용률 감시"
+  source: GPT 수집·벤더 문서 대조 완료(https://dev.mysql.com/doc/mysql-errors/5.7/en/server-error-reference.html#error_er_error_on_close)
+  note: 정렬 종료 오류가 아니라 파일 close 작업 오류이며 해당 ER_ERROR_ON_CLOSE 코드는 MySQL 8.0에서 제거됨
+  vendor_cause: 지정 파일을 닫는 과정에서 운영체제 오류가 발생했다.
+  vendor_action: ''
+  vendor_url: https://dev.mysql.com/doc/mysql-errors/5.7/en/server-error-reference.html#error_er_error_on_close
+  versions:
+  - MySQL 5.5
+  - MySQL 5.6
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: 서버 오류 번호(ER_) 1000번대 — 5.5~9.x 동일(SQL 클라이언트 오류·에러 로그 문구 공통)
+- code: MY-1030
+  severity: error
+  category: internal
+  title: 스토리지 엔진 반환 오류
+  immediate:
+  - "오류 원문의 errno 의미 조회: `perror <errno>` (MySQL 5.7·8.0 bin 포함) — 28 디스크 부족, 13 권한, 24 열린 파일 수 한도 (읽기 전용)"
+  - "28 이면 `SELECT @@datadir, @@tmpdir;` 경로에 `df -h <datadir>` · `df -h <tmpdir>`, 24 면 `SELECT @@open_files_limit;` 와 `SHOW GLOBAL STATUS LIKE 'Open_files';` — Open_files 가 한도에 가까우면 확정"
+  - "오류 로그 위치 `SELECT @@log_error;` 확인 후 같은 시각 InnoDB 메시지 `tail -200 <오류 로그 경로>` — 13 이면 `ls -ld <datadir>` 소유자가 mysql 인지 대조"
+  short:
+  - "(2차·승인 후, 롤백: 변경 전 my.cnf·systemd override 백업) 원인별 조치 — 디스크는 binlog 를 `PURGE BINARY LOGS BEFORE '<시각>';` 로만 정리(파일 직접 삭제 금지), 권한은 datadir 소유권 mysql:mysql 복구, 파일 수는 open_files_limit·LimitNOFILE 상향 후 서비스 재시작"
+  mid:
+  - 자원 확보·설정 수정
+  long:
+  - 엔진 오류 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_get_errno)
+  note: 스토리지 엔진이 반환한 일반 오류로 단독 코드만으로 서비스 전체 중단을 뜻하지 않음
+  vendor_cause: 스토리지 엔진이 오류 번호와 함께 작업 실패를 반환했다.
+  vendor_action: 반환된 오류 번호에 해당하는 운영체제 오류 내용을 확인한다.
+  vendor_url: https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_get_errno
+  versions:
+  - MySQL 5.5
+  - MySQL 5.6
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: 서버 오류 번호(ER_) 1000번대 — 5.5~9.x 동일(SQL 클라이언트 오류·에러 로그 문구 공통)
+- code: MY-1042
+  severity: error
+  category: connection
+  title: 클라이언트 호스트명 조회 실패
+  immediate:
+  - "오류의 출처 IP 기록 후 DB 서버에서 역방향 조회: `getent hosts <client_ip>` 또는 `nslookup <client_ip>` — 실패·지연이면 원인 확정 (읽기 전용)"
+  - "`SELECT @@skip_name_resolve;` 로 이름 해석 사용 여부 확인, 호스트 캐시 오류 집계 `SELECT ip, host, SUM_CONNECT_ERRORS FROM performance_schema.host_cache;` (5.6+)"
+  short:
+  - "(2차·승인 후) DNS 역방향 레코드 정정 또는 skip_name_resolve=ON 적용(재기동 필요, 이름 기반 계정 host 를 IP 로 바꿔야 함) — 롤백: my.cnf 백업, `SELECT user, host FROM mysql.user;` 결과 저장"
+  mid:
+  - "계정 host 를 IP·대역 기반으로 표준화해 DNS 의존 제거"
+  long:
+  - "DNS 응답 시간 감시와 host_cache 오류 수 정기 점검"
+  source: GPT 수집·벤더 문서 대조 완료(https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_bad_host_error)
+  note: 클라이언트 주소에 대한 호스트명 조회 실패이며 단독 코드만으로 서비스 중단을 뜻하지 않음
+  vendor_cause: 클라이언트 호스트 주소에 대한 호스트명 조회에 실패했다.
+  vendor_action: 호스트명과 DNS 설정을 확인하고 필요하면 IP 주소 사용 또는 이름 해석 설정을 점검한다.
+  vendor_url: https://dev.mysql.com/doc/refman/8.0/en/problems-connecting.html
+  versions:
+  - MySQL 5.5
+  - MySQL 5.6
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: 서버 오류 번호(ER_) 1000번대 — 5.5~9.x 동일(SQL 클라이언트 오류·에러 로그 문구 공통)
+- code: MY-1044
+  severity: error
+  category: security
+  title: DB 접근 권한 없음
+  immediate:
+  - "오류 원문의 '<user>'@'<host>'·DB 기록 후 부여 권한 조회: `SHOW GRANTS FOR '<user>'@'<host>';` (읽기 전용)"
+  - "실제 매칭된 계정 확인: 해당 앱 세션에서 `SELECT USER(), CURRENT_USER();` — 의도와 다른 '<user>'@'%' 등에 매칭되는지 대조"
+  short:
+  - "(2차·승인 후) 필요한 DB 범위만 `GRANT SELECT, INSERT, UPDATE, DELETE ON <db>.* TO '<user>'@'<host>';` — 롤백: 대응 REVOKE 문 작성, 보안 담당 승인"
+  mid:
+  - "애플리케이션 계정별 DB 권한을 역할(8.0+ ROLE) 또는 표준 부여 스크립트로 정비"
+  long:
+  - "권한 변경 이력 관리와 분기별 계정 권한 검토"
+  source: GPT 수집·벤더 문서 대조 완료(https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_dbaccess_denied_error)
+  vendor_cause: 지정 사용자에게 해당 데이터베이스 접근 권한이 없다.
+  vendor_action: ''
+  vendor_url: https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_dbaccess_denied_error
+  versions:
+  - MySQL 5.5
+  - MySQL 5.6
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: 서버 오류 번호(ER_) 1000번대 — 5.5~9.x 동일(SQL 클라이언트 오류·에러 로그 문구 공통)
+- code: MY-1045
+  severity: error
+  category: security
+  title: 접속 거부(인증 실패)
+  immediate:
+  - "오류 원문의 '<user>'@'<host>' 와 'using password: YES/NO' 기록 — NO 면 애플리케이션 설정에 비밀번호 누락"
+  - "계정·인증 플러그인 확인(비밀번호 컬럼 제외): `SELECT user, host, plugin, account_locked, password_expired FROM mysql.user WHERE user='<user>';` (account_locked 5.7.6+, 읽기 전용)"
+  - "접속 IP 가 계정 host 패턴에 맞는지 대조"
+  short:
+  - "(2차·승인 후) 비밀번호 재설정(`ALTER USER '<user>'@'<host>' IDENTIFIED BY …`)은 앱 설정 변경과 같은 작업 창에서, 8.0 caching_sha2_password 미지원 드라이버면 드라이버 갱신 — 롤백: 이전 비밀번호로 되돌릴 수 없어 영향 앱 목록 사전 확인"
+  mid:
+  - "애플리케이션 계정 비밀번호 보관·교체 절차(보안 담당) 표준화"
+  long:
+  - "인증 실패 출처 감시(5분 내 반복 실패 경보)"
+  source: GPT 수집·벤더 문서 대조 완료(https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_access_denied_error)
+  vendor_cause: 제공한 사용자·호스트·비밀번호 조건으로 서버 접근이 거부됐다.
+  vendor_action: ''
+  vendor_url: https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_access_denied_error
+  versions:
+  - MySQL 5.5
+  - MySQL 5.6
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: 서버 오류 번호(ER_) 1000번대 — 5.5~9.x 동일(SQL 클라이언트 오류·에러 로그 문구 공통)
+- code: MY-1049
+  severity: error
+  category: internal
+  title: 알 수 없는 DB
+  immediate:
+  - "오류 원문·접속 문자열의 DB 이름 기록 후 존재 확인: `SHOW DATABASES LIKE '<db>';` — 대소문자 규칙은 `SELECT @@lower_case_table_names;` 로 확인 (읽기 전용)"
+  - "최근 배포·DB 이름 변경·DB 제거 이력을 변경 기록과 대조"
+  short:
+  - "(2차·승인 후) 접속 문자열의 DB 이름 수정 또는 백업에서 DB 복원 — 롤백: 수정 전 설정 파일 보관"
+  mid:
+  - "배포 체크리스트에 대상 DB 존재 확인 단계 추가"
+  long:
+  - "스키마 변경 관리(DB 생성·삭제 승인 기록)"
+  source: GPT 수집·벤더 문서 대조 완료(https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_bad_db_error)
+  vendor_cause: 지정한 이름의 데이터베이스가 존재하지 않는다.
+  vendor_action: ''
+  vendor_url: https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_bad_db_error
+  versions:
+  - MySQL 5.5
+  - MySQL 5.6
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: 서버 오류 번호(ER_) 1000번대 — 5.5~9.x 동일(SQL 클라이언트 오류·에러 로그 문구 공통)
+- code: MY-1062
+  severity: warn
+  category: internal
+  title: 중복 키 입력
+  immediate:
+  - "오류 원문의 중복 값과 키 이름(\"for key '…'\") 기록, 같은 키를 넣은 배치·재처리 여부를 애플리케이션 로그로 확인"
+  - "키 정의 확인: `SHOW INDEX FROM <db>.<table>;` 와 `SHOW CREATE TABLE <db>.<table>\\G` 의 AUTO_INCREMENT 값 (읽기 전용)"
+  short:
+  - "(2차·승인 후) 재처리 멱등성(INSERT … ON DUPLICATE KEY UPDATE 또는 존재 확인 후 입력) 로직 보강, AUTO_INCREMENT 조정은 최대 키 확인 후 — 롤백: 이전 값 기록"
+  mid:
+  - "키 채번 방식 표준화와 복제 환경 auto_increment_increment/offset 점검"
+  long:
+  - "중복 키(1062) 오류 건수 감시와 데이터 정합성 점검"
+  source: GPT 수집·벤더 문서 대조 완료(https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_dup_entry)
+  vendor_cause: 고유 인덱스나 기본키에 이미 존재하는 값과 중복되는 값을 입력했다.
+  vendor_action: ''
+  vendor_url: https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_dup_entry
+  versions:
+  - MySQL 5.5
+  - MySQL 5.6
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: 서버 오류 번호(ER_) 1000번대 — 5.5~9.x 동일(SQL 클라이언트 오류·에러 로그 문구 공통)
+- code: MY-1064
+  severity: warn
+  category: internal
+  title: SQL 구문 오류
+  immediate:
+  - "오류 원문의 \"near '…' at line N\" 위치와 실패 SQL 원문을 애플리케이션 로그에서 기록"
+  - "서버 버전 확인 `SELECT VERSION();` — 8.0 신규 예약어(RANK·GROUPS 등)나 버전별 구문 차이 여부 대조 (읽기 전용)"
+  short:
+  - "(2차) 동적 SQL 생성 로직의 따옴표·구분자 처리 수정, 예약어 식별자는 백틱으로 감싸도록 개발팀에 전달 — 운영 반영은 승인 후"
+  mid:
+  - "바인드 변수(PreparedStatement) 사용으로 문자열 결합 SQL 제거"
+  long:
+  - "버전 업그레이드 전 예약어·구문 호환성 검사 절차"
+  source: GPT 수집·벤더 문서 대조 완료(https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_parse_error)
+  vendor_cause: SQL 문에 MySQL이 해석할 수 없는 구문 오류가 있다.
+  vendor_action: 해당 MySQL 버전 매뉴얼에서 올바른 SQL 구문을 확인한다.
+  vendor_url: https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_parse_error
+  versions:
+  - MySQL 5.5
+  - MySQL 5.6
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: 서버 오류 번호(ER_) 1000번대 — 5.5~9.x 동일(SQL 클라이언트 오류·에러 로그 문구 공통)
+- code: MY-1129
+  severity: error
+  category: connection
+  title: 연결 오류 과다로 호스트 차단
+  immediate:
+  - "접속 거부(blocked) 호스트 확인: `SELECT ip, host, SUM_CONNECT_ERRORS, COUNT_HOST_BLOCKED_ERRORS FROM performance_schema.host_cache WHERE SUM_CONNECT_ERRORS > 0;` (5.6+, 읽기 전용) — COUNT_HOST_BLOCKED_ERRORS > 0 인 ip 가 대상"
+  - "`SELECT @@max_connect_errors;` 와 해당 출처의 연결 오류 원인(L4 헬스체크가 TCP 연결만 맺고 닫는 동작, 방화벽 세션 정리 등) 확인 — SUM_CONNECT_ERRORS 가 max_connect_errors 이상이면 확정"
+  short:
+  - "(2차·승인 후) 원인 해소 후 차단 해제: `TRUNCATE TABLE performance_schema.host_cache;` 또는 `mysqladmin flush-hosts` (FLUSH HOSTS 문은 8.0.23 부터 비권장) — 영향: 호스트 캐시 전체 초기화, 롤백 불필요, 성공: 접속 재개"
+  mid:
+  - "L4 헬스체크를 정상 로그인 방식으로 바꾸고 max_connect_errors 값 재산정"
+  long:
+  - "host_cache 의 SUM_CONNECT_ERRORS 감시와 차단 발생 알림"
+  source: GPT 수집·벤더 문서 대조 완료(https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_host_is_blocked)
+  note: 특정 호스트가 과도한 연결 오류로 차단된 상태이므로 서비스 전체 중단 수준은 아님
+  vendor_cause: 연속된 연결 오류 수가 max_connect_errors를 넘어 해당 호스트가 차단됐다.
+  vendor_action: TCP/IP 문제를 먼저 확인하고 원인을 해결한 뒤 호스트 캐시를 flush해 차단을 해제한다.
+  vendor_url: https://dev.mysql.com/doc/refman/8.0/en/host-cache.html
+  versions:
+  - MySQL 5.5
+  - MySQL 5.6
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: 서버 오류 번호(ER_) 1000번대 — 5.5~9.x 동일(SQL 클라이언트 오류·에러 로그 문구 공통)
+- code: MY-1130
+  severity: error
+  category: security
+  title: 호스트 접속 허용 안됨
+  immediate:
+  - "오류 원문의 접속 호스트 기록 후 허용 계정 확인: `SELECT user, host FROM mysql.user WHERE user='<user>';` — 접속 IP 가 host 패턴에 없으면 확정 (읽기 전용)"
+  - "`SELECT @@skip_name_resolve;` 확인 — OFF 면 host 가 역방향 조회 이름으로 비교됨"
+  short:
+  - "(2차·승인 후) 필요한 출처만 `CREATE USER '<user>'@'<host>' …` + 최소 GRANT — 롤백: DROP USER 문 준비, 보안 담당 승인"
+  mid:
+  - "계정 host 패턴(IP 대역) 표준과 '%' 사용 제한 정책"
+  long:
+  - "접근 통제 목록과 DB 계정 목록 분기 대조"
+  source: GPT 수집·벤더 문서 대조 완료(https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_host_not_privileged)
+  vendor_cause: 클라이언트 호스트와 일치하는 접속 허용 계정이 없어 서버 연결이 허용되지 않았다.
+  vendor_action: 접속할 사용자와 클라이언트 호스트에 맞는 계정을 설정한다.
+  vendor_url: https://dev.mysql.com/doc/refman/8.0/en/problems-connecting.html
+  versions:
+  - MySQL 5.5
+  - MySQL 5.6
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: 서버 오류 번호(ER_) 1000번대 — 5.5~9.x 동일(SQL 클라이언트 오류·에러 로그 문구 공통)
+- code: MY-1146
+  severity: error
+  category: internal
+  title: 테이블 없음
+  immediate:
+  - "오류 원문의 '<db>.<table>' 기록 후 존재 확인: `SELECT table_schema, table_name FROM information_schema.TABLES WHERE table_name LIKE '<table>';` (읽기 전용)"
+  - "대소문자 규칙: `SELECT @@lower_case_table_names;` — Linux 에서 0 이면 대소문자 구분(배포 스크립트·SQL 의 표기와 비교)"
+  short:
+  - "(2차·승인 후) 누락 테이블 배포 또는 SQL 의 테이블명 수정 — lower_case_table_names 는 8.0 에서 초기화 시에만 지정 가능하므로 운영 중 변경 금지, 롤백: 배포 전 스키마 덤프"
+  mid:
+  - "배포 검증 단계에 대상 테이블 존재 확인 추가"
+  long:
+  - "환경 간(개발·운영) 스키마 비교 정례화와 스키마 변경 관리"
+  source: GPT 수집·벤더 문서 대조 완료(https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_no_such_table)
+  vendor_cause: 지정 데이터베이스에 요청한 테이블이 존재하지 않는다.
+  vendor_action: ''
+  vendor_url: https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_no_such_table
+  versions:
+  - MySQL 5.5
+  - MySQL 5.6
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: 서버 오류 번호(ER_) 1000번대 — 5.5~9.x 동일(SQL 클라이언트 오류·에러 로그 문구 공통)
+- code: MY-1194
+  severity: critical
+  category: internal
+  title: 테이블 손상(MyISAM)
+  immediate:
+  - "손상 표시 테이블 목록·최초 시각: `grep -n -i 'marked as crashed' <오류 로그 경로> | tail -20` (경로는 `SELECT @@log_error;`) — 같은 시각 mysqld 비정상 종료('ready for connections' 재출력)·디스크 가득참 여부 대조 (읽기 전용)"
+  - "대상 테이블 엔진 확인: `SELECT TABLE_SCHEMA, TABLE_NAME, ENGINE, TABLE_ROWS, UPDATE_TIME FROM information_schema.TABLES WHERE TABLE_NAME = '<table>';` — ENGINE 이 MyISAM 이면 이 코드 해당, 파일 `ls -l <datadir>/<db>/<table>.*` 크기 기록"
+  - "CHECK/REPAIR TABLE·myisamchk 는 테이블 잠금·파일 변경이 따르므로 1차에서 실행하지 않는다 — 테이블을 쓰는 업무와 영향 범위만 기록"
+  short:
+  - "(2차·승인 후, 롤백: 손상 테이블 파일(.MYD·.MYI, 5.7 은 .frm, 8.0 은 .sdi) 복사본 확보 후) `CHECK TABLE <db>.<table>;` → `REPAIR TABLE <db>.<table>;` — 수행 중 테이블 잠금, 실패 시 서버 중지 상태에서 `myisamchk -r <datadir>/<db>/<table>.MYI`"
+  mid:
+  - InnoDB 전환
+  long:
+  - 백업 검증
+  source: GPT 수집·벤더 문서 대조 완료(https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_crashed_on_usage)
+  vendor_cause: MyISAM 테이블이 손상된 것으로 표시돼 사용 시 오류가 발생했다.
+  vendor_action: CHECK TABLE로 상태를 확인하고 REPAIR TABLE 또는 myisamchk로 복구한다.
+  vendor_url: https://dev.mysql.com/doc/refman/8.0/en/myisam-repair.html
+  versions:
+  - MySQL 5.5
+  - MySQL 5.6
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: 서버 오류 번호(ER_) 1000번대 — 5.5~9.x 동일(SQL 클라이언트 오류·에러 로그 문구 공통)
+- code: MY-1226
+  severity: error
+  category: capacity
+  title: 사용자 자원 한도 초과
+  immediate:
+  - "계정 자원 한도 확인(비밀번호 컬럼 제외): `SELECT user, host, max_questions, max_updates, max_connections, max_user_connections FROM mysql.user WHERE user='<user>';` (읽기 전용)"
+  - "현재 연결 수: `SELECT user, COUNT(*) FROM information_schema.PROCESSLIST GROUP BY user;` 와 전역 `SELECT @@max_user_connections;` — 오류 원문의 자원 이름(max_user_connections 등) 대조"
+  short:
+  - "(2차·승인 후) `ALTER USER '<user>'@'<host>' WITH MAX_USER_CONNECTIONS <n>;` (5.7.6+, 이전은 GRANT … WITH) 로 한도 조정 — 롤백: 변경 전 값 기록"
+  mid:
+  - "애플리케이션 커넥션 풀 최대값 합계와 계정 한도 재산정"
+  long:
+  - "계정별 연결 수 감시와 자원 한도 정책 문서화"
+  source: GPT 수집·벤더 문서 대조 완료(https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_user_limit_reached)
+  vendor_cause: 사용자가 설정된 시간당 쿼리·업데이트·연결 또는 동시 연결 자원 한도를 초과했다.
+  vendor_action: ALTER USER로 해당 자원 한도를 변경하고 제한을 없애려면 값을 0으로 설정한다.
+  vendor_url: https://dev.mysql.com/doc/refman/8.0/en/user-resources.html
+  versions:
+  - MySQL 5.5
+  - MySQL 5.6
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: 서버 오류 번호(ER_) 1000번대 — 5.5~9.x 동일(SQL 클라이언트 오류·에러 로그 문구 공통)
+- code: MY-1290
+  severity: error
+  category: internal
+  title: 서버 옵션으로 실행 불가
+  immediate:
+  - "오류 원문의 옵션 이름 기록 후 상태 확인: `SELECT @@read_only, @@super_read_only, @@secure_file_priv;` (super_read_only 5.7.8+, 읽기 전용)"
+  - "복제 역할 확인: `SHOW REPLICA STATUS\\G` (8.0.22+) / `SHOW SLAVE STATUS\\G` (이전) — 결과가 있으면 복제본에 쓰기를 시도한 것"
+  short:
+  - "(2차·승인 후) 쓰기 요청을 원본(primary)으로 라우팅하도록 접속 설정 수정, read_only 해제는 역할 전환 절차로만 — 롤백: 변경 전 설정 기록"
+  mid:
+  - "읽기/쓰기 분리 접속 라우팅(프록시·데이터소스) 구성 정비"
+  long:
+  - "DB 역할(원본/복제본) 변경 이력 관리와 1290 오류 감시"
+  source: GPT 수집·벤더 문서 대조 완료(https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_option_prevents_statement)
+  vendor_cause: 현재 서버가 사용 중인 특정 시작 옵션 때문에 요청 문장을 실행할 수 없다.
+  vendor_action: ''
+  vendor_url: https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_option_prevents_statement
+  versions:
+  - MySQL 5.5
+  - MySQL 5.6
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: 서버 오류 번호(ER_) 1000번대 — 5.5~9.x 동일(SQL 클라이언트 오류·에러 로그 문구 공통)
+- code: MY-1317
+  severity: error
+  category: internal
+  title: 쿼리 실행 중단됨
+  immediate:
+  - "중단 주체 확인: 같은 시각 운영자·관리 도구·스크립트의 쿼리 중단 명령 실행 기록과 실행 시간 제한(3024 동반 여부)을 error log·애플리케이션 로그로 확인"
+  - "현재 장기 실행 쿼리: `SELECT id, user, time, state, LEFT(info,100) FROM information_schema.PROCESSLIST WHERE command='Query' ORDER BY time DESC LIMIT 20;` (읽기 전용)"
+  short:
+  - "(2차) 중단된 쿼리의 실행계획(`EXPLAIN <SQL>`, 실행 안 함)과 잠금 대기 원인 분석, 재실행은 업무 담당 승인 후"
+  mid:
+  - "장기 쿼리 튜닝과 클라이언트 타임아웃·서버 max_execution_time 정책 정렬"
+  long:
+  - "쿼리 중단(1317) 건수 감시와 자동 중단 스크립트 사용 기록 관리"
+  source: GPT 수집·벤더 문서 대조 완료(https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_query_interrupted)
+  note: 쿼리가 실제 중단되어 기능 수행에 실패한 오류이므로 warn보다 error가 타당함
+  vendor_cause: 실행 중인 쿼리가 KILL QUERY 등의 요청으로 중단됐다.
+  vendor_action: ''
+  vendor_url: https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_query_interrupted
+  versions:
+  - MySQL 5.5
+  - MySQL 5.6
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: 서버 오류 번호(ER_) 1000번대 — 5.5~9.x 동일(SQL 클라이언트 오류·에러 로그 문구 공통)
+- code: MY-1406
+  severity: error
+  category: internal
+  title: 컬럼 데이터 길이 초과
+  immediate:
+  - "오류 원문의 컬럼명·행 번호 기록 후 정의 확인: `SELECT column_name, data_type, character_maximum_length FROM information_schema.COLUMNS WHERE table_schema='<db>' AND table_name='<table>';` (읽기 전용)"
+  - "`SELECT @@sql_mode;` — STRICT_TRANS_TABLES 가 있으면 오류, 없으면 잘림 경고(1265)로 저장됨(환경 간 차이 확인)"
+  short:
+  - "(2차·승인 후) 컬럼 길이 확장(`ALTER TABLE … MODIFY`) 또는 입력 검증 수정 — 영향: 대형 테이블 ALTER 는 테이블 재작성·잠금, 롤백: 변경 전 `SHOW CREATE TABLE` 결과 저장"
+  mid:
+  - "애플리케이션 입력 길이 검증과 문자셋(utf8mb4 최대 4바이트) 고려 컬럼 설계"
+  long:
+  - "데이터 검증 표준과 환경 간 sql_mode 통일"
+  source: GPT 수집·벤더 문서 대조 완료(https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_data_too_long)
+  note: 데이터 저장 작업이 실패하는 오류이므로 warn보다 error가 타당함
+  vendor_cause: 입력하려는 데이터가 대상 컬럼에 허용된 길이보다 길다.
+  vendor_action: ''
+  vendor_url: https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_data_too_long
+  versions:
+  - MySQL 5.5
+  - MySQL 5.6
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: 서버 오류 번호(ER_) 1000번대 — 5.5~9.x 동일(SQL 클라이언트 오류·에러 로그 문구 공통)
+- code: MY-1461
+  severity: error
+  category: capacity
+  title: 프리페어드 문 한도 초과
+  immediate:
+  - "한도와 현재값: `SHOW GLOBAL VARIABLES LIKE 'max_prepared_stmt_count';` 와 `SHOW GLOBAL STATUS LIKE 'Prepared_stmt_count';` — 현재값이 한도와 같으면 확정 (읽기 전용)"
+  - "누수 여부: `SHOW GLOBAL STATUS LIKE 'Com_stmt_%';` — Com_stmt_prepare 가 Com_stmt_close 보다 계속 크게 늘면 문을 닫지 않는 애플리케이션"
+  - "문을 많이 쥔 연결: `SELECT OWNER_THREAD_ID, COUNT(*) AS cnt FROM performance_schema.prepared_statements_instances GROUP BY OWNER_THREAD_ID ORDER BY cnt DESC LIMIT 10;` → `SELECT THREAD_ID, PROCESSLIST_USER, PROCESSLIST_HOST FROM performance_schema.threads WHERE THREAD_ID = <id>;` (5.7+)"
+  short:
+  - "(2차·승인 후, 롤백: 이전 값 기록 후 `SET GLOBAL max_prepared_stmt_count = <이전값>;`) 임시로 `SET GLOBAL max_prepared_stmt_count = <새 값>;` — 근본은 해당 애플리케이션이 PreparedStatement 를 닫도록(드라이버 문 캐시 크기·useServerPrepStmts 설정 포함) 수정"
+  mid:
+  - 문 반납 로직 수정
+  long:
+  - 문 사용량 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_max_prepared_stmt_count_reached)
+  vendor_cause: 서버 전체 prepared statement 수가 max_prepared_stmt_count에 도달했다.
+  vendor_action: max_prepared_stmt_count 값을 조정한다.
+  vendor_url: https://dev.mysql.com/doc/refman/8.0/en/statement-caching.html
+  versions:
+  - MySQL 5.5
+  - MySQL 5.6
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: 서버 오류 번호(ER_) 1000번대 — 5.5~9.x 동일(SQL 클라이언트 오류·에러 로그 문구 공통)
+- code: MY-1637
+  severity: critical
+  category: capacity
+  title: 동시 트랜잭션 초과
+  immediate:
+  - "활성·장기 트랜잭션: `SELECT COUNT(*) FROM information_schema.INNODB_TRX;` · `SELECT trx_id, trx_started, trx_mysql_thread_id FROM information_schema.INNODB_TRX ORDER BY trx_started LIMIT 10;` (읽기 전용)"
+  - "`SHOW ENGINE INNODB STATUS\\G` 의 TRANSACTIONS·History list length 와 `SELECT @@innodb_rollback_segments;` (기본 128) 확인"
+  short:
+  - "(2차·승인 후) 장기 미커밋 트랜잭션의 소유 앱 확인 후 커밋·종료 협의, innodb_rollback_segments 가 기본값보다 작게 설정됐으면 원복 검토 — 롤백: 설정 변경 전 값 기록"
+  mid:
+  - "트랜잭션 범위 축소와 커넥션 풀 autocommit 설정 정비"
+  long:
+  - "활성 트랜잭션 수·History list length 감시"
+  source: GPT 수집·벤더 문서 대조 완료(https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_too_many_concurrent_trxs)
+  vendor_cause: 동시에 활성화할 수 있는 트랜잭션 수를 초과했다.
+  vendor_action: ''
+  vendor_url: https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_too_many_concurrent_trxs
+  versions:
+  - MySQL 5.5
+  - MySQL 5.6
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: 서버 오류 번호(ER_) 1000번대 — 5.5~9.x 동일(SQL 클라이언트 오류·에러 로그 문구 공통)
+- code: MY-1812
+  severity: critical
+  category: storage
+  title: 테이블스페이스 누락
+  immediate:
+  - "오류 원문의 테이블 기록 후 파일 존재 확인: `ls -l <datadir>/<db>/<table>.ibd` (읽기 전용)"
+  - "error log 의 같은 테이블 선행 메시지: `grep -i '<table>' <log_error 경로> | tail -30`, 최근 DISCARD/IMPORT TABLESPACE·파일 이동 작업 이력 대조"
+  short:
+  - "(2차·승인 후) 백업의 .ibd 를 `ALTER TABLE <db>.<table> IMPORT TABLESPACE` 로 가져오거나 테이블 단위 복원 — 롤백: 작업 전 해당 DB 디렉터리 사본 보관"
+  mid:
+  - "백업에서 단일 테이블 복구 절차(전송 가능 테이블스페이스) 문서화"
+  long:
+  - "datadir 파일 직접 조작 금지 정책과 정기 백업 복원 검증"
+  source: GPT 수집·벤더 문서 대조 완료(https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_tablespace_missing)
+  vendor_cause: 테이블에 필요한 테이블스페이스가 존재하지 않는다.
+  vendor_action: ''
+  vendor_url: https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_tablespace_missing
+  versions:
+  - MySQL 5.6
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: ER_TABLESPACE_MISSING 은 5.6(InnoDB file-per-table 확장) 도입
+- code: MY-1813
+  severity: error
+  category: storage
+  title: 테이블스페이스 이미 존재
+  immediate:
+  - "고아 파일 확인: `ls -l <datadir>/<db>/<table>.ibd` 와 `SELECT name FROM information_schema.INNODB_TABLESPACES WHERE name='<db>/<table>';` (8.0, 5.7 은 INNODB_SYS_TABLESPACES) — 파일만 있고 딕셔너리에 없으면 고아 파일 (읽기 전용)"
+  - "error log 에서 직전에 실패한 DDL(CREATE/ALTER/DROP·IMPORT) 기록 확인"
+  short:
+  - "(2차·승인 후) 고아 .ibd 는 삭제하지 말고 datadir 밖으로 이동 보관한 뒤 DDL 재실행 — 롤백: 이동한 파일 원위치"
+  mid:
+  - "DDL 실패 시 정리 절차(고아 파일 처리) 문서화"
+  long:
+  - "DDL 작업 절차(사전 백업·실패 처리) 표준화"
+  source: GPT 수집·벤더 문서 대조 완료(https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_tablespace_exists)
+  vendor_cause: 생성하려는 테이블스페이스가 이미 존재한다.
+  vendor_action: ''
+  vendor_url: https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_tablespace_exists
+  versions:
+  - MySQL 5.6
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: ER_TABLESPACE_EXISTS 는 5.6 도입
+- code: MY-2003
+  severity: critical
+  category: connection
+  title: 서버 접속 불가
+  immediate:
+  - 서버에서 `systemctl status mysqld` 또는 `systemctl status mysql`(배포판별 서비스명) 과 `ss -lntp | grep mysqld` 로 실제 리슨 포트 확인 — 리슨이 없으면 서버가 내려간 상태(읽기 전용)
+  - 클라이언트에서 `nc -vzw3 <server> <port>` 로 도달성, my.cnf 의 bind-address·port 값 확인
+  - 'error log 마지막 기동·종료 기록: `tail -100 <log_error 경로>` — 접속이 복구된 뒤에만 `mysql -u <조회계정> -p -e "SHOW GLOBAL STATUS LIKE ''Threads_connected'';"` 로 연결 수 확인'
+  short:
+  - "(2차·승인 후) 서버 중지면 error log 원인 확인 후 기동, 방화벽(firewalld/iptables)에 <port>/tcp 허용 — 롤백: 방화벽 규칙 변경 전 저장(`firewall-cmd --list-all` 결과)"
+  mid:
+  - "bind_address·포트·방화벽 설정을 구성 표준 문서로 관리"
+  long:
+  - "1분 주기 접속 헬스체크와 mysqld 프로세스 감시"
+  source: GPT 수집·벤더 문서 대조 완료(https://dev.mysql.com/doc/mysql-errors/8.0/en/client-error-reference.html#error_cr_conn_host_error)
+  vendor_cause: 클라이언트 오류 2003(CR_CONN_HOST_ERROR, 'Can't connect to MySQL server on <host>') — 지정 호스트·포트의 MySQL 서버에 TCP 연결을 만들지 못했다. 서버 중지, 다른 포트·bind-address 로만 리슨, 방화벽 차단, 잘못된 호스트 지정이 흔한 원인이다(MY-2003 은 이 분석기의 표기).
+  vendor_action: 서버 실행 여부, TCP/IP 사용 여부, 포트 번호와 방화벽 설정을 확인한다.
+  vendor_url: https://dev.mysql.com/doc/refman/8.0/en/can-not-connect-to-server.html
+  versions:
+  - MySQL 5.5
+  - MySQL 5.6
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: 클라이언트(CR_) 오류 번호 2000번대 — 5.5~9.x 동일(클라이언트 라이브러리·커넥터 로그에 기록)
+- code: MY-2005
+  severity: error
+  category: connection
+  title: 호스트 해석 실패
+  immediate:
+  - "클라이언트에서 이름 해석 확인: `getent hosts <server>` 또는 `nslookup <server>` — 실패면 DNS/hosts 문제 (읽기 전용)"
+  - "접속 문자열의 호스트명 철자와 /etc/hosts 항목(`grep <server> /etc/hosts`) 확인"
+  short:
+  - "(2차·승인 후) DNS 레코드 또는 /etc/hosts 정정 — 롤백: 변경 전 파일·레코드 백업"
+  mid:
+  - "DB 접속 대상을 관리되는 DNS 별칭으로 일원화"
+  long:
+  - "DNS 응답 감시와 DNS 변경 이력 관리"
+  source: GPT 수집·벤더 문서 대조 완료(https://dev.mysql.com/doc/mysql-errors/8.0/en/client-error-reference.html#error_cr_unknown_host)
+  vendor_cause: 지정한 MySQL 서버 호스트 이름을 해석할 수 없다.
+  vendor_action: 호스트명을 확인하고 DNS 또는 이름 해석 설정을 점검한다.
+  vendor_url: https://dev.mysql.com/doc/refman/8.0/en/problems-connecting.html
+  versions:
+  - MySQL 5.5
+  - MySQL 5.6
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: 클라이언트(CR_) 오류 번호 2000번대 — 5.5~9.x 동일(클라이언트 라이브러리·커넥터 로그에 기록)
+- code: MY-2008
+  severity: error
+  category: memory
+  title: MySQL 클라이언트 메모리 부족
+  immediate:
+  - "오류를 낸 클라이언트(애플리케이션·mysql CLI)와 실행 SQL 기록, 결과 행 수는 같은 조건의 `SELECT COUNT(*)` 를 DBA 에 요청해 추정 (읽기 전용)"
+  - "클라이언트 호스트 메모리 확인: `free -m` (Linux) 또는 작업 관리자 — 클라이언트 측 문제이며 서버 조치 대상 아님"
+  short:
+  - "(2차) 대용량 결과셋은 페이징(LIMIT)·스트리밍 조회(드라이버 fetch 크기)로 변경, mysql CLI 는 `--quick` 옵션 사용 — 운영 반영은 승인 후"
+  mid:
+  - "쿼리 결과 크기 상한과 배치 분할 처리 기준"
+  long:
+  - "클라이언트 메모리·결과 크기 기준 문서화"
+  source: GPT 수집·벤더 문서 대조 완료(https://dev.mysql.com/doc/mysql-errors/8.0/en/client-error-reference.html#error_cr_out_of_memory)
+  note: 서버가 아니라 클라이언트 라이브러리의 메모리 부족으로 해당 클라이언트 기능 실패 수준임
+  vendor_cause: MySQL 클라이언트 라이브러리가 필요한 메모리를 할당하지 못했다.
+  vendor_action: ''
+  vendor_url: https://dev.mysql.com/doc/mysql-errors/8.0/en/client-error-reference.html#error_cr_out_of_memory
+  versions:
+  - MySQL 5.5
+  - MySQL 5.6
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: 클라이언트(CR_) 오류 번호 2000번대 — 5.5~9.x 동일(클라이언트 라이브러리·커넥터 로그에 기록)
+- code: MY-2055
+  severity: error
+  category: connection
+  title: MySQL 서버 연결 손실
+  immediate:
+  - "오류 원문의 'system error: <번호>' 기록 → `perror <번호>` 로 의미 확인(Linux 예: 104 연결 재설정, 110 시간 초과)"
+  - "같은 시각 서버 기동 시각(Uptime)과 타임아웃·패킷 한도: `SHOW GLOBAL STATUS LIKE 'Uptime';` · `SELECT @@wait_timeout, @@max_allowed_packet;` (읽기 전용)"
+  - "TLS 사용 시 error log 의 SSL 관련 오류 동반 여부 확인"
+  short:
+  - "(2차·승인 후) 커넥션 풀 유효성 검사·유휴 수명을 wait_timeout 보다 짧게 설정, 큰 패킷이면 max_allowed_packet 조정 — 롤백: 이전 설정 보관"
+  mid:
+  - "네트워크 장비 세션 타임아웃과 TCP keepalive 정렬"
+  long:
+  - "연결 손실(2013·2055) 오류율 감시"
+  source: GPT 수집·벤더 문서 대조 완료(https://dev.mysql.com/doc/mysql-errors/8.0/en/client-error-reference.html#error_cr_server_lost_extended)
+  note: TLS 전용 오류가 아니라 서버 연결 손실과 시스템 오류를 함께 보고하는 클라이언트 오류임
+  vendor_cause: MySQL 서버와 연결이 끊겼고 시스템 오류 정보가 함께 반환됐다.
+  vendor_action: ''
+  vendor_url: https://dev.mysql.com/doc/mysql-errors/8.0/en/client-error-reference.html#error_cr_server_lost_extended
+  versions:
+  - MySQL 5.5
+  - MySQL 5.6
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: 클라이언트(CR_) 오류 번호 2000번대 — 5.5~9.x 동일(클라이언트 라이브러리·커넥터 로그에 기록)
+- code: MY-3024
+  severity: error
+  category: performance
+  title: 최대 실행시간 초과로 쿼리 중단
+  immediate:
+  - "중단된 SQL 과 제한값 확인: `SELECT @@max_execution_time;` (밀리초, 0=무제한, 5.7.8+) 와 SQL 의 `MAX_EXECUTION_TIME(n)` 옵티마이저 힌트 여부 (읽기 전용)"
+  - "실행계획은 `EXPLAIN <SQL>` 로만 확인(실행하지 않음) — type=ALL·rows 과다 여부 기록"
+  short:
+  - "(2차·승인 후) 인덱스 추가·쿼리 재작성으로 실행 시간 단축, 제한값 조정은 세션·힌트 단위 우선 — 롤백: 전역 변경 시 이전 값 기록"
+  mid:
+  - "업무별 쿼리 시간 기준(SLO) 설정과 max_execution_time 값 정렬"
+  long:
+  - "3024 발생 건수와 상위 지연 쿼리 정기 튜닝"
+  source: GPT 수집·벤더 문서 대조 완료(https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_query_timeout)
+  note: 용량 고갈이 아니라 최대 statement 실행시간을 초과한 쿼리 성능·시간 제한 오류임
+  vendor_cause: SELECT 실행 시간이 max_execution_time 또는 MAX_EXECUTION_TIME 제한을 초과했다.
+  vendor_action: 필요하면 max_execution_time 값을 늘리거나 0으로 설정해 실행시간 제한을 비활성화한다.
+  vendor_url: https://dev.mysql.com/doc/refman/8.0/en/server-system-variables.html#sysvar_max_execution_time
+  versions:
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: ER_QUERY_TIMEOUT(max_execution_time)는 5.7.4 도입
+- code: MY-3167
+  severity: error
+  category: internal
+  title: 지정 기능 비활성화
+  immediate:
+  - "오류 원문(The '<기능>' feature is disabled; see the documentation for '<옵션>')의 기능·옵션 이름 기록 후 현재 값 확인: `SHOW GLOBAL VARIABLES LIKE '<옵션명>';` (읽기 전용)"
+  - "최근 my.cnf 변경·버전 업그레이드 이력 대조(비활성 기본값 변경 여부)"
+  short:
+  - "(2차·승인 후) 기능이 필요하면 문서 안내 옵션을 my.cnf 에 설정(재기동이 필요할 수 있음), 불필요하면 애플리케이션에서 사용 제거 — 롤백: my.cnf 백업"
+  mid:
+  - "서버 옵션 형상 관리(my.cnf 변경 이력)와 기능 사용 목록 문서화"
+  long:
+  - "버전 업그레이드 시 비활성·제거 기능 사전 점검 절차"
+  source: GPT 수집·벤더 문서 대조 완료(https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_feature_disabled_see_doc)
+  note: 계정 잠금 오류가 아니라 지정된 기능이 비활성화되어 있음을 나타내는 ER_FEATURE_DISABLED_SEE_DOC임
+  vendor_cause: 요청한 기능이 서버에서 비활성화되어 있다.
+  vendor_action: ''
+  vendor_url: https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_feature_disabled_see_doc
+  versions:
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: ER_FEATURE_DISABLED_SEE_DOC 는 5.7 도입
+- code: MY-010119
+  severity: critical
+  category: internal
+  title: 서버 중단 처리 Aborting
+  immediate:
+  - "error log 에서 Aborting 직전 [ERROR] 줄 확인: `grep -B 30 'Aborting' <log_error 경로> | tail -40` — 첫 원인 오류 코드(MY-xxxxxx) 기록 (읽기 전용)"
+  - "프로세스 상태 `systemctl status mysqld`(배포판에 따라 mysql) 와 같은 시각 OS 로그 `journalctl -u mysqld --since '1 hour ago' | tail -50`, core 파일 생성 여부 확인"
+  short:
+  - "(2차·승인 후) 원인 오류별 조치(my.cnf 오류 수정·포트 충돌 해소·datadir 권한 복구) 후 기동 — 롤백: my.cnf 변경 전 백업, 기동 실패 시 원복"
+  mid:
+  - "설정 변경 전 `mysqld --validate-config` (8.0.16+) 검증 절차 도입"
+  long:
+  - "기동 실패 원인별 대응 절차 문서화와 mysqld 기동 감시"
+  source: GPT 수집·벤더 문서 대조 완료(https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html)
+  note: 비정상 종료 감지 코드가 아니라 서버가 Aborting 단계로 진입했음을 알리는 오류 로그 메시지임
+  vendor_cause: 서버가 기동 또는 실행 중 치명적 오류로 종료 단계(Aborting)에 들어갔음을 알리는 error log 메시지(8.0+ 형식). 실제 원인은 바로 앞의 [ERROR] 줄(설정 오류·포트 사용 중·데이터 디렉터리 권한·InnoDB 초기화 실패 등)에 있다.
+  vendor_action: ''
+  vendor_note: 제조사 문서에 원인·조치 항목 없음
+  vendor_url: https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html
+  versions:
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: 6자리 에러 로그 코드([MY-01xxxx] [Server]/[InnoDB] 서브시스템)는 8.0 도입 — 5.7 이하 에러 로그에는 코드 없이 문구만 기록(문구 룰로 보완)
+- code: MY-012153
+  severity: critical
+  category: storage
+  title: 테이블스페이스 범위밖 페이지
+  immediate:
+  - "오류 로그에서 space id·space name·page number 기록: `grep -n 'outside the tablespace bounds' <오류 로그 경로> | tail -20` — 뒤이어 assertion·mysqld 비정상 종료가 있는지 확인 (8.0+, 읽기 전용)"
+  - "해당 테이블스페이스 특정: `SELECT SPACE, NAME, FILE_SIZE, ALLOCATED_SIZE FROM information_schema.INNODB_TABLESPACES WHERE SPACE = <space id>;` (8.0, 5.7 은 INNODB_SYS_TABLESPACES) 와 `ls -l <datadir>/<db>/<table>.ibd` — 파일 크기가 FILE_SIZE 보다 작으면 잘림·손상 의심"
+  - "오류 로그·core 원본 보존: `cp -p <오류 로그 경로> <보관 경로>/` 와 `ls -l <datadir>/core*` — 서비스 조치 전 증거 확보"
+  short:
+  - "(2차·승인 후, 롤백: 데이터 디렉터리 전체 파일 수준 백업 선행) 손상 테이블만 백업에서 복원하거나 `innodb_force_recovery=1`(낮은 값부터) 로 기동해 `mysqldump` 로 추출 후 재적재 — 4 이상은 데이터 영구 손상 위험, 제조사 지원 권고"
+  mid:
+  - 복구·패치
+  long:
+  - 백업 검증
+  source: GPT 수집·벤더 문서 대조 완료(https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html)
+  note: 어설션이 아니라 테이블스페이스 범위를 벗어난 페이지 번호 접근을 보고하는 InnoDB 오류임
+  vendor_cause: 접근하려는 InnoDB 페이지 번호가 해당 테이블스페이스의 범위를 벗어났다.
+  vendor_action: 기동 중 발생했다면 my.cnf 설정이 보유한 ibdata 파일과 일치하는지 확인한다.
+  vendor_url: https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html
+  versions:
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: 6자리 에러 로그 코드([MY-01xxxx] [Server]/[InnoDB] 서브시스템)는 8.0 도입 — 5.7 이하 에러 로그에는 코드 없이 문구만 기록(문구 룰로 보완)
+- code: MY-012574
+  severity: critical
+  category: storage
+  title: InnoDB 파일 잠금 실패
+  immediate:
+  - "중복 기동 확인: `ps -ef | grep [m]ysqld` — 같은 datadir 로 두 프로세스면 원인 확정 (읽기 전용)"
+  - "파일 점유 프로세스: `fuser -v <datadir>/ibdata1` 또는 `lsof <datadir>/ibdata1`, 원격 파일시스템(NFS) 여부 `df -T <datadir>`"
+  short:
+  - "(2차·승인 후) 정상 인스턴스를 식별한 뒤 중복 프로세스 정리·기동 스크립트 수정 — 롤백: 정리 전 프로세스 목록·error log 보존"
+  mid:
+  - "서비스 관리자(systemd)로만 기동하도록 단일 인스턴스 보장"
+  long:
+  - "기동 전 검증(포트·잠금·datadir) 스크립트 운영"
+  source: GPT 수집·벤더 문서 대조 완료(https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html)
+  vendor_cause: InnoDB가 데이터 또는 로그 파일의 잠금을 획득하지 못했다.
+  vendor_action: ''
+  vendor_url: https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html
+  versions:
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: 6자리 에러 로그 코드([MY-01xxxx] [Server]/[InnoDB] 서브시스템)는 8.0 도입 — 5.7 이하 에러 로그에는 코드 없이 문구만 기록(문구 룰로 보완)
+- code: MY-012592
+  severity: critical
+  category: disk
+  title: InnoDB 파일작업 OS 오류
+  immediate:
+  - "error log 의 Operating system error number N 과 대상 파일 기록 → `perror <N>` 로 의미 확인(예: 28 공간 부족, 13 권한 거부, 2 파일 없음) (읽기 전용)"
+  - "대상 경로 공간·권한: `df -h <datadir>` · `ls -ld <datadir>` 와 `dmesg -T | tail -50` 의 I/O 오류"
+  short:
+  - "(2차·승인 후) errno 원인 해소(공간 확보·소유권 mysql:mysql 복구·스토리지 점검) — 롤백: 권한 변경 전 `ls -l` 결과 저장"
+  mid:
+  - "datadir 볼륨 사용률 경보와 디렉터리 권한 형상 관리"
+  long:
+  - "OS 오류 번호별 InnoDB 파일 오류 감시"
+  source: GPT 수집·벤더 문서 대조 완료(https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html)
+  note: 로그파일 전용 오류가 아니라 InnoDB 파일 작업에서 발생한 운영체제 오류 번호를 보고함
+  vendor_cause: InnoDB 파일 작업 중 운영체제가 오류 번호를 반환했다.
+  vendor_action: ''
+  vendor_url: https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html
+  versions:
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: 6자리 에러 로그 코드([MY-01xxxx] [Server]/[InnoDB] 서브시스템)는 8.0 도입 — 5.7 이하 에러 로그에는 코드 없이 문구만 기록(문구 룰로 보완)
+- code: MY-013183
+  severity: critical
+  category: internal
+  title: InnoDB 어설션(강제 종료)
+  immediate:
+  - "error log 의 Assertion failure 줄(파일·라인)과 직후 스택 트레이스를 별도 파일로 보존: `grep -A 40 'Assertion failure' <log_error 경로> > /tmp/mysql_assert_$(date +%Y%m%d).txt` (원본 변경 없음)"
+  - "반복 크래시 여부: `grep -c 'ready for connections' <log_error 경로>` 와 `systemctl status mysqld` (읽기 전용)"
+  short:
+  - "(2차·승인 후) 손상 의심 시 innodb_force_recovery 를 1부터 단계적으로 올려 기동·덤프 확보 — 영향: 4 이상은 데이터 손실 위험, 롤백: 설정 제거 후 정상 기동, 작업 전 datadir 사본 보관"
+  mid:
+  - "어설션 문구를 해당 버전 릴리스 노트·버그 DB 와 대조해 마이너 버전 업데이트"
+  long:
+  - "정기 백업 복원 검증과 마이너 버전 업데이트 정책"
+  source: GPT 수집·벤더 문서 대조 완료(https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html)
+  vendor_cause: InnoDB 내부 어설션 검사가 실패했다.
+  vendor_action: ''
+  vendor_url: https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html
+  versions:
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: 6자리 에러 로그 코드([MY-01xxxx] [Server]/[InnoDB] 서브시스템)는 8.0 도입 — 5.7 이하 에러 로그에는 코드 없이 문구만 기록(문구 룰로 보완)
+- code: MY-010914
+  severity: warn
+  category: connection
+  title: 사용자 연결 중단
+  immediate:
+  - "중단 사유 확인: `grep 'Aborted connection' <오류 로그 경로> | tail -50` — 괄호 안이 'Got timeout reading communication packets' 면 wait_timeout·net_read_timeout, 'Got an error reading communication packets' 면 클라이언트 비정상 종료·네트워크 (읽기 전용)"
+  - "`SHOW GLOBAL STATUS LIKE 'Aborted_%';` 와 `SHOW GLOBAL VARIABLES WHERE Variable_name IN ('wait_timeout','interactive_timeout','net_read_timeout','max_allowed_packet');` — Aborted_clients 가 계속 늘고 특정 user·host 에 몰리면 그 애플리케이션 연결 처리 원인"
+  short:
+  - "(2차·승인 후, 롤백: 이전 풀 설정 보관) 커넥션 풀 유휴 수명(maxLifetime·idleTimeout)을 wait_timeout 보다 짧게 맞추고 애플리케이션 종료 시 연결 close 호출 확인 — 서버 변수 변경은 이전 값 기록 후"
+  mid:
+  - 버퍼풀 재산정
+  long:
+  - 메모리 계획
+  source: GPT 수집·벤더 문서 대조 완료(https://dev.mysql.com/doc/refman/8.0/en/error-log-rule-based-filtering.html)
+  note: 버퍼풀 할당 실패가 아니라 ER_ABORTING_USER_CONNECTION 사용자 연결 중단 로그임
+  vendor_cause: 사용자 세션의 연결이 중단돼 Aborted connection 메시지가 기록됐다.
+  vendor_action: ''
+  vendor_url: https://dev.mysql.com/doc/refman/8.0/en/error-log-rule-based-filtering.html
+  versions:
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: 6자리 에러 로그 코드([MY-01xxxx] [Server]/[InnoDB] 서브시스템)는 8.0 도입 — 5.7 이하 에러 로그에는 코드 없이 문구만 기록(문구 룰로 보완)
+- code: MY-010270
+  severity: critical
+  category: connection
+  title: UNIX 소켓 바인드 실패
+  immediate:
+  - "소켓 경로·권한 확인: my.cnf 의 socket 값과 `ls -l <socket경로>` · `ls -ld <socket디렉터리>` (읽기 전용)"
+  - "중복 기동 확인: `ps -ef | grep [m]ysqld` 와 `ss -xlp | grep mysql`"
+  short:
+  - "(2차·승인 후) 다른 인스턴스가 없을 때만 남은 소켓·잠금 파일을 이동 보관 후 기동, 디렉터리 소유권 복구 — 롤백: 이동 파일 보관"
+  mid:
+  - "인스턴스별 소켓·pid 경로 분리 표준"
+  long:
+  - "기동 전 검증 스크립트(소켓·포트·잠금) 운영"
+  source: GPT 수집·벤더 문서 대조 완료(https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html)
+  note: 소켓 파일 잠금 실패가 아니라 서버 시작 시 UNIX 소켓 bind 실패 메시지임
+  vendor_cause: MySQL 서버가 UNIX 소켓 주소에 bind하지 못해 시작할 수 없다.
+  vendor_action: ''
+  vendor_url: https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html
+  versions:
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: 6자리 에러 로그 코드([MY-01xxxx] [Server]/[InnoDB] 서브시스템)는 8.0 도입 — 5.7 이하 에러 로그에는 코드 없이 문구만 기록(문구 룰로 보완)
+- code: MY-010262
+  severity: critical
+  category: connection
+  title: 포트 바인드 실패
+  immediate:
+  - "포트 점유 프로세스: `ss -lntp | grep :<port>` (또는 `netstat -lntp`) — mysqld 가 아니면 포트 충돌 확정 (읽기 전용)"
+  - "중복 기동 확인: `ps -ef | grep [m]ysqld` 와 my.cnf 의 port·bind-address 값 대조"
+  short:
+  - "(2차·승인 후) 충돌 프로세스 담당과 협의해 포트 정리 또는 mysqld 포트 변경(접속 설정 동반) — 롤백: my.cnf 백업"
+  mid:
+  - "서버별 포트 할당표 관리"
+  long:
+  - "mysqld 기동 감시와 기동 전 포트 충돌 점검"
+  source: GPT 수집·벤더 문서 대조 완료(https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html)
+  vendor_cause: MySQL 서버가 TCP/IP 포트에 bind하지 못해 시작할 수 없다.
+  vendor_action: ''
+  vendor_url: https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html
+  versions:
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: 6자리 에러 로그 코드([MY-01xxxx] [Server]/[InnoDB] 서브시스템)는 8.0 도입 — 5.7 이하 에러 로그에는 코드 없이 문구만 기록(문구 룰로 보완)
+- code: MY-1927
+  severity: critical
+  category: connection
+  title: 쿼리 중 연결 종료
+  immediate:
+  - "서버 제품 확인: `SELECT VERSION(), @@version_comment;` — 1927 은 MariaDB 오류 번호(ER_CONNECTION_KILLED)이므로 MariaDB 여부 먼저 확인 (읽기 전용)"
+  - "같은 시각 서버 기동 시각 `SHOW GLOBAL STATUS LIKE 'Uptime';` 와 error log 의 shutdown·ready for connections 기록, 운영자·스크립트의 세션 정리 명령 실행 기록 확인"
+  short:
+  - "(2차) 세션 정리 주체(관리 스크립트·모니터링 도구·재기동 작업) 식별 후 대상 조건 조정 협의, 애플리케이션 재연결 로직 점검 — 변경은 승인 후"
+  mid:
+  - "커넥션 풀 재시도·유효성 검사 표준화"
+  long:
+  - "연결 종료 건수 감시와 세션 정리 작업 이력 관리"
+  vendor_cause: MySQL 공식 서버 오류표에는 1927 이 없고(1888~2999 미사용), MariaDB 의 ER_CONNECTION_KILLED 'Connection was killed'(SQLSTATE 70100)이다. 관리자의 세션 종료 명령·서버 종료로 연결이 끊긴 경우다.
+  vendor_url: https://mariadb.com/docs/server/reference/error-codes/mariadb-error-code-reference
+  verify_note: "미검증 — MySQL 8.0 오류표에 1927 없음·MariaDB 오류표의 ER_CONNECTION_KILLED 는 확인, 수집 로그가 실제 MariaDB 인지는 미확인"
+  source: GPT 수집·공식 문서 미확인(보류)
+  note: GPT 대조 시 공식 공개 문서에서 확인 불가 — 실로그·벤더 확인 필요
+  versions:
+  - MySQL 5.5
+  - MySQL 5.6
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  - MySQL 9.x
+  version_note: 서버 오류 번호(ER_) 1000번대 — 5.5~9.x 동일(SQL 클라이언트 오류·에러 로그 문구 공통)

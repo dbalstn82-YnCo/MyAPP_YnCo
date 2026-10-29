@@ -1,0 +1,54 @@
+product: mesim-esb
+layer: sw
+title: mesim-esb 로그 종류 카탈로그 (GPT 수집 — 벤더 문서 대조 필요)
+source: GPT 수집(벤더 문서 대조 필요)
+sources:
+- https://www.metabuild.co.kr/mesim/esb
+- https://www.metabuild.co.kr/mesim/apig
+- https://www.gov-nhncloud.com/kr/marketplace/application-service/mesim-esb
+- https://www.gov-nhncloud.com/kr/marketplace/application-service/mesim-apig-api-gateway
+- https://aws.amazon.com/marketplace/pp/prodview-opwxmqmhaes6c
+- https://aws.amazon.com/marketplace/pp/prodview-ropqm3h2qumre
+- https://data.kosw.or.kr/egovdata/cop/bbs/selectBoardArticle.do?bbsId=BBSMSTR_000000000121&nttId=3303
+- https://m.digitalmarket.kr/m/service/detail.do?s=SAS-3-04-11246
+- https://www.etnews.com/20210512000110
+- https://www.etnews.com/20221214000290
+logtypes:
+- name: 통합 모니터링 데이터
+  path: 공개자료에서 기본 경로·파일명 미확인
+  format: 공개자료에서 파일형식 미확인
+  check: 연계 시스템·인프라·연계 서비스의 메트릭과 성능저하 원인, 병목, 비정상 패턴, 장애 징후를 우선 확인
+  sample: ''
+- name: 장애 추적 이력
+  path: 공개자료에서 기본 경로·파일명 미확인
+  format: 공개자료에서 파일형식 미확인
+  check: 실시간 장애 상황 추적과 장애탐지 결과에서 발생 서비스와 연계 구간 및 반복 패턴을 확인
+  sample: ''
+- name: 어댑터·인터페이스 상태정보
+  path: 공개자료에서 기본 경로·파일명 미확인
+  format: 공개자료에서 파일형식 미확인
+  check: DBMS, File, WAS, Middleware, Web Service, Protocol 어댑터별 연결상태와 실패 구간을 확인
+  sample: ''
+- name: 트랜잭션 모니터링 정보
+  path: 공개자료에서 기본 경로·파일명 미확인
+  format: 공개자료에서 파일형식 미확인
+  check: End to End 연계 흐름의 처리상태와 성능저하 및 병목 구간과 미처리 거래를 확인
+  sample: ''
+- name: 데이터 품질 검증정보
+  path: 공개자료에서 기본 경로·파일명 미확인
+  format: 공개자료에서 파일형식 미확인
+  check: 연계 데이터 품질 검증과 규칙 위반 및 비정상 데이터 패턴과 실패 거래를 확인
+  sample: ''
+sections:
+- heading: 로그 종류 카탈로그 (전수)
+  body: '통합 모니터링 데이터: 공개자료에서 기본 경로·파일명 미확인 · 장애 추적 이력: 공개자료에서 기본 경로·파일명 미확인 · 어댑터·인터페이스 상태정보: 공개자료에서 기본 경로·파일명 미확인 · 트랜잭션 모니터링 정보: 공개자료에서 기본 경로·파일명 미확인 · 데이터 품질 검증정보: 공개자료에서 기본 경로·파일명 미확인'
+- heading: '로그: 통합 모니터링 데이터'
+  body: 경로 공개자료에서 기본 경로·파일명 미확인 / 형식 공개자료에서 파일형식 미확인 / 확인 연계 시스템·인프라·연계 서비스의 메트릭과 성능저하 원인, 병목, 비정상 패턴, 장애 징후를 우선 확인
+- heading: '로그: 장애 추적 이력'
+  body: 경로 공개자료에서 기본 경로·파일명 미확인 / 형식 공개자료에서 파일형식 미확인 / 확인 실시간 장애 상황 추적과 장애탐지 결과에서 발생 서비스와 연계 구간 및 반복 패턴을 확인
+- heading: '로그: 어댑터·인터페이스 상태정보'
+  body: 경로 공개자료에서 기본 경로·파일명 미확인 / 형식 공개자료에서 파일형식 미확인 / 확인 DBMS, File, WAS, Middleware, Web Service, Protocol 어댑터별 연결상태와 실패 구간을 확인
+- heading: '로그: 트랜잭션 모니터링 정보'
+  body: 경로 공개자료에서 기본 경로·파일명 미확인 / 형식 공개자료에서 파일형식 미확인 / 확인 End to End 연계 흐름의 처리상태와 성능저하 및 병목 구간과 미처리 거래를 확인
+- heading: '로그: 데이터 품질 검증정보'
+  body: 경로 공개자료에서 기본 경로·파일명 미확인 / 형식 공개자료에서 파일형식 미확인 / 확인 연계 데이터 품질 검증과 규칙 위반 및 비정상 데이터 패턴과 실패 거래를 확인

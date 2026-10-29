@@ -1,0 +1,382 @@
+product: jboss
+layer: was
+note: 5차 핵심 코드 보강(2026-10-16) — Red Hat JBoss EAP 7.3·8.0 Log Message Reference, WildFly 34 Log Message Reference, wildfly-core ServerLogger/ControllerLogger 소스 원문 대조. 로그=$JBOSS_HOME/standalone/log/server.log(도메인 모드 $JBOSS_HOME/domain/servers/<server>/log/server.log), CLI=$JBOSS_HOME/bin/jboss-cli.sh -c (읽기 전용 조회만 1차)
+codes:
+- code: WFLYSRV0007
+  severity: error
+  category: internal
+  title: 배포 해제(undeploy) 롤백
+  vendor_cause: 배포 "<이름>" 의 해제(undeploy) 작업이 실패해 롤백되었다는 ERROR(Undeploy of deployment … was rolled back with the following failure message). 해제가 취소되었으므로 애플리케이션은 이전 상태로 남아 있으며, 뒤에 붙은 실패 메시지가 원인이다.
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html
+  immediate:
+  - "`grep -n -A10 'WFLYSRV0007' $JBOSS_HOME/standalone/log/server.log | tail -40` 로 배포 이름과 실패 메시지(failure message 뒤 JSON) 기록"
+  - "`$JBOSS_HOME/bin/jboss-cli.sh -c 'deployment-info'` 로 해당 배포가 아직 OK(enabled) 인지 확인 — rolled back 이므로 서비스는 이전 상태 유지가 정상"
+  short:
+  - "(2차·승인 후, 롤백: 해당 없음 — 이미 이전 상태) 실패 메시지의 원인(서비스 의존·잠금 대기)을 해소한 뒤 작업 창에서 undeploy 를 다시 수행"
+  mid:
+  - "배포·해제 작업을 CLI 배치 스크립트로 표준화하고 작업 전후 deployment-info 결과를 남기는 절차 수립"
+  long:
+  - "배포 작업 로그의 WFLYSRV0007·0011·0014·0021 롤백 건수를 변경 관리 대장과 함께 추적"
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: WFLY* 접두 코드는 WildFly 9/EAP 7.0 이후 — EAP 7.3·8.0·WildFly 34 Log Message Reference 원문 확인, EAP 6.x 는 JBAS0xxxxx
+  source: 공식 문서 대조(2026-10-16 5차 보강)
+- code: WFLYSRV0011
+  severity: error
+  category: internal
+  title: 재배포(redeploy) 롤백
+  vendor_cause: 배포 "<이름>" 의 재배포가 실패해 롤백되었다는 ERROR(Redeploy of deployment … was rolled back). 새 내용의 기동 실패(클래스 오류·의존 서비스 누락)가 흔하며, 롤백 후 애플리케이션 상태는 실패 메시지와 deployment-info 로 확인해야 한다.
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html
+  immediate:
+  - "`grep -n -A10 'WFLYSRV0011' $JBOSS_HOME/standalone/log/server.log | tail -40` 로 실패 메시지(missing dependencies·Caused by) 기록"
+  - "`$JBOSS_HOME/bin/jboss-cli.sh -c 'deployment-info'` 와 `$JBOSS_HOME/bin/jboss-cli.sh -c '/deployment=<name>:read-attribute(name=status)'` 로 현재 배포 상태(OK·FAILED·STOPPED) 확인"
+  short:
+  - "(2차·승인 후, 롤백: 직전 배포 파일로 재배포) 실패 원인을 고친 아티팩트로 다시 재배포, 서비스가 내려가 있으면 직전 정상 버전을 먼저 배포"
+  mid:
+  - "재배포 전 스테이징에서 같은 아티팩트로 기동 시험을 거치고 배포 파일 체크섬을 기록하는 절차 수립"
+  long:
+  - "배포 이력(버전·체크섬·결과)을 대장으로 관리해 롤백 시 직전 정상본을 바로 찾도록 함"
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: WFLY* 접두 코드는 WildFly 9/EAP 7.0 이후 — EAP 7.3·8.0·WildFly 34 원문 확인
+  source: 공식 문서 대조(2026-10-16 5차 보강)
+- code: WFLYSRV0014
+  severity: error
+  category: internal
+  title: 배포 교체(replace) 롤백
+  vendor_cause: 배포 "<기존>" 을 "<새 배포>" 로 교체하는 작업이 실패해 롤백되었다는 ERROR(Replacement of deployment … was rolled back). 새 배포의 기동 실패가 원인인 경우가 많으며 기존 배포가 그대로 남았는지 확인해야 한다.
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html
+  immediate:
+  - "`grep -n -A10 'WFLYSRV0014' $JBOSS_HOME/standalone/log/server.log | tail -40` 로 기존·새 배포 이름과 실패 메시지 기록"
+  - "`$JBOSS_HOME/bin/jboss-cli.sh -c 'deployment-info'` 로 기존 배포가 OK 로 남아 있는지 확인(읽기 전용)"
+  short:
+  - "(2차·승인 후, 롤백: 기존 배포 유지) 새 배포의 실패 원인(의존성·설정)을 고친 뒤 교체 작업을 다시 수행"
+  mid:
+  - "교체 배포 전 동일 구성 스테이징에서 새 배포 기동을 확인하는 배포 점검표 운영"
+  long:
+  - "교체 실패 건을 배포 대장에 기록하고 원인 유형별(의존성·설정·코드) 재발 추적"
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: WFLY* 접두 코드는 WildFly 9/EAP 7.0 이후 — EAP 7.3·8.0·WildFly 34 원문 확인
+  source: 공식 문서 대조(2026-10-16 5차 보강)
+- code: WFLYSRV0021
+  severity: error
+  category: internal
+  title: 배포(deploy) 롤백
+  vendor_cause: 배포 "<이름>" 의 배포 작업이 실패해 롤백되었다는 ERROR(Deploy of deployment … was rolled back with the following failure message). 실패 메시지의 WFLYCTL0412(필요 서비스 미설치)·Caused by 예외가 실제 원인이다.
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html
+  immediate:
+  - "`grep -n -A15 'WFLYSRV0021' $JBOSS_HOME/standalone/log/server.log | tail -50` 로 실패 메시지의 누락 서비스(jboss.naming·jboss.data-source 등)와 예외 기록"
+  - "`$JBOSS_HOME/bin/jboss-cli.sh -c '/core-service=management:read-boot-errors'` 로 기동 시 함께 실패한 작업 확인(EAP 7+)"
+  short:
+  - "(2차·승인 후, 롤백: 직전 정상 배포본 재배포) 누락된 데이터소스·JNDI·모듈을 구성하거나 아티팩트를 고쳐 다시 배포"
+  mid:
+  - "배포 아티팩트가 요구하는 데이터소스·모듈 목록을 배포 문서에 명시하고 배포 전 CLI 로 존재를 확인하는 점검 단계 추가"
+  long:
+  - "배포 실패 원인 유형(의존성 누락·설정·코드)을 대장으로 관리해 반복 원인 제거"
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: WFLY* 접두 코드는 WildFly 9/EAP 7.0 이후 — EAP 7.3·8.0·WildFly 34 원문 확인
+  source: 공식 문서 대조(2026-10-16 5차 보강)
+- code: WFLYSRV0022
+  severity: error
+  category: internal
+  title: 배포 롤백(실패 메시지 없음)
+  vendor_cause: 배포 "<이름>" 이 롤백되었지만 실패 메시지가 남지 않았다는 ERROR(Deploy of deployment … was rolled back with no failure message). 같은 작업(배치·복합 작업)의 다른 단계 실패로 함께 롤백된 경우가 많아 앞뒤 로그에서 원인 단계를 찾아야 한다.
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html
+  immediate:
+  - "`grep -n -B30 'WFLYSRV0022' $JBOSS_HOME/standalone/log/server.log | grep -E 'ERROR|WFLYCTL|Caused by' | tail -30` 로 같은 작업의 다른 실패 단계 확인"
+  - "`$JBOSS_HOME/bin/jboss-cli.sh -c 'deployment-info'` 로 배포 상태 확인, 배포 스캐너 사용 시 `ls -l $JBOSS_HOME/standalone/deployments/ | grep -E 'failed|deployed'` 로 표식 파일 확인"
+  short:
+  - "(2차·승인 후, 롤백: 직전 정상 배포본) 함께 실패한 단계를 고친 뒤 해당 배포만 단독으로 다시 배포해 원인 단계를 분리"
+  mid:
+  - "여러 배포를 한 배치로 묶는 스크립트를 배포 단위로 나눠 실패 범위를 줄이는 방식으로 변경"
+  long:
+  - "배포 스크립트 실행 결과(성공·롤백 단계)를 저장해 무메시지 롤백의 원인 추적 자료로 활용"
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: WFLY* 접두 코드는 WildFly 9/EAP 7.0 이후 — EAP 7.3·8.0·WildFly 34 원문 확인
+  source: 공식 문서 대조(2026-10-16 5차 보강)
+- code: WFLYSRV0026
+  severity: error
+  category: internal
+  title: 서버 기동 완료(오류 동반)
+  vendor_cause: 서버가 기동은 끝났지만 오류를 동반했다는 ERROR(… started (with errors) in N ms — Started x of y services (z services failed or missing dependencies …)). 일부 서비스·배포가 실패하거나 의존성이 빠진 채 떠 있으므로 실패한 서비스의 업무가 동작하지 않을 수 있다.
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/7.3/mgmt_model/log-message-reference.html
+  immediate:
+  - "`grep -n -E 'WFLYSRV0026|WFLYCTL0412|WFLYCTL0180|WFLYCTL0186' $JBOSS_HOME/standalone/log/server.log | tail -30` 로 실패·의존성 누락 서비스 수와 이름 기록"
+  - "`$JBOSS_HOME/bin/jboss-cli.sh -c '/core-service=management:read-boot-errors'` 로 기동 오류 목록 확인, `$JBOSS_HOME/bin/jboss-cli.sh -c 'deployment-info'` 로 FAILED 배포 확인"
+  short:
+  - "(2차·승인 후, 롤백: 직전 standalone.xml 백업) 실패 서비스의 원인(데이터소스·포트·모듈)을 고친 뒤 재기동 작업 창에서 정상 기동(WFLYSRV0025) 확인"
+  mid:
+  - "기동 후 점검에 read-boot-errors 결과 0건 확인을 넣고 구성 변경 시 standalone.xml 백업을 필수화"
+  long:
+  - "기동 로그에서 WFLYSRV0026 이 나오면 즉시 경보하도록 감시 등록(정상은 WFLYSRV0025)"
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: EAP 7.3 참조에 전체 문구, EAP 8.0·WildFly 34 참조는 '%s'(문구를 호출부에서 조립) — 같은 ID
+  source: 공식 문서 대조(2026-10-16 5차 보강)
+- code: WFLYSRV0034
+  severity: warn
+  category: security
+  title: native 관리 인터페이스 무인증
+  vendor_cause: native 관리 서비스에 보안 영역(security realm)이나 SASL 서버 인증이 정의되지 않아 모든 접근이 제한 없이 허용된다는 WARN. native 관리 포트(구성했을 때 보통 9999)로 누구나 서버 구성을 바꿀 수 있는 상태다.
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html
+  immediate:
+  - "`$JBOSS_HOME/bin/jboss-cli.sh -c '/core-service=management/management-interface=native-interface:read-resource'` 로 sasl-authentication-factory·security-realm 값이 비었는지 확인(읽기 전용)"
+  - "`netstat -an | grep LISTEN | grep -E ':9999|:9990'` 로 관리 포트가 어느 주소에 열려 있는지 확인 — 0.0.0.0·업무 IP 면 보안 담당에 즉시 통보"
+  short:
+  - "(2차·승인 후, 롤백: 변경 전 standalone.xml 백업 복원) native-interface 에 Elytron sasl-authentication-factory(management-sasl-authentication, EAP 7.1+) 또는 레거시 security-realm=ManagementRealm(EAP 7.0) 지정 후 reload"
+  mid:
+  - "관리 인터페이스를 관리 전용 네트워크 주소(management interface 바인딩)로 한정하고 방화벽으로 관리 포트 접근 출처 제한"
+  long:
+  - "기동 로그의 WFLYSRV0034·0035 를 보안 점검 항목으로 등록해 무인증 구성이 운영에 반입되지 않게 함"
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: EAP 7.3·8.0·WildFly 34 참조에서 같은 문구 확인 — EAP 8.0/WildFly 25+ 는 레거시 security-realm 제거(Elytron 만)
+  source: 공식 문서 대조(2026-10-16 5차 보강)
+- code: WFLYSRV0035
+  severity: warn
+  category: security
+  title: HTTP 관리 인터페이스 무인증
+  vendor_cause: HTTP 관리 서비스(관리 콘솔·HTTP 관리 API)에 보안 영역이나 HTTP 서버 인증이 정의되지 않아 모든 접근이 제한 없이 허용된다는 WARN. 관리 포트(기본 9990)에 접속하는 누구나 배포·구성 변경을 할 수 있다.
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html
+  immediate:
+  - "`$JBOSS_HOME/bin/jboss-cli.sh -c '/core-service=management/management-interface=http-interface:read-resource'` 로 http-authentication-factory·security-realm 값이 비었는지 확인(읽기 전용)"
+  - "`netstat -an | grep LISTEN | grep ':9990'` 로 관리 포트 바인딩 주소 확인 — 업무망에 열려 있으면 보안 담당에 즉시 통보"
+  short:
+  - "(2차·승인 후, 롤백: 변경 전 standalone.xml 백업 복원) http-interface 에 http-authentication-factory=management-http-authentication(EAP 7.1+) 또는 security-realm=ManagementRealm(EAP 7.0) 지정 후 reload, 관리 사용자 add-user.sh 로 생성"
+  mid:
+  - "관리 인터페이스를 관리 전용 주소로 바인딩하고 관리 콘솔 접근을 운영 단말 IP 로 제한"
+  long:
+  - "구성 점검 스크립트로 관리 인터페이스 인증 설정 유무를 정기 확인"
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: EAP 7.3·8.0·WildFly 34 참조에서 같은 문구 확인 — EAP 8.0/WildFly 25+ 는 Elytron 만
+  source: 공식 문서 대조(2026-10-16 5차 보강)
+- code: WFLYSRV0043
+  severity: error
+  category: internal
+  title: 배포 해제 단계 처리기 예외
+  vendor_cause: 배포 단위 처리기(Deployment Unit Processor)가 배포 해제(undeploy) 단계에서 예상치 못한 예외를 던졌다는 ERROR. 서브시스템·애플리케이션 정리 코드 오류로 자원이 덜 정리되어 다음 배포·재배포가 실패할 수 있다.
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html
+  immediate:
+  - "`grep -n -A25 'WFLYSRV0043' $JBOSS_HOME/standalone/log/server.log | tail -60` 로 처리기 클래스·단계(phase)·배포 이름과 예외 스택 기록"
+  - "`$JBOSS_HOME/bin/jboss-cli.sh -c 'deployment-info'` 로 해당 배포가 남아 있는지·상태 확인"
+  short:
+  - "(2차) 처리기 클래스가 org.jboss/org.wildfly 패키지면 로그·구성(비밀번호 가림)을 Red Hat 지원에 의뢰, 애플리케이션 클래스면 개발 담당에 전달 — 재배포·재기동은 승인 후(롤백: 직전 배포본)"
+  mid:
+  - "해당 서브시스템의 알려진 결함 여부를 EAP 누적 패치 수준과 대조해 패치 적용 계획 수립"
+  long:
+  - "배포 해제 시 WFLYSRV0043 발생을 배포 점검 항목에 넣어 누적 패치 회귀 확인"
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: WFLY* 접두 코드는 WildFly 9/EAP 7.0 이후 — EAP 7.3·8.0·WildFly 34 원문 확인
+  source: 공식 문서 대조(2026-10-16 5차 보강)
+- code: WFLYSRV0057
+  severity: error
+  category: internal
+  title: 배포 내용 저장소에 해시 내용 없음(ADMIN-ONLY 기동)
+  vendor_cause: 배포의 내용 해시에 해당하는 파일이 배포 내용 저장소(content repository)에 없다는 ERROR. 호스트 컨트롤러가 ADMIN-ONLY 모드라 기동은 계속되지만, 일반 모드였다면 치명적 기동 실패였다 — data/content 정리·복사 누락이 흔한 원인이다.
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html
+  immediate:
+  - "`grep -n 'WFLYSRV0057' $JBOSS_HOME/domain/log/host-controller.log | tail -10` 로 누락 해시와 배포 이름 기록 (도메인 모드)"
+  - "`ls -l $JBOSS_HOME/domain/data/content/<해시 앞 2자리>/<해시 나머지>/` 로 내용 파일 존재 확인, `df -k $JBOSS_HOME/domain/data` 로 공간 확인"
+  short:
+  - "(2차·승인 후, 롤백: 현재 domain.xml 백업 보관) 원본 아티팩트로 해당 배포를 다시 업로드(deploy --force 또는 콘솔)하거나 domain.xml 에서 해당 배포 참조를 정리한 뒤 일반 모드로 기동"
+  mid:
+  - "data/content 디렉터리를 정리·백업 대상에 포함하고 수동 삭제 금지 기준을 운영 문서에 명시"
+  long:
+  - "배포 아티팩트 원본을 별도 저장소에 버전별로 보관해 내용 저장소 손실 시 바로 복구"
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: 호스트 컨트롤러(도메인 모드) 메시지 — EAP 7.3·8.0·WildFly 34 원문 확인
+  source: 공식 문서 대조(2026-10-16 5차 보강)
+- code: WFLYSRV0059
+  severity: warn
+  category: internal
+  title: MANIFEST Class-Path 항목이 유효한 JAR 아님
+  vendor_cause: 배포 안 리소스 루트의 MANIFEST.MF Class-Path 항목이 유효한 JAR 를 가리키지 않는다는 WARN. 빌드 때 남은 잘못된 경로가 대부분이라 보통 무해하지만, 그 JAR 가 실제로 필요하면 실행 중 ClassNotFoundException 으로 이어진다.
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html
+  immediate:
+  - "`grep -n 'WFLYSRV0059' $JBOSS_HOME/standalone/log/server.log | tail -10` 로 항목 이름과 리소스 루트(JAR) 기록"
+  - "`unzip -l <path>/<app>.war | grep -i '<항목이름>'` 로 참조 JAR 가 배포 안에 있는지 확인하고, `grep -c ClassNotFoundException $JBOSS_HOME/standalone/log/server.log` 로 실행 중 클래스 누락이 동반되는지 확인 — 없으면 무해한 경고"
+  short:
+  - "(2차) ClassNotFoundException 이 동반되면 개발 담당이 빌드에 누락 JAR 를 넣거나 MANIFEST Class-Path 를 정리해 재빌드 — 배포는 승인 후(롤백: 직전 배포본)"
+  mid:
+  - "빌드 도구(Maven/Gradle) 설정에서 MANIFEST Class-Path 자동 추가를 끄거나 실제 포함 JAR 와 일치시키는 빌드 표준 수립"
+  long:
+  - "배포 후 WFLYSRV0059 건수를 빌드 품질 지표로 기록"
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: WFLY* 접두 코드는 WildFly 9/EAP 7.0 이후 — EAP 7.3·8.0·WildFly 34 원문 확인
+  source: 공식 문서 대조(2026-10-16 5차 보강)
+- code: WFLYSRV0068
+  severity: error
+  category: internal
+  title: 배포 오버레이 내용 없음(ADMIN-ONLY 기동)
+  vendor_cause: 배포 오버레이(deployment overlay)의 내용 해시에 해당하는 파일이 배포 내용 저장소에 없다는 ERROR. 호스트 컨트롤러가 ADMIN-ONLY 모드라 기동은 계속되지만 일반 모드였다면 치명적 기동 실패였다.
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html
+  immediate:
+  - "`grep -n 'WFLYSRV0068' $JBOSS_HOME/domain/log/host-controller.log | tail -10` 로 누락 해시·배포·오버레이 위치 기록 (도메인 모드)"
+  - "`$JBOSS_HOME/bin/jboss-cli.sh -c '/deployment-overlay=*:read-resource(recursive=true)'` 로 오버레이 구성 확인, `ls -l $JBOSS_HOME/domain/data/content/<해시 앞 2자리>/<해시 나머지>/` 로 내용 존재 확인"
+  short:
+  - "(2차·승인 후, 롤백: 현재 domain.xml 백업 보관) 원본 파일로 오버레이 내용을 다시 추가하거나 불필요한 오버레이 참조를 정리한 뒤 일반 모드로 기동"
+  mid:
+  - "오버레이로 넣는 파일 원본을 구성 관리 저장소에 보관하고 오버레이 변경을 변경 관리 대상으로 지정"
+  long:
+  - "data/content 를 백업 대상에 포함하고 복구 시험 때 오버레이 복원까지 확인"
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: 호스트 컨트롤러(도메인 모드) 메시지 — EAP 7.3·8.0·WildFly 34 원문 확인
+  source: 공식 문서 대조(2026-10-16 5차 보강)
+- code: WFLYCTL0003
+  severity: critical
+  category: internal
+  title: 기동 작업 스레드 스택 부족으로 기동 실패
+  vendor_cause: 기동 작업을 실행하는 스레드의 스택이 부족해 컨테이너 기동에 실패했다는 ERROR. 메시지에 찍힌 시스템 속성(jboss.boot.thread.stack.size, 소스 기준 기본 2MB)을 지금보다 크게 주면 해결될 수 있다고 안내한다 — 매우 큰 구성·깊은 재귀 구성이 원인이다.
+  vendor_action: 메시지에 표시된 시스템 속성을 현재 스택 크기보다 큰 값으로 설정
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html
+  immediate:
+  - "`grep -n -A5 'WFLYCTL0003' $JBOSS_HOME/standalone/log/server.log | tail -20` 로 현재 스택 크기([숫자])와 속성 이름 기록, StackOverflowError 동반 여부 확인"
+  - "`grep -n 'jboss.boot.thread.stack.size' $JBOSS_HOME/bin/standalone.conf $JBOSS_HOME/standalone/configuration/standalone.xml` 로 현재 설정 여부 확인, 직전 구성 변경(서브시스템·배포 수 증가) 이력 대조"
+  short:
+  - "(2차·승인 후, 롤백: standalone.conf 원복) standalone.conf 의 JAVA_OPTS 에 -Djboss.boot.thread.stack.size=<현재값의 2배 바이트> 추가 후 기동해 WFLYSRV0025 확인"
+  mid:
+  - "구성 파일 크기·서브시스템 수 증가 추세를 관리하고, 스택 설정 값을 운영 기동 스크립트 표준에 반영"
+  long:
+  - "기동 실패 감시(WFLYCTL0003·WFLYSRV0026) 경보와 구성 변경 후 기동 시험 의무화"
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: EAP 7.3·8.0·WildFly 34 원문 확인, 속성 이름·기본값은 wildfly-core AbstractControllerService 소스 기준
+  source: 공식 문서 대조(2026-10-16 5차 보강)
+- code: WFLYCTL0006
+  severity: critical
+  category: internal
+  title: 서브시스템 기동 작업 실패
+  vendor_cause: 서브시스템 <이름> 의 기동(boot) 작업 실행에 실패했다는 ERROR. 해당 서브시스템 구성 오류(잘못된 속성·누락 모듈)나 의존 자원 문제로 그 서브시스템 기능이 동작하지 않거나 서버 기동이 중단된다.
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html
+  immediate:
+  - "`grep -n -A25 'WFLYCTL0006' $JBOSS_HOME/standalone/log/server.log | tail -60` 로 서브시스템 이름과 Caused by 예외 기록"
+  - "`$JBOSS_HOME/bin/jboss-cli.sh -c '/core-service=management:read-boot-errors'` 로 실패 작업 주소 확인(서버가 떠 있을 때), 직전 standalone.xml 변경 내역과 대조(`ls -lt $JBOSS_HOME/standalone/configuration/standalone_xml_history/ | head`)"
+  short:
+  - "(2차·승인 후, 롤백: standalone_xml_history 의 직전 정상본으로 복원) 해당 서브시스템 구성 오류를 고치거나 직전 정상 구성으로 되돌린 뒤 기동 확인"
+  mid:
+  - "구성 변경은 CLI 스크립트로만 하고 변경 전 `:take-snapshot` 으로 스냅숏을 남기는 절차 수립"
+  long:
+  - "기동 로그 WFLYCTL0006 경보와 구성 스냅숏 보관 주기 운영"
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: WFLY* 접두 코드는 WildFly 9/EAP 7.0 이후 — EAP 7.3·8.0·WildFly 34 원문 확인
+  source: 공식 문서 대조(2026-10-16 5차 보강)
+- code: WFLYCTL0008
+  severity: error
+  category: internal
+  title: 구성 변경 저장 실패
+  vendor_cause: 관리 작업으로 바꾼 구성을 구성 파일(standalone.xml/domain.xml)에 저장하지 못했다는 ERROR. 런타임에는 반영됐어도 파일에 남지 않아 재기동 시 변경이 사라진다 — 디스크 가득참·파일 권한·읽기 전용 구성(--read-only-server-config)이 흔한 원인이다.
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html
+  immediate:
+  - "`grep -n -A15 'WFLYCTL0008' $JBOSS_HOME/standalone/log/server.log | tail -40` 로 원인 예외(IOException·No space·Permission denied) 기록"
+  - "`df -k $JBOSS_HOME/standalone/configuration` 와 `ls -l $JBOSS_HOME/standalone/configuration/` 로 공간·소유자·권한 확인, 기동 인수에 --read-only-server-config 가 있는지 `ps -ef | grep '[j]boss-modules'` 로 확인"
+  short:
+  - "(2차·승인 후, 롤백: 저장 전 구성 파일 백업) 공간·권한을 바로잡은 뒤 같은 변경을 다시 적용해 파일에 저장되었는지 확인 — 재기동 전에 반드시 확인"
+  mid:
+  - "구성 디렉터리 소유자를 JBoss 실행 계정으로 고정하고 구성 파일시스템 사용률 감시"
+  long:
+  - "변경 후 standalone_xml_history/current 의 갱신 시각을 확인하는 점검 단계 추가"
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: WFLY* 접두 코드는 WildFly 9/EAP 7.0 이후 — EAP 7.3·8.0·WildFly 34 원문 확인
+  source: 공식 문서 대조(2026-10-16 5차 보강)
+- code: WFLYCTL0027
+  severity: critical
+  category: internal
+  title: 서비스 컨테이너 안정화 전 작업 중단(재시작 필요)
+  vendor_cause: 관리 작업이 서비스 컨테이너가 안정 상태에 이르기 전에 중단(interrupt)되었다는 ERROR이며 메시지 자체가 프로세스 재시작이 필요하다고 안내한다. 서비스 상태가 어긋난 채 남아 일부 기능이 비정상일 수 있다.
+  vendor_action: 프로세스를 재시작(Process should be restarted)
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html
+  immediate:
+  - "`grep -n -A5 'WFLYCTL0027' $JBOSS_HOME/standalone/log/server.log | tail -20` 로 처음 서비스 컨테이너를 바꾼 작업 이름·주소 기록"
+  - "`$JBOSS_HOME/bin/jboss-cli.sh -c ':read-attribute(name=server-state)'` 로 상태(running·restart-required·reload-required) 확인, `jcmd <PID> Thread.print > <path>/td_ctl0027.txt` 로 스레드 덤프(프로세스는 유지)"
+  short:
+  - "(2차·승인 후, 롤백: 해당 없음) 업무 영향이 적은 시간에 프로세스 재시작(문서 권고) — 클러스터면 한 노드씩, 전후 server-state·배포 상태 확인"
+  mid:
+  - "중단을 일으킨 작업(장시간 관리 작업·시간 초과 설정)을 찾아 관리 작업 시간 초과(blocking-timeout) 기준과 작업 절차 조정"
+  long:
+  - "server-state 가 restart-required 로 남는 상황을 감시해 운영자에게 알림"
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: WFLY* 접두 코드는 WildFly 9/EAP 7.0 이후 — EAP 7.3·8.0·WildFly 34 원문 확인
+  source: 공식 문서 대조(2026-10-16 5차 보강)
+- code: WFLYCTL0035
+  severity: error
+  category: security
+  title: 관리 작업 감사 로그 기록 실패
+  vendor_cause: 관리 작업 감사 로그(audit log) 갱신에 실패했다는 ERROR. 감사 로그 파일 공간·권한 문제나 원격 syslog 전송 실패가 흔하며, 실패가 계속되면 감사 로그가 자동으로 꺼진다(WFLYCTL0036).
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html
+  immediate:
+  - "`grep -n -A10 'WFLYCTL0035' $JBOSS_HOME/standalone/log/server.log | tail -30` 로 원인 예외 기록"
+  - "`$JBOSS_HOME/bin/jboss-cli.sh -c '/core-service=management/access=audit:read-resource(recursive=true)'` 로 핸들러 종류(file·syslog)·경로·max-failure-count 확인, 파일이면 `df -k $JBOSS_HOME/standalone/data` 로 공간 확인(기본 audit-log.log)"
+  short:
+  - "(2차·승인 후, 롤백: 이전 핸들러 설정 값) 공간·권한·syslog 수신지를 바로잡고 감사 로그가 다시 기록되는지 확인 — 보안 담당에 기록 공백 시간대 보고"
+  mid:
+  - "감사 로그 파일 순환(size-rotating-file-handler)과 보관 경로를 별도 파일시스템으로 분리"
+  long:
+  - "감사 로그 기록 실패를 보안 사건으로 분류해 경보·보고 체계에 포함"
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: WFLY* 접두 코드는 WildFly 9/EAP 7.0 이후 — EAP 7.3·8.0·WildFly 34 원문 확인
+  source: 공식 문서 대조(2026-10-16 5차 보강)
+- code: WFLYCTL0036
+  severity: error
+  category: security
+  title: 감사 로그 연속 실패로 감사 기록 중단
+  vendor_cause: 관리 작업 감사 로그 기록이 [N] 회 연속 실패해 감사 로깅을 끈다는 ERROR. 이후 관리 작업이 감사 기록 없이 수행되므로 보안 통제(변경 추적)에 공백이 생긴다.
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html
+  immediate:
+  - "`grep -n -E 'WFLYCTL0035|WFLYCTL0036' $JBOSS_HOME/standalone/log/server.log | tail -20` 로 첫 실패 시각과 중단 시각을 기록(기록 공백 구간)"
+  - "`$JBOSS_HOME/bin/jboss-cli.sh -c '/core-service=management/access=audit:read-resource(recursive=true,include-runtime=true)'` 로 logger·핸들러 enabled·실패 수 확인, 보안 담당에 공백 구간 통보"
+  short:
+  - "(2차·승인 후, 롤백: 이전 설정 값) 실패 원인(공간·권한·syslog 수신지)을 고친 뒤 핸들러를 다시 살림 — 핸들러가 지원하는 작업은 `:read-operation-names` 로 확인(recycle 등), 공백 구간의 관리 작업은 server.log·변경 대장으로 보완"
+  mid:
+  - "감사 로그 핸들러를 파일+원격 syslog 이중화하고 max-failure-count 값을 운영 기준으로 정함"
+  long:
+  - "감사 로그 중단을 즉시 경보하고 월간 보안 점검에 감사 기록 연속성 확인 포함"
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: WFLY* 접두 코드는 WildFly 9/EAP 7.0 이후 — EAP 7.3·8.0·WildFly 34 원문 확인
+  source: 공식 문서 대조(2026-10-16 5차 보강)

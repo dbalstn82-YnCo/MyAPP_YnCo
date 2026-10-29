@@ -1,0 +1,952 @@
+product: tibero
+layer: db
+note: GPT 협업 수집분 — 벤더 공식 문서와 대조 후 확정
+codes:
+- code: TBR-1001
+  severity: error
+  category: storage
+  title: 파일 생성 실패
+  immediate:
+  - "오류 파일 경로·OS errno: `grep -h \"TBR-1001\" $TB_HOME/instance/$TB_SID/log/slog/* $TB_HOME/instance/$TB_SID/log/dlog/* | tail -20` (Tibero 6/7)"
+  - "대상 디렉터리: `ls -ld <dir>`(tibero 계정 쓰기 권한) · `df -h <dir>` · `df -i <dir>` — 100% 또는 권한 없음이면 확정, 실패한 작업은 2차 판단 전 다시 실행하지 않음"
+  short:
+  - "(2차·승인 후, 롤백: 생성한 디렉터리·변경한 권한 기록 후 원복) 디렉터리 생성·소유권 정정 또는 공간 확보 후 실패 작업(ADD DATAFILE·백업 등) 재실행"
+  mid:
+  - 데이터파일과 로그파일 저장 경로 및 권한 구성을 표준화
+  long:
+  - 파일시스템 용량예측과 경로 무결성 점검을 상시 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tibero.com/tibero-manuals)
+  note: 일반 파일 생성 작업 실패로 서비스 전체 중단을 뜻하지 않음
+  vendor_cause: "Tibero 서버가 OS 에 파일 생성을 요청했으나 실패함 — 대상 디렉터리 부재, tibero 계정 쓰기 권한 없음, 공간·inode 부족, 같은 이름 파일 존재가 흔한 원인."
+  vendor_action: 파일 경로와 권한을 확인하십시오.
+  vendor_url: https://docs.tibero.com/tibero-manuals/7.2.6.manuals/error-reference-guide/chapter-1000.cache.error
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR-nnnnn 코드 체계는 4~7 공통으로 수집(5→6→7 번호 재편 근거 없음 — GPT B). 6/7 sys.log 는 [ISO시각] [COM-nnn] [I/W/E] 형식(파서 대응), 6 EOS 2025-03-31·Extended 2028-03-31
+- code: TBR-1003
+  severity: error
+  category: storage
+  title: 파일 열기 실패
+  immediate:
+  - "대상 파일·errno: `grep -h \"TBR-1003\" $TB_HOME/instance/$TB_SID/log/slog/* $TB_HOME/instance/$TB_SID/log/dlog/* | tail -20` (Tibero 6/7)"
+  - "파일·마운트: `ls -l <file>` · `df -h <mount>` · `mount | grep <mount>` — 미마운트·소유자 불일치 여부"
+  - "DB 등록 경로: tbsql 에서 `select name, status from v$datafile;` 와 비교(경로 오타 여부)"
+  short:
+  - "(2차·승인 후, 롤백: 변경 전 경로·권한 기록) 마운트 복구·소유권 정정 후 해당 작업 재실행, 파일 유실이면 백업 복구 절차로 진행"
+  mid:
+  - 파일 배치와 권한 정책을 정비하고 결함 스토리지를 복구
+  long:
+  - 파일 접근성 헬스체크와 스토리지 이중화를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tibero.com/tibero-manuals)
+  note: 일반 파일 열기 작업 실패로 서비스 전체 중단을 뜻하지 않음
+  vendor_cause: "Tibero 가 데이터·로그·컨트롤 파일을 열지 못함 — 파일 삭제·이동, 경로 오타, 권한·소유권 변경, 파일시스템 미마운트가 흔한 원인."
+  vendor_action: 파일 경로와 권한을 확인하십시오.
+  vendor_url: https://docs.tibero.com/tibero-manuals/7.2.6.manuals/error-reference-guide/chapter-1000.cache.error
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR-nnnnn 코드 체계는 4~7 공통으로 수집(5→6→7 번호 재편 근거 없음 — GPT B). 6/7 sys.log 는 [ISO시각] [COM-nnn] [I/W/E] 형식(파서 대응), 6 EOS 2025-03-31·Extended 2028-03-31
+- code: TBR-1004
+  severity: error
+  category: disk
+  title: 파일 읽기 실패
+  immediate:
+  - "대상 파일: `grep -h \"TBR-1004\" $TB_HOME/instance/$TB_SID/log/slog/* $TB_HOME/instance/$TB_SID/log/dlog/* | tail -20` (Tibero 6/7)"
+  - "OS I/O 오류: `dmesg -T | grep -i \"i/o error\" | tail -20` · 다중경로 사용 시 `multipath -ll` 의 failed 경로"
+  - "장치 지연: `iostat -x 5 3` 의 await·%util"
+  short:
+  - "(2차·승인 후, 롤백: 해당 없음) 스토리지 담당과 결함 경로·장치 조치, 손상 블록이 확인되면 백업 기반 복구 계획"
+  mid:
+  - 결함 장치나 경로를 교체하고 데이터 정합성을 검증
+  long:
+  - I/O 오류 예측진단과 다중경로 모니터링을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tibero.com/tibero-manuals)
+  note: 일반 파일 읽기 작업 실패로 서비스 전체 중단을 뜻하지 않음
+  vendor_cause: "Tibero 가 파일 읽기 시스템 호출에서 오류를 받음 — 디스크 배드 섹터·스토리지 경로 장애·NFS 끊김 등 I/O 계층 문제가 대부분이며 손상 블록으로 이어질 수 있음."
+  vendor_action: 파일 경로와 권한을 확인하십시오.
+  vendor_url: https://docs.tibero.com/tibero-manuals/7.2.6.manuals/error-reference-guide/chapter-1000.cache.error
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR-nnnnn 코드 체계는 4~7 공통으로 수집(5→6→7 번호 재편 근거 없음 — GPT B). 6/7 sys.log 는 [ISO시각] [COM-nnn] [I/W/E] 형식(파서 대응), 6 EOS 2025-03-31·Extended 2028-03-31
+- code: TBR-1005
+  severity: error
+  category: disk
+  title: 파일 쓰기 실패
+  immediate:
+  - "대상 파일: `grep -h \"TBR-1005\" $TB_HOME/instance/$TB_SID/log/slog/* $TB_HOME/instance/$TB_SID/log/dlog/* | tail -20` (Tibero 6/7)"
+  - "공간·마운트: `df -h <mount>` · `mount | grep <mount>`(ro 여부) — 100% 또는 ro 면 확정"
+  - "OS I/O 오류: `dmesg -T | grep -i \"i/o error\\|remount\" | tail -20`"
+  short:
+  - "(2차·승인 후, 롤백: 정리·이관 대상 목록 기록) 공간 확보(백업 완료 아카이브 이관·볼륨 증설) 또는 스토리지 오류 조치 후 쓰기 재개 확인"
+  mid:
+  - 볼륨을 증설하거나 결함 경로를 복구하고 데이터 정합성을 확인
+  long:
+  - 디스크 임계치와 I/O 실패 자동경보를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tibero.com/tibero-manuals)
+  note: 일반 파일 쓰기 작업 실패로 서비스 전체 중단을 뜻하지 않음
+  vendor_cause: "Tibero 가 파일 쓰기에 실패함 — 파일시스템 가득 참, 읽기 전용 재마운트(ro), 쿼터, 스토리지 I/O 오류가 흔한 원인. 리두·컨트롤 파일이면 인스턴스가 멈출 수 있음."
+  vendor_action: 파일 경로와 권한을 확인하십시오.
+  vendor_url: https://docs.tibero.com/tibero-manuals/7.2.6.manuals/error-reference-guide/chapter-1000.cache.error
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR-nnnnn 코드 체계는 4~7 공통으로 수집(5→6→7 번호 재편 근거 없음 — GPT B). 6/7 sys.log 는 [ISO시각] [COM-nnn] [I/W/E] 형식(파서 대응), 6 EOS 2025-03-31·Extended 2028-03-31
+- code: TBR-1006
+  severity: critical
+  category: storage
+  title: 리두로그 열기 실패
+  immediate:
+  - "대상 멤버: `grep -h \"TBR-1006\" $TB_HOME/instance/$TB_SID/log/slog/* | tail -10` (Tibero 6/7)"
+  - "로그 구성: tbsql 에서 `select group#, member from v$logfile;` 와 `select group#, sequence#, status from v$log;` 후 각 멤버 `ls -l <member>`"
+  short:
+  - "(2차·승인 후, 롤백: 해당 없음 — 조치 후 백업) 같은 그룹의 정상 멤버를 기준으로 손상 멤버 재구성, 그룹 전체 실패면 TmaxTibero 기술지원과 복구 판단"
+  mid:
+  - 정상 멤버를 기준으로 로그 구성을 복구하고 재기동 검증
+  long:
+  - redo 멀티플렉싱과 로그 경로 상태 감시를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tibero.com/tibero-manuals)
+  vendor_cause: "온라인 리두 로그 멤버 파일을 열 수 없음 — 파일 삭제·경로 변경·권한·미마운트가 원인이며 그룹의 모든 멤버가 실패하면 기동·로그 스위치가 불가."
+  vendor_action: 로그 파일 경로와 권한을 확인하십시오.
+  vendor_url: https://docs.tibero.com/tibero-manuals/7.2.6.manuals/error-reference-guide/chapter-1000.cache.error
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR-nnnnn 코드 체계는 4~7 공통으로 수집(5→6→7 번호 재편 근거 없음 — GPT B). 6/7 sys.log 는 [ISO시각] [COM-nnn] [I/W/E] 형식(파서 대응), 6 EOS 2025-03-31·Extended 2028-03-31
+- code: TBR-1007
+  severity: critical
+  category: storage
+  title: 리두로그 읽기 실패
+  immediate:
+  - "대상 그룹·블록: `grep -h \"TBR-1007\" $TB_HOME/instance/$TB_SID/log/slog/* | tail -10` (Tibero 6/7)"
+  - "멤버 상태: tbsql `select group#, member from v$logfile;` · `ls -l <member>` · `dmesg -T | grep -i \"i/o error\" | tail`"
+  short:
+  - "(2차·승인 후, 롤백: 해당 없음) 정상 멤버 유무 확인 후 손상 멤버 재구성, 복구 중이면 백업·아카이브로 미디어 복구 계획"
+  mid:
+  - 손상 로그를 복구하고 필요 시 media recovery를 수행
+  long:
+  - redo 다중화와 스토리지 무결성 점검을 정례화
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tibero.com/tibero-manuals)
+  vendor_cause: "리두 로그 파일 읽기에 실패함 — 복구·아카이브 과정에서 스토리지 I/O 오류나 손상 블록을 만난 경우가 대부분. 다중화 멤버가 정상이면 그쪽으로 진행 가능."
+  vendor_action: 로그 파일 경로와 권한을 확인하십시오.
+  vendor_url: https://docs.tibero.com/tibero-manuals/7.2.6.manuals/error-reference-guide/chapter-1000.cache.error
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR-nnnnn 코드 체계는 4~7 공통으로 수집(5→6→7 번호 재편 근거 없음 — GPT B). 6/7 sys.log 는 [ISO시각] [COM-nnn] [I/W/E] 형식(파서 대응), 6 EOS 2025-03-31·Extended 2028-03-31
+- code: TBR-1008
+  severity: critical
+  category: storage
+  title: 리두로그 쓰기 실패
+  immediate:
+  - "대상 멤버: `grep -h \"TBR-1008\" $TB_HOME/instance/$TB_SID/log/slog/* | tail -10` (Tibero 6/7)"
+  - "공간·마운트: 멤버 경로의 `df -h <mount>` · `mount | grep <mount>` · `dmesg -T | grep -i \"i/o error\" | tail`"
+  short:
+  - "(2차·승인 후, 롤백: 해당 없음) 리두 볼륨 공간·스토리지 오류 조치, 멤버 일부 실패면 정상 멤버로 운영하며 손상 멤버 재구성"
+  mid:
+  - 결함 저장장치를 복구하고 로그 멤버 구성을 재검증
+  long:
+  - redo write 지연과 I/O 오류를 상시 모니터링
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tibero.com/tibero-manuals)
+  vendor_cause: "온라인 리두 로그에 쓰지 못함 — 리두 볼륨 가득 참·I/O 오류·읽기 전용 마운트가 원인이며 모든 멤버가 실패하면 커밋이 멈추고 인스턴스가 종료될 수 있음."
+  vendor_action: 로그 파일 경로와 권한을 확인하십시오.
+  vendor_url: https://docs.tibero.com/tibero-manuals/7.2.6.manuals/error-reference-guide/chapter-1000.cache.error
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR-nnnnn 코드 체계는 4~7 공통으로 수집(5→6→7 번호 재편 근거 없음 — GPT B). 6/7 sys.log 는 [ISO시각] [COM-nnn] [I/W/E] 형식(파서 대응), 6 EOS 2025-03-31·Extended 2028-03-31
+- code: TBR-1009
+  severity: critical
+  category: storage
+  title: 손상 블록 읽기 실패
+  immediate:
+  - "`grep -rn \"TBR-1009\" $TB_HOME/instance/$TB_SID/log | tail -20` 로 file#·block#·발생 시각 기록 (6·7 공통, 하위 slog·dlog 등 포함)"
+  - "tbsql 로 DBA 접속 후 `select file#, name, status from v$datafile where file#=<file#>;` 와 `select owner, segment_name, segment_type from dba_extents where file_id=<file#> and <block#> between block_id and block_id+blocks-1;` — 손상 객체 특정, STATUS=RECOVER 면 복구 필요"
+  - "OS I/O 오류: `dmesg | tail -50` (AIX `errpt | head -20`) — 디스크 오류 동반이면 스토리지 원인"
+  short:
+  - "(2차·승인 후, 롤백: 복구 전 파일 사본 보관) 손상 객체 접근 업무를 잠시 멈추고, DB 오프라인에서 `tbdv <datafile 경로>` 로 블록 검사 뒤 백업·아카이브로 미디어 복구"
+  - 스토리지 오류와 백업 및 archive log 가용성을 확인
+  mid:
+  - 검증된 백업과 로그로 media recovery를 수행
+  long:
+  - 블록 손상 점검과 백업 복구훈련을 정례화
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tibero.com/tibero-manuals)
+  vendor_cause: 손상된 데이터 블록을 읽을 수 없음.
+  vendor_action: 미디어 복구를 수행한 후 다시 시도하십시오.
+  vendor_url: https://docs.tibero.com/tibero-manuals/7.2.6.manuals/error-reference-guide/chapter-1000.cache.error
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR-nnnnn 코드 체계는 4~7 공통으로 수집(5→6→7 번호 재편 근거 없음 — GPT B). 6/7 sys.log 는 [ISO시각] [COM-nnn] [I/W/E] 형식(파서 대응), 6 EOS 2025-03-31·Extended 2028-03-31
+- code: TBR-1010
+  severity: critical
+  category: storage
+  title: 불일치 블록 읽기 실패
+  immediate:
+  - "`grep -rn \"TBR-1010\" $TB_HOME/instance/$TB_SID/log | tail -20` 로 file#·block# 기록 — 같은 파일에서 반복되면 하부 I/O(부분 쓰기) 의심"
+  - "tbsql 로 DBA 접속 후 `select owner, segment_name, segment_type from dba_extents where file_id=<file#> and <block#> between block_id and block_id+blocks-1;` 로 영향 객체, `select file#, name, status from v$datafile where file#=<file#>;` 로 파일 상태(RECOVER 면 복구 필요)"
+  - "`dmesg | tail -50` (AIX `errpt | head -20`) 로 스토리지 경로·컨트롤러 오류 동반 확인"
+  short:
+  - "(2차·승인 후, 롤백: 복구 전 파일 사본 보관) 해당 데이터파일 쓰기 업무를 잠시 멈추고 오프라인 `tbdv <datafile 경로>` 검사 뒤 미디어 복구"
+  - fractured block 원인과 하부 I/O 및 백업 상태를 분석
+  mid:
+  - media recovery 후 객체와 데이터 정합성을 검증
+  long:
+  - 스토리지 안정성 점검과 블록 무결성 감시를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tibero.com/tibero-manuals)
+  vendor_cause: 불일치로 인해 데이터 블록을 읽을 수 없음.
+  vendor_action: 미디어 복구를 수행한 후 다시 시도하십시오.
+  vendor_url: https://docs.tibero.com/tibero-manuals/7.2.6.manuals/error-reference-guide/chapter-1000.cache.error
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR-nnnnn 코드 체계는 4~7 공통으로 수집(5→6→7 번호 재편 근거 없음 — GPT B). 6/7 sys.log 는 [ISO시각] [COM-nnn] [I/W/E] 형식(파서 대응), 6 EOS 2025-03-31·Extended 2028-03-31
+- code: TBR-1013
+  severity: error
+  category: storage
+  title: 로그파일 생성 실패
+  immediate:
+  - "대상 경로: `grep -h \"TBR-1013\" $TB_HOME/instance/$TB_SID/log/slog/* | tail -10` 후 `ls -ld <dir>` · `df -h <dir>` (Tibero 6/7)"
+  - "같은 이름 파일 존재: `ls -l <logfile>` — 이미 있으면 다른 DB·이전 작업 잔여물 여부 확인(정리는 2차)"
+  short:
+  - "(2차·승인 후, 롤백: 생성 경로·권한 변경 기록) 경로·권한·공간 조치 후 로그 파일 생성 작업 재실행"
+  mid:
+  - 로그 저장공간을 증설하고 경로 구성을 표준화
+  long:
+  - 로그 파일 용량예측과 사전 공간점검을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tibero.com/tibero-manuals)
+  note: 로그파일 생성 작업 실패만으로 서비스 전체 중단을 뜻하지 않음
+  vendor_cause: "리두(로그) 파일 생성에 실패함 — ADD LOGFILE·RESETLOGS 시 경로 부재·권한·공간 부족·같은 이름 파일 존재가 흔한 원인."
+  vendor_action: 로그 파일 경로와 권한을 확인하십시오.
+  vendor_url: https://docs.tibero.com/tibero-manuals/7.2.6.manuals/error-reference-guide/chapter-1000.cache.error
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR-nnnnn 코드 체계는 4~7 공통으로 수집(5→6→7 번호 재편 근거 없음 — GPT B). 6/7 sys.log 는 [ISO시각] [COM-nnn] [I/W/E] 형식(파서 대응), 6 EOS 2025-03-31·Extended 2028-03-31
+- code: TBR-1014
+  severity: error
+  category: storage
+  title: 데이터파일 생성 실패
+  immediate:
+  - "대상 경로: `grep -h \"TBR-1014\" $TB_HOME/instance/$TB_SID/log/slog/* | tail -10` 후 `ls -ld <dir>` · `df -h <dir>` (Tibero 6/7)"
+  - "요청 크기와 블록 크기: tbsql `select name, value from v$parameters where name='DB_BLOCK_SIZE';` 와 실행한 DDL 의 SIZE·MAXSIZE 대조"
+  short:
+  - "(2차·승인 후, 롤백: 생성 실패 잔여 파일 목록 기록) 경로·공간 조치 후 DDL 재실행 — 잔여 파일 정리는 DB 미사용 파일임을 확인한 뒤"
+  mid:
+  - 데이터파일 배치와 tablespace 용량을 재설계
+  long:
+  - 데이터 증가율 기반 선제 증설과 생성 전 검증을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tibero.com/tibero-manuals)
+  note: 데이터파일 생성 작업 실패만으로 서비스 전체 중단을 뜻하지 않음
+  vendor_cause: "데이터파일 생성(CREATE TABLESPACE·ADD DATAFILE)에 실패함 — 경로 부재·권한·공간 부족·같은 이름 파일 존재·파일 크기 한도가 흔한 원인."
+  vendor_action: 파일 경로와 권한을 확인하십시오.
+  vendor_url: https://docs.tibero.com/tibero-manuals/7.2.6.manuals/error-reference-guide/chapter-1000.cache.error
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR-nnnnn 코드 체계는 4~7 공통으로 수집(5→6→7 번호 재편 근거 없음 — GPT B). 6/7 sys.log 는 [ISO시각] [COM-nnn] [I/W/E] 형식(파서 대응), 6 EOS 2025-03-31·Extended 2028-03-31
+- code: TBR-1015
+  severity: error
+  category: memory
+  title: 버퍼캐시 블록 고정 실패
+  immediate:
+  - "메모리 설정: tbsql `select name, value from v$parameters where name in ('DB_CACHE_SIZE','TOTAL_SHM_SIZE');` 와 `grep -i \"CACHE_SIZE\\|SHM_SIZE\" $TB_HOME/config/$TB_SID.tip`"
+  - "동시 부하: `select status, count(*) from v$session group by status;` 와 같은 시각 대량 배치 일정 대조"
+  short:
+  - "(2차·승인 후, 롤백: tip 백업본 복원 후 재기동) TOTAL_SHM_SIZE 범위 안에서 DB_CACHE_SIZE 상향 후 계획 재기동, 대량 스캔 배치는 시간대 분리"
+  mid:
+  - 버퍼캐시와 물리 메모리를 워크로드 기준으로 재산정
+  long:
+  - 캐시 부족 임계치와 메모리 용량계획을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tibero.com/tibero-manuals)
+  note: 버퍼 캐시 부족으로 블록 고정 작업이 실패하는 오류로 심각도를 error로 조정
+  vendor_cause: "버퍼 캐시에서 블록을 고정(pin)할 여유 버퍼를 확보하지 못함 — DB_CACHE_SIZE 가 동시 작업량에 비해 작거나 대량 스캔이 캐시를 점유할 때 발생."
+  vendor_action: 버퍼 캐시 크기를 확인한 후 다시 시도하십시오.
+  vendor_url: https://docs.tibero.com/tibero-manuals/7.2.6.manuals/error-reference-guide/chapter-1000.cache.error
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR-nnnnn 코드 체계는 4~7 공통으로 수집(5→6→7 번호 재편 근거 없음 — GPT B). 6/7 sys.log 는 [ISO시각] [COM-nnn] [I/W/E] 형식(파서 대응), 6 EOS 2025-03-31·Extended 2028-03-31
+- code: TBR-1016
+  severity: critical
+  category: storage
+  title: 로그그룹 손상
+  immediate:
+  - "손상 멤버: `grep -h \"TBR-1016\" $TB_HOME/instance/$TB_SID/log/slog/* | tail -10` (Tibero 6/7)"
+  - "그룹 구성: tbsql `select group#, member from v$logfile;` · `select group#, status from v$log;` · `ls -l <member>`"
+  short:
+  - "(2차·승인 후, 롤백: 해당 없음 — 조치 후 백업) 정상 멤버가 있는 비활성 그룹에서 손상 멤버를 재생성해 다중화 복구"
+  mid:
+  - 정상 멤버 복사 또는 복구 절차로 로그그룹을 정상화
+  long:
+  - redo 멀티플렉싱과 정기 무결성 점검을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tibero.com/tibero-manuals)
+  vendor_cause: "리두 로그 그룹의 멤버 중 하나가 손상됨 — 다른 멤버가 정상이면 운영은 계속되지만 다중화가 깨진 상태. 스토리지 I/O 오류가 흔한 원인."
+  vendor_action: 로그 파일 복구를 수행하십시오.
+  vendor_url: https://docs.tibero.com/tibero-manuals/7.2.6.manuals/error-reference-guide/chapter-1000.cache.error
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR-nnnnn 코드 체계는 4~7 공통으로 수집(5→6→7 번호 재편 근거 없음 — GPT B). 6/7 sys.log 는 [ISO시각] [COM-nnn] [I/W/E] 형식(파서 대응), 6 EOS 2025-03-31·Extended 2028-03-31
+- code: TBR-1018
+  severity: critical
+  category: storage
+  title: 로그그룹 비정상
+  immediate:
+  - "tbsql 로 DBA 접속 후 `select group#, sequence#, members, archived, status from v$log;` 와 `select group#, member from v$logfile order by group#;` — 오류 그룹의 멤버 구성 확인"
+  - "멤버 파일 실재: `ls -l <member 경로>` 로 각 멤버의 존재·크기·권한 비교 — 한 멤버만 없거나 크기가 다르면 확정"
+  - "`grep -rn \"TBR-1018\" $TB_HOME/instance/$TB_SID/log | tail -20` 과 `dmesg | tail -50` 으로 발생 시각·OS I/O 오류 확인"
+  short:
+  - "(2차·승인 후, 롤백: 변경 전 v$logfile 구성 기록) 비정상 멤버는 그룹이 CURRENT 가 아닐 때 drop/add logfile member 로 다시 구성"
+  - 파일 누락과 손상 및 스토리지 경로 오류를 분석
+  mid:
+  - 로그그룹을 복구 또는 재생성하고 정상 전환을 검증
+  long:
+  - redo 그룹 상태와 파일 접근성을 상시 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tibero.com/tibero-manuals)
+  vendor_cause: 로그 그룹 멤버 중 하나가 비정상임.
+  vendor_action: 로그 파일 복구를 수행하십시오.
+  vendor_url: https://docs.tibero.com/tibero-manuals/7.2.6.manuals/error-reference-guide/chapter-1000.cache.error
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR-nnnnn 코드 체계는 4~7 공통으로 수집(5→6→7 번호 재편 근거 없음 — GPT B). 6/7 sys.log 는 [ISO시각] [COM-nnn] [I/W/E] 형식(파서 대응), 6 EOS 2025-03-31·Extended 2028-03-31
+- code: TBR-1019
+  severity: critical
+  category: storage
+  title: 로그파일 비정상
+  immediate:
+  - "대상 파일: `grep -h \"TBR-1019\" $TB_HOME/instance/$TB_SID/log/slog/* | tail -10` (Tibero 6/7)"
+  - "크기 비교: 같은 그룹 멤버끼리 `ls -l <member1> <member2>` — 크기가 다르면 잘림·교체 의심"
+  short:
+  - "(2차·승인 후, 롤백: 해당 없음) 정상 멤버 기준으로 손상 멤버 재구성, 정상 멤버가 없으면 기술지원과 복구 판단"
+  mid:
+  - 손상 member를 재구성하고 로그그룹 정합성을 검증
+  long:
+  - redo member 다중화와 파일 무결성 감시를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tibero.com/tibero-manuals)
+  vendor_cause: "리두 로그 파일의 헤더·크기·식별 정보가 비정상 — 다른 DB 의 파일이 섞였거나 파일이 잘리거나 손상된 경우."
+  vendor_action: 로그 파일을 확인하십시오.
+  vendor_url: https://docs.tibero.com/tibero-manuals/7.2.6.manuals/error-reference-guide/chapter-1000.cache.error
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR-nnnnn 코드 체계는 4~7 공통으로 수집(5→6→7 번호 재편 근거 없음 — GPT B). 6/7 sys.log 는 [ISO시각] [COM-nnn] [I/W/E] 형식(파서 대응), 6 EOS 2025-03-31·Extended 2028-03-31
+- code: TBR-1022
+  severity: critical
+  category: storage
+  title: RESETLOGS 실패
+  immediate:
+  - "먼저 이 오류의 상세 인자와 바로 앞 오류 — 최신 slog 하나만 보지 말고 회전된 최근 파일까지: `grep -n -B10 'TBR-1022' $(ls -tr $TB_HOME/instance/$TB_SID/log/slog/* | tail -5) | tail -60` (Tibero 6/7) — 장애 시각의 TBR-1022 줄 상세 인자(%1$s·%2$s — 무엇을 가리키는지는 찍힌 문구 그대로 읽고 짐작하지 않는다)와 그 앞 10줄의 오류(TBR- 가 아닌 OS 오류·경로·권한 거부 줄 포함)가 원인 후보를 가른다, 오류 줄이 파일 첫 10줄 안이면 바로 앞 파일 끝도 본다 — 최근 5개 파일·앞 10줄에서 원인이 보이지 않으면 판정 불가로 기록하고 3차(제조사 TmaxTibero) 의뢰"
+  - "인스턴스가 MOUNT 상태일 때만(tbsql `select status from v$instance;`): `select * from v$recover_file;`(복구 잔여) · `select * from v$log;` · `select * from v$logfile;`(로그 그룹·멤버 경로·상태) — DB 가 내려가 있으면 이 뷰들은 조회되지 않으므로 slog·복구 작업 기록(명령·종료 상태)으로만 판단"
+  - "v$logfile 또는 tip 의 리두 멤버 경로를 `ls -ld <log_dir>` 로 존재·소유자 확인 — 같은 기동 명령의 반복 실행은 2차 판단 후"
+  short:
+  - "(2차·승인 후, 롤백: RESETLOGS 이후에는 이전 백업으로 되돌릴 수 없음 — 현재 파일 사본 보관) 원인 조치 후 MOUNT 에서 복구 완료를 확인하고 `tbboot -t RESETLOGS` 재수행"
+  mid:
+  - 원인 오류를 조치한 뒤 검증된 절차로 RESETLOGS를 재수행
+  long:
+  - 불완전 복구와 RESETLOGS 복구훈련을 정례화
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tibero.com/tibero-manuals)
+  vendor_cause: "RESETLOGS 기동 중 로그 초기화에 실패함. 원인은 이 오류의 상세 인자와 바로 앞 오류에 나타나므로 그것부터 읽는다 — 원인 후보: 불완전 복구 미완료, 직전 비정상 종료(관리자 안내서: 이때 RESETLOGS 사용 불가), 리두 로그 경로·권한 문제(어느 것도 선행 오류 확인 전에는 확정하지 않음)."
+  verify_note: "미검증 — Tibero 6/7 에서 V$LOG·V$RECOVER_FILE 이 MOUNT 단계에서 조회되는지 공식 문서로 확인하지 못함(조회 오류면 slog·tip 으로 판단, V$LOGFILE 의 MOUNT 조회는 2차 교차 검토자가 공식 문서로 확인), TBR-1022 상세 인자(%1$s·%2$s)가 각각 무엇인지도 확인 못 함"
+  vendor_action: 실패 원인을 파악한 후 다시 시도하십시오.
+  vendor_url: https://docs.tibero.com/tibero-manuals/7.2.6.manuals/error-reference-guide/chapter-1000.cache.error
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR-nnnnn 코드 체계는 4~7 공통으로 수집(5→6→7 번호 재편 근거 없음 — GPT B). 6/7 sys.log 는 [ISO시각] [COM-nnn] [I/W/E] 형식(파서 대응), 6 EOS 2025-03-31·Extended 2028-03-31
+- code: TBR-1023
+  severity: critical
+  category: storage
+  title: RESETLOGS 필요
+  immediate:
+  - "현재 모드: tbsql `select status from v$instance;` 와 복구 작업 기록(불완전 복구 완료 여부) 확인"
+  - "복구 대상 잔존: `select * from v$recover_file;` — 일반 기동 시도는 2차 판단 후"
+  short:
+  - V$RECOVER_FILE과 control file 및 redo 상태를 검증
+  mid:
+  - 필요한 recovery를 완료한 뒤 RESETLOGS로 기동
+  long:
+  - 복구 절차 문서화와 정기 복구 테스트를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tibero.com/tibero-manuals)
+  vendor_cause: RESETLOGS로 시스템을 재부팅해야 함.
+  vendor_action: 필요한 복구 작업을 수행한 후 다시 시도하십시오.
+  vendor_url: https://docs.tibero.com/tibero-manuals/7.2.6.manuals/error-reference-guide/chapter-1000.cache.error
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR-nnnnn 코드 체계는 4~7 공통으로 수집(5→6→7 번호 재편 근거 없음 — GPT B). 6/7 sys.log 는 [ISO시각] [COM-nnn] [I/W/E] 형식(파서 대응), 6 EOS 2025-03-31·Extended 2028-03-31
+- code: TBR-1027
+  severity: critical
+  category: storage
+  title: 아카이브로그 없음
+  immediate:
+  - "`grep -rn \"TBR-1027\" $TB_HOME/instance/$TB_SID/log | tail -20` 로 요구 thread#·sequence# 확인"
+  - "tbsql 로 DBA 접속 후 `select name, value from v$parameters where name like 'LOG_ARCHIVE%';` 로 아카이브 경로 확인 뒤 `ls -l <아카이브 경로> | tail -20` — 요구 sequence 파일이 없으면 확정"
+  - "`select thread#, sequence#, name from v$archived_log where sequence# >= <요구 sequence#> - 5 order by sequence#;` — 기록은 있는데 파일이 없으면 이동·백업 정리 이력 확인"
+  short:
+  - 백업 저장소와 LOG_ARCHIVE_DEST 및 누락 sequence를 점검
+  mid:
+  - 누락 로그를 복구하거나 가능한 백업 시점으로 복구 계획을 재수립
+  long:
+  - archive log 백업 검증과 보존정책을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tibero.com/tibero-manuals)
+  vendor_cause: 미디어 복구에 필요한 로그 파일을 찾을 수 없음.
+  vendor_action: 로그 파일을 확인한 후 다시 시도하십시오.
+  vendor_url: https://docs.tibero.com/tibero-manuals/7.2.6.manuals/error-reference-guide/chapter-1000.cache.error
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR-nnnnn 코드 체계는 4~7 공통으로 수집(5→6→7 번호 재편 근거 없음 — GPT B). 6/7 sys.log 는 [ISO시각] [COM-nnn] [I/W/E] 형식(파서 대응), 6 EOS 2025-03-31·Extended 2028-03-31
+- code: TBR-1028
+  severity: critical
+  category: storage
+  title: 로그파일 유효하지 않음
+  immediate:
+  - "요구 로그와 지정 로그: `grep -h \"TBR-1028\\|TBR-1147\" $TB_HOME/instance/$TB_SID/log/slog/* | tail -10` (Tibero 6/7)"
+  - "아카이브 파일 목록·크기: `ls -lt <archive_dir> | head -20` — 크기가 다른 파일보다 작으면 잘림 의심"
+  short:
+  - "(2차·승인 후, 롤백: 해당 없음) 백업 매체에서 올바른 시퀀스의 로그를 복원해 복구 재개"
+  mid:
+  - 정상 로그파일로 교체해 recovery를 재수행
+  long:
+  - 로그 백업 무결성 검증과 복구 사전점검을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tibero.com/tibero-manuals)
+  vendor_cause: "복구에 지정한 로그 파일이 올바르지 않음 — 시퀀스·스레드·RESETLOGS 이력이 맞지 않는 아카이브이거나 손상·잘린 파일."
+  vendor_action: 유효한 로그 파일을 선택한 후 다시 시도하십시오.
+  vendor_url: https://docs.tibero.com/tibero-manuals/7.2.6.manuals/error-reference-guide/chapter-1000.cache.error
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR-nnnnn 코드 체계는 4~7 공통으로 수집(5→6→7 번호 재편 근거 없음 — GPT B). 6/7 sys.log 는 [ISO시각] [COM-nnn] [I/W/E] 형식(파서 대응), 6 EOS 2025-03-31·Extended 2028-03-31
+- code: TBR-1029
+  severity: critical
+  category: upstream
+  title: Standby 로그 전송 실패
+  immediate:
+  - "Primary 에서 tbsql 로 DBA 접속 후 `select standby_addr, type, flags, sent_seq, acked_seq, sent_date, acked_date from v$standby_dest;` — FLAGS 가 not connected 거나 sent_seq·acked_seq 차이가 커지면 확정 (7.x 문서 기준, 6 은 `select * from v$standby_dest;`)"
+  - "Primary 에서 `nc -zvw3 <standby_host> <standby_port>` (기본 LISTENER_PORT+4) — 연결 거부·시간초과면 네트워크·Standby 미기동"
+  - "Standby 에서 `ps -ef | grep [t]bsvr` 와 `select database_role, open_mode from v$database;` — 프로세스 없음 또는 role 이 STANDBY 가 아니면 Standby 상태 원인"
+  short:
+  - Primary와 Standby 간 포트와 경로 및 전송 지연을 분석
+  mid:
+  - 네트워크와 Standby 구성을 복구하고 로그 전송을 재동기화
+  long:
+  - Standby 전송 지연과 연결 상태를 상시 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tibero.com/tibero-manuals)
+  vendor_cause: 스탠바이 DB로 리두 로그 전송에 실패함.
+  vendor_action: 스탠바이 DB 상태를 확인한 후 다시 시도하십시오.
+  vendor_url: https://docs.tibero.com/tibero-manuals/7.2.6.manuals/error-reference-guide/chapter-1000.cache.error
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR-nnnnn 코드 체계는 4~7 공통으로 수집(5→6→7 번호 재편 근거 없음 — GPT B). 6/7 sys.log 는 [ISO시각] [COM-nnn] [I/W/E] 형식(파서 대응), 6 EOS 2025-03-31·Extended 2028-03-31
+- code: TBR-1034
+  severity: critical
+  category: storage
+  title: DB 복구 필요
+  immediate:
+  - "상태: tbsql `select status from v$instance;` — MOUNT 이면 `select * from v$recover_file;` 로 복구 대상 파일 확인(관리자 안내서 백업과 복구)"
+  - "선행 오류: `tail -200 $(ls -tr $TB_HOME/instance/$TB_SID/log/slog/* | tail -5) | grep -n \"TBR-\"` (Tibero 6/7)"
+  short:
+  - "(2차·승인 후, 롤백: 복구 전 데이터파일·컨트롤파일 사본 보관) MOUNT 에서 `alter database recover automatic database;` 수행 후 V$RECOVER_FILE 0건 확인하고 정상 기동"
+  mid:
+  - 필요한 media recovery를 수행하고 정상 기동을 확인
+  long:
+  - 백업 복구훈련과 복구 가능성 점검을 정례화
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tibero.com/tibero-manuals)
+  vendor_cause: "데이터베이스에 (크래시·미디어) 복구가 필요해 정상 기동할 수 없음 — 비정상 종료 후 리두 부족, 데이터파일 백업본 복원 상태가 흔한 원인."
+  vendor_action: 실패 원인을 확인한 후 다시 시도하십시오.
+  vendor_url: https://docs.tibero.com/tibero-manuals/7.2.6.manuals/error-reference-guide/chapter-1000.cache.error
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR-nnnnn 코드 체계는 4~7 공통으로 수집(5→6→7 번호 재편 근거 없음 — GPT B). 6/7 sys.log 는 [ISO시각] [COM-nnn] [I/W/E] 형식(파서 대응), 6 EOS 2025-03-31·Extended 2028-03-31
+- code: TBR-1037
+  severity: critical
+  category: upstream
+  title: Standby 응답 없음
+  immediate:
+  - "Standby 서버에서 `ps -ef | grep [t]bsvr` 와 `grep -rn \"TBR-\" $TB_HOME/instance/$TB_SID/log | tail -30` — 프로세스가 없거나 직전 오류가 있으면 Standby 원인"
+  - "Primary 에서 `nc -zvw3 <standby_host> <standby_port>` 와 `ping -c 5 <standby_host>` — 응답 지연·손실이면 네트워크"
+  - "양쪽 `select * from v$version;` 비교 — 버전·패치가 다르면 호환 문제 의심"
+  short:
+  - Primary와 Standby 로그 및 연결 타임아웃을 분석
+  mid:
+  - Standby 서비스와 네트워크 경로를 복구하고 재동기화
+  long:
+  - Standby heartbeat와 응답시간 모니터링을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tibero.com/tibero-manuals)
+  vendor_cause: 스탠바이 DB에서 응답이 도착하지 않음.
+  vendor_action: 스탠바이 DB 실행 여부와 서버 버전을 확인하십시오.
+  vendor_url: https://docs.tibero.com/tibero-manuals/7.2.6.manuals/error-reference-guide/chapter-1000.cache.error
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR-nnnnn 코드 체계는 4~7 공통으로 수집(5→6→7 번호 재편 근거 없음 — GPT B). 6/7 sys.log 는 [ISO시각] [COM-nnn] [I/W/E] 형식(파서 대응), 6 EOS 2025-03-31·Extended 2028-03-31
+- code: TBR-1038
+  severity: critical
+  category: connection
+  title: Standby 접속 실패
+  immediate:
+  - "Primary 설정: `grep -in \"LOG_REPLICATION\" $TB_HOME/config/$TB_SID.tip` — LOG_REPLICATION_DEST_n 의 주소·포트가 실제 Standby 와 같은지"
+  - "Primary 에서 `nc -zvw3 <standby_host> <standby_port>` — 거부면 Standby 리스너·포트, 시간초과면 방화벽·라우팅"
+  - "Standby 에서 `ps -ef | grep [t]bsvr` 와 tbsql 로 DBA 접속 후 `select database_role from v$database;` 로 기동·역할 확인"
+  short:
+  - Primary와 Standby 설정파일 및 방화벽과 라우팅을 점검
+  mid:
+  - 연결 설정을 수정하고 이중화 경로를 검증
+  long:
+  - Standby 연결성 사전점검과 장애전환 훈련을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tibero.com/tibero-manuals)
+  vendor_cause: 프라이머리 DB가 스탠바이 DB에 연결하지 못함.
+  vendor_action: 프라이머리와 스탠바이 DB 설정 파일을 확인한 후 다시 시도하십시오.
+  vendor_url: https://docs.tibero.com/tibero-manuals/7.2.6.manuals/error-reference-guide/chapter-1000.cache.error
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR-nnnnn 코드 체계는 4~7 공통으로 수집(5→6→7 번호 재편 근거 없음 — GPT B). 6/7 sys.log 는 [ISO시각] [COM-nnn] [I/W/E] 형식(파서 대응), 6 EOS 2025-03-31·Extended 2028-03-31
+- code: TBR-1039
+  severity: critical
+  category: storage
+  title: 온라인 리두로그 오류
+  immediate:
+  - "`grep -rn \"TBR-1039\" $TB_HOME/instance/$TB_SID/log | tail -20` 로 logfile 번호·경로 확인"
+  - "tbsql 로 DBA 접속 후 `select group#, sequence#, members, status from v$log;` 와 `select group#, member from v$logfile;` — 오류 파일이 CURRENT 그룹이고 같은 그룹 다른 멤버가 없으면 위험도 높음(3차 협의)"
+  - "`ls -l <member 경로>` 와 `dmesg | tail -50` — 파일 없음·크기 불일치·I/O 오류 확인"
+  short:
+  - "(2차·승인 후, 롤백: 변경 전 구성 기록) 손상 멤버 교체(비 CURRENT 그룹) 뒤 제조사 문서대로 서버 재기동 — 재기동 일정은 업무 담당과 합의"
+  - V$LOG와 V$LOGFILE 및 스토리지 오류를 분석
+  mid:
+  - 손상 로그를 복구하고 필요 시 DB 재기동 또는 recovery를 수행
+  long:
+  - redo 상태와 로그 멤버 무결성을 상시 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tibero.com/tibero-manuals)
+  vendor_cause: 온라인 리두 로그 파일에 오류가 있음.
+  vendor_action: 온라인 리두 로그 파일을 확인한 후 서버를 재시작하십시오.
+  vendor_url: https://docs.tibero.com/tibero-manuals/7.2.6.manuals/error-reference-guide/chapter-1000.cache.error
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR-nnnnn 코드 체계는 4~7 공통으로 수집(5→6→7 번호 재편 근거 없음 — GPT B). 6/7 sys.log 는 [ISO시각] [COM-nnn] [I/W/E] 형식(파서 대응), 6 EOS 2025-03-31·Extended 2028-03-31
+- code: TBR-1043
+  severity: critical
+  category: storage
+  title: 미디어복구 종료 실패
+  immediate:
+  - "진행 상태: `tail -200 $(ls -tr $TB_HOME/instance/$TB_SID/log/slog/* | tail -5) | grep -n \"TBR-\"` (Tibero 6/7) 에서 요구 로그 시퀀스 확인"
+  - "복구 대상: tbsql `select * from v$recover_file;` — 종료 재시도는 2차 판단 후"
+  short:
+  - V$RECOVER_FILE과 적용된 archive sequence를 점검
+  mid:
+  - 필요 로그를 추가 적용한 뒤 recovery 완료 조건에서 종료
+  long:
+  - 복구 체크리스트와 로그 가용성 검증을 표준화
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tibero.com/tibero-manuals)
+  note: 미디어 복구를 완료하지 못해 DB 가용성에 직접 영향을 줄 수 있어 critical로 조정
+  vendor_cause: 현재 미디어 복구를 완료할 수 없음.
+  vendor_action: 완료에 필요한 조건을 충족한 후 미디어 복구를 완료하십시오.
+  vendor_url: https://docs.tibero.com/tibero-manuals/7.2.6.manuals/error-reference-guide/chapter-1000.cache.error
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR-nnnnn 코드 체계는 4~7 공통으로 수집(5→6→7 번호 재편 근거 없음 — GPT B). 6/7 sys.log 는 [ISO시각] [COM-nnn] [I/W/E] 형식(파서 대응), 6 EOS 2025-03-31·Extended 2028-03-31
+- code: TBR-1044
+  severity: critical
+  category: storage
+  title: 로그파일 읽기 실패
+  immediate:
+  - "대상 파일: `grep -h \"TBR-1044\" $TB_HOME/instance/$TB_SID/log/slog/* | tail -10` (Tibero 6/7)"
+  - "파일·스토리지: `ls -l <logfile>` · `dmesg -T | grep -i \"i/o error\" | tail`"
+  short:
+  - "(2차·승인 후, 롤백: 해당 없음) 백업 매체의 같은 로그로 교체 후 복구 재개, 없으면 불완전 복구 범위 승인"
+  mid:
+  - 정상 로그로 교체하거나 recovery 절차를 수행
+  long:
+  - 로그파일 무결성 검사와 저장장치 감시를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tibero.com/tibero-manuals)
+  vendor_cause: "로그 파일 읽기에 실패함 — 아카이브·리두 파일 손상, 권한, 스토리지 경로 오류가 원인이며 복구 진행이 그 지점에서 멈춤."
+  vendor_action: 로그 파일에 오류가 없는지 확인한 후 다시 시도하십시오.
+  vendor_url: https://docs.tibero.com/tibero-manuals/7.2.6.manuals/error-reference-guide/chapter-1000.cache.error
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR-nnnnn 코드 체계는 4~7 공통으로 수집(5→6→7 번호 재편 근거 없음 — GPT B). 6/7 sys.log 는 [ISO시각] [COM-nnn] [I/W/E] 형식(파서 대응), 6 EOS 2025-03-31·Extended 2028-03-31
+- code: TBR-1049
+  severity: critical
+  category: storage
+  title: 데이터파일 복구 필요
+  immediate:
+  - "복구 대상: tbsql `select * from v$recover_file;` 와 `select file#, name, status from v$datafile;`"
+  - "필요 아카이브 존재: `ls -lt <archive_dir> | head -20` 와 선행 오류 `grep -h \"TBR-1049\" $TB_HOME/instance/$TB_SID/log/slog/* | tail`"
+  short:
+  - "(2차·승인 후, 롤백: 복구 전 대상 파일 사본 보관) 해당 데이터파일 복원 후 미디어 복구·온라인 전환, V$RECOVER_FILE 에서 사라졌는지 확인"
+  mid:
+  - 해당 datafile을 restore 후 media recovery 수행
+  long:
+  - 데이터파일 백업 검증과 복구훈련을 정례화
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tibero.com/tibero-manuals)
+  vendor_cause: "데이터파일이 미디어 복구가 필요한 상태(다른 파일보다 오래된 시점)라 사용할 수 없음 — 백업본 복원 후 미복구, 오프라인 후 미복구, I/O 오류로 오프라인된 경우가 흔함."
+  vendor_action: 미디어 복구를 수행하십시오.
+  vendor_url: https://docs.tibero.com/tibero-manuals/7.2.6.manuals/error-reference-guide/chapter-1000.cache.error
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR-nnnnn 코드 체계는 4~7 공통으로 수집(5→6→7 번호 재편 근거 없음 — GPT B). 6/7 sys.log 는 [ISO시각] [COM-nnn] [I/W/E] 형식(파서 대응), 6 EOS 2025-03-31·Extended 2028-03-31
+- code: TBR-1058
+  severity: critical
+  category: storage
+  title: 손상 미디어 복구 실패
+  immediate:
+  - "손상 위치: `grep -h \"TBR-1058\" $TB_HOME/instance/$TB_SID/log/slog/* | tail -10` 로 리두 시퀀스·블록 정보 확보(Tibero 6/7)"
+  - "스토리지: `dmesg -T | grep -i \"i/o error\" | tail` — 복구 재시도는 2차 판단 후"
+  short:
+  - 백업 세트와 로그 손상 및 스토리지 오류를 분석
+  mid:
+  - 정상 백업으로 재복원하고 유효한 로그 범위에서 recovery 수행
+  long:
+  - 백업 무결성 검증과 다중 보관정책을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tibero.com/tibero-manuals)
+  vendor_cause: 잘못된 리두 로그 또는 데이터 블록으로 미디어 복구가 중단됨.
+  vendor_action: 리두 로그 또는 데이터 블록을 확인하십시오.
+  vendor_url: https://docs.tibero.com/tibero-manuals/7.2.6.manuals/error-reference-guide/chapter-1000.cache.error
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR-nnnnn 코드 체계는 4~7 공통으로 수집(5→6→7 번호 재편 근거 없음 — GPT B). 6/7 sys.log 는 [ISO시각] [COM-nnn] [I/W/E] 형식(파서 대응), 6 EOS 2025-03-31·Extended 2028-03-31
+- code: TBR-1063
+  severity: critical
+  category: capacity
+  title: 아카이브 완료 대기
+  immediate:
+  - "tbsql 로 DBA 접속 후 `select name, value from v$parameters where name like 'LOG_ARCHIVE_DEST%';` 로 경로 확인 뒤 `df -h <아카이브 경로>` — 95% 이상이면 확정"
+  - "`select group#, sequence#, archived, status from v$log;` — CURRENT 외 그룹이 모두 ARCHIVED=NO 면 아카이브 정체"
+  - "`ls -lt <아카이브 경로> | head -5` 로 마지막 아카이브 생성 시각, `iostat -x 1 3` (Linux) 로 아카이브 디스크 I/O 병목 확인"
+  short:
+  - 아카이브 디렉터리 full과 백업 지연 및 I/O 병목을 분석
+  mid:
+  - 공간을 증설하고 archive 백업 및 삭제 주기를 조정
+  long:
+  - 아카이브 증가율 예측과 용량 임계치 경보를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://support.tibero.com/hc/en-us/articles/13836573407887-Error-When-General-User-Connects-redo-log-waiting)
+  vendor_cause: 모든 로그 파일이 아카이브되는 동안 작업을 진행할 수 없음.
+  vendor_action: 아카이브 로그 대상 장치 또는 디렉터리가 가득 찼는지 확인하십시오.
+  vendor_url: https://support.tibero.com/hc/en-us/articles/13836573407887-Error-When-General-User-Connects-redo-log-waiting
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR-nnnnn 코드 체계는 4~7 공통으로 수집(5→6→7 번호 재편 근거 없음 — GPT B). 6/7 sys.log 는 [ISO시각] [COM-nnn] [I/W/E] 형식(파서 대응), 6 EOS 2025-03-31·Extended 2028-03-31
+- code: TBR-12020
+  severity: error
+  category: internal
+  title: 요청 SQL 실행 불가
+  immediate:
+  - "서버 모드: tbsql `select status from v$instance;` — MOUNT·READ ONLY 등에서 허용되지 않는 SQL 인지 확인"
+  - "직전 오류: `tail -100 $(ls -tr $TB_HOME/instance/$TB_SID/log/slog/* | tail -5) | grep -n \"TBR-\"` — 같은 SQL 반복 실행은 2차 판단 후"
+  short:
+  - 현재 DB 상태와 트랜잭션 및 선행 오류를 분석
+  mid:
+  - 원인 상태를 해소한 뒤 SQL을 재실행하고 정합성을 확인
+  long:
+  - 오류 선행조건과 재시도 정책을 애플리케이션에 반영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tibero.com/tibero-manuals)
+  vendor_cause: 현재 서버 모드에서 SQL 문을 실행할 수 없음.
+  vendor_action: 서버 모드를 변경한 후 문장을 다시 시도하십시오.
+  vendor_url: https://docs.tibero.com/tibero-manuals/tibero_7.2.5./7.2.5.manuals/tibero-error-reference-guide/chapter-12000.frame.error
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR-nnnnn 코드 체계는 4~7 공통으로 수집(5→6→7 번호 재편 근거 없음 — GPT B). 6/7 sys.log 는 [ISO시각] [COM-nnn] [I/W/E] 형식(파서 대응), 6 EOS 2025-03-31·Extended 2028-03-31
+- code: TBR-21023
+  severity: error
+  category: undo
+  title: TX 복구 중 작업 불가
+  immediate:
+  - "진행 상태: `grep -h -i \"recover\" $(ls -tr $TB_HOME/instance/$TB_SID/log/slog/* | tail -5) | tail -20` 로 트랜잭션 복구 진행·완료 기록 확인(Tibero 6/7)"
+  - "영향 세션: tbsql `select status, count(*) from v$session group by status;` — 복구 완료 전 같은 작업 재실행은 2차 판단 후"
+  short:
+  - 복구 대상 트랜잭션과 세션 상태 및 sys.log를 분석
+  mid:
+  - TX recovery 완료 후 작업을 재수행하고 데이터 정합성을 확인
+  long:
+  - 장애 복구 중 DDL과 DML 실행 통제를 운영절차에 반영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tibero.com/tibero-manuals)
+  vendor_cause: 트랜잭션 복구가 완료되지 않아 작업을 실행할 수 없음.
+  vendor_action: 트랜잭션 복구가 완료된 후 다시 시도하십시오.
+  vendor_url: https://docs.tibero.com/tibero-manuals_en/7.2.5.manuals_en/tibero-error-reference-guide/chapter-21000.tx.error
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR-nnnnn 코드 체계는 4~7 공통으로 수집(5→6→7 번호 재편 근거 없음 — GPT B). 6/7 sys.log 는 [ISO시각] [COM-nnn] [I/W/E] 형식(파서 대응), 6 EOS 2025-03-31·Extended 2028-03-31
+- code: TBR-21028
+  severity: critical
+  category: undo
+  title: UNDO 세그먼트 기동 실패
+  immediate:
+  - UNDO free space와 _USGMT_ONLINE_MIN 설정을 확인하고 기동 실패 로그를 보존
+  short:
+  - V$UNDO_FREE_SPACE와 expired undo 및 undo datafile 상태를 분석
+  mid:
+  - 필요 시 rollback segment shrink와 UNDO 용량 및 파라미터를 조정
+  long:
+  - UNDO 증가율과 기동 최소 세그먼트 용량을 정기 검증
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tibero.com/tibero-manuals)
+  vendor_cause: 온라인 UNDO 세그먼트 수가 최대 한도를 초과함.
+  vendor_action: _USGMT_ONLINE_MAX를 늘리거나 _USGMT_ONLINE_MIN을 줄이십시오.
+  vendor_url: https://docs.tibero.com/tibero-manuals_en/7.2.5.manuals_en/tibero-error-reference-guide/chapter-21000.tx.error
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR-nnnnn 코드 체계는 4~7 공통으로 수집(5→6→7 번호 재편 근거 없음 — GPT B). 6/7 sys.log 는 [ISO시각] [COM-nnn] [I/W/E] 형식(파서 대응), 6 EOS 2025-03-31·Extended 2028-03-31
+- code: TBR-21039
+  severity: error
+  category: capacity
+  title: 테이블스페이스 Quota 초과
+  immediate:
+  - "tbsql 로 DBA 접속 후 `select tablespace_name, username, bytes, max_bytes from dba_ts_quotas where username='<USER>';` — bytes 가 max_bytes 에 닿았으면 확정(max_bytes=-1 은 무제한)"
+  - "테이블스페이스 여유와 구분: `select tablespace_name, round(sum(bytes)/1024/1024) free_mb from dba_free_space where tablespace_name='<TS>' group by tablespace_name;` — 여유가 충분한데 실패하면 quota 원인"
+  short:
+  - "(2차·승인 후, 롤백: 원래 quota 값) `alter user <USER> quota <크기> on <TS>;` 로 업무에 필요한 만큼만 부여"
+  - USER_TS_QUOTAS와 USE_TS_QUOTA 관련 설정을 점검
+  mid:
+  - 필요 quota를 부여하거나 quota 정책을 업무 기준에 맞게 조정
+  long:
+  - 사용자별 quota 사용률과 tablespace 용량을 상시 관리
+  source: GPT 수집·벤더 문서 대조 완료(https://support.tibero.com/hc/en-us/articles/13803428593551-Error-21039-Occurs-When-Creating-Table)
+  vendor_cause: Quota 설정 때문에 테이블스페이스에 추가 블록을 할당할 수 없음.
+  vendor_action: Quota 설정을 확인하십시오.
+  vendor_url: https://support.tibero.com/hc/en-us/articles/13803428593551-Error-21039-Occurs-When-Creating-Table
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR-nnnnn 코드 체계는 4~7 공통으로 수집(5→6→7 번호 재편 근거 없음 — GPT B). 6/7 sys.log 는 [ISO시각] [COM-nnn] [I/W/E] 형식(파서 대응), 6 EOS 2025-03-31·Extended 2028-03-31
+- code: TBR-24001
+  severity: critical
+  category: storage
+  title: 컨트롤파일 열기 실패
+  immediate:
+  - "지정 경로: `grep -i \"CONTROL_FILES\" $TB_HOME/config/$TB_SID.tip` 후 각 경로 `ls -l <ctl>` (Tibero 6/7)"
+  - "오류·마운트: `grep -h \"TBR-24001\" $TB_HOME/instance/$TB_SID/log/slog/* | tail` · `df -h <mount>`"
+  short:
+  - "(2차·승인 후, 롤백: tip 백업본·손상 파일 사본 보관) 정상 다중화본으로 복사하거나 tip 에서 손상 경로 제외 후 기동, 다중화본이 없으면 백업 기반 재생성"
+  mid:
+  - 정상 control file을 복구하거나 재생성 후 기동을 검증
+  long:
+  - control file 다중화와 경로 접근성 점검을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://support.tibero.com/hc/en-us/articles/13803684550671-Control-File-Related-Errors-When-Starting-DB)
+  vendor_cause: "컨트롤파일 열기에 실패함 — tip 의 CONTROL_FILES 경로 오류, 파일 삭제·이동, 권한, 미마운트가 흔한 원인이며 MOUNT 단계 기동이 실패함."
+  vendor_action: 파일 경로와 권한을 확인한 후 다시 시도하십시오.
+  vendor_url: https://docs.tibero.com/tibero-manuals_en/7.2.5.manuals_en/tibero-error-reference-guide/chapter-24000.tccf.error
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR-nnnnn 코드 체계는 4~7 공통으로 수집(5→6→7 번호 재편 근거 없음 — GPT B). 6/7 sys.log 는 [ISO시각] [COM-nnn] [I/W/E] 형식(파서 대응), 6 EOS 2025-03-31·Extended 2028-03-31
+- code: TBR-24004
+  severity: critical
+  category: storage
+  title: 컨트롤파일 쓰기 실패
+  immediate:
+  - "지정 경로: `grep -i \"CONTROL_FILES\" $TB_HOME/config/$TB_SID.tip` 후 `df -h <mount>` · `mount | grep <mount>`(ro 여부)"
+  - "OS I/O 오류: `dmesg -T | grep -i \"i/o error\\|remount\" | tail -20`"
+  short:
+  - "(2차·승인 후, 롤백: 손상 파일 사본 보관) 스토리지 조치 후 정상 다중화본으로 손상본 교체, 정합성 확인 뒤 기동"
+  mid:
+  - 정상 control file로 복구 또는 재생성하고 DB 정합성을 검증
+  long:
+  - control file 다중화와 스토리지 장애 감시를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://support.tibero.com/hc/en-us/articles/13803684550671-Control-File-Related-Errors-When-Starting-DB)
+  vendor_cause: "컨트롤파일에 쓸 수 없음 — 볼륨 가득 참·I/O 오류·읽기 전용 마운트가 원인이며 컨트롤파일 갱신 실패는 인스턴스 정지로 이어질 수 있음."
+  vendor_action: 파일 경로와 권한을 확인한 후 다시 시도하십시오.
+  vendor_url: https://docs.tibero.com/tibero-manuals_en/7.2.5.manuals_en/tibero-error-reference-guide/chapter-24000.tccf.error
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR-nnnnn 코드 체계는 4~7 공통으로 수집(5→6→7 번호 재편 근거 없음 — GPT B). 6/7 sys.log 는 [ISO시각] [COM-nnn] [I/W/E] 형식(파서 대응), 6 EOS 2025-03-31·Extended 2028-03-31
+- code: TBR-24006
+  severity: critical
+  category: storage
+  title: 컨트롤파일 로드 실패
+  immediate:
+  - "지정 경로와 파일 크기: `grep -i \"CONTROL_FILES\" $TB_HOME/config/$TB_SID.tip` 후 `ls -l <ctl1> <ctl2>` — 다중화본 크기가 다르면 손상 의심"
+  - "오류: `grep -h \"TBR-24006\" $TB_HOME/instance/$TB_SID/log/slog/* | tail`"
+  short:
+  - "(2차·승인 후, 롤백: 손상 파일 사본 보관) 정상 다중화본으로 교체하거나 백업한 컨트롤파일 생성문으로 재생성 후 복구"
+  mid:
+  - 정상 백업으로 control file을 재생성하고 recovery를 수행
+  long:
+  - control file 백업 검증과 변경 후 무결성 점검을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://support.tibero.com/hc/en-us/articles/13803684550671-Control-File-Related-Errors-When-Starting-DB)
+  vendor_cause: "컨트롤파일을 메모리로 읽어 들이지 못함 — 블록 크기 불일치·파일 손상·다른 DB 의 파일 지정이 원인이며 MOUNT 가 실패함."
+  vendor_action: 파일 경로와 권한을 확인한 후 다시 시도하십시오.
+  vendor_url: https://docs.tibero.com/tibero-manuals_en/7.2.5.manuals_en/tibero-error-reference-guide/chapter-24000.tccf.error
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR-nnnnn 코드 체계는 4~7 공통으로 수집(5→6→7 번호 재편 근거 없음 — GPT B). 6/7 sys.log 는 [ISO시각] [COM-nnn] [I/W/E] 형식(파서 대응), 6 EOS 2025-03-31·Extended 2028-03-31
+- code: TBR-24010
+  severity: error
+  category: storage
+  title: 테이블스페이스 온라인백업 중
+  immediate:
+  - "백업 모드: tbsql `select * from v$backup;` (Tibero 동적 뷰) — 해당 파일이 ACTIVE 인지"
+  - "백업 스크립트 로그에서 END BACKUP 실행 여부·오류 확인"
+  short:
+  - "(2차·승인 후, 롤백: 해당 없음 — 백업 유효성 별도 확인) 백업 완료 확인 후 `alter tablespace <TS> end backup;` 실행하고 요청 작업 재실행"
+  mid:
+  - 정상적으로 END BACKUP 처리 후 필요한 작업을 재수행
+  long:
+  - 온라인 백업 시작과 종료 자동검증 및 상태 모니터링을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tibero.com/tibero-manuals)
+  note: 공식 메시지는 테이블스페이스가 온라인 백업 모드임을 나타냄
+  vendor_cause: "대상 테이블스페이스가 온라인 백업 모드(BEGIN BACKUP)라 요청 작업을 수행할 수 없음 — 백업 스크립트가 END BACKUP 을 하지 못하고 끝난 경우가 흔함."
+  vendor_action: 온라인 백업이 완료된 후 다시 시도하십시오.
+  vendor_url: https://docs.tibero.com/tibero-manuals_en/7.2.5.manuals_en/tibero-error-reference-guide/chapter-24000.tccf.error
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR-nnnnn 코드 체계는 4~7 공통으로 수집(5→6→7 번호 재편 근거 없음 — GPT B). 6/7 sys.log 는 [ISO시각] [COM-nnn] [I/W/E] 형식(파서 대응), 6 EOS 2025-03-31·Extended 2028-03-31
+- code: TBR-1068
+  severity: critical
+  category: memory
+  title: 시스템 메모리 부족
+  immediate:
+  - "OS 메모리: `free -m` · `vmstat 5 3` · `ps -eo pid,rss,cmd --sort=-rss | head -15`"
+  - "OS 메모리 고갈 종료 기록: `dmesg -T | grep -i \"out of memory\" | tail`"
+  - "설정: `grep -i \"SHM_SIZE\\|MEMORY\" $TB_HOME/config/$TB_SID.tip` — 물리 메모리 대비 과다 여부"
+  short:
+  - "(2차·승인 후, 롤백: tip 백업본 복원 후 재기동) 비필수 프로세스 정리 또는 TOTAL_SHM_SIZE 조정 후 계획 재기동"
+  mid:
+  - 물리 메모리와 Tibero 메모리 파라미터를 재산정
+  long:
+  - 메모리 헤드룸과 OOM 조기경보를 운영
+  source: GPT 수집·공식 문서 미확인(보류)
+  note: GPT 대조 시 공식 공개 문서에서 확인 불가 — 실로그·벤더 확인 필요
+  vendor_cause: "Tibero 서버 프로세스가 OS 에서 메모리를 할당받지 못한 상태(시스템 메모리 부족)로 보임 — 공유 메모리(TOTAL_SHM_SIZE)와 프로세스 메모리 합이 물리 메모리·swap 을 넘거나 다른 프로세스가 메모리를 점유한 경우가 흔함."
+  verify_note: "미검증 — TBR-1068 의 공식 메시지·조치를 Tibero 오류 참조 안내서에서 확인하지 못함(원인은 제목 기준 추정)"
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR-nnnnn 코드 체계는 4~7 공통으로 수집(5→6→7 번호 재편 근거 없음 — GPT B). 6/7 sys.log 는 [ISO시각] [COM-nnn] [I/W/E] 형식(파서 대응), 6 EOS 2025-03-31·Extended 2028-03-31
+- code: TBR-1062
+  severity: critical
+  category: security
+  title: 블록 복호화 실패
+  immediate:
+  - "지갑 설정: `grep -i \"wallet\" $TB_HOME/config/$TB_SID.tip` 후 지정 경로 `ls -l <wallet_path>`(소유자·변경 시각)"
+  - "오류 블록·객체: `grep -h \"TBR-1062\" $TB_HOME/instance/$TB_SID/log/slog/* | tail`"
+  short:
+  - "(2차·승인 후, 롤백: 현재 지갑 파일 사본 보관) 백업해 둔 정상 지갑으로 복원·지갑 열기 후 암호화 데이터 조회 시험"
+  mid:
+  - 정상 wallet 또는 백업을 복구하고 암호화 데이터 접근을 검증
+  long:
+  - 키 백업과 wallet 이중보관 및 복구시험을 운영
+  source: GPT 수집·공식 문서 미확인(보류)
+  note: GPT 대조 시 공식 공개 문서에서 확인 불가 — 실로그·벤더 확인 필요
+  vendor_cause: "암호화된 테이블스페이스·컬럼 블록을 복호화하지 못한 상태로 보임 — 보안 지갑(wallet)이 열려 있지 않거나 다른 지갑·키로 바뀐 경우가 흔함."
+  verify_note: "미검증 — TBR-1062 의 공식 메시지와 Tibero 지갑 관련 tip 파라미터 이름을 공식 문서에서 확인하지 못함"
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR-nnnnn 코드 체계는 4~7 공통으로 수집(5→6→7 번호 재편 근거 없음 — GPT B). 6/7 sys.log 는 [ISO시각] [COM-nnn] [I/W/E] 형식(파서 대응), 6 EOS 2025-03-31·Extended 2028-03-31
+- code: TBR-1091
+  severity: critical
+  category: storage
+  title: Crash Recovery 실패
+  immediate:
+  - "실패 위치: `tail -300 $(ls -tr $TB_HOME/instance/$TB_SID/log/slog/* | tail -5) | grep -n \"TBR-\"` 로 리두 그룹·블록 정보 확보(Tibero 6/7)"
+  - "스토리지: `dmesg -T | grep -i \"i/o error\" | tail` — 반복 기동 시도는 2차 판단 후"
+  short:
+  - "(2차·승인 후, 롤백: 현재 데이터파일·리두 사본 보관) 백업에서 데이터파일 복원 후 미디어 복구, 손상 범위는 TmaxTibero 기술지원과 판단"
+  mid:
+  - 정상 데이터파일 복원 후 recovery를 재수행
+  long:
+  - 백업 복구검증과 스토리지 무결성 점검을 정례화
+  source: GPT 수집·공식 문서 미확인(보류)
+  note: GPT 대조 시 공식 공개 문서에서 확인 불가 — 실로그·벤더 확인 필요
+  vendor_cause: "기동 시 크래시 복구(리두 적용) 중 잘못된 리두나 데이터 블록을 만나 복구에 실패한 상태로 보임 — 리두·데이터파일 손상, 스토리지 I/O 오류, 불완전한 파일 복사가 흔한 원인."
+  verify_note: "미검증 — TBR-1091 의 공식 메시지·조치를 Tibero 오류 참조 안내서에서 확인하지 못함"
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR-nnnnn 코드 체계는 4~7 공통으로 수집(5→6→7 번호 재편 근거 없음 — GPT B). 6/7 sys.log 는 [ISO시각] [COM-nnn] [I/W/E] 형식(파서 대응), 6 EOS 2025-03-31·Extended 2028-03-31

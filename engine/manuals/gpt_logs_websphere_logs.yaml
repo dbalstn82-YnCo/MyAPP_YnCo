@@ -1,0 +1,159 @@
+product: websphere
+layer: was
+title: websphere 로그 종류 카탈로그 (GPT 수집 — 벤더 문서 대조 필요)
+source: GPT 수집(벤더 문서 대조 필요)
+sources: []
+logtypes:
+- name: SystemOut 로그
+  path: <profile_root>/logs/<SERVER>/SystemOut.log
+  format: 텍스트·[M/d/yy HH:mm:ss:SSS TZ]
+  check: WSVR·SRVE·J2CA·HMGR·애플리케이션·기동 상태
+  sample: '[9/9/26 12:00:00:123 KST] 00000001 HttpTransport A SRVE0171I: Transport http is listening...'
+- name: SystemErr 로그
+  path: <profile_root>/logs/<SERVER>/SystemErr.log
+  format: 텍스트·WebSphere timestamp
+  check: stderr·Java 예외·native/JVM 오류·stack trace
+  sample: '[9/9/26 12:00:00:123 KST] 00000001 SystemErr R java.lang...'
+- name: Trace 로그
+  path: <profile_root>/logs/<SERVER>/trace.log 기본 Basic 모드
+  format: 텍스트·WebSphere timestamp
+  check: 컴포넌트 trace specification·webcontainer/JDBC/security 상세 추적
+  sample: '[9/9/26 12:00:00:123 KST] 00000001 WebContainer 3 ...'
+- name: Activity 로그
+  path: <profile_root>/logs/<SERVER>/activity.log
+  format: 바이너리 service log·이벤트 timestamp
+  check: 서비스 상태·경고·오류를 Showlog로 분석
+  sample: activity.log binary record, Showlog로 텍스트 변환
+- name: Native stdout
+  path: <profile_root>/logs/<SERVER>/native_stdout.log 설정값 기준
+  format: 텍스트·선택적 WebSphere timestamp
+  check: native/JVM bootstrap·verbose class·stdout 메시지
+  sample: '[6/18/12 16:24:31:453 CDT] 00000000 ws.ext.mains.args[0]=-nosplash'
+- name: Native stderr
+  path: <profile_root>/logs/<SERVER>/native_stderr.log
+  format: 텍스트·선택적 WebSphere timestamp
+  check: native crash·JVM stderr·GC/JNI·기동 실패
+  sample: '[6/18/12 16:24:31:453 CDT] 00000000 <native stderr message>'
+- name: FFDC 로그
+  path: <profile_root>/logs/ffdc/
+  format: 텍스트·파일명/본문 timestamp
+  check: FFDC incident·Exception·ProbeId·SourceId·stack trace
+  sample: FFDC Exception:java.lang... SourceId:... ProbeId:...
+- name: Dmgr 서버 로그
+  path: <dmgr_profile>/logs/dmgr/SystemOut.log, SystemErr.log
+  format: 텍스트·WebSphere timestamp
+  check: 셀 관리·노드 동기화·배포·보안·HA Manager 오류
+  sample: '[9/9/26 12:00:00:123 KST] ... WSVR...'
+- name: Node Agent 로그
+  path: <profile_root>/logs/nodeagent/SystemOut.log, SystemErr.log
+  format: 텍스트·WebSphere timestamp
+  check: dmgr 연결·node sync·서버 start/stop·노드 상태
+  sample: '[9/9/26 12:00:00:123 KST] ... ADMS...'
+- name: HTTP Access 로그
+  path: ${SERVER_LOG_ROOT}/http_access.log 설정 시
+  format: NCSA Common/Combined·dd/MMM/yyyy:HH:mm:ss Z
+  check: HTTP 4xx·5xx·URI·client·응답량
+  sample: 127.0.0.1 - - [09/Sep/2026:12:00:00 +0900] "GET / HTTP/1.1" 200 1234
+- name: HTTP Error 로그
+  path: ${SERVER_LOG_ROOT}/http_error.log 설정 시
+  format: 텍스트·WebSphere/NCSA 계열 timestamp
+  check: WebContainer HTTP 처리·연결·파싱·응답 오류
+  sample: <timestamp> <severity> <HTTP error message>
+- name: WebServer Plug-in 로그
+  path: <plugins_root>/logs/<WEB_SERVER>/http_plugin.log
+  format: 텍스트·plugin timestamp
+  check: WAS backend 선택·연결 실패·load balancing·plugin_cfg 오류
+  sample: 'ERROR: ws_config_parser:handleLogEnd: Failed to open log file ...'
+- name: 보안 Audit 로그
+  path: 버전별 상이(Audit Service Provider 설정)
+  format: 바이너리 텍스트 기반 또는 설정형·event timestamp
+  check: SECURITY_AUTHN·AUTHZ·정책변경·SUCCESSFUL/FAILURE
+  sample: Event Type = SECURITY_AUTHN | Outcome = SUCCESSFUL | OutcomeReason = SUCCESS | ...
+- name: HPEL 로그
+  path: 버전별 상이(HPEL repository 설정)
+  format: HPEL binary repository·정밀 timestamp
+  check: SystemOut/SystemErr/trace 대체·LogViewer 조회·대량 진단
+  sample: LogViewer로 HPEL repository 레코드 출력
+- name: HPEL TextLog
+  path: 버전별 상이(HPEL TextLog 설정)
+  format: 텍스트·WebSphere timestamp
+  check: HPEL 이벤트를 일반 텍스트로 상관분석
+  sample: '[9/9/26 12:00:00:123 KST] ... <message>'
+- name: Verbose GC 로그
+  path: 버전별 상이(JVM verbose GC 설정)
+  format: 텍스트/XML·JVM별 timestamp
+  check: GC pause·heap occupancy·allocation failure·OOM 전조
+  sample: <af type="tenured" id="..." timestamp="...">...
+- name: Java Thread Dump
+  path: 버전별 상이·javacore.%Y%m%d.%H%M%S.%pid.%seq.txt
+  format: 텍스트·파일명 timestamp
+  check: 스레드 상태·deadlock·heap summary·native stack
+  sample: javacore.20260909.120000.1234.0001.txt
+- name: Heap Dump
+  path: 버전별 상이·heapdump.%Y%m%d.%H%M%S.%pid.%seq.phd
+  format: PHD 바이너리·파일명 timestamp
+  check: OutOfMemoryError·객체 점유·memory leak
+  sample: heapdump.20260909.120000.1234.0001.phd
+- name: System Core Dump
+  path: 버전별 상이·core.%Y%m%d.%H%M%S.%pid.%seq.dmp
+  format: 시스템덤프 바이너리·파일명 timestamp
+  check: JVM crash·native fault·SIGSEGV·JNI 문제
+  sample: core.20260909.120000.1234.0001.dmp
+- name: IVT 설치검증 로그
+  path: <profile_root>/logs/ivtClient.log
+  format: 텍스트·검증시각
+  check: 설치·프로파일·서버 연결·기동 검증 실패
+  sample: <timestamp> IVT <verification result>
+sections:
+- heading: 로그 종류 카탈로그 (전수)
+  body: 'SystemOut 로그: <profile_root>/logs/<SERVER>/SystemOut.log · SystemErr 로그: <profile_root>/logs/<SERVER>/SystemErr.log · Trace 로그: <profile_root>/logs/<SERVER>/trace.log 기본 Basic 모드 · Activity 로그:
+    <profile_root>/logs/<SERVER>/activity.log · Native stdout: <profile_root>/logs/<SERVER>/native_stdout.log 설정값 기준 · Native stderr: <profile_root>/logs/<SERVER>/native_stderr.log · FFDC 로그: <profile_root>/logs/ffdc/
+    · Dmgr 서버 로그: <dmgr_profile>/logs/dmgr/SystemOut.log, SystemErr.log · Node Agent 로그: <profile_root>/logs/nodeagent/SystemOut.log, SystemErr.log · HTTP Access 로그: ${SERVER_LOG_ROOT}/http_access.log 설정
+    시 · HTTP Error 로그: ${SERVER_LOG_ROOT}/http_error.log 설정 시 · WebServer Plug-in 로그: <plugins_root>/logs/<WEB_SERVER>/http_plugin.log · 보안 Audit 로그: 버전별 상이(Audit Service Provider 설정) · HPEL 로그: 버전별 상이(HPEL
+    repository 설정) · HPEL TextLog: 버전별 상이(HPEL TextLog 설정) · Verbose GC 로그: 버전별 상이(JVM verbose GC 설정) · Java Thread Dump: 버전별 상이·javacore.%Y%m%d.%H%M%S.%pid.%seq.txt · Heap Dump: 버전별 상이·heapdump.%Y%m%d.%H%M%S.%pid.%seq.phd
+    · System Core Dump: 버전별 상이·core.%Y%m%d.%H%M%S.%pid.%seq.dmp · IVT 설치검증 로그: <profile_root>/logs/ivtClient.log'
+- heading: '로그: SystemOut 로그'
+  body: '경로 <profile_root>/logs/<SERVER>/SystemOut.log / 형식 텍스트·[M/d/yy HH:mm:ss:SSS TZ] / 확인 WSVR·SRVE·J2CA·HMGR·애플리케이션·기동 상태 / 샘플 [9/9/26 12:00:00:123 KST] 00000001 HttpTransport A SRVE0171I: Transport
+    http is listening...'
+- heading: '로그: SystemErr 로그'
+  body: 경로 <profile_root>/logs/<SERVER>/SystemErr.log / 형식 텍스트·WebSphere timestamp / 확인 stderr·Java 예외·native/JVM 오류·stack trace / 샘플 [9/9/26 12:00:00:123 KST] 00000001 SystemErr R java.lang...
+- heading: '로그: Trace 로그'
+  body: 경로 <profile_root>/logs/<SERVER>/trace.log 기본 Basic 모드 / 형식 텍스트·WebSphere timestamp / 확인 컴포넌트 trace specification·webcontainer/JDBC/security 상세 추적 / 샘플 [9/9/26 12:00:00:123 KST] 00000001 WebContainer
+    3 ...
+- heading: '로그: Activity 로그'
+  body: 경로 <profile_root>/logs/<SERVER>/activity.log / 형식 바이너리 service log·이벤트 timestamp / 확인 서비스 상태·경고·오류를 Showlog로 분석 / 샘플 activity.log binary record, Showlog로 텍스트 변환
+- heading: '로그: Native stdout'
+  body: 경로 <profile_root>/logs/<SERVER>/native_stdout.log 설정값 기준 / 형식 텍스트·선택적 WebSphere timestamp / 확인 native/JVM bootstrap·verbose class·stdout 메시지 / 샘플 [6/18/12 16:24:31:453 CDT] 00000000 ws.ext.mains.args[0]=-nosplash
+- heading: '로그: Native stderr'
+  body: 경로 <profile_root>/logs/<SERVER>/native_stderr.log / 형식 텍스트·선택적 WebSphere timestamp / 확인 native crash·JVM stderr·GC/JNI·기동 실패 / 샘플 [6/18/12 16:24:31:453 CDT] 00000000 <native stderr message>
+- heading: '로그: FFDC 로그'
+  body: 경로 <profile_root>/logs/ffdc/ / 형식 텍스트·파일명/본문 timestamp / 확인 FFDC incident·Exception·ProbeId·SourceId·stack trace / 샘플 FFDC Exception:java.lang... SourceId:... ProbeId:...
+- heading: '로그: Dmgr 서버 로그'
+  body: 경로 <dmgr_profile>/logs/dmgr/SystemOut.log, SystemErr.log / 형식 텍스트·WebSphere timestamp / 확인 셀 관리·노드 동기화·배포·보안·HA Manager 오류 / 샘플 [9/9/26 12:00:00:123 KST] ... WSVR...
+- heading: '로그: Node Agent 로그'
+  body: 경로 <profile_root>/logs/nodeagent/SystemOut.log, SystemErr.log / 형식 텍스트·WebSphere timestamp / 확인 dmgr 연결·node sync·서버 start/stop·노드 상태 / 샘플 [9/9/26 12:00:00:123 KST] ... ADMS...
+- heading: '로그: HTTP Access 로그'
+  body: 경로 ${SERVER_LOG_ROOT}/http_access.log 설정 시 / 형식 NCSA Common/Combined·dd/MMM/yyyy:HH:mm:ss Z / 확인 HTTP 4xx·5xx·URI·client·응답량 / 샘플 127.0.0.1 - - [09/Sep/2026:12:00:00 +0900] "GET / HTTP/1.1" 200
+    1234
+- heading: '로그: HTTP Error 로그'
+  body: 경로 ${SERVER_LOG_ROOT}/http_error.log 설정 시 / 형식 텍스트·WebSphere/NCSA 계열 timestamp / 확인 WebContainer HTTP 처리·연결·파싱·응답 오류 / 샘플 <timestamp> <severity> <HTTP error message>
+- heading: '로그: WebServer Plug-in 로그'
+  body: '경로 <plugins_root>/logs/<WEB_SERVER>/http_plugin.log / 형식 텍스트·plugin timestamp / 확인 WAS backend 선택·연결 실패·load balancing·plugin_cfg 오류 / 샘플 ERROR: ws_config_parser:handleLogEnd: Failed to open log
+    file ...'
+- heading: '로그: 보안 Audit 로그'
+  body: 경로 버전별 상이(Audit Service Provider 설정) / 형식 바이너리 텍스트 기반 또는 설정형·event timestamp / 확인 SECURITY_AUTHN·AUTHZ·정책변경·SUCCESSFUL/FAILURE / 샘플 Event Type = SECURITY_AUTHN | Outcome = SUCCESSFUL | OutcomeReason
+    = SUCCESS | ...
+- heading: '로그: HPEL 로그'
+  body: 경로 버전별 상이(HPEL repository 설정) / 형식 HPEL binary repository·정밀 timestamp / 확인 SystemOut/SystemErr/trace 대체·LogViewer 조회·대량 진단 / 샘플 LogViewer로 HPEL repository 레코드 출력
+- heading: '로그: HPEL TextLog'
+  body: 경로 버전별 상이(HPEL TextLog 설정) / 형식 텍스트·WebSphere timestamp / 확인 HPEL 이벤트를 일반 텍스트로 상관분석 / 샘플 [9/9/26 12:00:00:123 KST] ... <message>
+- heading: '로그: Verbose GC 로그'
+  body: 경로 버전별 상이(JVM verbose GC 설정) / 형식 텍스트/XML·JVM별 timestamp / 확인 GC pause·heap occupancy·allocation failure·OOM 전조 / 샘플 <af type="tenured" id="..." timestamp="...">...
+- heading: '로그: Java Thread Dump'
+  body: 경로 버전별 상이·javacore.%Y%m%d.%H%M%S.%pid.%seq.txt / 형식 텍스트·파일명 timestamp / 확인 스레드 상태·deadlock·heap summary·native stack / 샘플 javacore.20260909.120000.1234.0001.txt
+- heading: '로그: Heap Dump'
+  body: 경로 버전별 상이·heapdump.%Y%m%d.%H%M%S.%pid.%seq.phd / 형식 PHD 바이너리·파일명 timestamp / 확인 OutOfMemoryError·객체 점유·memory leak / 샘플 heapdump.20260909.120000.1234.0001.phd
+- heading: '로그: System Core Dump'
+  body: 경로 버전별 상이·core.%Y%m%d.%H%M%S.%pid.%seq.dmp / 형식 시스템덤프 바이너리·파일명 timestamp / 확인 JVM crash·native fault·SIGSEGV·JNI 문제 / 샘플 core.20260909.120000.1234.0001.dmp
+- heading: '로그: IVT 설치검증 로그'
+  body: 경로 <profile_root>/logs/ivtClient.log / 형식 텍스트·검증시각 / 확인 설치·프로파일·서버 연결·기동 검증 실패 / 샘플 <timestamp> IVT <verification result>

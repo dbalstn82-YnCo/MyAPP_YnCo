@@ -1,0 +1,98 @@
+product: cubrid
+layer: db
+title: cubrid 로그 종류 카탈로그 (GPT 수집 — 벤더 문서 대조 필요)
+source: GPT 수집(벤더 문서 대조 필요)
+sources: []
+logtypes:
+- name: 서버 Error 로그
+  path: $CUBRID/log/server/<db>_<yyyymmdd>_<hhmi>.err
+  format: 텍스트·시각 포함
+  check: 음수 ER 코드·disk/lock/memory/internal·server crash
+  sample: ERROR CODE = -493 계열 서버 오류 형식
+- name: 서버 Event 로그
+  path: $CUBRID/log/server/<db>_<yyyymmdd>_<hhmi>.event
+  format: 텍스트·event timestamp
+  check: DEADLOCK·LOCK_TIMEOUT·SLOW_QUERY·TEMP_VOLUME_EXPAND·MANY_IOREADS
+  sample: event type·object·transaction 정보 형식
+- name: Broker Admin 로그
+  path: $CUBRID/log/broker/cubrid_broker.log
+  format: 텍스트·timestamp
+  check: broker start/stop·admin operation·프로세스 상태
+  sample: broker administration message 형식
+- name: Broker Access 로그
+  path: $CUBRID/log/broker/<broker_name>.access
+  format: 텍스트·YYYY/MM/DD HH:mm:ss
+  check: client IP·DB·user·NEW/OLD 접속·CAS ID
+  sample: 1 192.168.56.4 2020/11/10 14:41:55 testdb dba NEW 6
+- name: 접속 거부 로그
+  path: $CUBRID/log/broker/<broker_name>.access.denied
+  format: 텍스트·YYYY/MM/DD HH:mm:ss
+  check: REJ·ACL·DB/user/IP 접근 거부
+  sample: Access 로그와 동일 구조, connection_type=REJ
+- name: Broker Error 로그
+  path: $CUBRID/log/broker/error_log/<broker>_<CAS>.err
+  format: 텍스트·MM/DD/YY HH:mm:ss.SSS
+  check: CAS error·음수 error code·Tran·EID·Syntax
+  sample: 'Time: 02/04/09 13:45:17.687 - SYNTAX ERROR *** ERROR CODE = -493, Tran = 1, EID = 38'
+- name: CAS SQL 로그
+  path: $CUBRID/log/broker/sql_log/<broker>_<CAS>.sql.log
+  format: 텍스트·YY-MM-DD HH:mm:ss.SSS
+  check: prepare·execute·fetch·SQL·CAS STARTED/TERMINATED·session
+  sample: 13-06-11 15:07:39.282 (0) STATE idle
+- name: Slow SQL 로그
+  path: $CUBRID/log/broker/sql_log/<broker>_<CAS>.slow.log
+  format: 텍스트·YY-MM-DD HH:mm:ss.SSS
+  check: LONG_QUERY_TIME·LONG_TRANSACTION_TIME·오류 SQL
+  sample: SQL log 계열 timestamp+CAS transaction record 형식
+- name: DDL Audit 로그
+  path: $CUBRID/log/ddl_audit/*_ddl.log
+  format: 텍스트·실행시각
+  check: CREATE·ALTER·DROP·권한 DDL·CAS/csql/loaddb 수행주체
+  sample: <broker>_<CAS>_ddl.log, csql_<db>_ddl.log, loaddb_<db>_ddl.log
+- name: SHARD Proxy 로그
+  path: $CUBRID/log/broker/proxy_log/
+  format: 텍스트·timestamp
+  check: proxy routing·shard 연결·timeout·proxy 오류
+  sample: SHARD proxy log-level message 형식
+- name: SHARD CAS SQL 로그
+  path: $CUBRID/log/broker/sql_log/<broker>_<proxy>_<shard>_<cas>.sql.log
+  format: 텍스트·YY-MM-DD HH:mm:ss.SSS
+  check: shard CAS connect·prepare·rollback·session·SQL
+  sample: 13-06-21 10:14:21.227 (0) connect db shard1@HostA user dba ...
+- name: SHARD CAS Error 로그
+  path: $CUBRID/log/broker/error_log/<broker>_<proxy>_<shard>_<cas>.err
+  format: 텍스트·MM/DD/YY HH:mm:ss.SSS
+  check: EID·handshake·shard DB 접속·CAS 오류
+  sample: 'Time: 06/21/13 10:50:27.776 - DEBUG *** file ...'
+sections:
+- heading: 로그 종류 카탈로그 (전수)
+  body: '서버 Error 로그: $CUBRID/log/server/<db>_<yyyymmdd>_<hhmi>.err · 서버 Event 로그: $CUBRID/log/server/<db>_<yyyymmdd>_<hhmi>.event · Broker Admin 로그: $CUBRID/log/broker/cubrid_broker.log · Broker Access
+    로그: $CUBRID/log/broker/<broker_name>.access · 접속 거부 로그: $CUBRID/log/broker/<broker_name>.access.denied · Broker Error 로그: $CUBRID/log/broker/error_log/<broker>_<CAS>.err · CAS SQL 로그: $CUBRID/log/broker/sql_log/<broker>_<CAS>.sql.log
+    · Slow SQL 로그: $CUBRID/log/broker/sql_log/<broker>_<CAS>.slow.log · DDL Audit 로그: $CUBRID/log/ddl_audit/*_ddl.log · SHARD Proxy 로그: $CUBRID/log/broker/proxy_log/ · SHARD CAS SQL 로그: $CUBRID/log/broker/sql_log/<broker>_<proxy>_<shard>_<cas>.sql.log
+    · SHARD CAS Error 로그: $CUBRID/log/broker/error_log/<broker>_<proxy>_<shard>_<cas>.err'
+- heading: '로그: 서버 Error 로그'
+  body: 경로 $CUBRID/log/server/<db>_<yyyymmdd>_<hhmi>.err / 형식 텍스트·시각 포함 / 확인 음수 ER 코드·disk/lock/memory/internal·server crash / 샘플 ERROR CODE = -493 계열 서버 오류 형식
+- heading: '로그: 서버 Event 로그'
+  body: 경로 $CUBRID/log/server/<db>_<yyyymmdd>_<hhmi>.event / 형식 텍스트·event timestamp / 확인 DEADLOCK·LOCK_TIMEOUT·SLOW_QUERY·TEMP_VOLUME_EXPAND·MANY_IOREADS / 샘플 event type·object·transaction 정보 형식
+- heading: '로그: Broker Admin 로그'
+  body: 경로 $CUBRID/log/broker/cubrid_broker.log / 형식 텍스트·timestamp / 확인 broker start/stop·admin operation·프로세스 상태 / 샘플 broker administration message 형식
+- heading: '로그: Broker Access 로그'
+  body: 경로 $CUBRID/log/broker/<broker_name>.access / 형식 텍스트·YYYY/MM/DD HH:mm:ss / 확인 client IP·DB·user·NEW/OLD 접속·CAS ID / 샘플 1 192.168.56.4 2020/11/10 14:41:55 testdb dba NEW 6
+- heading: '로그: 접속 거부 로그'
+  body: 경로 $CUBRID/log/broker/<broker_name>.access.denied / 형식 텍스트·YYYY/MM/DD HH:mm:ss / 확인 REJ·ACL·DB/user/IP 접근 거부 / 샘플 Access 로그와 동일 구조, connection_type=REJ
+- heading: '로그: Broker Error 로그'
+  body: '경로 $CUBRID/log/broker/error_log/<broker>_<CAS>.err / 형식 텍스트·MM/DD/YY HH:mm:ss.SSS / 확인 CAS error·음수 error code·Tran·EID·Syntax / 샘플 Time: 02/04/09 13:45:17.687 - SYNTAX ERROR *** ERROR CODE = -493,
+    Tran = 1, EID = 38'
+- heading: '로그: CAS SQL 로그'
+  body: 경로 $CUBRID/log/broker/sql_log/<broker>_<CAS>.sql.log / 형식 텍스트·YY-MM-DD HH:mm:ss.SSS / 확인 prepare·execute·fetch·SQL·CAS STARTED/TERMINATED·session / 샘플 13-06-11 15:07:39.282 (0) STATE idle
+- heading: '로그: Slow SQL 로그'
+  body: 경로 $CUBRID/log/broker/sql_log/<broker>_<CAS>.slow.log / 형식 텍스트·YY-MM-DD HH:mm:ss.SSS / 확인 LONG_QUERY_TIME·LONG_TRANSACTION_TIME·오류 SQL / 샘플 SQL log 계열 timestamp+CAS transaction record 형식
+- heading: '로그: DDL Audit 로그'
+  body: 경로 $CUBRID/log/ddl_audit/*_ddl.log / 형식 텍스트·실행시각 / 확인 CREATE·ALTER·DROP·권한 DDL·CAS/csql/loaddb 수행주체 / 샘플 <broker>_<CAS>_ddl.log, csql_<db>_ddl.log, loaddb_<db>_ddl.log
+- heading: '로그: SHARD Proxy 로그'
+  body: 경로 $CUBRID/log/broker/proxy_log/ / 형식 텍스트·timestamp / 확인 proxy routing·shard 연결·timeout·proxy 오류 / 샘플 SHARD proxy log-level message 형식
+- heading: '로그: SHARD CAS SQL 로그'
+  body: 경로 $CUBRID/log/broker/sql_log/<broker>_<proxy>_<shard>_<cas>.sql.log / 형식 텍스트·YY-MM-DD HH:mm:ss.SSS / 확인 shard CAS connect·prepare·rollback·session·SQL / 샘플 13-06-21 10:14:21.227 (0) connect db
+    shard1@HostA user dba ...
+- heading: '로그: SHARD CAS Error 로그'
+  body: '경로 $CUBRID/log/broker/error_log/<broker>_<proxy>_<shard>_<cas>.err / 형식 텍스트·MM/DD/YY HH:mm:ss.SSS / 확인 EID·handshake·shard DB 접속·CAS 오류 / 샘플 Time: 06/21/13 10:50:27.776 - DEBUG *** file ...'

@@ -1,0 +1,19 @@
+# 아이디어 3 (2026-10-16) — DB 묶음 B(SQL Server · MySQL · PostgreSQL) 판정 중 '같은 제품·유형' 으로 붙던 절차가
+# 실제 원인·1차 확인·2차 조치와 맞는다고 확인한 것만 '이 판정 전용'으로 잇는다. 절차 파일은 고치지 않는다.
+# 맞지 않는 판정은 r6_dbb_procedures.yaml 의 전용 절차로 옮겼다.
+links:
+- procedure: MS-PROC-R5-THREAD
+  match: [MSSQL-17888]
+  reviewed: "2026-10-16 판정 적합성 확인 — 17888(노드 스케줄러 전체가 공통 자원 대기)은 17883/17884 와 같은 워커 고갈 계열이라 절차의 sys.dm_os_schedulers work_queue_count·THREADPOOL·블로킹 체인(DAC) 확인과 head blocker 정리가 그대로 맞음"
+- procedure: MS-PROC-R5-HARDWARE
+  match: [MSSQL-824]
+  reviewed: "2026-10-16 판정 적합성 확인 — 824(체크섬·torn page 논리 I/O 오류)는 823/825 와 같은 저장 경로 결함 계열로 절차의 suspect_pages·ERRORLOG 'Error: 82'·System 이벤트·CHECKDB·하드웨어 진단이 맞음(절차 2차의 복원 안내 'MS-PROC-STORAGE' 는 잘못된 참조 — 복원은 MS-PROC-R6-RECOVERY)"
+- procedure: MS-PROC-MEMORY
+  match: [DB-MSS-001]
+  reviewed: "2026-10-16 판정 적합성 확인 — 프로세스 메모리 대량 페이징은 OS 가 작업 집합을 줄인 것으로 절차의 dm_os_sys_memory·process_physical_memory_low 확인과 max server memory 로 OS 몫을 남기는 2차 조치가 맞음(FREEPROCCACHE 줄은 이 판정과 무관)"
+- procedure: MY-PROC-LOCK
+  match: [DB-MYS-SLOW-002]
+  reviewed: "2026-10-16 판정 적합성 확인 — 슬로우 로그 Lock_time 5초 이상은 행 잠금 대기로 절차의 data_lock_waits(5.7 innodb_lock_waits)·블로커 확인과 KILL·innodb_lock_wait_timeout 조정이 맞음(메타데이터 잠금 대기는 data_lock_waits 에 안 보임)"
+- procedure: MY-PROC-STORAGE
+  match: [DB-MYS-008]
+  reviewed: "2026-10-16 판정 적합성 확인 — InnoDB 페이지 손상·파일 읽기 실패는 절차의 error log corruption/Assertion 확인, 디스크 사용량, innodb_force_recovery 최소값 기동→덤프→재구축 2차가 맞음(binlog 정리 단계는 이 판정과 무관)"

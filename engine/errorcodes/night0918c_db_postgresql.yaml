@@ -1,0 +1,425 @@
+product: postgresql
+layer: db
+note: Claude 야간 수집 2026-09-18 — 벤더 공식 문서와 대조 후 확정
+codes:
+- code: 08004
+  severity: error
+  category: connection
+  title: 서버가 연결 거부
+  immediate:
+  - "서버 로그의 같은 시각 FATAL 줄과 클라이언트 주소 기록: `grep FATAL <로그 파일> | tail -30` (로그 위치는 `SHOW log_directory;`, 10+ `SELECT pg_current_logfile();`) (읽기 전용)"
+  - "접속 규칙 확인: `SELECT line_number, type, database, user_name, address, auth_method FROM pg_hba_file_rules;` (10+, superuser) — 출처 IP 와 대조"
+  short:
+  - "(2차·승인 후) 필요한 출처만 pg_hba.conf 규칙 추가 후 `SELECT pg_reload_conf();` — 롤백: 수정 전 pg_hba.conf 백업, 성공: 접속 재개·pg_hba_file_rules 의 error 컬럼 NULL"
+  mid:
+  - "pg_hba.conf 규칙 표준(출처 대역·인증 방식) 정비"
+  long:
+  - "접속 거부 출처 감시와 pg_hba.conf 형상 관리"
+  vendor_cause: 서버가 연결 수립을 거부했음을 뜻하는 연결 예외 분류(sqlserver_rejected_establishment_of_sqlconnection). 접속 허용 규칙·서버 상태·프로토콜 문제로 연결이 거부된 경우에 보고된다.
+  verify_note: "미검증 — PostgreSQL 부록 A 의 조건명은 확인했으나 서버가 08004 를 내는 구체 상황(서버 자체 보고인지 드라이버 보고인지)은 확인 못 함"
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://www.postgresql.org/docs/current/errcodes-appendix.html)
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: '23503'
+  severity: warn
+  category: internal
+  title: 외래 키 위반
+  immediate:
+  - "서버 로그의 violates foreign key constraint 줄의 제약 이름과 DETAIL(Key … is not present / is still referenced) 기록 (읽기 전용)"
+  - "제약 정의 확인: `SELECT conname, conrelid::regclass, confrelid::regclass FROM pg_constraint WHERE conname='<제약명>';`"
+  short:
+  - "(2차·승인 후) 입력·삭제 순서 수정, 데이터 보정은 대상 행을 백업 테이블로 복사한 뒤 실행 — 롤백: 백업 테이블에서 원복"
+  mid:
+  - "애플리케이션 입력 검증과 ON DELETE 정책(RESTRICT·CASCADE) 검토"
+  long:
+  - "외래 키 위반 건수 감시와 데이터 정합성 점검"
+  vendor_cause: 참조 테이블에 없는 키를 넣거나 아직 참조되는 부모 행을 삭제·변경하려 해 외래 키 제약을 위반한 경우(foreign_key_violation). 입력 순서 오류·부모 행 선삭제가 흔한 원인이다.
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://www.postgresql.org/docs/current/errcodes-appendix.html)
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: '23502'
+  severity: warn
+  category: internal
+  title: NOT NULL 위반
+  immediate:
+  - "서버 로그의 null value in column … violates not-null constraint 줄의 컬럼·테이블과 DETAIL 의 실패 행 기록 (읽기 전용)"
+  - "컬럼 기본값 확인: `SELECT column_name, is_nullable, column_default FROM information_schema.columns WHERE table_name='<table>';`"
+  short:
+  - "(2차·승인 후) 애플리케이션 입력값 보강 또는 컬럼 기본값 설정(`ALTER TABLE <table> ALTER COLUMN <col> SET DEFAULT <값>`) — 롤백: DROP DEFAULT 문 준비"
+  mid:
+  - "스키마 변경과 애플리케이션 배포 순서 표준"
+  long:
+  - "데이터 품질 검증과 23502 발생 감시"
+  vendor_cause: NOT NULL 컬럼에 NULL 을 넣거나 NULL 로 갱신하려 해 거부된 경우(not_null_violation). 애플리케이션의 값 누락·기본값 미정의·스키마 변경 후 앱 미반영이 흔한 원인이다.
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://www.postgresql.org/docs/current/errcodes-appendix.html)
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: '25006'
+  severity: error
+  category: internal
+  title: 읽기 전용 트랜잭션에서 쓰기
+  immediate:
+  - "접속한 서버가 대기 서버인지 확인: `SELECT pg_is_in_recovery();` — true 면 standby 로 쓰기가 라우팅된 것 (읽기 전용)"
+  - "`SHOW default_transaction_read_only;` · `SHOW transaction_read_only;` 와 접속 문자열(target_session_attrs 등) 확인"
+  short:
+  - "(2차·승인 후) 쓰기 요청을 primary 로 라우팅하도록 접속 설정 수정(libpq target_session_attrs=read-write, 10+) — 롤백: 이전 접속 설정 보관"
+  mid:
+  - "읽기/쓰기 분리 라우팅(프록시·데이터소스) 구성 정비"
+  long:
+  - "HA 전환 후 접속 대상 검증 절차와 25006 감시"
+  vendor_cause: 읽기 전용 트랜잭션에서 쓰기 문장을 실행해 거부된 경우(read_only_sql_transaction). 대기 서버(hot standby)로 쓰기 요청이 간 경우, default_transaction_read_only 설정, 앱의 읽기 전용 트랜잭션 지정이 흔한 원인이다.
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://www.postgresql.org/docs/current/errcodes-appendix.html)
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: '42883'
+  severity: error
+  category: internal
+  title: 함수가 존재하지 않음
+  immediate:
+  - "서버 로그의 function …(인자형) does not exist 줄과 HINT 기록 (읽기 전용)"
+  - "후보 함수 확인: `SELECT n.nspname, p.proname, pg_get_function_identity_arguments(p.oid) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE p.proname='<func>';` 와 `SHOW search_path;`"
+  short:
+  - "(2차·승인 후) SQL 에 명시적 형 변환(::형식) 추가 또는 누락 함수·확장 배포(`CREATE EXTENSION <ext>`) — 롤백: 배포 전 스키마 덤프(`pg_dump -s`)"
+  mid:
+  - "배포 순서(함수·확장 → 애플리케이션) 정립"
+  long:
+  - "스키마 변경 관리와 환경 간 함수 목록 비교"
+  vendor_cause: 호출한 이름·인자 형식에 맞는 함수(또는 연산자)가 없는 경우(undefined_function). 인자 형식 불일치(암묵 형 변환 없음), 확장 미설치, search_path 밖 스키마의 함수 호출이 흔한 원인이다.
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://www.postgresql.org/docs/current/errcodes-appendix.html)
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: 42P07
+  severity: warn
+  category: internal
+  title: 중복 테이블
+  immediate:
+  - "서버 로그의 relation … already exists 줄과 실행된 스크립트·시각 기록 (읽기 전용)"
+  - "기존 객체 확인: `SELECT n.nspname, c.relname, c.relkind FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.relname='<name>';` — 인덱스·뷰 등 같은 이름 관계 포함"
+  short:
+  - "(2차) 배포 스크립트를 `CREATE TABLE IF NOT EXISTS`·마이그레이션 이력 기반으로 수정 — 운영 반영은 승인 후"
+  mid:
+  - "배포 스크립트 멱등성 표준 수립"
+  long:
+  - "마이그레이션 도구(이력 테이블) 도입"
+  vendor_cause: 만들려는 테이블(또는 같은 이름의 관계)이 이미 있어 CREATE 가 거부된 경우(duplicate_table). 배포·마이그레이션 스크립트 재실행이 흔한 원인이다.
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://www.postgresql.org/docs/current/errcodes-appendix.html)
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: '42703'
+  severity: error
+  category: internal
+  title: 정의되지 않은 컬럼
+  immediate:
+  - "서버 로그의 column … does not exist 줄과 HINT·STATEMENT 기록 (읽기 전용)"
+  - "컬럼 목록 확인: `SELECT column_name FROM information_schema.columns WHERE table_schema='<schema>' AND table_name='<table>';` — 대문자 컬럼은 큰따옴표 식별자 필요, 최근 스키마 변경·앱 배포 시각 대조"
+  short:
+  - "(2차·승인 후) 누락 컬럼 배포 또는 애플리케이션 롤백·SQL 수정 — 롤백: 배포 전 스키마 덤프(`pg_dump -s`)"
+  mid:
+  - "스키마 변경 → 애플리케이션 배포 순서 통제"
+  long:
+  - "스키마 변경 관리와 환경 간 스키마 비교"
+  vendor_cause: SQL 이 참조한 컬럼이 테이블에 없는 경우(undefined_column). 스키마 변경과 애플리케이션 배포 불일치, 대소문자(따옴표 식별자) 차이, 오타가 흔한 원인이다.
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://www.postgresql.org/docs/current/errcodes-appendix.html)
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 입력 제목 오탈자만 교정
+- code: '42601'
+  severity: error
+  category: internal
+  title: 구문 오류
+  immediate:
+  - "서버 로그의 syntax error at or near … 줄과 STATEMENT(오류 위치 포함) 기록 — 생성 주체(ORM·동적 SQL) 확인 (읽기 전용)"
+  - "서버 버전 확인 `SELECT version();` — 상위 버전 전용 구문·다른 DBMS 전용 구문 사용 여부 대조"
+  short:
+  - "(2차) SQL 수정(예약어 식별자는 큰따옴표, 문자열 결합 대신 바인드 변수) 후 개발 환경 검증 — 운영 반영은 승인 후"
+  mid:
+  - "배포 전 SQL 구문 검증 단계 추가"
+  long:
+  - "코드 리뷰 기준에 SQL 이식성 항목 포함"
+  vendor_cause: SQL 구문을 해석할 수 없는 경우(syntax_error). 동적 SQL 조립 오류, 예약어 식별자 미인용, 다른 DBMS 전용 구문 사용이 흔한 원인이다.
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://www.postgresql.org/docs/current/errcodes-appendix.html)
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: '22003'
+  severity: warn
+  category: internal
+  title: 숫자 범위 초과
+  immediate:
+  - "서버 로그의 out of range 문구(예: integer out of range)와 STATEMENT 기록 (읽기 전용)"
+  - "시퀀스 사용률: `SELECT schemaname, sequencename, last_value, max_value FROM pg_sequences;` (10+) 와 컬럼 형식 `\\d <schema>.<table>` (psql)"
+  short:
+  - "(2차·승인 후) 컬럼 형식 확장(integer→bigint) — 영향: 대형 테이블 ALTER TYPE 은 테이블 재작성·배타 잠금, 롤백: 변경 전 백업"
+  mid:
+  - "입력값 범위 검증과 계산식 결과 형식 지정"
+  long:
+  - "시퀀스 사용률(최대값 대비 80%) 감시와 스키마 설계 기준"
+  vendor_cause: 값이 대상 숫자 형식의 범위를 넘은 경우(numeric_value_out_of_range). integer 범위 초과, numeric 정밀도 초과, 시퀀스·serial 값이 int 최대값에 도달한 경우가 흔하다.
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://www.postgresql.org/docs/current/errcodes-appendix.html)
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: '22021'
+  severity: error
+  category: internal
+  title: 인코딩에 없는 문자
+  immediate:
+  - "서버 로그의 invalid byte sequence for encoding … 줄의 바이트 값 기록 (읽기 전용)"
+  - "인코딩 확인: `SHOW server_encoding;` · `SHOW client_encoding;` 와 `SELECT datname, pg_encoding_to_char(encoding) FROM pg_database;`"
+  short:
+  - "(2차·승인 후) client_encoding 을 실제 데이터 인코딩에 맞추거나 적재 파일을 변환(iconv) 후 재적재 — 롤백: 변환 전 원본 파일 보관"
+  mid:
+  - "DB·클라이언트 인코딩 표준(UTF8) 통일"
+  long:
+  - "데이터 유입 경로별 인코딩 검증"
+  vendor_cause: 문자열에 대상 인코딩에서 유효하지 않은 바이트가 있는 경우(character_not_in_repertoire, invalid byte sequence for encoding). 클라이언트 인코딩 설정 불일치나 다른 인코딩 파일 적재가 흔한 원인이다.
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://www.postgresql.org/docs/current/errcodes-appendix.html)
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: 25P03
+  severity: warn
+  category: connection
+  title: idle-in-transaction 세션 타임아웃 종료
+  immediate:
+  - "서버 로그의 terminating connection due to idle-in-transaction timeout 줄과 사용자·애플리케이션 기록 (읽기 전용)"
+  - "현재 유휴 트랜잭션: `SELECT pid, usename, application_name, now()-state_change AS idle, LEFT(query,80) FROM pg_stat_activity WHERE state='idle in transaction' ORDER BY idle DESC;` 와 `SHOW idle_in_transaction_session_timeout;` (9.6+)"
+  short:
+  - "(2차) 애플리케이션의 커밋·롤백 누락 경로 수정, 커넥션 풀 반환 전 트랜잭션 종료 확인 — 운영 반영은 승인 후"
+  mid:
+  - "idle_in_transaction_session_timeout 값 정책(업무별) 수립"
+  long:
+  - "idle in transaction 세션 수·지속 시간 감시와 연결풀 설정 표준"
+  vendor_cause: 트랜잭션을 연 채 idle_in_transaction_session_timeout(9.6+) 보다 오래 유휴 상태로 있어 서버가 세션을 종료한 경우(idle_in_transaction_session_timeout). 커밋 누락·트랜잭션 중 외부 호출 대기가 흔한 원인이다.
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://www.postgresql.org/docs/current/errcodes-appendix.html)
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: 3F000
+  severity: error
+  category: internal
+  title: 잘못된 스키마 이름
+  immediate:
+  - "서버 로그의 schema … does not exist 줄 기록, 존재 확인: `SELECT nspname FROM pg_namespace;` (읽기 전용)"
+  - "실행 계정의 `SHOW search_path;` 와 스키마 USAGE 권한 `SELECT has_schema_privilege('<user>', '<schema>', 'USAGE');`"
+  short:
+  - "(2차·승인 후) 스키마 생성 배포 또는 SQL·search_path 수정(`ALTER ROLE <user> SET search_path = …`) — 롤백: 이전 search_path 기록"
+  mid:
+  - "스키마 관리 표준(소유자·권한) 수립"
+  long:
+  - "배포 절차에 스키마 존재 확인 포함"
+  vendor_cause: 지정한 스키마가 없거나 이름이 잘못된 경우(invalid_schema_name). 스키마 미생성·이름 오타·search_path 에 없는 스키마로 객체를 만들려 한 경우가 흔한 원인이다.
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://www.postgresql.org/docs/current/errcodes-appendix.html)
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: SQLSTATE 이름은 invalid_schema_name
+- code: '57000'
+  severity: error
+  category: internal
+  title: 운영자 개입
+  immediate:
+  - "서버 로그의 같은 시각 shutdown·terminating connection 문구와 하위 코드 확인: `grep -E 'shutdown|terminating connection' <로그 파일> | tail -30` (읽기 전용)"
+  - "서버 기동 시각 `SELECT pg_postmaster_start_time();` 과 작업 일정(패치·계획 정지) 대조"
+  short:
+  - "(2차) 예정 작업이면 공지·재시도 절차 확인, 예정에 없던 종료면 종료 주체(관리자 명령·OOM killer: `dmesg -T | grep -i 'killed process'`) 조사"
+  mid:
+  - "작업 공지·접속 차단 절차 표준화"
+  long:
+  - "계획 외 종료 감시와 변경 관리"
+  vendor_cause: 운영자 개입 분류(operator_intervention)의 오류로, 관리자 조치(서버 종료·세션 종료·취소)로 작업이 중단된 경우에 보고된다. 하위 코드 57014(취소)·57P01(관리자 종료)·57P02(비정상 종료)로 세부 원인을 구분한다.
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://www.postgresql.org/docs/current/errcodes-appendix.html)
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: SQLSTATE class operator_intervention
+- code: 58P02
+  severity: error
+  category: disk
+  title: 중복 파일
+  immediate:
+  - "서버 로그의 could not create file … File exists 줄의 경로 기록 (읽기 전용)"
+  - "해당 경로 파일 확인 `ls -l <경로>` 와 테이블스페이스 위치 `SELECT spcname, pg_tablespace_location(oid) FROM pg_tablespace;` — 다른 객체가 쓰는 파일인지 판단"
+  short:
+  - "(2차·승인 후) 어느 객체에도 속하지 않는 잔존 파일만 데이터 디렉터리 밖으로 이동 보관 후 재시도 — 롤백: 이동 파일 원위치, 판단이 어려우면 제조사 문의"
+  mid:
+  - "비정상 종료 원인 분석과 제거"
+  long:
+  - "잔존 파일 정리 절차 문서화"
+  vendor_cause: 만들려는 파일이 이미 있어 실패한 경우(duplicate_file). 비정상 종료 후 남은 파일, 같은 경로를 쓰는 테이블스페이스 생성, 이전 작업 잔존 파일이 흔한 원인이다.
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://www.postgresql.org/docs/current/errcodes-appendix.html)
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: 2BP01
+  severity: warn
+  category: internal
+  title: 의존 객체가 남아 있음
+  immediate:
+  - "서버 로그 DETAIL(… depends on …)의 의존 객체 목록 기록 (읽기 전용)"
+  - "의존 관계 확인: `SELECT classid::regclass, objid, deptype FROM pg_depend WHERE refobjid='<schema>.<object>'::regclass;` (테이블·뷰 대상)"
+  short:
+  - "(2차·승인 후) 의존 객체를 먼저 정리하거나 영향 검토 후 CASCADE 사용 — 롤백: 작업 전 `pg_dump -s` 로 관련 객체 정의 저장"
+  mid:
+  - "스키마 의존성 관리(변경 전 의존 객체 조회 절차)"
+  long:
+  - "DDL 변경 관리 절차"
+  vendor_cause: 삭제·변경하려는 객체에 다른 객체(뷰·외래 키·함수 등)가 의존하고 있어 거부된 경우(dependent_objects_still_exist). CASCADE 없이 DROP 한 경우 발생한다.
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://www.postgresql.org/docs/current/errcodes-appendix.html)
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'

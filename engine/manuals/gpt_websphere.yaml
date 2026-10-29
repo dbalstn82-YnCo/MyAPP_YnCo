@@ -1,0 +1,15 @@
+product: websphere
+title: IBM WebSphere Application Server 운영 참고 (GPT 수집 — 벤더 문서 대조 필요)
+sections:
+- heading: 로그 위치
+  body: 전통 WAS 서버 로그는 <profile_root>/logs/<server_name>/SystemOut.log, SystemErr.log,
+    startServer.log, stopServer.log이며 FFDC는 프로파일의 logs/ffdc 계열 디렉터리를 확인한다.
+- heading: 장애 시 수집 방법
+  body: SystemOut/SystemErr, FFDC, native_stdout/native_stderr, JVM javacore·heapdump와
+    프로파일 설정을 장애 시각 기준으로 함께 보존한다.
+- heading: 대표 장애 신호
+  body: WSVR0009E 기동 오류, WSVR0605W hung thread, CWPKI SSL·인증서 오류, JDBC pool 고갈, JVM
+    OOM, FFDC 반복 생성과 server state 비정상을 우선 확인한다.
+- heading: 1차 확인 명령
+  body: <profile_root>/bin/serverStatus.sh <server_name>로 상태를 확인하고 tail -100 <profile_root>/logs/<server_name>/SystemOut.log
+    및 SystemErr.log를 함께 확인한다.

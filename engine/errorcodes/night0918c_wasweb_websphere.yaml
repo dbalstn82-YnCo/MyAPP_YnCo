@@ -1,0 +1,258 @@
+product: websphere
+layer: was
+note: Claude 야간 수집 2026-09-18 — 벤더 공식 문서와 대조 후 확정
+codes:
+- code: SRVE0133E
+  severity: error
+  category: internal
+  title: 서블릿 매개변수 파싱 오류
+  immediate:
+  - '`grep -n -A 10 "SRVE0133E" <PROFILE_ROOT>/logs/<server>/SystemOut.log` 으로 문제 매개변수·웹모듈 확인'
+  - 웹모듈 web.xml 매개변수 정의 확인 `grep -n -A3 "param-name" <PROFILE_ROOT>/installedApps/<cell>/<app>.ear/<war>/WEB-INF/web.xml | head -40`
+  short:
+  - web.xml 매개변수 정의 오류면 개발 담당 수정 요청, 요청 형식 문제면 호출측에 전달
+  mid:
+  - '(2차·승인 후, 롤백: 이전 EAR) web.xml 수정본 재배포'
+  long:
+  - 매개변수 파싱 오류(SRVE0133E) 건수 감시
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://www.ibm.com/docs/en/was-nd/8.5.5?topic=messages-srve)
+  vendor_cause: 서블릿 매개변수를 파싱하는 중 오류가 발생함 — web.xml 의 매개변수 정의(init-param·context-param) 오류가 흔한 원인이다.
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  - WAS Liberty (공유 코드)
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 웹 요청 전체 파싱 오류보다 범위가 구체적
+- code: SRVE0255E
+  severity: error
+  category: internal
+  title: 정의되지 않은 웹그룹·가상호스트
+  immediate:
+  - '`grep -n "SRVE0255E" <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -10` 으로 요청 host:port·URI 확인'
+  - 요청 호스트·컨텍스트 루트와 가상호스트 매핑 확인
+  short:
+  - '(2차·승인 후, 롤백: 변경 전 virtualhosts.xml 사본) virtual host 별칭(host:port) 추가 후 웹서버 플러그인 재생성·전파'
+  mid:
+  - 가상 호스트·컨텍스트 루트 배정 대장 관리
+  long:
+  - 배포 후 URL 호출 점검 자동화
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://www.ibm.com/docs/en/was-nd/8.5.5?topic=messages-srve)
+  vendor_cause: 요청을 처리할 웹 그룹(웹 모듈) 또는 가상 호스트가 정의·배포되어 있지 않음 — 가상 호스트 별칭(host:port) 누락, 컨텍스트 루트 오기, 앱 미시작이 흔한 원인이다.
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  - WAS Liberty (공유 코드)
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: SRVE0026E
+  severity: error
+  category: internal
+  title: 서블릿 처리 오류
+  immediate:
+  - '`grep -n -A 30 "SRVE0026E" <PROFILE_ROOT>/logs/<server>/SystemOut.log | head -60` 으로 서블릿 이름과 근본 예외(Caused by) 확인'
+  - 같은 시각 `tail -200 <PROFILE_ROOT>/logs/<server>/SystemErr.log` 와 FFDC `ls -lt <PROFILE_ROOT>/logs/ffdc/ | head` 확인
+  short:
+  - 근본 예외를 개발·자원 담당에 전달
+  mid:
+  - 애플리케이션 예외 처리 보강과 코드 리뷰
+  long:
+  - 서블릿 오류 건수 감시
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://www.ibm.com/docs/en/was-nd/8.5.5?topic=messages-srve)
+  vendor_cause: 지정된 서블릿에서 오류가 발생함([Servlet Error]) — 구체 원인은 함께 기록된 예외에 따라 다르며 애플리케이션 예외·자원 오류가 흔하다.
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  - WAS Liberty (공유 코드)
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 미처리 예외로 한정되지 않음
+- code: WSVR0501E
+  severity: critical
+  category: internal
+  title: 컴포넌트 생성 오류
+  immediate:
+  - '`grep -n -A 30 "WSVR0501E" <PROFILE_ROOT>/logs/<server>/SystemOut.log | head -60` 으로 실패 구성 요소 이름·예외 확인'
+  - 같은 시각 FFDC `ls -lt <PROFILE_ROOT>/logs/ffdc/ | head` 와 최근 구성 변경 `ls -lt <PROFILE_ROOT>/config/cells/<cell>/nodes/<node>/servers/<server>/ | head` 확인
+  short:
+  - '(2차·승인 후, 롤백: restoreConfig 또는 변경 전 server.xml 사본) 구성 수정 후 기동, WSVR0001I 확인'
+  mid:
+  - 구성 변경 전 backupConfig 와 변경 이력 관리
+  long:
+  - 기동 결과 점검 자동화
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://www.ibm.com/docs/en/was-zos/8.5.5?topic=messages-wsvr)
+  vendor_cause: 서버 기동 중 구성 요소(component) 생성에 실패함 — 원인은 함께 기록된 예외이며 구성 파일(server.xml 등) 오류·클래스 누락·자원 초기화 실패가 흔하다.
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  - WAS Liberty (공유 코드)
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: DSRA0304E
+  severity: error
+  category: internal
+  title: DB 2단계 XA 예외
+  immediate:
+  - '`grep -n -A 10 "DSRA0304E" <PROFILE_ROOT>/logs/<server>/SystemOut.log` 으로 XAException 오류 코드(XAER_*·XA_RB*) 확인'
+  - DB 측 XA 트랜잭션 상태와 리소스 어댑터 로그 확인
+  short:
+  - '(2차·승인 후, 롤백: 해당 없음 — DB 담당 확인 후 처리) DB 측 미결 XA 트랜잭션 정리와 WAS 트랜잭션 복구 결과 확인'
+  mid:
+  - DB XA 타임아웃을 WAS 트랜잭션 타임아웃보다 길게 정합, XA 권한 표준
+  long:
+  - XA 예외(DSRA0304E) 건수 감시 경보
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://www.ibm.com/docs/en/was/9.0.5?topic=messages-dsra)
+  vendor_cause: DB 의 2단계(XA) 작업에서 XAException 이 발생함 — XAException 내용(오류 코드)이 원인을 가리키며 DB 측 XA 권한·타임아웃·연결 단절이 흔하다.
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  - WAS Liberty (공유 코드)
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 연결 오류로 한정되지 않음
+- code: J2CA0027E
+  severity: error
+  category: internal
+  title: XA 리소스 메서드 예외
+  immediate:
+  - '`grep -n -A 15 "J2CA0027E" <PROFILE_ROOT>/logs/<server>/SystemOut.log | head -40` 으로 호출 메서드·데이터소스·트랜잭션 ID·예외 확인'
+  - 앞선 오류 `grep -nE "DSRA0304E|WTRN0006W|StaleConnection" <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -20` 대조, JDBC 드라이버·DB 상태 확인
+  short:
+  - '(2차·승인 후, 롤백: 이전 드라이버 보관) 드라이버 결함이면 JDBC 드라이버 갱신, DB 단절이면 DB 복구 후 풀 상태 확인'
+  mid:
+  - 단일 자원 업무의 XA 사용 필요성 재검토
+  long:
+  - XA 데이터소스 구성 표준·예외 감시
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://www.ibm.com/docs/en/was/9.0.5?topic=messages-j2ca)
+  vendor_cause: DataSource 의 XA 리소스 어댑터에서 메서드(commit·rollback·prepare 등) 호출 중 예외가 발생해 완료되지 못함 — 앞선 오류(DB 단절·트랜잭션 타임아웃)가 계기인 경우가 많다.
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  - WAS Liberty (공유 코드)
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 트랜잭션 XA 작업 예외
+- code: J2CA0079E
+  severity: error
+  category: internal
+  title: ConnectionManager 내부 오류
+  immediate:
+  - '`grep -n -A 20 "J2CA0079E" <PROFILE_ROOT>/logs/<server>/SystemOut.log | head -40` 으로 메서드와 IllegalStateException 상세 확인'
+  - 같은 시각 FFDC `ls -lt <PROFILE_ROOT>/logs/ffdc/ | head` 와 J2CA0206W·DB 단절 동반 여부 확인
+  short:
+  - '(2차·승인 후, 롤백: 원래 값 기록) 연결 검증(Purge policy·Pretest connections) 설정, 반복 시 메시지 ID 로 IBM 지원 문서 검색'
+  mid:
+  - 연결풀 설정 표준과 APAR·Fix Pack 수준 점검
+  long:
+  - 네트워크 안정성 관리와 J2CA 오류 감시
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://www.ibm.com/docs/en/was/9.0.5?topic=messages-j2ca)
+  vendor_cause: ConnectionManager 가 내부 불법 상태(IllegalStateException)를 감지함 — 연결 관리자 내부 오류 성격이므로 반복되면 FFDC 와 함께 IBM 지원 문서 확인이 필요하다.
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  - WAS Liberty (공유 코드)
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: stale connection 메시지가 아님
+- code: DCSV8104W
+  severity: warn
+  category: connection
+  title: 실패 판정 멤버 제거
+  immediate:
+  - '`grep -nE "DCSV8104W|HMGR0152W|DCSV1115W" <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -20` 으로 제거된 멤버·요청 멤버·시각 확인'
+  - 제거된 멤버와 요청 멤버 양쪽 SystemOut·GC 로그의 같은 시각 정지 확인, `ping -c 5 <host>` 로 네트워크 확인
+  short:
+  - 양쪽 멤버 로그와 멤버 간 네트워크 확인, 장기 GC 정지면 힙 조정 검토
+  mid:
+  - 코어 그룹 크기와 하트비트(IBM_CS_FD_PERIOD_SECS·IBM_CS_FD_CONSECUTIVE_MISSED) 검토
+  long:
+  - 클러스터 멤버 이탈 감시
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://www.ibm.com/docs/SS7K4U_8.5.5/com.ibm.websphere.messages.doc/DCSV.html)
+  vendor_cause: 다른 view 멤버가 이 멤버를 실패로 판정해 제거를 요청해 코어 그룹 view 에서 제거됨 — 장기 GC 정지·CPU 기아·멤버 간 네트워크 문제가 흔한 원인이다.
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  - WAS Liberty (공유 코드)
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 다른 view 멤버의 제거 요청으로 제거
+- code: DCSV1113W
+  severity: warn
+  category: connection
+  title: 멤버 송신 연결 종료
+  immediate:
+  - '`grep -nE "DCSV1113W|DCSV1115W" <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -20` 으로 대상 멤버·채널·시각 확인'
+  - 상대 멤버가 계획 정지였는지 작업 이력과 대조, 아니면 상대 SystemOut 의 같은 시각 오류와 `ping -c 5 <host>` 확인
+  short:
+  - '(2차·승인 후, 롤백: 원래 값 기록) 네트워크 지연이 원인일 때만 하트비트 타임아웃 조정'
+  mid:
+  - 멤버 간 네트워크 지연·패킷 손실 점검과 경로 이중화
+  long:
+  - 코어 그룹 멤버 이탈 건수 감시와 용량 계획
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://www.ibm.com/docs/ko/was/9.0.5?topic=messages-dcsv)
+  vendor_cause: 다른 멤버로의 송신 연결이 닫혀 그 멤버가 view 에서 제거됨 — 상대 멤버 정지 또는 멤버 간 네트워크 연결 문제가 원인이다.
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  - WAS Liberty (공유 코드)
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 하트비트 유실은 DCSV1112W
+- code: SECJ0056E
+  severity: error
+  category: security
+  title: 인증 실패
+  immediate:
+  - '`grep -n "SECJ0056E" <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -20` 으로 실패 사유·사용자 확인(공유 시 사용자 ID 가림)'
+  - 건수 `grep -c "SECJ0056E" <PROFILE_ROOT>/logs/<server>/SystemOut.log` — 단일 계정 반복은 비밀번호 변경 미반영, 다수 계정 대량은 무차별 대입 의심
+  short:
+  - 레지스트리(LDAP) 계정 잠김·비밀번호 만료 확인, 레지스트리 관리자에 문의
+  mid:
+  - 서비스 계정 비밀번호 변경 시 WAS 인증 별칭 동시 갱신 절차
+  long:
+  - '인증 실패 건수 임계 경보(예: 5분 50건)'
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://www.ibm.com/docs/en/was-zos/9.0.5?topic=messages-secj)
+  vendor_cause: 표시된 사유로 인증이 실패함 — 사용자 ID·비밀번호 오류가 흔하며 지속되면 WAS 가 쓰는 사용자 레지스트리(LDAP 등) 상태 확인이 필요하다.
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  - WAS Liberty (공유 코드)
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 비밀번호 오류 외 여러 인증 실패 원인 포함
+- code: TCPC0004E
+  severity: critical
+  category: connection
+  title: TCP 채널 바인드 실패
+  immediate:
+  - '`grep -n -A 5 "TCPC0004E" <PROFILE_ROOT>/logs/<server>/SystemOut.log` 으로 실제 문구·호스트·포트 확인'
+  - '`ss -ltnp | grep <port>`(Linux) 또는 `netstat -an | grep <port>` 로 점유 프로세스 확인'
+  short:
+  - '(2차·승인 후, 롤백: 원래 serverindex.xml 사본) 남은 인스턴스 정리 또는 포트 변경'
+  mid:
+  - 노드별 포트 배정 대장(serverindex.xml 기준) 관리
+  long:
+  - 기동 전 포트 점유 사전 확인 자동화
+  source: Claude 수집 2026-09-18·공식 문서 미확인(보류)(https://www.ibm.com/docs/en/was/9.0.5)
+  verify_note: 미검증 — IBM WAS 8.5.5·9.0.5 TCPC 메시지 문서에서 TCPC0004E 문구·원인 확인 못함
+  vendor_cause: IBM 공식 메시지 문서에서 이 ID 를 확인하지 못함 — 제목 기준으로는 TCP 채널이 지정 호스트·포트에 바인드하지 못한 상태(포트 사용 중·권한 부족)를 가리킨다.
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  - WAS Liberty (공유 코드)
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: IBM 공식 메시지 문서에서 해당 코드 확인 못함

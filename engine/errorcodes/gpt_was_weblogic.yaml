@@ -1,0 +1,346 @@
+product: weblogic
+layer: was
+note: GPT 협업 수집분 — 벤더 공식 문서와 대조 후 확정
+codes:
+- code: BEA-000137
+  severity: error
+  category: connection
+  title: 클러스터 전송 실패
+  immediate:
+  - "`grep -n -A10 'BEA-000137' <DOMAIN_HOME>/servers/<server>/logs/<server>.log | tail -40` 로 IOException 내용과 발생 시각·반복 여부 확인"
+  - "`java weblogic.WLST` → `connect(userConfigFile='<path>/wls.ucf', userKeyFile='<path>/wls.key', url='t3://<admin_host>:<port>')` → `state('<cluster>', 'Cluster')` 로 멤버별 상태 확인(읽기 전용, 12c/14c) — RUNNING 이 아닌 멤버가 있으면 그 노드 원인, 모두 RUNNING 이면 멤버 간 네트워크 확인"
+  short:
+  - 멀티캐스트 또는 클러스터 통신 설정과 네트워크 손실을 분석
+  mid:
+  - 클러스터 네트워크와 채널 구성을 표준화하고 장애 경로를 개선
+  long:
+  - 클러스터 통신 지연과 패킷 손실 및 멤버 상태를 상시 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  vendor_cause: IOException으로 multicast 메시지 전송에 실패함
+  vendor_action: 클러스터 디버깅을 활성화해 상세 메시지를 확인
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 10.3.6·12.1.3·12.2.1.x·14.1.1·14.1.2 동일(EOS 된 10.3.6/12.1.3 도 동일 ID)
+- code: BEA-000342
+  severity: critical
+  category: internal
+  title: 서버 초기화 실패
+  immediate:
+  - "`grep -n -B30 'BEA-000342' <DOMAIN_HOME>/servers/<server>/logs/<server>.log | grep -E 'BEA-|Exception|Caused by' | tail -30` 로 서버 기동을 막은 직전 예외 확보 — 첫 예외가 근본 원인"
+  - "`tail -100 <DOMAIN_HOME>/servers/<server>/logs/<server>.out`(Node Manager 기동 시 표준 출력) 로 JVM·config.xml 오류 확인 — 서버를 RUNNING 으로 강제 진행(force resume 등)하지 않는다"
+  short:
+  - 설정파일과 배포 모듈 및 JVM 옵션의 선행 오류를 분석
+  mid:
+  - 원인 설정이나 모듈을 수정하고 검증된 상태로 재기동
+  long:
+  - 기동 사전검증과 구성 변경 이력 및 자동 롤백을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  vendor_cause: 서버 초기화 도중 예외가 발생해 서버가 완전히 초기화되지 못한 Emergency 상태 — 설정(config.xml) 오류·필수 서비스 실패·포트·보안 초기화 실패가 흔하며 직전 예외가 근본 원인이다.
+  vendor_action: weblogic.log를 분석해 서버가 완전히 초기화되지 못한 원인을 확인
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 10.3.6·12.1.3·12.2.1.x·14.1.1·14.1.2 동일(EOS 된 10.3.6/12.1.3 도 동일 ID)
+- code: BEA-000394
+  severity: critical
+  category: lock
+  title: 스레드 교착상태
+  immediate:
+  - '`grep -n -A 40 "BEA-000394" <DOMAIN_HOME>/servers/<server>/logs/<server>.log | head -80` 으로 DEADLOCK DETECTED 덤프의 교착 스레드·잠금 객체(monitor) 확인'
+  - 스레드 덤프 10초 간격 3회 `jcmd <PID> Thread.print`(HotSpot JDK 7+) 또는 `java weblogic.Admin -url t3://<host>:<port> -username <user> THREAD_DUMP`(10.3.6, 비밀번호는 프롬프트) — 스레드 덤프, 프로세스는 유지
+  short:
+  - '교착 스택에 애플리케이션 클래스가 있으면 개발 담당에 잠금 순서 분석 요청, weblogic.* 내부 클래스만이면 덤프·서버 로그로 My Oracle Support 의뢰; 업무 정지 시 (2차·승인 후, 롤백: 해당 없음) 서버 재기동'
+  mid:
+  - 애플리케이션 잠금 순서를 수정하거나 해당 벤더 패치를 검토
+  long:
+  - 교착 자동탐지와 스레드 덤프 수집 및 회귀시험을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  vendor_cause: 서버 내부에 서로 교착된 스레드가 존재함
+  vendor_action: WebLogic Server 내부 코드가 관련된 교착이면 My Oracle Support에 보고
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 10.3.6·12.1.3·12.2.1.x·14.1.1·14.1.2 동일(EOS 된 10.3.6/12.1.3 도 동일 ID)
+- code: BEA-000401
+  severity: critical
+  category: capacity
+  title: 소켓 큐 포화
+  immediate:
+  - '`grep -nE "BEA-000401|BEA-000337|BEA-002616" <DOMAIN_HOME>/servers/<server>/logs/<server>.log | tail -20` 로 소켓 큐 포화 시각과 STUCK 스레드·accept 실패 동반 여부 확인'
+  - WLST(`java weblogic.WLST` → `connect(url='t3://<admin_host>:<port>')`, 자격증명은 프롬프트 입력) 에서 `domainRuntime()` → `cd('ServerRuntimes/<server>/ThreadPoolRuntime/ThreadPoolRuntime')` → `ls()` 로 QueueLength·HoggingThreadCount 확인, `ss -s` 로 TCP 연결 수 확인 (Linux)
+  short:
+  - '(2차·승인 후, 롤백: LB 가중치 원복) 앞단 LB 에서 해당 서버로의 신규 연결 비중을 낮추고, 소켓 큐 포화·스레드 포화 원인(지연 요청·폭주 트래픽) 분석'
+  mid:
+  - 서버 용량과 연결 큐 및 애플리케이션 처리량을 재산정
+  long:
+  - 동시접속 부하시험과 소켓 큐 임계치 경보를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  vendor_cause: 소켓 읽기 요청용 내부 큐가 가득 차 추가 소켓 읽기 요청을 버림
+  vendor_action: 실패에 대한 추가 정보를 제공하는 다른 로그 메시지를 확인
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 10.3.6·12.1.3·12.2.1.x·14.1.1·14.1.2 동일(EOS 된 10.3.6/12.1.3 도 동일 ID)
+- code: BEA-000402
+  severity: warn
+  category: thread
+  title: 소켓 리더 부족
+  immediate:
+  - "`grep -c 'BEA-000402' <DOMAIN_HOME>/servers/<server>/logs/<server>.log` 로 반복 건수, `netstat -an | grep ':<listen_port> ' | grep -c ESTABLISHED` 로 활성 소켓 수 확인"
+  - "`jcmd <PID> Thread.print | grep -c 'weblogic.socket.Muxer'` 로 소켓 리더 스레드 수 확인(스레드 덤프, 프로세스는 유지) — 활성 소켓이 리더 수보다 크게 많고 Native IO 를 쓰지 않으면 확정 (12c/14c)"
+  short:
+  - "(2차·승인 후, 롤백: 원래 값 복원) 과도한 신규 접속 완화(앞단 분산)와 NativeIOEnabled·ThreadPoolPercentSocketReaders 조정 검토"
+  - ThreadPool과 SocketReader 관련 설정 및 I/O 방식을 점검
+  mid:
+  - 벤더 권고 범위에서 스레드와 소켓 읽기 구성을 조정
+  long:
+  - 활성 소켓 대비 리더 용량과 연결량 추세를 관리
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  vendor_cause: 비네이티브 I/O에서 소켓 리더 수가 활성 소켓보다 적어 성능이 크게 저하될 수 있음
+  vendor_action: ThreadPoolPercentSocketReaders·ThreadPoolSize를 늘리거나 SocketReaderTimeout 최소·최대값을 낮춤
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 10.3.6·12.1.3·12.2.1.x·14.1.1·14.1.2 동일(EOS 된 10.3.6/12.1.3 도 동일 ID)
+- code: BEA-000403
+  severity: error
+  category: connection
+  title: 소켓 I/O 예외
+  immediate:
+  - "`grep -n -A10 'BEA-000403' <DOMAIN_HOME>/servers/<server>/logs/<server>.log | tail -40` 로 원격지 주소와 IOException 내용 확인"
+  - "`nc -zvw3 <remote_host> <port>` 로 원격지 도달성, `netstat -an | grep <remote_ip>` 로 연결 상태 확인 — 특정 원격지만 반복되면 그 구간 네트워크·상대 원인"
+  short:
+  - "(2차·승인 후) 영향 요청 재처리는 멱등성(중복 처리 영향) 확인 뒤 업무 담당 승인으로 진행"
+  - 방화벽과 LB 및 TCP 오류와 동시 발생 로그를 분석
+  mid:
+  - 네트워크 경로와 타임아웃 및 재접속 정책을 개선
+  long:
+  - 소켓 I/O 오류율과 구간별 네트워크 품질을 모니터링
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  vendor_cause: 소켓 I/O 수행 중 예기치 않은 IOException이 발생함
+  vendor_action: 네트워크 연결을 확인하고 환경 문제 해결 후에도 지속되면 My Oracle Support에 문의
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 10.3.6·12.1.3·12.2.1.x·14.1.1·14.1.2 동일(EOS 된 10.3.6/12.1.3 도 동일 ID)
+- code: BEA-000449
+  severity: warn
+  category: connection
+  title: 소켓 유휴시간 초과
+  immediate:
+  - "`grep -n -A5 'BEA-000449' <DOMAIN_HOME>/servers/<server>/logs/<server>.log | tail -30` 으로 유휴 종료된 연결의 원격지·시각 확인"
+  - "WLST `java weblogic.WLST` → `connect(userConfigFile='<path>/wls.ucf', userKeyFile='<path>/wls.key', url='t3://<host>:<server_port>')` → `serverRuntime()` → `cd('ThreadPoolRuntime/ThreadPoolRuntime')` → `ls()` 로 QueueLength·HoggingThreadCount 확인(읽기 전용, 12c/14c) — 평소보다 높으면 서버 과부하로 응답 지연"
+  short:
+  - 네트워크 지연과 서버 과부하 및 idle timeout 값을 분석
+  mid:
+  - 처리성능을 개선하고 계층별 유휴 타임아웃을 정렬
+  long:
+  - 유휴 종료율과 장기요청 및 서버 부하를 함께 모니터링
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  vendor_cause: WebLogic Server 또는 네트워크 과부하로 소켓이 idle timeout에 도달할 수 있음
+  vendor_action: 서버 용량 튜닝 수행
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 10.3.6·12.1.3·12.2.1.x·14.1.1·14.1.2 동일(EOS 된 10.3.6/12.1.3 도 동일 ID)
+- code: BEA-000573
+  severity: error
+  category: upstream
+  title: 원격 응답 시간초과
+  immediate:
+  - '`grep -n -A 10 "BEA-000573" <DOMAIN_HOME>/servers/<server>/logs/<server>.log | tail -30` 으로 응답을 기다린 원격 서버·요청과 시간초과 값 확인'
+  - 원격 서버 상태 WLST(`java weblogic.WLST` → `connect(url='t3://<admin_host>:<port>')`, 자격증명은 프롬프트 입력) 의 `state('<server>')` 와 `nc -zvw3 <host> <port>` 로 도달성 확인 — 원격 서버 STUCK·GC 정지 여부는 그 서버 로그에서 확인
+  short:
+  - '(2차·승인 후, 롤백: 원래 값 기록) 원격 처리 지연 원인 해소 후 필요 시 weblogic.jndi.responseReadTimeout 등 응답 타임아웃 조정, 영향 호출 제한은 업무 승인 후'
+  mid:
+  - 응답 타임아웃과 재시도 및 원격 서비스 용량을 조정
+  long:
+  - 의존 서비스 SLO와 호출 지연 및 실패율을 통합 관리
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  vendor_cause: 요청 응답 대기 중 시간초과됐으며 설정된 timeout이 실행 환경에 충분하지 않을 수 있음
+  vendor_action: weblogic.jndi.responseReadTimeout 속성 값을 늘리는 것을 고려
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 10.3.6·12.1.3·12.2.1.x·14.1.1·14.1.2 동일(EOS 된 10.3.6/12.1.3 도 동일 ID)
+- code: BEA-000574
+  severity: error
+  category: upstream
+  title: 원격 부트스트랩 실패
+  immediate:
+  - '`grep -n -A 10 "BEA-000574" <DOMAIN_HOME>/servers/<server>/logs/<server>.log | tail -30` 으로 bootstrap 실패 원격 주소와 PeerGone 동반 여부 확인'
+  - 대상 서버의 기동 상태 WLST(`java weblogic.WLST` → `connect(url='t3://<admin_host>:<port>')`, 자격증명은 프롬프트 입력) 의 `state('<server>')` 와 주소·포트 도달성 `nc -zvw3 <host> <port>` 확인
+  short:
+  - PeerGone과 네트워크 단절 및 채널 설정을 분석
+  mid:
+  - 클러스터 통신 경로와 재연결 정책을 정비
+  long:
+  - 원격 멤버 헬스체크와 장애조치 절차를 자동화
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  vendor_cause: 원격 주소 bootstrap이 실패했으며 이 JVM에서 PeerGone이 발생했을 가능성이 높음
+  vendor_action: 원격 서버가 실행 중인지 확인
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 10.3.6·12.1.3·12.2.1.x·14.1.1·14.1.2 동일(EOS 된 10.3.6/12.1.3 도 동일 ID)
+- code: BEA-001112
+  severity: error
+  category: upstream
+  title: DB풀 연결검사 실패
+  immediate:
+  - "`grep -n -A10 'BEA-001112' <DOMAIN_HOME>/servers/<server>/logs/<server>.log | tail -30` 으로 데이터소스 이름과 테스트 SQL 실패 오류(ORA- 등) 확인"
+  - "WLST `java weblogic.WLST` → `connect(userConfigFile='<path>/wls.ucf', userKeyFile='<path>/wls.key', url='t3://<host>:<server_port>')` → `serverRuntime()` → `cd('JDBCServiceRuntime/<server>/JDBCDataSourceRuntimeMBeans/<ds>')` → `get('State')`·`get('ActiveConnectionsCurrentCount')` 확인(읽기 전용, 12c/14c), `nc -zvw3 <db_host> <db_port>` 로 DB 도달성 확인 — 불통이면 DB·네트워크 원인"
+  short:
+  - DB 연결 손실과 TestTableName 및 네트워크 상태를 점검
+  mid:
+  - 데이터소스 검증 설정과 DB 장애시 재연결 정책을 개선
+  long:
+  - DB풀 검증 실패율과 DB 가용성을 통합 모니터링
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  vendor_cause: 연결 풀에 설정된 연결 테스트 중 하나가 실패했으며 관련 오류가 함께 출력됨
+  vendor_action: 관련 오류를 확인·수정; 일반적으로 DB 연결 손실이면 DBA가 데이터베이스 문제를 해결
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 10.3.6·12.1.3·12.2.1.x·14.1.1·14.1.2 동일(EOS 된 10.3.6/12.1.3 도 동일 ID)
+- code: BEA-001129
+  severity: error
+  category: upstream
+  title: DB풀 연결 생성 실패
+  immediate:
+  - "`grep -n -A15 'BEA-001129' <DOMAIN_HOME>/servers/<server>/logs/<server>.log | grep -E 'ORA-|SQLException|Caused by' | head -20` 로 연결 생성 실패의 DB 측 오류 코드(접속 거부·인증 실패·세션 한도) 확인"
+  - "`nc -zvw3 <db_host> <db_port>` 로 DB 도달성, WLST `java weblogic.WLST` → `connect(userConfigFile='<path>/wls.ucf', userKeyFile='<path>/wls.key', url='t3://<host>:<server_port>')` → `serverRuntime()` → `cd('JDBCServiceRuntime/<server>/JDBCDataSourceRuntimeMBeans/<ds>')` → `get('CurrCapacity')`·`get('WaitingForConnectionCurrentCount')` 로 풀 여유 확인(읽기 전용, 12c/14c)"
+  short:
+  - "(2차·승인 후, 롤백: 원래 설정 원복) 신규 요청 폭주 완화(앞단 유입 제한), DB 세션 한도 상향은 DBA 와 협의"
+  - JDBC 예외와 DB 세션 한도 및 네트워크를 분석
+  mid:
+  - 풀 크기와 연결 생성 재시도 및 DB 수용량을 재산정
+  long:
+  - DB 연결 생성 실패율과 풀 포화 임계치를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  vendor_cause: 연결 생성 실패의 원인은 예외 메시지에 표시됨
+  vendor_action: 오류를 확인해 연결 생성이 실패한 원인을 수정
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 10.3.6·12.1.3·12.2.1.x·14.1.1·14.1.2 동일(EOS 된 10.3.6/12.1.3 도 동일 ID)
+- code: BEA-001153
+  severity: warn
+  category: capacity
+  title: DB 연결 강제 회수
+  immediate:
+  - "`grep -n -A20 'BEA-001153' <DOMAIN_HOME>/servers/<server>/logs/<server>.log | head -60` 으로 강제로 거둬들인 연결의 예약(reserve) 스택과 호출 클래스 확인 — 같은 애플리케이션 클래스가 반복되면 연결 미반납(누수) 확정"
+  - "WLST `java weblogic.WLST` → `connect(userConfigFile='<path>/wls.ucf', userKeyFile='<path>/wls.key', url='t3://<host>:<server_port>')` → `serverRuntime()` → `cd('JDBCServiceRuntime/<server>/JDBCDataSourceRuntimeMBeans/<ds>')` → `get('LeakedConnectionCount')`·`get('ActiveConnectionsCurrentCount')` 확인(읽기 전용, 12c/14c)"
+  short:
+  - 커넥션 미반납과 InactiveConnectionTimeout 설정을 분석
+  mid:
+  - 누수 코드를 수정하고 풀 회수 정책을 업무시간에 맞게 조정
+  long:
+  - 커넥션 누수 탐지와 장기 점유 연결 모니터링을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  vendor_cause: 연결이 장시간 미사용됐거나 harvest 후 애플리케이션 callback이 연결을 닫지 않음
+  vendor_action: 애플리케이션의 연결 누수를 확인하거나 해당 연결 풀의 timeout·harvest 관련 설정값을 조정
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 10.3.6·12.1.3·12.2.1.x·14.1.1·14.1.2 동일(EOS 된 10.3.6/12.1.3 도 동일 ID)
+- code: BEA-002617
+  severity: error
+  category: connection
+  title: 서버 소켓 재개방 시도
+  immediate:
+  - "`ls /proc/<PID>/fd | wc -l` 과 `grep 'open files' /proc/<PID>/limits` 로 FD 사용량·한도 비교 — 90% 이상이면 FD 고갈 (Linux, 그 밖의 OS 는 `lsof -p <PID> | wc -l`)"
+  - "`netstat -an | grep ':<listen_port> ' | grep LISTEN` 으로 리슨 채널 존재 확인, `grep -c 'BEA-002617' <DOMAIN_HOME>/servers/<server>/logs/<server>.log` 로 반복 건수 확인"
+  short:
+  - "(2차·승인 후, 롤백: 원래 값 복원) 신규 접속 분산(앞단 LB)과 nofile 한도 상향은 재기동 일정과 함께"
+  - OS 파일 디스크립터 한도와 TCP accept backlog를 점검
+  mid:
+  - FD와 네트워크 큐 및 동시접속 용량을 재산정
+  long:
+  - 리스너 수락 실패와 FD 사용률을 선제 모니터링
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  note: 반복적인 accept 실패 후 서버 소켓을 닫고 다시 여는 복구 동작을 수행하는 메시지임
+  vendor_cause: 리스너가 연결을 accept하지 못해 반복 재시도 후 서버 소켓을 닫고 다시 열음
+  vendor_action: 파일 디스크립터 한도 증설 여부를 확인하고 더 많은 연결을 수용하도록 OS 매개변수를 조정
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: HTTP 요청 처리 오류 — 9.0 이후 동일
+- code: BEA-002619
+  severity: error
+  category: connection
+  title: 일부 리슨 포트 시작 실패
+  immediate:
+  - "`grep -n -A5 'BEA-002619' <DOMAIN_HOME>/servers/<server>/logs/<server>.log | tail -20` 으로 시작하지 못한 리슨 주소·포트 확인"
+  - "`netstat -anp | grep ':<port> '`(Linux, PID 표시는 root) 또는 `lsof -i :<port>` 로 그 포트를 점유한 프로세스 확인 — 다른 프로세스가 LISTEN 중이면 포트 충돌 확정"
+  short:
+  - 포트 충돌과 채널 설정 및 OS 네트워크 구성을 점검
+  mid:
+  - 포트 할당과 서버 채널 구성을 표준화
+  long:
+  - 기동 전 포트 충돌검사와 리스너 헬스체크를 자동화
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  note: 하나 이상의 listen port가 정상 시작되지 않은 오류로 전체 서버 중단을 단정할 수 없어 error가 타당함
+  vendor_cause: 서버 시작 중 하나 이상의 listen port를 열지 못함
+  vendor_action: 설정된 listen port가 다른 프로세스에서 사용 중이지 않은지 확인
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: HTTP 요청 처리 오류 — 9.0 이후 동일

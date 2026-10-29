@@ -1,0 +1,47 @@
+# 아이디어 3(2026-10-16) — WEB 묶음: '같은 제품·유형'으로만 붙던 판정 중 기존 절차가 실제로 맞는 것만 '이 판정 전용'으로 잇는다.
+# 판정 기준: 그 절차의 1차(읽기 전용) 확인이 이 판정의 원인을 가려내고, 2차 조치가 이 판정의 해결책과 같은 방향일 것.
+# 맞지 않는 판정은 r6_web_procedures.yaml 의 전용 절차로 옮겼다(절차 파일은 고치지 않는다).
+links:
+# ── IIS ──
+- procedure: IIS-PROC-R5-CONNECTION
+  match: [IIS-W3SVC-1039]
+  reviewed: "2026-10-16 판정 적합성 확인 — 사이트 바인딩·URL 예약(appcmd list site·netsh http) 확인과 바인딩 충돌 해소 후 사이트 시작 단계가 1039(바인딩 문제로 사이트 시작 실패)에 그대로 맞음"
+- procedure: IIS-PROC-INTERNAL
+  match: ['503.0', IIS-HTTPERR-APPOFFLINE]
+  reviewed: "2026-10-16 판정 적합성 확인 — 앱 풀 Stopped 와 WAS 5002/5009/5011 원인 이벤트 확인, 원인 기록 후 앱 풀 시작·빠른 실패 보호 조정 단계가 앱 풀 중지로 인한 503(503.0·HTTPERR AppOffline)에 맞음"
+- procedure: IIS-PROC-INTERNAL
+  match: [IIS-ASPNET-1325]
+  reviewed: "2026-10-16 판정 적합성 확인 — 1325(처리되지 않은 예외로 워커 종료)는 WAS 5009/5011·빠른 실패 보호로 이어지며, 이 절차의 원인 이벤트 기록·DebugDiag 크래시 덤프 수집 단계가 그대로 맞음"
+- procedure: IIS-PROC-CAPACITY
+  match: ['500.13', WEB-IIS-HTTPERR-003]
+  reviewed: "2026-10-16 판정 적합성 확인 — HTTP.sys 큐(CurrentQueueSize)·현재 연결 수 카운터 확인과 queueLength·maxConnections·유입 제한 조정 단계가 서버 과부하(500.13)·HTTP.sys 연결 한도(ConnLimit)에 맞음"
+- procedure: IIS-PROC-R5-THREAD
+  match: [IIS-HTTPERR-TIMER-APPPOOL]
+  reviewed: "2026-10-16 판정 적합성 확인 — Timer_AppPool 은 워커 행·백엔드 대기로 큐에서 꺼내지 못한 상태라 장시간 요청(appcmd list requests)·워커 확인, 행 덤프 후 재활용 단계가 맞음(큐 확대 절차 IIS-PROC-CAPACITY 는 증상만 가려 부적합)"
+# ── nginx ──
+- procedure: NGX-PROC-UPSTREAM
+  match: [NGX-UPSTREAM-CONNECT, NGX-UPSTREAM-TIMEOUT, NGX-NO-LIVE-UPSTREAMS, NGX-UPSTREAM-NEXT-TRIES]
+  reviewed: "2026-10-16 판정 적합성 확인 — connect() failed·upstream timed out·no live upstreams 확인과 백엔드 포트 도달 시험, max_fails/fail_timeout·proxy 타임아웃·proxy_next_upstream_tries 설정이 연결 실패·시간 초과·전 멤버 격리·일시 제외(temporarily disabled)에 그대로 맞음"
+- procedure: NGX-PROC-CAPACITY
+  match: [NGX-WORKER-CONNECTIONS, NGX-TOO-MANY-OPEN-FILES]
+  reviewed: "2026-10-16 판정 적합성 확인 — worker_connections are not enough·Too many open files 확인과 워커 /proc limits 대조, worker_connections·worker_rlimit_nofile·LimitNOFILE 상향 단계가 그대로 맞음"
+# ── WebtoB ──
+- procedure: WTB-PROC-CAPACITY
+  match: [WEBTOB-SVR-QUEUE-FULL, WEBTOB-SVR-MAXPROC, WEBTOB-JSV-QUEUE-FULL, WEBTOB-CLIENT-MAX]
+  reviewed: "2026-10-16 판정 적합성 확인 — st -s 큐 대기·st -p 처리 프로세스 확인과 MaxProc·MaxQCount·MaxUser/HTH 조정(JEUS 워커 수 동시 조정) 단계가 서버·JSV 큐 가득참·MaxProc 도달·MaxUser 초과에 맞음"
+- procedure: WTB-PROC-INTERNAL
+  match: [WEBTOB-HTL-DOWN, WEBTOB-WSM-DOWN, WEBTOB-HTH-DOWN, WEBTOB-BOOT-FAIL, WEBTOB-CONFIG-ERROR, CFL-05011, LEG-WEBTOB-WEB-001-D813]
+  reviewed: "2026-10-16 판정 적합성 확인 — 프로세스·공유메모리 잔존·wscfl 문법 검사·system.log 확인과 잔존 정리 후 재기동 단계가 기동 실패·설정 컴파일 오류(CFL)·WSM/HTL/HTH 전체 다운(서비스 중단)·WEB- 시스템 오류에 맞음"
+# ── Apache ──
+- procedure: APA-PROC-INTERNAL
+  match: [AH00020, AH00534, AH00104]
+  reviewed: "2026-10-16 판정 적합성 확인 — configtest·포트·최근 오류 확인과 설정 정정 후 기동 단계가 설정 실패로 인한 종료(AH00020)·MPM 구성 오류(AH00534)·파이프 로그 프로그램 시작 실패(AH00104) 같은 기동 실패에 맞음"
+- procedure: APA-PROC-INTERNAL
+  match: [AH00051, AH00060]
+  reviewed: "2026-10-16 판정 적합성 확인 — 자식(AH00051)·부모(AH00060) 프로세스 시그널·치명 오류는 이 절차의 AH00052 계열 크래시 확인과 CoreDumpDirectory 코어 확보·문제 모듈 격리 단계에 그대로 맞음"
+- procedure: APA-PROC-UPSTREAM
+  match: [AH00957, AH00992]
+  reviewed: "2026-10-16 판정 적합성 확인 — 백엔드 포트 도달·프록시 오류 확인과 BalancerMember connectiontimeout/timeout/retry/ping·AJP 설정 단계가 백엔드 연결 시도 실패(AH00957)·AJP 응답 수신 실패(AH00992)에 맞음"
+- procedure: APA-PROC-SECURITY
+  match: [AH01909, AH02311, AH02572]
+  reviewed: "2026-10-16 판정 적합성 확인 — 인증서 주체·만료 확인과 키/인증서 쌍(modulus md5) 대조 후 교체·ssl.conf 정정 단계가 ServerName 불일치(AH01909)·mod_ssl 초기화 실패(AH02311)·인증서/키 구성 실패(AH02572)에 맞음"

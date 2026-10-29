@@ -1,0 +1,422 @@
+product: iis
+layer: web
+note: Claude 야간 수집 2026-09-18 — 벤더 공식 문서와 대조 후 확정
+codes:
+- code: '401.4'
+  severity: warn
+  category: security
+  title: 필터에 의한 권한 거부
+  immediate:
+  - '`%windir%\system32\inetsrv\appcmd list config "<site>" -section:isapiFilters` 로 설치된 ISAPI 필터 목록 확인'
+  - 'W3C 로그 `Select-String -Path "C:\inetpub\logs\LogFiles\W3SVC<siteID>\u_ex*.log" -Pattern " 401 4 "` 로 대상 URL·사용자 확인'
+  short:
+  - '(2차) 필터 담당(제품 공급사)에 거부 규칙 확인 요청, 필터 비활성화는 승인 후(롤백: 필터 재등록)'
+  mid:
+  - '설치 필터 목록·용도 대장 관리'
+  long:
+  - 'W3C 로그 401.4 건수 일별 집계와 필터 변경 이력 대조'
+  vendor_cause: 'IIS 하위 상태 401.4 — 웹 서버에 설치된 필터(ISAPI 필터·인증 모듈)가 권한 부여를 거부했다. 필터의 인증 규칙 변경·필터 오류가 흔한 원인.'
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/developer/webapps/iis/health-diagnostic-performance/http-status-code)
+  versions:
+  - IIS 6.0 (2003)
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: '401.5'
+  severity: warn
+  category: security
+  title: ISAPI/CGI 앱 권한 거부
+  immediate:
+  - 'W3C 로그 `Select-String -Path "C:\inetpub\logs\LogFiles\W3SVC<siteID>\u_ex*.log" -Pattern " 401 5 "` 로 대상 URL·사용자 확인'
+  - '해당 URL 의 처리기 매핑(`%windir%\system32\inetsrv\appcmd list config "<site>" -section:handlers`)으로 ISAPI/CGI 이름 확인'
+  short:
+  - '(2차) 해당 애플리케이션 담당에 인증 로직·실행 계정 권한 확인 요청'
+  mid:
+  - '레거시 ISAPI/CGI 인증 방식 표준화'
+  long:
+  - 'W3C 로그 401.5 건수 일별 집계와 애플리케이션 배포 이력 대조'
+  vendor_cause: 'IIS 하위 상태 401.5 — ISAPI 또는 CGI 애플리케이션이 권한 부여를 거부했다. 애플리케이션 자체 인증 로직이나 실행 계정 권한 문제가 흔한 원인.'
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/developer/webapps/iis/health-diagnostic-performance/http-status-code)
+  versions:
+  - IIS 6.0 (2003)
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: '403.1'
+  severity: warn
+  category: security
+  title: 실행 접근 금지
+  immediate:
+  - '`%windir%\system32\inetsrv\appcmd list config "<site>/<path>" -section:handlers` 로 accessPolicy 값(Read,Script,Execute) 확인'
+  - '거부된 URL 확장자와 해당 폴더 처리기 매핑 대조'
+  short:
+  - '(2차·승인 후, 롤백: web.config 백업 복원) 필요한 폴더에 한해 accessPolicy 에 Script 또는 Execute 추가'
+  mid:
+  - '업로드 폴더 실행 금지 원칙을 유지한 폴더별 권한 표준'
+  long:
+  - 'W3C 로그 403.1 건수 감시와 처리기 접근 정책 변경 이력 관리'
+  vendor_cause: 'IIS 하위 상태 403.1 — 실행 접근 금지: 처리기 매핑의 접근 정책(accessPolicy)에 Execute/Script 권한이 없어 스크립트·실행 파일 요청이 거부됐다.'
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/developer/webapps/iis/health-diagnostic-performance/http-status-code)
+  versions:
+  - IIS 6.0 (2003)
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: '403.2'
+  severity: warn
+  category: security
+  title: 읽기 접근 금지
+  immediate:
+  - '`%windir%\system32\inetsrv\appcmd list config "<site>/<path>" -section:handlers` 로 accessPolicy 에 Read 가 있는지 확인'
+  - 'W3C 로그에서 403 2 대상 경로 목록 확인'
+  short:
+  - '(2차·승인 후, 롤백: web.config 백업 복원) 해당 경로 accessPolicy 에 Read 추가'
+  mid:
+  - '폴더별 접근 정책 표준 템플릿'
+  long:
+  - 'W3C 로그 403.2 건수 감시와 처리기 접근 정책 변경 이력 관리'
+  vendor_cause: 'IIS 하위 상태 403.2 — 읽기 접근 금지: 처리기 매핑 접근 정책에 Read 권한이 없어 정적 파일 요청이 거부됐다.'
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/developer/webapps/iis/health-diagnostic-performance/http-status-code)
+  versions:
+  - IIS 6.0 (2003)
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: '403.3'
+  severity: warn
+  category: security
+  title: 쓰기 접근 금지
+  immediate:
+  - 'W3C 로그 `Select-String -Path "C:\inetpub\logs\LogFiles\W3SVC<siteID>\u_ex*.log" -Pattern " 403 3 "` 로 메서드(PUT 등)·URL·출처 확인'
+  - '`%windir%\system32\inetsrv\appcmd list config "<site>" -section:system.webServer/webdav/authoring` 로 WebDAV 사용 여부 확인(설치 시)'
+  short:
+  - '(2차) 정상 업무면 WebDAV 저작 규칙 추가를 승인 후 적용(롤백: 규칙 제거), 외부 PUT 시도면 보안 담당 통보'
+  mid:
+  - 'WebDAV·쓰기 허용 경로 최소화 정책'
+  long:
+  - '쓰기 시도(403.3) 보안 감시'
+  vendor_cause: 'IIS 하위 상태 403.3 — 쓰기 접근 금지: 쓰기(PUT·WebDAV) 요청에 대한 Write 접근 정책이 없어 거부됐다.'
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/developer/webapps/iis/health-diagnostic-performance/http-status-code)
+  versions:
+  - IIS 6.0 (2003)
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: '403.6'
+  severity: warn
+  category: security
+  title: IP 주소 거부
+  immediate:
+  - '`%windir%\system32\inetsrv\appcmd list config "<site>" -section:system.webServer/security/ipSecurity` 로 allowUnlisted·허용/거부 목록 확인'
+  - 'W3C 로그 403 6 줄의 c-ip 가 실제 사용자 IP 인지 프록시·LB IP 인지 확인'
+  short:
+  - '(2차·승인 후, 롤백: 추가 항목 제거) 정상 사용자 IP(또는 프록시 IP)를 허용 목록에 추가 — 보안 담당 승인 필수'
+  mid:
+  - '접근 허용 IP 대장 관리와 프록시 환경의 X-Forwarded-For 처리 기준'
+  long:
+  - '403.6 거부 건수 감시'
+  vendor_cause: 'IIS 하위 상태 403.6 — 클라이언트 IP 주소가 IP 및 도메인 제한(ipSecurity) 규칙에 의해 거부됐다. 허용 목록 누락이나 프록시 경유로 출발 IP 가 바뀐 것이 흔한 원인.'
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/developer/webapps/iis/health-diagnostic-performance/http-status-code)
+  versions:
+  - IIS 6.0 (2003)
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: '403.7'
+  severity: warn
+  category: security
+  title: 클라이언트 인증서 필요
+  immediate:
+  - '`%windir%\system32\inetsrv\appcmd list config "<site>" -section:system.webServer/security/access` 로 sslFlags 확인'
+  - '거부된 사용자 PC 의 개인 인증서 저장소에 클라이언트 인증서가 설치돼 있는지 사용자 담당과 확인'
+  short:
+  - '(2차) 사용자에게 인증서 발급·설치 안내, 요구 정책 완화는 보안 담당 승인 후(롤백: sslFlags 원복)'
+  mid:
+  - '클라이언트 인증서 발급·갱신 절차 정비'
+  long:
+  - 'W3C 로그 403.7 건수 감시와 인증서 미설치 사용자 목록 관리'
+  vendor_cause: 'IIS 하위 상태 403.7 — 사이트 SSL 설정이 클라이언트 인증서를 요구(sslFlags SslRequireCert)하는데 클라이언트가 인증서를 제시하지 않았다.'
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/developer/webapps/iis/health-diagnostic-performance/http-status-code)
+  versions:
+  - IIS 6.0 (2003)
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: '403.16'
+  severity: error
+  category: security
+  title: 클라이언트 인증서 신뢰 불가
+  immediate:
+  - '`Get-ChildItem Cert:\LocalMachine\Root, Cert:\LocalMachine\CA | Where-Object Subject -like "*<발급CA이름>*" | Select Subject,NotAfter` 로 발급 CA 설치 확인'
+  - '`netsh http show sslcert` 로 바인딩의 클라이언트 인증서 폐기 확인(Verify Client Certificate Revocation) 설정 확인'
+  short:
+  - '(2차·승인 후, 롤백: 가져온 인증서 제거) 발급 CA 체인을 로컬 컴퓨터 저장소에 설치하고 CRL 배포 지점 접근을 네트워크 담당과 확인'
+  mid:
+  - 'CA 체인·CRL 접근 경로 표준 구성'
+  long:
+  - 'CA 인증서 만료 감시와 403.16 감시'
+  vendor_cause: 'IIS 하위 상태 403.16 — 클라이언트 인증서를 신뢰할 수 없거나 유효하지 않다. 서버의 신뢰할 수 있는 루트/중간 CA 저장소에 발급 CA 가 없거나 폐기 목록(CRL) 확인 실패가 흔한 원인.'
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/developer/webapps/iis/health-diagnostic-performance/http-status-code)
+  versions:
+  - IIS 6.0 (2003)
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: '403.17'
+  severity: error
+  category: security
+  title: 인증서 만료 또는 미유효
+  immediate:
+  - '거부된 사용자 인증서의 유효 기간(NotBefore·NotAfter)을 사용자 담당과 확인'
+  - '서버 시각 확인 `w32tm /query /status` — 시각 차이가 크면 시계 문제'
+  short:
+  - '(2차) 사용자 인증서 재발급 안내, 시계 오차면 시간 동기화 설정을 승인 후 정정'
+  mid:
+  - '클라이언트 인증서 만료 사전 안내 절차'
+  long:
+  - '인증서 만료 예정자 월간 점검'
+  vendor_cause: 'IIS 하위 상태 403.17 — 클라이언트 인증서가 만료됐거나 아직 유효 기간이 시작되지 않았다. 사용자 인증서 갱신 누락이나 서버·클라이언트 시계 차이가 흔한 원인.'
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/developer/webapps/iis/health-diagnostic-performance/http-status-code)
+  versions:
+  - IIS 6.0 (2003)
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 만료뿐 아니라 아직 유효하지 않은 인증서 포함
+- code: '404.4'
+  severity: error
+  category: internal
+  title: 매핑된 핸들러 없음
+  immediate:
+  - '`%windir%\system32\inetsrv\appcmd list config "<site>" -section:handlers` 로 요청 확장자에 대한 매핑 존재 여부 확인'
+  - '`Get-WindowsFeature Web-*` (Windows Server) 로 필요한 IIS 역할 서비스 설치 여부 확인'
+  short:
+  - '(2차·승인 후, 롤백: 매핑 제거·기능 제거) 필요한 역할 서비스 설치 또는 처리기 매핑 추가'
+  mid:
+  - '서버 구축 표준에 필요한 IIS 기능 목록 반영'
+  long:
+  - 'W3C 로그 404.4 건수 감시와 IIS 기능 설치 목록 정기 대조'
+  vendor_cause: 'IIS 하위 상태 404.4 — 요청 파일 확장자를 처리할 처리기(handler)가 구성되지 않았다. 필요한 IIS 기능(ASP.NET·CGI 등) 미설치나 처리기 매핑 누락이 흔한 원인.'
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/developer/webapps/iis/health-diagnostic-performance/http-status-code)
+  versions:
+  - IIS 6.0 (2003)
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: '404.7'
+  severity: warn
+  category: security
+  title: 파일 확장자 거부
+  immediate:
+  - '`%windir%\system32\inetsrv\appcmd list config "<site>" -section:requestFiltering` 로 fileExtensions allowed="false" 목록 확인'
+  - 'W3C 로그 404 7 요청의 확장자·출처 확인 — .bak·.config 탐색이면 스캔'
+  short:
+  - '(2차) 정상 업무 확장자면 허용 추가를 승인 후 적용(롤백: 항목 제거), 탐색 시도면 보안 담당 통보'
+  mid:
+  - '요청 필터링 확장자 정책 표준화'
+  long:
+  - '404.7 건수 보안 감시'
+  vendor_cause: 'IIS 하위 상태 404.7 — 요청 필터링(requestFiltering fileExtensions)이 해당 파일 확장자를 거부했다. 업로드·백업 파일(.bak·.config 등) 탐색 시도나 새 확장자 사용이 흔한 원인.'
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/developer/webapps/iis/health-diagnostic-performance/http-status-code)
+  versions:
+  - IIS 6.0 (2003)
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: '404.8'
+  severity: warn
+  category: security
+  title: 숨겨진 네임스페이스
+  immediate:
+  - '`%windir%\system32\inetsrv\appcmd list config "<site>" -section:requestFiltering` 로 hiddenSegments 목록 확인'
+  - 'W3C 로그 404 8 요청 URL·출처 IP 확인 — 외부 반복이면 탐색 공격'
+  short:
+  - '(2차) 정상 앱이 hiddenSegments 경로를 쓰면 앱 경로 변경 요청(목록 완화는 보안 승인 필요), 공격이면 IP 차단을 승인 후 적용'
+  mid:
+  - '민감 폴더 배치 기준(사이트 루트 밖 보관)'
+  long:
+  - '404.8 탐색 시도 건수·출처 IP 를 보안 관제에 연동'
+  vendor_cause: 'IIS 하위 상태 404.8 — 요청 경로가 숨겨진 네임스페이스(requestFiltering hiddenSegments, 예: bin·App_Data·web.config)를 포함해 거부됐다. 민감 경로 탐색 시도가 흔한 원인.'
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/developer/webapps/iis/health-diagnostic-performance/http-status-code)
+  versions:
+  - IIS 6.0 (2003)
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: '404.11'
+  severity: warn
+  category: security
+  title: 이중 이스케이프 시퀀스 거부
+  immediate:
+  - 'W3C 로그 `Select-String -Path "C:\inetpub\logs\LogFiles\W3SVC<siteID>\u_ex*.log" -Pattern " 404 11 "` 로 URL·출처 확인'
+  - '`%windir%\system32\inetsrv\appcmd list config "<site>" -section:requestFiltering` 로 allowDoubleEscaping 값 확인'
+  short:
+  - '(2차) 앱의 이중 인코딩을 수정하도록 개발 담당에 요청 — allowDoubleEscaping 허용은 보안 검토·승인 후 해당 경로만(롤백: 원복)'
+  mid:
+  - 'URL 인코딩 규칙 개발 표준화'
+  long:
+  - '404.11 보안 감시'
+  vendor_cause: 'IIS 하위 상태 404.11 — 요청 URL 에 이중 이스케이프 시퀀스(예: %252e)가 있어 요청 필터링(allowDoubleEscaping=false)이 거부했다. 필터 우회 시도나 URL 을 두 번 인코딩한 앱이 흔한 원인.'
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/developer/webapps/iis/health-diagnostic-performance/http-status-code)
+  versions:
+  - IIS 6.0 (2003)
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: '404.14'
+  severity: warn
+  category: security
+  title: URL 길이 초과 거부
+  immediate:
+  - '`%windir%\system32\inetsrv\appcmd list config "<site>" -section:requestFiltering` 로 requestLimits maxUrl 확인'
+  - 'W3C 로그 404 14 요청 URL 길이·출처 확인'
+  short:
+  - '(2차·승인 후, 롤백: 이전 값 복원) 정상 업무면 maxUrl 을 필요한 최소만큼 상향(HTTP.sys 한도 이내)'
+  mid:
+  - '긴 URL 설계 개선 요청'
+  long:
+  - 'W3C 로그 404.14 건수와 URL 길이 분포 월간 점검'
+  vendor_cause: 'IIS 하위 상태 404.14 — 요청 URL 이 요청 필터링 requestLimits maxUrl(기본 4096) 보다 길어 거부됐다. 긴 경로 파라미터를 쓰는 앱이나 비정상 요청이 흔한 원인.'
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/developer/webapps/iis/health-diagnostic-performance/http-status-code)
+  versions:
+  - IIS 6.0 (2003)
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: '500.11'
+  severity: error
+  category: internal
+  title: 웹 서버에서 앱 종료 중
+  immediate:
+  - '`Get-WinEvent -FilterHashtable @{LogName="System"; ProviderName="Microsoft-Windows-WAS"} -MaxEvents 20 | Format-List TimeCreated,Id,Message` 로 같은 시각 재활용·종료 이벤트 확인'
+  - 'W3C 로그 500 11 발생 구간 길이 확인 — 수 초 안에 그치면 재활용 시점 일시 현상'
+  short:
+  - '(2차·승인 후, 롤백: 이전 값 복원) 업무 시간 재활용이면 야간 예약으로 옮기고 disallowOverlappingRotation=false(겹침 재활용) 유지 확인'
+  mid:
+  - '앱 풀 재활용 정책 표준화'
+  long:
+  - '500.11 건수와 재활용 시각 상관 감시'
+  vendor_cause: 'IIS 하위 상태 500.11 — 웹 서버에서 애플리케이션이 종료되는 중이라 요청을 처리하지 못했다. 앱 풀 재활용·중지 진행 중 들어온 요청에서 일시적으로 난다.'
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/developer/webapps/iis/health-diagnostic-performance/http-status-code)
+  versions:
+  - IIS 6.0 (2003)
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: '500.12'
+  severity: error
+  category: internal
+  title: 웹 서버에서 앱 재시작 중
+  immediate:
+  - '사이트 폴더 web.config·bin 수정 시각 확인 `Get-ChildItem <사이트경로> -Recurse -Include web.config,*.dll | Sort LastWriteTime -Desc | Select -First 10`'
+  - '같은 시각 WAS·ASP.NET(1334 등) 이벤트 확인'
+  short:
+  - '(2차) 운영 시간 중 파일 변경이 원인이면 배포 시간 통제를 담당자와 협의'
+  mid:
+  - '배포 시간대·절차 표준화'
+  long:
+  - 'W3C 로그 500.12 건수와 배포 시각 상관 감시'
+  vendor_cause: 'IIS 하위 상태 500.12 — 웹 서버에서 애플리케이션이 다시 시작되는 중이라 요청을 처리하지 못했다. web.config·bin 변경이나 재활용 직후 일시적으로 난다.'
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/developer/webapps/iis/health-diagnostic-performance/http-status-code)
+  versions:
+  - IIS 6.0 (2003)
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: '500.13'
+  severity: error
+  category: capacity
+  title: 웹 서버 과부하
+  immediate:
+  - '`Get-Counter "\HTTP Service Request Queues(*)\CurrentQueueSize","\Processor(_Total)\% Processor Time" -SampleInterval 5 -MaxSamples 3` 로 큐·CPU 확인'
+  - '`%windir%\system32\inetsrv\appcmd list requests /elapsed:10000` 로 지연 요청 URL 확인'
+  short:
+  - '(2차) 지연 원인(백엔드) 담당에 통보, 폭주면 유입 제한을 승인 후 적용 — 큐·워커 수 조정은 원인 확인 뒤(롤백: 이전 값)'
+  mid:
+  - '용량 재산정·서버 증설 계획'
+  long:
+  - 'CPU·큐 길이 경보 임계 등록'
+  vendor_cause: 'IIS 하위 상태 500.13 — 웹 서버가 너무 바빠 요청을 처리하지 못했다(과부하). 동시 요청 폭주나 워커 처리 지연으로 요청이 쌓인 것이 흔한 원인.'
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/developer/webapps/iis/health-diagnostic-performance/http-status-code)
+  versions:
+  - IIS 6.0 (2003)
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: HTTP 500 서버 오류이며 과부하 상태
+- code: '500.15'
+  severity: warn
+  category: security
+  title: Global.asa 직접 요청
+  immediate:
+  - 'W3C 로그 `Select-String -Path "C:\inetpub\logs\LogFiles\W3SVC<siteID>\u_ex*.log" -Pattern "global.asa" | Select-Object -Last 20` 로 출처 IP 확인'
+  - '같은 IP 의 다른 탐색(404·403) 요청 동반 여부 확인 — 동반이면 스캔으로 보안 담당 통보'
+  short:
+  - '(2차) 반복 출처 IP 차단을 보안 담당 승인 후 방화벽·ipSecurity 에 적용(롤백: 규칙 제거)'
+  mid:
+  - 'WAF 탐색 차단 규칙 정비'
+  long:
+  - '민감 파일 탐색 시도 보안 감시'
+  vendor_cause: 'IIS 하위 상태 500.15 — Global.asa/Global.asax 를 직접 요청해 거부됐다. 정상 사용자 요청이 아니며 취약점 스캔·민감 파일 탐색 시도가 흔한 원인.'
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/developer/webapps/iis/health-diagnostic-performance/http-status-code)
+  versions:
+  - IIS 6.0 (2003)
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: Global.asax 또는 Global.asa 직접 요청
+- code: '500.100'
+  severity: error
+  category: internal
+  title: 내부 ASP 오류
+  immediate:
+  - 'W3C 로그 500 100 줄의 cs-uri-query 에 기록된 ASP 오류 번호·줄 번호 확인(ASP 는 오류 내용을 쿼리 칸에 덧붙임)'
+  - '`%windir%\system32\inetsrv\appcmd list config "<site>" -section:asp` 로 scriptErrorSentToBrowser·로깅 설정 확인'
+  short:
+  - '(2차) 오류 줄 번호로 스크립트 담당이 수정, 운영에서 브라우저 오류 표시를 켜는 것은 금지'
+  mid:
+  - '레거시 ASP 오류 처리 보강과 의존 COM·DB 연결 점검'
+  long:
+  - 'ASP 애플리케이션 현대화(ASP.NET 전환) 계획'
+  vendor_cause: 'IIS 하위 상태 500.100 — 클래식 ASP 스크립트 실행 중 내부 ASP 오류가 났다. 스크립트 오류·COM 구성 요소 오류·DB 연결 실패가 흔한 원인.'
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/developer/webapps/iis/health-diagnostic-performance/http-status-code)
+  versions:
+  - IIS 6.0 (2003)
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'

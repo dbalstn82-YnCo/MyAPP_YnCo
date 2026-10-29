@@ -1,0 +1,117 @@
+product: altibase
+layer: db
+title: altibase 로그 종류 카탈로그 (GPT 수집 — 벤더 문서 대조 필요)
+source: GPT 수집(벤더 문서 대조 필요)
+sources: []
+logtypes:
+- name: 기동 로그
+  path: $ALTIBASE_HOME/trc/altibase_boot.log
+  format: 텍스트·Altibase trace timestamp
+  check: PROCESS/CONTROL/META/SERVICE 전환·listener·recovery·startup/shutdown
+  sample: 'TRANSITION TO PHASE : SERVICE'
+- name: Error 로그
+  path: $ALTIBASE_HOME/trc/altibase_error.log
+  format: 텍스트·trace timestamp
+  check: ERR 코드·서버 비정상 종료·FATAL·call stack
+  sample: BEGIN-STACK-[CRASH]... / [========= FATAL Terminated ==========]
+- name: Dump 로그
+  path: $ALTIBASE_HOME/trc/altibase_dump.log
+  format: 텍스트/덤프·장애시점
+  check: 프로세스 비정상 종료 시 작업 메모리·debug 정보
+  sample: 비정상 종료 memory dump 형식
+- name: Storage Manager 로그
+  path: $ALTIBASE_HOME/trc/altibase_sm.log
+  format: 텍스트·trace timestamp
+  check: checkpoint·tablespace·datafile·redo·storage manager 경고
+  sample: module trace message 형식
+- name: Query Processor 로그
+  path: $ALTIBASE_HOME/trc/altibase_qp.log
+  format: 텍스트·trace timestamp
+  check: DDL·query processing·optimizer/statement 오류
+  sample: QP warning/trace message 형식
+- name: Replication 로그
+  path: $ALTIBASE_HOME/trc/altibase_rp.log
+  format: 텍스트·trace timestamp
+  check: Sender/Receiver·handshake·replication 오류·ERR-61xxx
+  sample: ERR-61035(errno=0) [Receiver] An update conflict encountered.
+- name: Replication Conflict
+  path: $ALTIBASE_HOME/trc/altibase_rp_conflict.log
+  format: 텍스트·trace timestamp
+  check: INSERT/UPDATE/DELETE conflict·PK·before/after 데이터 불일치
+  sample: replication conflict transaction record 형식
+- name: 통신 로그
+  path: $ALTIBASE_HOME/trc/altibase_cm.log
+  format: 텍스트·trace timestamp
+  check: communication manager·접속·socket·protocol 경고
+  sample: CM warning/trace message 형식
+- name: IPC 로그
+  path: $ALTIBASE_HOME/trc/altibase_ipc.log
+  format: 텍스트·trace timestamp
+  check: IPC 연결 자원·channel·shared resource 오류
+  sample: IPC resource trace 형식
+- name: IPCDA 로그
+  path: $ALTIBASE_HOME/trc/altibase_ipcda.log
+  format: 텍스트·trace timestamp
+  check: IPCDA 연결·자원 생성·통신 오류
+  sample: IPCDA resource trace 형식
+- name: XA 로그
+  path: $ALTIBASE_HOME/trc/altibase_xa.log
+  format: 텍스트·trace timestamp
+  check: XA transaction·prepare/commit/rollback·분산거래 오류
+  sample: XA module trace 형식
+- name: DB Link 로그
+  path: $ALTIBASE_HOME/trc/altibase_dk.log
+  format: 텍스트·trace timestamp
+  check: ODBC·DB Link·원격 DB 접속·08001 등
+  sample: ERR-b1070(errno=239) ODBC problem occurred [...08001...]
+- name: Main Module 로그
+  path: $ALTIBASE_HOME/trc/altibase_mm.log
+  format: 텍스트·trace timestamp
+  check: main module 처리·세션·서버 제어 관련 경고
+  sample: MM warning/trace message 형식
+- name: JOB 로그
+  path: $ALTIBASE_HOME/trc/altibase_job.log
+  format: 텍스트·trace timestamp
+  check: JOB 객체 실행·실패·스케줄 처리
+  sample: JOB execution trace 형식
+- name: Load Balancer 로그
+  path: $ALTIBASE_HOME/trc/altibase_lb.log
+  format: 텍스트·trace timestamp
+  check: load balancer 상태·연결·분산 처리 경고
+  sample: LB warning/trace message 형식
+sections:
+- heading: 로그 종류 카탈로그 (전수)
+  body: '기동 로그: $ALTIBASE_HOME/trc/altibase_boot.log · Error 로그: $ALTIBASE_HOME/trc/altibase_error.log · Dump 로그: $ALTIBASE_HOME/trc/altibase_dump.log · Storage Manager 로그: $ALTIBASE_HOME/trc/altibase_sm.log
+    · Query Processor 로그: $ALTIBASE_HOME/trc/altibase_qp.log · Replication 로그: $ALTIBASE_HOME/trc/altibase_rp.log · Replication Conflict: $ALTIBASE_HOME/trc/altibase_rp_conflict.log · 통신 로그: $ALTIBASE_HOME/trc/altibase_cm.log
+    · IPC 로그: $ALTIBASE_HOME/trc/altibase_ipc.log · IPCDA 로그: $ALTIBASE_HOME/trc/altibase_ipcda.log · XA 로그: $ALTIBASE_HOME/trc/altibase_xa.log · DB Link 로그: $ALTIBASE_HOME/trc/altibase_dk.log · Main Module
+    로그: $ALTIBASE_HOME/trc/altibase_mm.log · JOB 로그: $ALTIBASE_HOME/trc/altibase_job.log · Load Balancer 로그: $ALTIBASE_HOME/trc/altibase_lb.log'
+- heading: '로그: 기동 로그'
+  body: '경로 $ALTIBASE_HOME/trc/altibase_boot.log / 형식 텍스트·Altibase trace timestamp / 확인 PROCESS/CONTROL/META/SERVICE 전환·listener·recovery·startup/shutdown / 샘플 TRANSITION TO PHASE : SERVICE'
+- heading: '로그: Error 로그'
+  body: 경로 $ALTIBASE_HOME/trc/altibase_error.log / 형식 텍스트·trace timestamp / 확인 ERR 코드·서버 비정상 종료·FATAL·call stack / 샘플 BEGIN-STACK-[CRASH]... / [========= FATAL Terminated ==========]
+- heading: '로그: Dump 로그'
+  body: 경로 $ALTIBASE_HOME/trc/altibase_dump.log / 형식 텍스트/덤프·장애시점 / 확인 프로세스 비정상 종료 시 작업 메모리·debug 정보 / 샘플 비정상 종료 memory dump 형식
+- heading: '로그: Storage Manager 로그'
+  body: 경로 $ALTIBASE_HOME/trc/altibase_sm.log / 형식 텍스트·trace timestamp / 확인 checkpoint·tablespace·datafile·redo·storage manager 경고 / 샘플 module trace message 형식
+- heading: '로그: Query Processor 로그'
+  body: 경로 $ALTIBASE_HOME/trc/altibase_qp.log / 형식 텍스트·trace timestamp / 확인 DDL·query processing·optimizer/statement 오류 / 샘플 QP warning/trace message 형식
+- heading: '로그: Replication 로그'
+  body: 경로 $ALTIBASE_HOME/trc/altibase_rp.log / 형식 텍스트·trace timestamp / 확인 Sender/Receiver·handshake·replication 오류·ERR-61xxx / 샘플 ERR-61035(errno=0) [Receiver] An update conflict encountered.
+- heading: '로그: Replication Conflict'
+  body: 경로 $ALTIBASE_HOME/trc/altibase_rp_conflict.log / 형식 텍스트·trace timestamp / 확인 INSERT/UPDATE/DELETE conflict·PK·before/after 데이터 불일치 / 샘플 replication conflict transaction record 형식
+- heading: '로그: 통신 로그'
+  body: 경로 $ALTIBASE_HOME/trc/altibase_cm.log / 형식 텍스트·trace timestamp / 확인 communication manager·접속·socket·protocol 경고 / 샘플 CM warning/trace message 형식
+- heading: '로그: IPC 로그'
+  body: 경로 $ALTIBASE_HOME/trc/altibase_ipc.log / 형식 텍스트·trace timestamp / 확인 IPC 연결 자원·channel·shared resource 오류 / 샘플 IPC resource trace 형식
+- heading: '로그: IPCDA 로그'
+  body: 경로 $ALTIBASE_HOME/trc/altibase_ipcda.log / 형식 텍스트·trace timestamp / 확인 IPCDA 연결·자원 생성·통신 오류 / 샘플 IPCDA resource trace 형식
+- heading: '로그: XA 로그'
+  body: 경로 $ALTIBASE_HOME/trc/altibase_xa.log / 형식 텍스트·trace timestamp / 확인 XA transaction·prepare/commit/rollback·분산거래 오류 / 샘플 XA module trace 형식
+- heading: '로그: DB Link 로그'
+  body: 경로 $ALTIBASE_HOME/trc/altibase_dk.log / 형식 텍스트·trace timestamp / 확인 ODBC·DB Link·원격 DB 접속·08001 등 / 샘플 ERR-b1070(errno=239) ODBC problem occurred [...08001...]
+- heading: '로그: Main Module 로그'
+  body: 경로 $ALTIBASE_HOME/trc/altibase_mm.log / 형식 텍스트·trace timestamp / 확인 main module 처리·세션·서버 제어 관련 경고 / 샘플 MM warning/trace message 형식
+- heading: '로그: JOB 로그'
+  body: 경로 $ALTIBASE_HOME/trc/altibase_job.log / 형식 텍스트·trace timestamp / 확인 JOB 객체 실행·실패·스케줄 처리 / 샘플 JOB execution trace 형식
+- heading: '로그: Load Balancer 로그'
+  body: 경로 $ALTIBASE_HOME/trc/altibase_lb.log / 형식 텍스트·trace timestamp / 확인 load balancer 상태·연결·분산 처리 경고 / 샘플 LB warning/trace message 형식

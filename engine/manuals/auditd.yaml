@@ -1,0 +1,11 @@
+product: auditd
+title: "Linux auditd 감사 로그 참고"
+sections:
+  - heading: "로그 위치"
+    body: "/var/log/audit/audit.log (로테이션: audit.log.1 ~ .4). ausearch/aureport 도구로도 조회 가능"
+  - heading: "형식"
+    body: "type=이벤트타입 msg=audit(유닉스시각.밀리초:일련번호): 필드들. res=success/failed 로 성공 여부 표기. 분석기는 이벤트 타입을 에러코드로 추출"
+  - heading: "대표 이벤트 타입"
+    body: "USER_AUTH/USER_LOGIN 인증·로그인(res=failed 주시) · ANOM_ABEND 프로세스 비정상 종료(segfault) · AVC SELinux 차단 · ANOM_LOGIN_FAILURES 실패 임계 초과 · RESP_ACCT_LOCK 계정 잠금 · SERVICE_STOP/SYSTEM_SHUTDOWN 중지 기록"
+  - heading: "1차 확인 명령"
+    body: "실패 로그인 요약: aureport -au --failed · 특정 계정 추적: ausearch -ua <uid> 또는 -m USER_AUTH · 발신 IP 확인: addr= 필드"

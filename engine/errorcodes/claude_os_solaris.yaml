@@ -1,0 +1,581 @@
+product: solaris
+layer: os
+note: GPT 협업 수집분 — 벤더 공식 문서와 대조 후 확정
+codes:
+- code: SOL-SVC-MAINTENANCE
+  severity: error
+  category: internal
+  title: SMF 서비스 유지보수 상태
+  vendor_cause: SMF 서비스가 시작 메서드 실패·반복 종료로 maintenance 상태가 된 것. 설정 오류, 의존 서비스·파일 부재,
+    시작 메서드 시간 초과가 흔한 원인이며 원인 해결 전까지 자동 재시작되지 않는다.
+  immediate:
+  - '`svcs -xv` 로 maintenance 서비스·Reason·로그 위치(See:) 확인'
+  - '`tail -50 /var/svc/log/<서비스 로그>.log` 로 시작 메서드의 마지막 오류 확인, `svcs -d <FMRI>` 로
+    의존 서비스 상태 확인'
+  short:
+  - '(2차·승인 후, 롤백: 설정 변경 시 svccfg export 로 사전 백업) 원인 수정 후 `svcadm clear <FMRI>` 로
+    maintenance 해제, `svcs <FMRI>` 로 online 확인'
+  mid:
+  - 반복 실패 서비스는 매니페스트의 시작 메서드·timeout_seconds·의존성 속성(svccfg) 정비
+  long:
+  - svcs -x 출력(정상 시 비어 있음) 주기 감시와 maintenance 전환 알림 등록
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - Solaris 10
+  - Solaris 11.3
+  - Solaris 11.4
+  version_note: SMF 10+
+- code: SOL-SVC-DEGRADED
+  severity: warn
+  category: internal
+  title: SMF 서비스 저하
+  vendor_cause: SMF 서비스가 degraded 상태 — 동작은 하지만 일부 기능·인스턴스가 정상이 아닌 상태. 의존 서비스 일부 실패,
+    서비스 자체가 보고한 부분 장애가 흔한 원인.
+  immediate:
+  - '`svcs -xv <FMRI>` 로 degraded 사유와 로그 위치 확인'
+  - '`svcs -d <FMRI>` 로 의존 서비스 상태, `tail -50 /var/svc/log/<서비스 로그>.log` 로 최근 오류 확인'
+  short:
+  - '(2차·승인 후, 롤백: svccfg export 백업) 의존 서비스·설정 원인 수정 후 `svcadm refresh <FMRI>`, 필요
+    시 업무 영향 확인 후 `svcadm restart <FMRI>`'
+  mid:
+  - 서비스 매니페스트의 의존성·속성 정비
+  long:
+  - svcs -x 출력(정상 시 비어 있음) 주기 감시
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - Solaris 10
+  - Solaris 11.3
+  - Solaris 11.4
+  version_note: SMF 10+
+- code: SOL-ZPOOL-DEGRADED
+  severity: critical
+  category: storage
+  title: ZFS 풀 저하
+  vendor_cause: ZFS 풀의 일부 장치가 FAULTED/UNAVAIL 이 되어 중복성(mirror/raidz)이 줄어든 상태. 데이터
+    접근은 계속되지만 추가 장애 시 데이터 손실 위험이 있다. 디스크 장애·경로 단절이 흔한 원인.
+  immediate:
+  - '`zpool status -x` 로 문제 풀만 확인, `zpool status -v <pool>` 로 장치별 상태와 READ/WRITE/CKSUM
+    오류 수 확인'
+  - '`fmadm faulty` 로 FMA 가 진단한 결함 디스크·FRU, `iostat -En <디스크>` 로 하드웨어 오류 확인'
+  short:
+  - '(2차·승인 후, 롤백: 교체 전 zpool status 출력 보관) 디스크 교체 후 `zpool replace <pool> <장치>` 로
+    resilver, 일시 경로 문제였으면 `zpool online <pool> <장치>`'
+  mid:
+  - resilver 완료 후 `zpool scrub <pool>` 로 정합성 확인, 핫 스페어 구성
+  long:
+  - zpool status -x 주기 감시와 월 1회 scrub
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - Solaris 10
+  - Solaris 11.3
+  - Solaris 11.4
+  version_note: ZFS 10 6/06+
+- code: SOL-ZPOOL-FAULTED
+  severity: critical
+  category: storage
+  title: ZFS 풀 실패
+  vendor_cause: ZFS 풀이 중복성 이상의 장치를 잃어 FAULTED(사용 불가)가 된 상태. 다중 디스크·경로 동시 장애, 스토리지
+    전체 단절이 원인이며 장치 복구 없이는 데이터에 접근할 수 없다.
+  immediate:
+  - "`zpool status -x` 로 이상 풀, `zpool status -v <pool>` 로 FAULTED/UNAVAIL 장치·영구 오류 파일 확인 — 풀 state 가 FAULTED 면 확정 (Solaris 10 6/06+, 11.x)"
+  - "`fmadm faulty` 로 FMA 결함 진단(장치·FRU), `iostat -En | head -60` 으로 디스크별 Hard/Transport Errors 확인 — 같은 경로의 여러 장치가 함께 오류면 경로·스토리지 단절 의심"
+  - "`zpool import`(풀 이름 없이 = 가져오기 후보 목록만 표시)로 장치 인식 상태 확인 — 실제 import(-F 포함)·`zpool clear` 는 2차"
+  short:
+  - '(2차·승인 후, 롤백: 복구 시도 전 zpool status·fmdump 결과 보관) 장치·경로를 먼저 복구한 뒤 `zpool clear
+    <pool>` 로 재시도, 회복 모드 import(-F) 는 데이터 일부 손실 가능성이 있어 Oracle 지원과 협의 후'
+  mid:
+  - 장치 복구가 불가능하면 풀을 재생성하고 백업에서 복원, 재생성 시 mirror/raidz2 등 중복 수준 재설계
+  long:
+  - zpool status -x 주기 감시·월 1회 scrub·백업 복원 시험 정례화
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - Solaris 10
+  - Solaris 11.3
+  - Solaris 11.4
+  version_note: ZFS 10 6/06+
+- code: SOL-ZFS-CHECKSUM
+  severity: error
+  category: storage
+  title: ZFS 체크섬 오류
+  vendor_cause: ZFS 가 읽은 데이터의 체크섬이 맞지 않음을 발견한 상태. 중복 구성이면 자동 복구되지만, 디스크·케이블·HBA·메모리
+    문제로 반복되면 데이터 손상 위험 신호다.
+  immediate:
+  - '`zpool status -v <pool>` 의 CKSUM 열과 ''Permanent errors'' 파일 목록 확인 — 목록이 있으면 복구
+    불가 손상'
+  - '`fmdump -eV | grep -i -E ''class|checksum'' | tail -20` 으로 체크섬 ereport 장치, `iostat
+    -En` 으로 해당 디스크 오류 확인'
+  short:
+  - '(2차·승인 후, 롤백: 불필요 — 단 scrub 은 I/O 부하 발생) 원인 장치 조치 후 업무 부하가 낮은 시간에 `zpool scrub
+    <pool>`, 오류 카운터 정리는 `zpool clear <pool>`'
+  mid:
+  - 같은 장치에서 반복되면 디스크·케이블·HBA 교체, 영구 손상 파일은 백업에서 복원
+  long:
+  - CKSUM 0 유지 감시와 월 1회 scrub
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - Solaris 10
+  - Solaris 11.3
+  - Solaris 11.4
+  version_note: ZFS 10 6/06+
+- code: SOL-ZFS-NO-SPACE
+  severity: critical
+  category: disk
+  title: ZFS 공간 부족
+  vendor_cause: ZFS 풀 또는 데이터셋 quota 공간이 부족해 쓰기가 실패한 상태. 스냅샷이 잡고 있는 공간, quota/reservation
+    설정, 풀 사용률 과다가 흔한 원인(풀은 80% 이상부터 성능 저하).
+  immediate:
+  - '`zpool list` 로 풀 CAP, `zfs list -o space -r <pool> | head -30` 으로 데이터셋별 USEDSNAP·USEDDS
+    확인'
+  - '`zfs list -t snapshot -o name,used -s used | tail -15` 로 큰 스냅샷, `zfs get quota,refquota,reservation
+    <dataset>` 로 한도 확인'
+  short:
+  - '(2차·승인 후, 롤백: 스냅샷 삭제는 되돌릴 수 없어 백업 확인 필수) 불필요 스냅샷 정리(`zfs destroy <스냅샷>`) 또는 `zfs
+    set quota=<크기> <dataset>` 조정'
+  mid:
+  - '`zpool add` 로 장치 추가(같은 중복 구조로), 스냅샷 보존 정책 정비'
+  long:
+  - 풀 CAP 80% 와 데이터셋 quota 대비 사용률 감시
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - Solaris 10
+  - Solaris 11.3
+  - Solaris 11.4
+  version_note: ZFS 10 6/06+
+- code: SOL-MPXIO-PATH-OFFLINE
+  severity: critical
+  category: storage
+  title: 멀티패스 경로 오프라인
+  vendor_cause: MPxIO(scsi_vhci) 다중 경로 중 일부 경로가 offline/failed 가 된 상태. 남은 경로로 I/O
+    는 계속되지만 이중화가 깨진 상태이며 FC 케이블·HBA·스위치·스토리지 포트 장애가 원인.
+  immediate:
+  - '`mpathadm list lu` 로 LU 별 Total/Operational Path Count 확인 — 두 값이 다르면 경로 손실'
+  - '`mpathadm show lu <장치>` 로 경로별 상태, `fcinfo hba-port` 로 HBA 포트 상태 확인'
+  short:
+  - (2차) SAN·스토리지 측 원인 해결 후 경로 자동 복귀 확인, 남은 offline 경로는 `cfgadm -al -o show_FCP_dev`
+    로 상태 확인 후 승인 하에 재구성
+  mid:
+  - 결함 HBA·케이블·포트 교체, 모든 LU 가 서로 다른 fabric 경로를 갖도록 구성
+  long:
+  - Operational Path Count 감시
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - Solaris 8
+  - Solaris 9
+  - Solaris 10
+  - Solaris 11.3
+  - Solaris 11.4
+  version_note: MPxIO 8(패치)~11, 10 부터 기본 활성
+- code: SOL-DISK-ERROR
+  severity: critical
+  category: disk
+  title: 디스크 하드 오류
+  vendor_cause: 'sd/ssd 디스크 드라이버가 복구할 수 없는 오류(Error Level: Fatal)를 보고한 상태. 디스크 매체·하드웨어
+    불량, 경로 오류가 흔한 원인.'
+  immediate:
+  - '`iostat -En` 으로 장치별 Soft/Hard/Transport 오류 수와 Media Error·Predictive Failure
+    Analysis 확인'
+  - '`grep -i -E ''error for command|fatal'' /var/adm/messages | tail -20` 으로 오류 장치·블록,
+    `fmadm faulty` 로 FMA 결함 진단 확인'
+  short:
+  - (2차) 해당 디스크가 속한 ZFS 풀/SVM 미러 확인 후 미러면 교체 계획, 비미러면 데이터 백업 우선
+  mid:
+  - Oracle/유지보수 업체에 디스크 교체 의뢰, 교체 후 zpool replace 또는 metareplace 로 재동기화
+  long:
+  - iostat -En Hard 오류 증가 감시
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - Solaris 8
+  - Solaris 9
+  - Solaris 10
+  - Solaris 11.3
+  - Solaris 11.4
+  version_note: /var/adm/messages '[ID nnnnn facility.level]' 형식 8~11.4 공통
+- code: SOL-DISK-RETRYABLE
+  severity: warn
+  category: disk
+  title: 디스크 재시도 오류
+  vendor_cause: 'sd/ssd 드라이버가 재시도로 복구된 디스크 오류(Error Level: Retryable)를 보고한 상태. 일시적
+    경로·버스 문제일 수 있으나 반복되면 디스크·케이블 열화의 전조다.'
+  immediate:
+  - '`grep -i ''retryable'' /var/adm/messages | tail -20` 으로 오류 장치·빈도 확인'
+  - '`iostat -En <장치>` 로 Soft/Transport 오류 수와 Predictive Failure Analysis 값 확인 — 증가
+    추세면 교체 대상'
+  short:
+  - (2차) 같은 HBA·경로의 다른 장치에도 오류가 있는지 비교해 디스크/경로 원인 구분, 케이블·포트 점검 의뢰
+  mid:
+  - 반복 디스크는 미러 상태 확인 후 선제 교체
+  long:
+  - Soft/Transport 오류 증가율 감시
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - Solaris 8
+  - Solaris 9
+  - Solaris 10
+  - Solaris 11.3
+  - Solaris 11.4
+  version_note: /var/adm/messages '[ID nnnnn facility.level]' 형식 8~11.4 공통
+- code: SOL-MEMORY-ECC
+  severity: error
+  category: hardware
+  title: 메모리 ECC 오류
+  vendor_cause: 메모리 ECC 오류가 감지된 상태. 정정 가능 오류가 누적되면 FMA 가 해당 페이지·DIMM 을 격리(retire)하며,
+    정정 불가 오류는 패닉으로 이어질 수 있다.
+  immediate:
+  - '`fmadm faulty` 로 결함 진단된 DIMM·FRU 위치와 SUNW-MSG-ID 확인'
+  - '`fmdump -e | tail -20` 으로 메모리 ereport 발생 빈도, `fmdump -v -u <UUID>` 로 해당 결함 상세
+    확인'
+  short:
+  - (2차) SUNW-MSG-ID 와 FRU 위치를 Oracle 지원에 접수해 DIMM 교체 일정 수립
+  mid:
+  - 교체 후 `fmadm faulty` 가 비었는지 확인(교체 인식이 안 되면 승인 하에 fmadm repair)
+  long:
+  - FMA 결함 이벤트(fmd) 알림 연동
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - Solaris 8
+  - Solaris 9
+  - Solaris 10
+  - Solaris 11.3
+  - Solaris 11.4
+  version_note: FMA 코드 10+, ECC syslog 문구 전 버전
+- code: SOL-CPU-FAULT
+  severity: critical
+  category: hardware
+  title: CPU 결함
+  vendor_cause: FMA 가 CPU(스트랜드·코어) 결함을 진단했거나 CPU 가 오프라인 처리된 상태. 하드웨어 결함이 원인이며 결함 CPU
+    는 자동 격리되어 처리 용량이 줄어든다.
+  immediate:
+  - '`fmadm faulty` 로 결함 CPU·FRU·SUNW-MSG-ID 확인'
+  - '`psrinfo -v | grep -i -E ''off-line|faulted''` 로 오프라인 CPU, `psrinfo | wc -l`
+    로 가용 CPU 수 확인'
+  short:
+  - (2차) Oracle 지원에 FRU 교체 접수, 줄어든 CPU 로 업무 부하 영향 평가
+  mid:
+  - 업체 일정에 맞춰 교체(변경 관리), 교체 후 psrinfo 로 CPU 수 정상 확인
+  long:
+  - FMA 결함 알림과 CPU 수 변화 감시
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - Solaris 8
+  - Solaris 9
+  - Solaris 10
+  - Solaris 11.3
+  - Solaris 11.4
+  version_note: SUN4U/SUN4V-8000 FMA 코드는 10+, 'CPU offlined' 문구는 전 버전
+- code: SOL-FMA-RETIRE
+  severity: error
+  category: hardware
+  title: FMA 자원 격리
+  vendor_cause: FMA 가 결함 자원(CPU·메모리 페이지·I/O 장치)을 사용 중지(retire)한 상태. 하드웨어 결함 진단의 결과이며
+    FRU 교체 전까지 해당 자원은 쓰이지 않는다.
+  immediate:
+  - '`fmadm faulty` 로 retire 된 자원·FRU·영향 범위 확인'
+  - '`fmdump -v | tail -20` 으로 진단 이력과 같은 FRU 반복 여부 확인'
+  short:
+  - (2차) Oracle 지원에 FRU 교체 접수, 오진단이 의심되면 지원 확인 후 승인 하에 `fmadm acquit <UUID>`
+  mid:
+  - FRU 교체 후 fmadm faulty 정상 확인
+  long:
+  - FMA 결함 알림(SNMP/메일) 연동
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - Solaris 10
+  - Solaris 11.3
+  - Solaris 11.4
+  version_note: fmd 10+
+- code: SOL-LINK-DOWN
+  severity: error
+  category: connection
+  title: 네트워크 링크 다운
+  vendor_cause: 네트워크 데이터링크의 물리 링크가 끊긴 상태('link down'). 케이블·스위치 포트 장애, 속도/듀플렉스 불일치,
+    NIC 불량이 흔한 원인.
+  immediate:
+  - '`dladm show-phys`(11) 또는 `dladm show-dev`(10) 로 링크 STATE·속도 확인'
+  - '`ipadm show-addr`(11) 또는 `ifconfig -a`(10) 로 해당 링크의 IP 와 IPMP/aggregation 소속
+    확인'
+  short:
+  - (2차) 네트워크 담당과 스위치 포트 상태 대조, 케이블 교체 후 링크 up 확인
+  mid:
+  - 반복 시 NIC 교체, 단일 링크는 IPMP 또는 링크 aggregation 으로 이중화
+  long:
+  - 링크 상태 감시
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - Solaris 8
+  - Solaris 9
+  - Solaris 10
+  - Solaris 11.3
+  - Solaris 11.4
+  version_note: /var/adm/messages '[ID nnnnn facility.level]' 형식 8~11.4 공통
+- code: SOL-IPMP-FAIL
+  severity: error
+  category: connection
+  title: IPMP 인터페이스 실패
+  vendor_cause: IPMP 그룹의 인터페이스가 장애(failed)로 판정된 상태. 링크 다운 또는 프로브 대상(기본 게이트웨이 등) 응답
+    실패가 원인이며 다른 인터페이스로 주소가 넘어간다.
+  immediate:
+  - '`ipmpstat -g` 와 `ipmpstat -i` 로 그룹·인터페이스 상태 확인(11), Solaris 10 은 `ifconfig -a`
+    의 FAILED 플래그 확인'
+  - '`grep in.mpathd /var/adm/messages | tail -20` 으로 장애 판정 사유(link down/프로브 실패)·시각
+    확인'
+  short:
+  - (2차) 링크·스위치 원인 해결 후 인터페이스 복귀 확인, 프로브 실패면 프로브 대상(게이트웨이) 응답 확인
+  mid:
+  - IPMP 인터페이스를 서로 다른 스위치에 연결, 프로브 대상·FAILURE_DETECTION_TIME(/etc/default/mpathd)
+    표준화
+  long:
+  - IPMP 그룹 상태 감시
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - Solaris 8
+  - Solaris 9
+  - Solaris 10
+  - Solaris 11.3
+  - Solaris 11.4
+  version_note: IPMP(in.mpathd) 8+
+- code: SOL-TOO-MANY-OPEN-FILES
+  severity: critical
+  category: capacity
+  title: 파일디스크립터 고갈
+  vendor_cause: 프로세스가 열 수 있는 파일 디스크립터 한도(process.max-file-descriptor, rlim_fd_cur)에
+    도달해 EMFILE 이 발생한 상태. 소켓·파일 누수 또는 한도 과소가 흔한 원인.
+  immediate:
+  - '`ls /proc/<PID>/fd | wc -l` 로 열린 FD 수 확인(대상 프로세스를 멈추지 않음)'
+  - '`prctl -n process.max-file-descriptor -i process <PID>` 로 한도 확인(10+) — 열린 수가
+    한도에 근접하면 확정'
+  short:
+  - '(2차·승인 후, 롤백: 원래 값으로 prctl) 열린 대상 확인은 `pfiles <PID>`(대상 프로세스를 잠시 멈춤 — 업무 영향 확인
+    후), 즉시 완화는 `prctl -n process.max-file-descriptor -r -v <값> -i process <PID>`'
+  mid:
+  - project 의 process.max-file-descriptor 영구 설정(projmod), 애플리케이션 close 누락 수정
+  long:
+  - 주요 프로세스 FD 사용률(한도 대비 80%) 감시
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - Solaris 8
+  - Solaris 9
+  - Solaris 10
+  - Solaris 11.3
+  - Solaris 11.4
+  version_note: /var/adm/messages '[ID nnnnn facility.level]' 형식 8~11.4 공통
+- code: SOL-FORK-FAIL
+  severity: critical
+  category: capacity
+  title: 프로세스 생성 실패
+  vendor_cause: 새 프로세스 생성이 실패한 상태(fork EAGAIN). 시스템 프로세스 테이블(max_nprocs)·사용자당 한도(maxuprc)·zone.max-processes
+    도달, 또는 스왑(가상 메모리) 부족이 원인.
+  immediate:
+  - '`sar -v 1 1` 의 proc-sz(현재/한도), `ps -ef | wc -l` 로 프로세스 수 확인'
+  - '`swap -s` 로 가용 스왑 확인 — 거의 없으면 메모리 부족이 원인, `ps -e -o user= | sort | uniq -c |
+    sort -rn | head` 로 사용자별 수 확인'
+  short:
+  - '(2차·승인 후) 폭주 원인 프로세스는 담당자 확인 후 정리, 스왑 부족이면 `swap -a` 로 스왑 추가(롤백: `swap -d`)'
+  mid:
+  - /etc/system 의 maxuprc·max_nprocs 또는 zone/project 프로세스 한도 재산정(재부팅 필요 항목은 변경 관리)
+  long:
+  - proc-sz 사용률과 스왑 가용량 감시
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - Solaris 8
+  - Solaris 9
+  - Solaris 10
+  - Solaris 11.3
+  - Solaris 11.4
+  version_note: /var/adm/messages '[ID nnnnn facility.level]' 형식 8~11.4 공통
+- code: SOL-SHM-FAIL
+  severity: error
+  category: memory
+  title: 공유 메모리 할당 실패
+  vendor_cause: "공유 메모리 세그먼트 생성(shmget)이 실패한 상태. Solaris 10+ 에서 EINVAL 은 요청 크기가 프로젝트·zone 의 남은 max-shm-memory 한도를 넘었거나 같은 key 의 기존 세그먼트가 요청보다 작을 때, ENOSPC 는 project.max-shm-ids 초과, ENOMEM 은 가용 메모리 부족이며 DB 설치 요구값 미반영이 흔한 원인이다."
+  immediate:
+  - "`ps -o pid,projid,project,args -p <PID>` 로 실패 프로세스의 실제 프로젝트 확인, `prctl -n project.max-shm-memory -i project <project>` 와 `prctl -n project.max-shm-ids -i project <project>` 로 한도 확인 (Solaris 10+ · 8/9 는 `grep shmsys /etc/system`)"
+  - "`ipcs -mJ | head -40` 으로 프로젝트별 기존 세그먼트, `ipcs -mA | head -40` 으로 SEGSZ·소유자 확인 — 기존 합계+요청 크기가 max-shm-memory 를 넘으면 한도 EINVAL, 세그먼트 수가 max-shm-ids 에 닿으면 ENOSPC"
+  - "애플리케이션 로그의 errno·요청 크기·key 를 위 결과와 대조 — 같은 key 의 기존 세그먼트가 요청보다 작으면 한도와 무관한 EINVAL(기존 세그먼트 정리는 2차·승인 후)"
+  vendor_action: "shmget(2) NOTES — 세그먼트 최대 크기는 project.max-shm-memory·zone.max-shm-memory 에서 이미 쓰는 세그먼트를 뺀 값, 식별자 수는 project.max-shm-ids·zone.max-shm-ids 로 제한된다"
+  vendor_url: "https://docs.oracle.com/cd/E36784_01/html/E36872/shmget-2.html"
+  short:
+  - '(2차·승인 후, 롤백: 원래 값으로 prctl/projmod) 즉시 완화 `prctl -n project.max-shm-memory -r
+    -v <크기> -i project <project>`, 영구 반영 `projmod -s -K ''project.max-shm-memory=(priv,<크기>,deny)''
+    <project>`'
+  mid:
+  - DB·미들웨어 설치 가이드 요구값으로 project 자원 제어 표준화
+  long:
+  - 공유 메모리 사용량(한도 대비 80%) 감시
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - Solaris 8
+  - Solaris 9
+  - Solaris 10
+  - Solaris 11.3
+  - Solaris 11.4
+  version_note: /var/adm/messages '[ID nnnnn facility.level]' 형식 8~11.4 공통
+- code: SOL-ZONE-FAIL
+  severity: critical
+  category: internal
+  title: Zone 기동 실패
+  vendor_cause: 비전역 zone 의 기동(boot)·준비(ready)가 실패한 상태. zonepath 파일시스템 문제, 네트워크·장치
+    구성 오류, 자원 제어·풀 설정 충돌, 패키지 불일치(업데이트 후)가 흔한 원인.
+  immediate:
+  - '`zoneadm list -cv` 로 zone 상태(installed/ready/running) 확인, `zonecfg -z <zone>
+    info` 로 zonepath·net·자원 설정 확인'
+  - '`grep -i zone /var/adm/messages | tail -20` 과 `svcs -xv svc:/system/zones:default`
+    로 오류 문구 확인'
+  short:
+  - '(2차·승인 후, 롤백: `zonecfg -z <zone> export` 백업) 설정 오류 수정 후 `zoneadm -z <zone> boot`,
+    패키지 불일치는 `zoneadm -z <zone> attach -u`(업데이트 후 attach)'
+  mid:
+  - zone 구성 표준 템플릿 관리, 업데이트 시 zone 포함 절차 정비
+  long:
+  - zone 상태 감시
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - Solaris 10
+  - Solaris 11.3
+  - Solaris 11.4
+  version_note: Zones(Containers) 10+ — 11 은 Kernel Zone 포함
+- code: SOL-LDOM-FAIL
+  severity: critical
+  category: internal
+  title: LDom 오류
+  vendor_cause: Oracle VM Server for SPARC(LDoms) 의 도메인·가상 서비스(vds/vsw/vcc) 동작이 실패한
+    상태. 서비스 도메인 장애, 자원 할당 부족, ldmd 데몬 이상, 펌웨어·LDoms 버전 불일치가 흔한 원인.
+  immediate:
+  - 컨트롤 도메인에서 `ldm list` 로 도메인 STATE·FLAGS, `ldm list-services` 로 가상 디스크·스위치 서비스 확인
+  - '`svcs -l svc:/ldoms/ldmd:default` 로 ldmd 상태, `tail -50 /var/svc/log/ldoms-ldmd:default.log`
+    로 오류 확인'
+  short:
+  - '(2차·승인 후, 롤백: `ldm list-constraints -x <domain>` 로 XML 구성 백업) 원인 수정 후 `ldm start-domain
+    <domain>`, 구성 변경은 `ldm add-spconfig` 로 저장'
+  mid:
+  - 서비스 도메인 이중화(복수 I/O 도메인), 펌웨어·LDoms 버전 정합
+  long:
+  - 도메인 상태 감시와 SP 구성 백업 정례화
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - Solaris 10
+  - Solaris 11.3
+  - Solaris 11.4
+  version_note: LDoms/Oracle VM Server for SPARC — Solaris 10 11/06 이후 SPARC
+- code: SOL-CLUSTER-NODE-LOST
+  severity: critical
+  category: connection
+  title: 클러스터 노드 이탈
+  vendor_cause: Solaris Cluster 가 노드를 클러스터 멤버십에서 제외한 상태. 실제 노드 장애, 클러스터 인터커넥트(전용 네트워크)
+    단절, 쿼럼 장치 문제가 흔한 원인이며 리소스 그룹 절체가 뒤따른다.
+  immediate:
+  - "`clnode status` 로 노드 Online/Offline, `clquorum status` 로 쿼럼 투표 확인(Cluster 3.2+/4.x, 3.1 은 `scstat -n`)"
+  - "`clinterconnect status` 로 인터커넥트 경로, `grep -i -E 'CMM|reconfig' /var/adm/messages | tail -20` 으로 클러스터 reconfiguration 원인 확인 — 인터커넥트 경로가 모두 faulted 면 네트워크 원인"
+  short:
+  - (2차·승인 후) 인터커넥트·노드 복구 후 노드를 클러스터 모드로 부팅, 리소스 그룹 원위치는 업무 협의 후 `clresourcegroup
+    switch -n <node> <rg>`
+  mid:
+  - 인터커넥트 이중화, 쿼럼 장치 구성 점검
+  long:
+  - 노드·인터커넥트 상태 감시와 정기 절체 훈련
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - Solaris 8
+  - Solaris 9
+  - Solaris 10
+  - Solaris 11.3
+  - Solaris 11.4
+  version_note: Sun Cluster 3.x(8~10)·Oracle Solaris Cluster 4(11)
+- code: SOL-AUTH-FAIL
+  severity: error
+  category: security
+  title: 인증 실패 반복
+  vendor_cause: 로그인 인증 실패가 반복된 상태('REPEATED LOGIN FAILURES'). 비밀번호 오입력·만료, LOCK_AFTER_RETRIES
+    잠금, 무차별 대입 시도가 흔한 원인.
+  immediate:
+  - '`tail -30 /var/adm/loginlog`(파일이 있을 때) 와 `grep -i ''login'' /var/adm/messages
+    | tail -20` 으로 실패 계정·터미널·시각 확인'
+  - '`passwd -s <user>` 로 계정 상태(LK=잠금), `grep LOCK_AFTER_RETRIES /etc/security/policy.conf`
+    로 잠금 정책 확인'
+  short:
+  - '(2차·승인 후, 롤백: 차단 해제) 외부 반복 시도면 출발지 차단, 정상 사용자면 본인 확인 후 `passwd -u <user>`'
+  mid:
+  - /etc/default/login RETRIES·policy.conf 잠금 정책과 원격 접속 경로 제한 정비
+  long:
+  - 계정·IP 별 인증 실패 감시
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - Solaris 8
+  - Solaris 9
+  - Solaris 10
+  - Solaris 11.3
+  - Solaris 11.4
+  version_note: '''REPEATED LOGIN FAILURES''(/var/adm/loginlog) 전 버전'
+- code: SOL-NTP-FAIL
+  severity: warn
+  category: connection
+  title: NTP 동기화 실패
+  vendor_cause: NTP 데몬(Solaris 10 xntpd, 11 ntpd)이 시간 서버와 동기화하지 못한 상태. 서버 도달 불가(UDP
+    123), 시간 차이 과대, 서비스 정지가 흔한 원인.
+  immediate:
+  - '`ntpq -p` 로 서버별 reach·offset 확인 — reach 0 이면 통신 불가, `svcs -l svc:/network/ntp:default`
+    로 서비스 상태 확인'
+  - '`grep -v ''^#'' /etc/inet/ntp.conf` 로 server 설정 확인'
+  short:
+  - '(2차·승인 후, 롤백: ntp.conf 백업 복원) UDP 123 방화벽 확인 후 `svcadm restart ntp`, 시각 차가 크면
+    업무 영향 검토 후 보정'
+  mid:
+  - 시간 서버 2대 이상 지정
+  long:
+  - 'ntpq offset 임계(예: 100ms) 감시'
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - Solaris 8
+  - Solaris 9
+  - Solaris 10
+  - Solaris 11.3
+  - Solaris 11.4
+  version_note: /var/adm/messages '[ID nnnnn facility.level]' 형식 8~11.4 공통
+- code: SOL-CORE-DUMP
+  severity: error
+  category: internal
+  title: 프로세스 코어 덤프
+  vendor_cause: 프로세스가 비정상 종료하며 core 파일을 남긴 상태. 애플리케이션 결함(SIGSEGV/SIGBUS)·라이브러리 불일치·자원
+    부족이 흔한 원인.
+  immediate:
+  - '`coreadm` 으로 전역·프로세스 코어 경로 규칙 확인, `ls -lt <코어경로> | head` 로 코어 파일 확인'
+  - '`file <core>` 로 코어를 만든 프로그램, `pstack <core> | head -30` 으로 스택(코어 파일 대상이라 운영 프로세스
+    영향 없음) 확인'
+  short:
+  - (2차) 코어·바이너리·`pldd <core>` 라이브러리 목록을 개발사에 전달, mdb 로 상세 분석
+  mid:
+  - 개발사 패치 적용, 코어 저장 경로를 전용 FS 로 지정(`coreadm -g`, 변경 관리)
+  long:
+  - 코어 생성 감시와 코어 FS 사용률 감시
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - Solaris 8
+  - Solaris 9
+  - Solaris 10
+  - Solaris 11.3
+  - Solaris 11.4
+  version_note: /var/adm/messages '[ID nnnnn facility.level]' 형식 8~11.4 공통
+- code: SOL-CPU-HIGH-LOAD
+  severity: warn
+  category: capacity
+  title: CPU 부하 과다
+  vendor_cause: CPU 사용률이 지속적으로 높거나 실행 대기열이 길어 응답이 지연되는 상태. 특정 프로세스 폭주, 배치 겹침, zone
+    간 자원 경합이 흔한 원인.
+  immediate:
+  - '`vmstat 2 5` 의 r(대기열)·us+sy 확인, `mpstat 2 3` 으로 특정 CPU 편중 여부 확인'
+  - '`prstat -s cpu -n 10 5 1` 로 CPU 상위 프로세스, zone 환경이면 `prstat -Z 5 1` 로 zone 별 사용률
+    확인(종료는 2차)'
+  short:
+  - '(2차·승인 후, 롤백: 우선순위·자원 설정 원복) 폭주 프로세스는 담당자 확인 후 `priocntl`/배치 일정 조정, `prstat -mL
+    -p <PID>` 로 스레드 상태 분석'
+  mid:
+  - zone CPU cap·자원 풀 재설정, 증설 검토
+  long:
+  - sar 상시 수집과 CPU 80% 지속 감시
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - Solaris 8
+  - Solaris 9
+  - Solaris 10
+  - Solaris 11.3
+  - Solaris 11.4
+  version_note: /var/adm/messages '[ID nnnnn facility.level]' 형식 8~11.4 공통

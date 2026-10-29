@@ -1,0 +1,98 @@
+product: tomcat
+layer: was
+title: tomcat 로그 종류 카탈로그 (GPT 수집 — 벤더 문서 대조 필요)
+source: GPT 수집(벤더 문서 대조 필요)
+sources: []
+logtypes:
+- name: Catalina 서버 로그
+  path: ${CATALINA_BASE}/logs/catalina.<date>.log
+  format: JULI 텍스트·OneLineFormatter 시간형식 설정 가능
+  check: Tomcat 기동·종료·Connector·Context·SEVERE·예외 스택
+  sample: 09-Sep-2026 12:00:00.123 SEVERE [main] org.apache.catalina... message
+- name: 호스트 로그
+  path: ${CATALINA_BASE}/logs/localhost.<date>.log
+  format: JULI 텍스트·OneLineFormatter
+  check: 웹앱 Context 초기화·Servlet/JSP·배포 예외
+  sample: 09-Sep-2026 12:00:00.123 SEVERE [main] org.apache.catalina.core... message
+- name: Manager 로그
+  path: ${CATALINA_BASE}/logs/manager.<date>.log
+  format: JULI 텍스트·OneLineFormatter
+  check: Manager 웹앱 배포·undeploy·관리 요청 오류
+  sample: 09-Sep-2026 12:00:00.123 INFO [http-nio-8080-exec-1] org.apache... message
+- name: Host Manager 로그
+  path: ${CATALINA_BASE}/logs/host-manager.<date>.log 또는 설정값
+  format: JULI 텍스트·OneLineFormatter
+  check: 가상호스트 관리·생성·삭제·권한 오류
+  sample: <timestamp> <level> [thread] <logger> <message>
+- name: HTTP Access 로그
+  path: ${CATALINA_BASE}/logs/localhost_access_log.<date>.txt 기본 Host 설정
+  format: CLF/Combined·dd/MMM/yyyy:HH:mm:ss Z
+  check: 4xx·5xx·응답크기·클라이언트 IP·처리 요청
+  sample: 127.0.0.1 - - [09/Sep/2026:12:00:00 +0900] "GET / HTTP/1.1" 200 1234
+- name: W3C Access 로그
+  path: AccessLogValve directory/prefix 설정 경로
+  format: W3C Extended·시간 필드 포함
+  check: URI·상태코드·헤더·쿠키·세션 속성 기반 장애 추적
+  sample: date time c-ip cs-method cs-uri-stem sc-status ...
+- name: JSON Access 로그
+  path: JsonAccessLogValve 설정 경로
+  format: JSON·RFC8259·시간 패턴 설정
+  check: HTTP 상태·요청·응답·헤더를 구조화 분석
+  sample: '{"remoteAddr":"127.0.0.1","request":"GET / HTTP/1.1","status":200}'
+- name: 콘솔 출력 로그
+  path: ${CATALINA_BASE}/logs/catalina.out Unix 스크립트 실행 시 일반적
+  format: 텍스트·JULI/표준출력 시간형식
+  check: System.out/err·uncaught exception·signal thread dump
+  sample: Full thread dump Java HotSpot(TM) 64-Bit Server VM...
+- name: 웹앱 JULI 로그
+  path: ${CATALINA_BASE}/logs/${classloader.webappName}.<date> 설정 시
+  format: JULI 텍스트·OneLineFormatter
+  check: 애플리케이션별 logger 예외·ServletContext 로그
+  sample: <timestamp> <level> [thread] <class> <message>
+- name: Windows 서비스 로그
+  path: '%SystemRoot%\System32\LogFiles\Apache\commons-daemon.<date>.log 기본 Procrun'
+  format: 텍스트·서비스 timestamp
+  check: 서비스 설치·기동·JVM 로딩·종료 실패
+  sample: '[YYYY-MM-DD HH:MM:SS] [info] [pid] Apache Commons Daemon procrun...'
+- name: GC 로그
+  path: 버전별 상이(JVM -Xlog:gc/-Xloggc 지정 경로)
+  format: JVM 텍스트·uptime/ISO 시간 설정
+  check: Full GC·GC overhead·긴 pause·heap 포화
+  sample: '[12.345s][info][gc] GC(10) Pause Young ...'
+- name: JVM 장애덤프
+  path: 버전별 상이(-XX:HeapDumpPath, JVM 작업 디렉터리)
+  format: HPROF/텍스트·파일명 timestamp 또는 PID
+  check: OutOfMemoryError·heap dump·hs_err_pid<PID>.log·thread dump
+  sample: java_pid1234.hprof / hs_err_pid1234.log
+sections:
+- heading: 로그 종류 카탈로그 (전수)
+  body: 'Catalina 서버 로그: ${CATALINA_BASE}/logs/catalina.<date>.log · 호스트 로그: ${CATALINA_BASE}/logs/localhost.<date>.log · Manager 로그: ${CATALINA_BASE}/logs/manager.<date>.log · Host Manager 로그: ${CATALINA_BASE}/logs/host-manager.<date>.log
+    또는 설정값 · HTTP Access 로그: ${CATALINA_BASE}/logs/localhost_access_log.<date>.txt 기본 Host 설정 · W3C Access 로그: AccessLogValve directory/prefix 설정 경로 · JSON Access 로그: JsonAccessLogValve 설정 경로 · 콘솔 출력 로그:
+    ${CATALINA_BASE}/logs/catalina.out Unix 스크립트 실행 시 일반적 · 웹앱 JULI 로그: ${CATALINA_BASE}/logs/${classloader.webappName}.<date> 설정 시 · Windows 서비스 로그: %SystemRoot%\System32\LogFiles\Apache\commons-daemon.<date>.log
+    기본 Procrun · GC 로그: 버전별 상이(JVM -Xlog:gc/-Xloggc 지정 경로) · JVM 장애덤프: 버전별 상이(-XX:HeapDumpPath, JVM 작업 디렉터리)'
+- heading: '로그: Catalina 서버 로그'
+  body: 경로 ${CATALINA_BASE}/logs/catalina.<date>.log / 형식 JULI 텍스트·OneLineFormatter 시간형식 설정 가능 / 확인 Tomcat 기동·종료·Connector·Context·SEVERE·예외 스택 / 샘플 09-Sep-2026 12:00:00.123 SEVERE [main] org.apache.catalina...
+    message
+- heading: '로그: 호스트 로그'
+  body: 경로 ${CATALINA_BASE}/logs/localhost.<date>.log / 형식 JULI 텍스트·OneLineFormatter / 확인 웹앱 Context 초기화·Servlet/JSP·배포 예외 / 샘플 09-Sep-2026 12:00:00.123 SEVERE [main] org.apache.catalina.core... message
+- heading: '로그: Manager 로그'
+  body: 경로 ${CATALINA_BASE}/logs/manager.<date>.log / 형식 JULI 텍스트·OneLineFormatter / 확인 Manager 웹앱 배포·undeploy·관리 요청 오류 / 샘플 09-Sep-2026 12:00:00.123 INFO [http-nio-8080-exec-1] org.apache... message
+- heading: '로그: Host Manager 로그'
+  body: 경로 ${CATALINA_BASE}/logs/host-manager.<date>.log 또는 설정값 / 형식 JULI 텍스트·OneLineFormatter / 확인 가상호스트 관리·생성·삭제·권한 오류 / 샘플 <timestamp> <level> [thread] <logger> <message>
+- heading: '로그: HTTP Access 로그'
+  body: 경로 ${CATALINA_BASE}/logs/localhost_access_log.<date>.txt 기본 Host 설정 / 형식 CLF/Combined·dd/MMM/yyyy:HH:mm:ss Z / 확인 4xx·5xx·응답크기·클라이언트 IP·처리 요청 / 샘플 127.0.0.1 - - [09/Sep/2026:12:00:00 +0900] "GET
+    / HTTP/1.1" 200 1234
+- heading: '로그: W3C Access 로그'
+  body: 경로 AccessLogValve directory/prefix 설정 경로 / 형식 W3C Extended·시간 필드 포함 / 확인 URI·상태코드·헤더·쿠키·세션 속성 기반 장애 추적 / 샘플 date time c-ip cs-method cs-uri-stem sc-status ...
+- heading: '로그: JSON Access 로그'
+  body: 경로 JsonAccessLogValve 설정 경로 / 형식 JSON·RFC8259·시간 패턴 설정 / 확인 HTTP 상태·요청·응답·헤더를 구조화 분석 / 샘플 {"remoteAddr":"127.0.0.1","request":"GET / HTTP/1.1","status":200}
+- heading: '로그: 콘솔 출력 로그'
+  body: 경로 ${CATALINA_BASE}/logs/catalina.out Unix 스크립트 실행 시 일반적 / 형식 텍스트·JULI/표준출력 시간형식 / 확인 System.out/err·uncaught exception·signal thread dump / 샘플 Full thread dump Java HotSpot(TM) 64-Bit Server VM...
+- heading: '로그: 웹앱 JULI 로그'
+  body: 경로 ${CATALINA_BASE}/logs/${classloader.webappName}.<date> 설정 시 / 형식 JULI 텍스트·OneLineFormatter / 확인 애플리케이션별 logger 예외·ServletContext 로그 / 샘플 <timestamp> <level> [thread] <class> <message>
+- heading: '로그: Windows 서비스 로그'
+  body: 경로 %SystemRoot%\System32\LogFiles\Apache\commons-daemon.<date>.log 기본 Procrun / 형식 텍스트·서비스 timestamp / 확인 서비스 설치·기동·JVM 로딩·종료 실패 / 샘플 [YYYY-MM-DD HH:MM:SS] [info] [pid] Apache Commons Daemon procrun...
+- heading: '로그: GC 로그'
+  body: 경로 버전별 상이(JVM -Xlog:gc/-Xloggc 지정 경로) / 형식 JVM 텍스트·uptime/ISO 시간 설정 / 확인 Full GC·GC overhead·긴 pause·heap 포화 / 샘플 [12.345s][info][gc] GC(10) Pause Young ...
+- heading: '로그: JVM 장애덤프'
+  body: 경로 버전별 상이(-XX:HeapDumpPath, JVM 작업 디렉터리) / 형식 HPROF/텍스트·파일명 timestamp 또는 PID / 확인 OutOfMemoryError·heap dump·hs_err_pid<PID>.log·thread dump / 샘플 java_pid1234.hprof / hs_err_pid1234.log

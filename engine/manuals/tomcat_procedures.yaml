@@ -1,0 +1,236 @@
+# Tomcat 조치 절차 카탈로그 — Apache Tomcat 8.5/9/10 Configuration Reference·Tomcat Manager 기준 (2026-09-11)
+# 강화(2026-10-16, GPT 45차 관문): 1차 = 읽기 전용(재기동·kill·설정 변경·힙 덤프·명령줄 비밀번호 없음), 2차 = 사전조건·영향·승인·백업/롤백 + 성공/실패 기준, 3차 = 민감정보 마스킹·전달 승인
+# 적용 범위 표기: Tomcat 7.0 / 8.5 / 9.0 / 10.1. jcmd 는 JDK 7+ 의 JDK(JRE 아님)에서, JVM 과 같은 OS 계정으로 실행.
+products: [tomcat]
+procedures:
+- id: TOMCAT-PROC-THREAD
+  category: thread
+  match: [WAS-THR-003, TOMCAT-THREADPOOL-FULL, TOMCAT-STUCK-THREAD, TOMCAT-OOM-THREAD]
+  title: 요청 스레드 고갈 (maxThreads 도달 · Stuck thread)
+  source: "Tomcat 9 Configuration Reference 'The HTTP Connector (maxThreads, acceptCount, connectionTimeout)'·'The Executor'·'Stuck Thread Detection Valve' — tomcat.apache.org/tomcat-9.0-doc/config/http.html"
+  stages:
+  - stage: 1
+    steps:
+    - do: 커넥터 스레드 상태 확인 (Manager 앱 status 또는 jcmd, 읽기 전용)
+      cmd: |
+        curl -s -u <manager-user> "http://localhost:8080/manager/status?XML=true" | sed 's/>/>\n/g' | grep -i "threadInfo"
+        jcmd <PID> Thread.print | grep -c "http-nio-8080-exec"
+        ss -tan state established '( sport = :8080 )' | wc -l
+      check: "이상: currentThreadsBusy 가 maxThreads 와 같고 접속 수가 계속 늘면 스레드 고갈. 정상: currentThreadsBusy 가 maxThreads 의 70% 미만"
+      note: "적용: Tomcat 7.0/8.5/9.0/10.1 (status XML 은 manager-status 역할 필요, 커넥터 이름은 BIO 면 http-bio-8080-exec·APR 면 http-apr-8080-exec) · 권한: Manager 계정(curl 이 비밀번호를 묻는다 — 명령줄에 비밀번호를 쓰지 않음), jcmd 는 Tomcat 실행 OS 계정 · sed 줄바꿈 치환은 GNU sed 기준"
+    - do: 스레드 덤프 3회 채취 (재기동 전)
+      cmd: |
+        for i in 1 2 3; do jcmd <PID> Thread.print > $CATALINA_BASE/logs/td_$(date +%H%M%S)_$i.txt; sleep 10; done
+        # jcmd 가 없으면: kill -3 <PID> (스레드 덤프, 프로세스는 유지 — catalina.out 에 기록)
+      check: "같은 스택(DB 대기·외부 HTTP·락)이 다수면 그 지점이 병목 — 2차 전달. td 파일이 비어 있으면 실행 계정 불일치 — Tomcat 실행 계정으로 재시도"
+      note: "적용: Tomcat 7.0~10.1·JDK 7+ (jcmd) · 권한: Tomcat 실행 OS 계정 · 디스크 여유 확인(덤프 1회 수 MB)"
+  - stage: 2
+    steps:
+    - do: 커넥터 스레드·큐·타임아웃 조정
+      config:
+        file: $CATALINA_BASE/conf/server.xml (Connector)
+        snippet: |
+          <Connector port="8080" protocol="org.apache.coyote.http11.Http11NioProtocol"
+                     maxThreads="400" minSpareThreads="25" acceptCount="200"
+                     connectionTimeout="20000" keepAliveTimeout="15000" maxKeepAliveRequests="100"
+                     maxConnections="8192" compression="on" />
+        note: "maxThreads 는 CPU 코어·백엔드(DB 풀) 한도와 함께 산정. 변경 후 Tomcat 재기동(catalina.sh stop / start)"
+      cmd: |
+        cp -p $CATALINA_BASE/conf/server.xml $CATALINA_BASE/conf/server.xml.bak.$(date +%Y%m%d%H%M)
+        $CATALINA_HOME/bin/shutdown.sh ; sleep 5 ; $CATALINA_HOME/bin/startup.sh
+      check: "성공: catalina.out 에 'Server startup in' 기록, status 의 currentThreadsBusy 가 maxThreads 의 70% 이하로 안정. 실패: 기동 오류(server.xml 파싱 SEVERE)·CPU 포화·DB 풀 고갈로 번짐 → .bak 복원 후 재기동"
+      note: "사전조건: 1차 스레드 덤프 확보, CPU 코어·DB 풀 maxActive/maxTotal 확인, shutdown 후 프로세스가 남으면(ps 확인) 원인 기록 · 영향: 재기동 동안 서비스 중단·세션 소실(세션 복제 없을 때) · 승인: 서비스 담당·WAS 운영 담당 · 백업/롤백: server.xml.bak.<시각> 보관(cmd 1번째 줄), 롤백은 .bak 복사 후 재기동 · 적용: Tomcat 7.0~10.1 (Tomcat 7 기본 커넥터가 BIO 일 수 있음 — protocol 명시)"
+    - do: Stuck Thread Detection Valve 로 장시간 스레드 감지·기록
+      config:
+        file: $CATALINA_BASE/conf/server.xml (Host 또는 Context 안)
+        snippet: |
+          <Valve className="org.apache.catalina.valves.StuckThreadDetectionValve" threshold="60" interruptThreadThreshold="300" />
+      check: "성공: 재기동 후 catalina.out 에 'Thread ... has been active for ... milliseconds' 경고와 스택이 기록됨. 실패: 기동 시 Valve 클래스 오류 → 해당 줄 제거(롤백)"
+      note: "사전조건: server.xml 백업, 재기동 일정 합의 · 영향: 재기동 필요(서비스 중단), interruptThreadThreshold 는 장시간 스레드를 인터럽트하므로 진행 중 요청이 실패할 수 있음 — 처음에는 threshold 만 두고 관찰 권장 · 승인: WAS 운영 담당·서비스 담당 · 백업/롤백: server.xml.bak 보관, 롤백은 Valve 줄 삭제 후 재기동 · 적용: Tomcat 7.0~10.1 (interruptThreadThreshold 의 7.0 지원 판은 미검증)"
+  - stage: 3
+    steps:
+    - do: 제조사(커뮤니티/유지보수사) 의뢰 자료
+      cmd: |
+        $CATALINA_HOME/bin/version.sh ; java -version 2>&1
+        tar czf tomcat_$(date +%Y%m%d).tgz $CATALINA_BASE/conf/server.xml $CATALINA_BASE/logs/catalina.*.log $CATALINA_BASE/logs/td_*.txt $CATALINA_BASE/logs/localhost_access_log.*.txt
+      check: server.xml·catalina 로그·스레드 덤프·접근 로그(장애 전후 1시간)·버전
+      note: "민감정보 마스킹: server.xml 의 keystorePass·certificateKeystorePassword·AJP secret, 접근 로그의 클라이언트 IP·쿼리 문자열(토큰·세션 ID), 로그의 호스트명·계정·JDBC URL 가림 — 접근 로그는 장애 시간대만 잘라서 · 전달 승인: 보안 담당 승인 후 유지보수사 지정 경로로만"
+
+- id: TOMCAT-PROC-CONNECTION
+  category: connection
+  match: [TOMCAT-POOL-EXHAUSTED, TOMCAT-JNDI-DS-FAIL, TOMCAT-DS-VALIDATION-FAIL, TOMCAT-JDBC-DRIVER-LEAK, WAS-POOL-002]
+  title: JDBC 커넥션 풀 고갈·데이터소스 오류
+  source: "Tomcat 9 'JNDI Datasource How-To'·'The Tomcat JDBC Connection Pool (maxTotal/maxActive, maxWaitMillis, removeAbandoned, validationQuery)' — tomcat.apache.org/tomcat-9.0-doc/jdbc-pool.html"
+  stages:
+  - stage: 1
+    steps:
+    - do: 풀 상태·DB 접속 가능 여부 확인
+      cmd: |
+        jcmd <PID> Thread.print | grep -B2 -A10 "getConnection\|PoolExhausted\|Timeout waiting for idle" | head -80
+        nc -zvw3 <DB_HOST> <DB_PORT>
+        grep -n "Cannot get a connection\|Timeout waiting for idle object\|connection is not available" $CATALINA_BASE/logs/catalina.out | tail -20
+      check: "이상: DB 포트 접속 실패면 DB/네트워크 장애. 접속되는데 getConnection 대기 스레드가 많으면 풀 고갈/누수. 정상: 포트 접속 성공·대기 스레드 없음"
+      note: "적용: Tomcat 7.0~10.1 (DBCP 1/DBCP2/tomcat-jdbc 공통 메시지) · 권한: Tomcat 실행 OS 계정(jcmd), catalina.out 읽기 · nc 는 TCP 연결만 열고 닫는다(DB 로그인 없음)"
+  - stage: 2
+    steps:
+    - do: 풀 크기·대기·누수 회수 설정 (context.xml Resource)
+      config:
+        file: $CATALINA_BASE/conf/context.xml 또는 webapp META-INF/context.xml (Resource)
+        snippet: |
+          <Resource name="jdbc/<DS>" auth="Container" type="javax.sql.DataSource"
+                    factory="org.apache.tomcat.jdbc.pool.DataSourceFactory"
+                    driverClassName="oracle.jdbc.OracleDriver" url="jdbc:oracle:thin:@//<DB_HOST>:1521/<service>"
+                    username="<user>" password="<pw>"
+                    initialSize="10" maxActive="60" maxIdle="20" minIdle="10" maxWait="10000"
+                    validationQuery="SELECT 1 FROM DUAL" testOnBorrow="true" validationInterval="30000"
+                    removeAbandoned="true" removeAbandonedTimeout="60" logAbandoned="true"/>
+        note: "위는 tomcat-jdbc factory 속성. 기본 DBCP 사용 시 Tomcat 8.0+ (DBCP2) 는 maxTotal/maxWaitMillis/removeAbandonedOnBorrow, Tomcat 7 (DBCP 1) 은 maxActive/maxWait/removeAbandoned. maxActive 합계가 DB processes 한도를 넘지 않게. 변경 후 재배포 또는 재기동"
+      cmd: |
+        cp -p $CATALINA_BASE/conf/context.xml $CATALINA_BASE/conf/context.xml.bak.$(date +%Y%m%d%H%M)
+        $CATALINA_HOME/bin/shutdown.sh ; sleep 5 ; $CATALINA_HOME/bin/startup.sh
+      check: "성공: 기동 후 대기 오류(Cannot get a connection) 사라짐, logAbandoned 로 catalina.out 에 기록된 미반환 커넥션 스택 → 개발팀 close() 수정. 실패: JNDI lookup 실패·속성 오타 경고 또는 DB 세션 한도 초과(ORA-00020 등) → .bak 복원 후 재기동"
+      note: "사전조건: DBA 와 DB 세션 한도 확인, 1차 스레드 덤프 확보 · 영향: 재기동 동안 서비스 중단, removeAbandoned 는 오래 쥔 연결을 강제 회수하므로 긴 배치 작업이 실패할 수 있음(removeAbandonedTimeout 을 최장 정상 트랜잭션보다 길게) · 승인: WAS 운영 담당·DBA·서비스 담당 · 백업/롤백: context.xml.bak.<시각> 보관(cmd 1번째 줄, 앱 META-INF/context.xml 이면 그 파일도), 롤백은 .bak 복사 후 재기동 · 적용: Tomcat 7.0~10.1"
+  - stage: 3
+    steps:
+    - do: 의뢰 자료
+      cmd: |
+        tar czf tomcat_ds_$(date +%Y%m%d).tgz $CATALINA_BASE/conf/context.xml $CATALINA_BASE/conf/server.xml $CATALINA_BASE/logs/catalina.out $CATALINA_BASE/logs/td_*.txt
+        ls $CATALINA_BASE/lib/*.jar | grep -i "jdbc\|ojdbc\|mysql\|postgres"
+      check: 풀 설정·로그·스레드 덤프·JDBC 드라이버 버전
+      note: "민감정보 마스킹: context.xml·server.xml 의 password·username·url(DB 호스트·포트·서비스명) 반드시 가림(평문 저장), 로그의 호스트명·IP·계정·SQL 바인드 값 가림 · 전달 승인: 보안 담당·DBA 승인 후 유지보수사 지정 경로로만"
+
+- id: TOMCAT-PROC-MEMORY
+  category: memory
+  match: [TOMCAT-HEAP-OOM, TOMCAT-METASPACE-OOM, TOMCAT-GC-OVERHEAD, TOMCAT-CLASSLOADER-LEAK, WAS-JVM-001]
+  title: JVM 메모리 고갈 (힙·Metaspace·클래스로더 누수)
+  source: "Tomcat 9 'RUNNING.txt / setenv.sh (CATALINA_OPTS)'·'Class Loader HOW-TO'·'JreMemoryLeakPreventionListener' — tomcat.apache.org/tomcat-9.0-doc"
+  stages:
+  - stage: 1
+    steps:
+    - do: 힙·GC 상태 기록
+      cmd: |
+        jcmd <PID> GC.heap_info ; jstat -gcutil <PID> 5000 6
+        grep -n "OutOfMemoryError\|GC overhead\|appears to have started a thread" $CATALINA_BASE/logs/catalina.out | tail -20
+      check: "이상: Old(O)/Metaspace(M) 95% 이상 지속·FGC 수가 계속 늘면 고갈. '…failed to stop it' 경고 반복이면 재배포 누수. 정상: O 가 GC 후 내려가고 FGC 증가 없음"
+      note: "적용: GC.heap_info 는 JDK 9+ (JDK 8 은 jstat 만 사용 — jmap -heap 은 프로세스를 멈추므로 1차 금지), Metaspace 는 JDK 8+ (JDK 7 은 PermGen = jstat 의 P) · Tomcat 7.0~10.1 · 권한: Tomcat 실행 OS 계정"
+    - do: 스레드 덤프 채취 (재기동 전) — 힙 덤프는 2차
+      cmd: |
+        jcmd <PID> Thread.print > $CATALINA_BASE/logs/td_$(date +%Y%m%d_%H%M%S).txt
+      check: "td 파일 생성(수 MB). 비어 있으면 실행 계정 불일치 (힙 덤프는 stop-the-world·대용량 — 2차 승인 후)"
+      note: "적용: JDK 7+ (jcmd), 없으면 kill -3 <PID> (스레드 덤프, 프로세스는 유지) · 권한: Tomcat 실행 OS 계정"
+  - stage: 2
+    steps:
+    - do: 힙 덤프 채취 (디스크 여유 확인·서비스 우회 후)
+      cmd: |
+        df -h $CATALINA_BASE/logs ; jcmd <PID> GC.heap_dump $CATALINA_BASE/logs/heap_$(date +%Y%m%d_%H%M%S).hprof
+      check: "성공: 'Heap dump file created' 출력·hprof 크기가 사용 힙과 비슷. 실패: 디스크 부족·권한 오류 또는 덤프 중 응답 없음이 길어짐 → 덤프 중단 여부는 판단하지 말고 완료 대기 후 재기동 판단"
+      note: "사전조건: 덤프 경로 여유 공간 ≥ 힙 최대(-Xmx)의 1.2배, 로드밸런서에서 해당 인스턴스 제외(서비스 우회) · 영향: 덤프 동안 JVM 전체 정지(stop-the-world, 힙 크기에 따라 수십 초~수 분) · 승인: 서비스 담당·WAS 운영 담당 · 백업/롤백: 설정 변경 없음 — 덤프 후 우회 해제로 원복, hprof 는 업무 데이터가 들어 있어 분석 후 안전하게 폐기 · 적용: JDK 7+ (jcmd GC.heap_dump)"
+    - do: JVM 옵션 조정 (setenv.sh)
+      config:
+        file: $CATALINA_BASE/bin/setenv.sh (없으면 생성)
+        snippet: |
+          CATALINA_OPTS="$CATALINA_OPTS -Xms4g -Xmx4g -XX:MetaspaceSize=256m -XX:MaxMetaspaceSize=512m"
+          CATALINA_OPTS="$CATALINA_OPTS -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=$CATALINA_BASE/logs"
+          CATALINA_OPTS="$CATALINA_OPTS -Xlog:gc*:file=$CATALINA_BASE/logs/gc_%t.log:time,uptime:filecount=5,filesize=50m"
+        note: "JDK 8: -XX:+PrintGCDetails -Xloggc:… 사용(-Xlog 는 JDK 9+). 재배포로 누수가 쌓이면 재배포 대신 전체 재기동 정책"
+      cmd: |
+        cp -p $CATALINA_BASE/bin/setenv.sh $CATALINA_BASE/bin/setenv.sh.bak.$(date +%Y%m%d%H%M) 2>/dev/null
+        $CATALINA_HOME/bin/shutdown.sh ; sleep 5 ; $CATALINA_HOME/bin/startup.sh
+      check: "성공: 재기동 후 ps 의 java 인자에 새 옵션 반영, jstat Old 사용률 안정·Full GC 반복 없음. 실패: 'Could not create the Java Virtual Machine'(옵션 오류)·물리 메모리 부족(스왑 증가) → .bak 복원 후 재기동"
+      note: "사전조건: 물리 메모리 여유(Xmx + Metaspace + 스레드 스택 + OS 여유) 확인, HeapDumpPath 디스크 여유 · 영향: 재기동 동안 서비스 중단, 힙 확대는 GC 정지 시간 증가 가능 · 승인: WAS 운영 담당·서비스 담당 · 백업/롤백: setenv.sh.bak.<시각> 보관(없던 파일이면 새 파일 삭제가 롤백), 롤백 후 재기동 · 적용: Tomcat 7.0~10.1, -Xlog 는 JDK 9+"
+    - do: 힙 덤프 분석(MAT) 으로 누수 클래스 식별 후 개발팀 이관
+      cmd: |
+        jcmd <PID> GC.class_histogram | head -30
+      check: "성공: 상위 점유 클래스가 애플리케이션 객체(캐시·세션)면 소스 결함으로 개발팀 이관. 실패: 상위가 byte[]/char[] 만이면 판단 불가 → 힙 덤프(MAT dominator tree)로 확인"
+      note: "사전조건: 서비스 우회 또는 한가한 시간 · 영향: GC.class_histogram 은 Full GC 를 일으켜 잠시 정지(stop-the-world) · 승인: WAS 운영 담당 · 백업/롤백: 설정 변경 없음(되돌릴 것 없음) · 적용: JDK 7+"
+  - stage: 3
+    steps:
+    - do: 의뢰 자료
+      cmd: |
+        tar czf tomcat_mem_$(date +%Y%m%d).tgz $CATALINA_BASE/bin/setenv.sh $CATALINA_BASE/logs/gc*.log $CATALINA_BASE/logs/catalina.out $CATALINA_BASE/logs/td_*.txt
+      check: hprof(별도 전달)·GC 로그·setenv.sh·버전
+      note: "민감정보 마스킹: setenv.sh 의 -D 비밀번호·키 옵션, 로그의 호스트명·IP·계정·세션 ID 가림. hprof 는 메모리 전체(세션·비밀번호·개인정보)가 들어 있어 마스킹 불가 — 사내 분석을 우선하고 외부 전달은 별도 승인 · 전달 승인: 보안 담당 승인 후 유지보수사 지정 경로로만"
+
+- id: TOMCAT-PROC-INTERNAL
+  category: internal
+  match: [TOMCAT-CONTEXT-START-FAILED, TOMCAT-LISTENER-FAIL, TOMCAT-SERVLET-INIT-FAIL, TOMCAT-FILTER-FAIL, TOMCAT-DEPLOY-FAIL, TOMCAT-CONNECTOR-FAIL, TOMCAT-ADDRESS-IN-USE]
+  title: 컨텍스트 기동 실패·배포 실패·커넥터 초기화 실패
+  source: "Tomcat 9 'Tomcat Web Application Deployment'·'Host Manager'·'The Host Container (autoDeploy, deployOnStartup)' — tomcat.apache.org/tomcat-9.0-doc/deployer-howto.html"
+  stages:
+  - stage: 1
+    steps:
+    - do: 실패 원인 줄 확인
+      cmd: |
+        grep -n "SEVERE\|startup failed\|Error listenerStart\|Address already in use\|Failed to initialize" $CATALINA_BASE/logs/catalina.out | tail -30
+        tail -n 100 $CATALINA_BASE/logs/localhost.$(date +%Y-%m-%d).log
+        ss -ltnp | grep -E ":(8080|8005|8009)\b"
+      check: "'Address already in use' 면 포트 점유 PID 확인, listenerStart/filterStart 면 애플리케이션 초기화 예외(localhost 로그에 스택). 정상: SEVERE 없음·포트가 Tomcat PID 하나에만 묶임"
+      note: "적용: Tomcat 7.0~10.1 (10.x 는 javax→jakarta 전환 미적용 앱이 ClassNotFoundException 으로 실패하는 경우 많음) · 권한: 로그 읽기, ss -p 의 PID 표시는 root 필요"
+  - stage: 2
+    steps:
+    - do: 배포 롤백·재배포 (Manager)
+      cmd: |
+        curl -u <manager-user> "http://localhost:8080/manager/text/undeploy?path=/<app>"
+        curl -u <manager-user> -T <app>.war "http://localhost:8080/manager/text/deploy?path=/<app>&update=true"
+        curl -u <manager-user> "http://localhost:8080/manager/text/list"
+      check: "성공: deploy 응답 'OK - Deployed application', list 출력에서 /<app>:running. 실패: 'FAIL - ' 응답 또는 /<app>:stopped → localhost 로그 확인 후 보관한 직전 war 로 재배포(롤백)"
+      note: "사전조건: 직전 정상 war 를 별도 경로에 보관, manager-script 역할 계정 · 영향: undeploy 는 appBase 의 war·전개 폴더를 지우고 앱 중단·세션 소실 · 승인: 서비스 담당·WAS 운영 담당 · 백업/롤백: $CATALINA_BASE/webapps/<app>.war 를 <app>.war.bak.<날짜> 로 다른 디렉터리에 복사 후 진행, 실패 시 그 파일로 deploy · 주의: <pw> 를 명령줄에 쓰면 history 에 남음 — -u <manager-user> 만 주면 curl 이 묻는다 · 적용: Tomcat 7.0~10.1 (text 인터페이스 /manager/text)"
+    - do: 포트 충돌 해소 또는 커넥터 포트 변경
+      config:
+        file: $CATALINA_BASE/conf/server.xml
+        snippet: |
+          <Server port="8005" shutdown="SHUTDOWN">   <!-- 인스턴스마다 다르게 -->
+          <Connector port="8080" ... />
+      cmd: |
+        kill <점유 PID>   # 이전 Tomcat 잔존 프로세스일 때만(승인 후)
+      check: "성공: 기동 로그에 'Server startup in [N] ms', ss 에서 포트가 새 PID 에 묶임. 실패: kill 후에도 프로세스 잔존 또는 다른 서비스가 같은 포트 사용 → 포트 변경(server.xml) 쪽으로"
+      note: "사전조건: 점유 PID 가 이전 Tomcat 잔존인지 ps -fp <PID> 로 확인(다른 서비스면 kill 금지), 잔존 프로세스 스레드 덤프 확보 · 영향: kill 한 프로세스가 처리 중이던 요청 실패, 포트 변경 시 웹서버·방화벽 설정도 바꿔야 함 · 승인: WAS 운영 담당·해당 서버 담당 · 백업/롤백: server.xml.bak.<시각> 보관 후 포트 변경, 롤백은 .bak 복사 · 적용: Tomcat 7.0~10.1"
+  - stage: 3
+    steps:
+    - do: 의뢰 자료
+      cmd: |
+        tar czf tomcat_boot_$(date +%Y%m%d).tgz $CATALINA_BASE/conf $CATALINA_BASE/logs/catalina.out $CATALINA_BASE/logs/localhost.*.log
+      check: conf 전체·catalina.out·localhost 로그·앱 버전
+      note: "민감정보 마스킹: conf 안 tomcat-users.xml 비밀번호, server.xml·context.xml 의 password·secret·keystorePass, 키스토어 파일(*.jks·*.p12 — 묶음에서 제외) 가림, 로그의 호스트명·IP·계정·JDBC URL 가림 · 전달 승인: 보안 담당 승인 후 유지보수사 지정 경로로만"
+
+- id: TOMCAT-PROC-SECURITY
+  category: security
+  match: [TOMCAT-SSL-INIT-FAIL, TOMCAT-AJP-SECRET, TOMCAT-AJP-REJECT, TOMCAT-MANAGER-AUTH-FAIL, TOMCAT-REALM-FAIL, TOMCAT-INVALID-CHARACTER]
+  title: SSL 초기화·AJP secret·인증 실패
+  source: "Tomcat 9 'SSL/TLS Configuration How-To'·'The AJP Connector (secretRequired, secret, allowedRequestAttributesPattern)'·'Realm Configuration' — tomcat.apache.org/tomcat-9.0-doc"
+  stages:
+  - stage: 1
+    steps:
+    - do: 오류 원인 확인
+      cmd: |
+        grep -n "SSLEngine\|keystore\|secretRequired\|Invalid character\|Access to the requested resource" $CATALINA_BASE/logs/catalina.out | tail -20
+        keytool -list -v -keystore <keystore.jks> | grep -i "valid\|alias"
+      check: "이상: 인증서 만료(Valid until 경과)·별칭 불일치면 교체 대상. AJP secret 경고면 7.0.100/8.5.51/9.0.31+ 의 secretRequired 기본값(true). 정상: 유효 기간 내·설정 별칭 존재"
+      note: "적용: Tomcat 7.0~10.1 · 권한: 키스토어 파일 읽기(Tomcat 실행 계정) · keytool 은 비밀번호를 물어본다 — -storepass 를 명령줄에 쓰지 않음(JKS 는 Enter 로 건너뛰어도 목록 조회 가능, PKCS12 는 입력 필요)"
+  - stage: 2
+    steps:
+    - do: SSL 커넥터·키스토어 설정
+      config:
+        file: $CATALINA_BASE/conf/server.xml
+        snippet: |
+          <Connector port="8443" protocol="org.apache.coyote.http11.Http11NioProtocol" SSLEnabled="true" maxThreads="200">
+            <SSLHostConfig protocols="TLSv1.2+TLSv1.3">
+              <Certificate certificateKeystoreFile="conf/keystore.jks" certificateKeystorePassword="<pw>" type="RSA"/>
+            </SSLHostConfig></Connector>
+      check: "성공: 재기동 후 openssl s_client -connect localhost:8443 -tls1_2 </dev/null 로 핸드셰이크 성공·새 인증서 만료일 표시. 실패: 기동 시 keystore 로드 오류(비밀번호·별칭) → 이전 키스토어·server.xml.bak 복원"
+      note: "사전조건: 새 인증서 체인·개인키가 키스토어에 들어 있고 유효 기간 확인, 이전 키스토어 보관 · 영향: 재기동 필요(서비스 중단), 프로토콜 제한 시 구형 클라이언트 접속 실패 · 승인: 보안 담당·서비스 담당 · 백업/롤백: server.xml·이전 keystore 파일을 .bak 로 보관, 롤백은 복사 후 재기동 · 적용: SSLHostConfig 는 Tomcat 8.5/9.0/10.1 (Tomcat 7 은 Connector 의 keystoreFile·keystorePass·sslEnabledProtocols), TLSv1.3 은 JDK 11+ (또는 8u261+)"
+    - do: AJP secret 설정 (WEB 서버 mod_jk/mod_proxy_ajp 와 동일 값)
+      config:
+        file: $CATALINA_BASE/conf/server.xml
+        snippet: |
+          <Connector protocol="AJP/1.3" address="::1" port="8009" secretRequired="true" secret="<same-secret>" />
+          # Apache: ProxyPass "/" "ajp://localhost:8009/" secret=<same-secret>   / mod_jk: worker.<name>.secret=<same-secret>
+      check: "성공: Tomcat·웹서버 재기동 후 AJP 거부 로그 없음·웹서버 경유 요청 정상(200). 실패: 403 또는 AJP 연결 거부 로그 → 양쪽 secret 값·address(::1 vs 127.0.0.1) 불일치 확인, 안 되면 .bak 복원"
+      note: "사전조건: 웹서버(httpd/WebtoB) 담당과 같은 secret 값 합의·동시 반영 일정, 웹서버가 IPv4 로 접속하면 address 를 127.0.0.1 로 · 영향: Tomcat·웹서버 재기동 필요, 값이 다르면 전체 요청 실패 · 승인: 보안 담당·웹서버 담당·서비스 담당 · 백업/롤백: server.xml·웹서버 설정(.conf/workers.properties) .bak 보관, 롤백은 양쪽 복원 후 재기동(secretRequired=false 로 되돌리는 것은 Ghostcat 위험 — 임시로만) · 적용: secret/secretRequired 는 Tomcat 7.0.100·8.5.51·9.0.31 이상과 10.1 (이전 판은 requiredSecret), mod_proxy_ajp secret 은 httpd 2.4.42+"
+  - stage: 3
+    steps:
+    - do: 의뢰 자료
+      cmd: |
+        tar czf tomcat_sec_$(date +%Y%m%d).tgz $CATALINA_BASE/conf/server.xml $CATALINA_BASE/conf/tomcat-users.xml $CATALINA_BASE/logs/catalina.out
+      check: 설정(비밀번호 마스킹)·로그·인증서 정보(keytool 출력)
+      note: "민감정보 마스킹: tomcat-users.xml 의 password, server.xml 의 certificateKeystorePassword·keystorePass·AJP secret, 로그의 사용자 ID·출처 IP·호스트명 가림, 키스토어 파일 자체는 보내지 않음(인증서 정보는 keytool 출력으로) · 전달 승인: 보안 담당 승인 후 유지보수사 지정 경로로만"

@@ -1,0 +1,13 @@
+product: mesim
+title: "메타빌드 MESIM ESB · APIG 운영 참고"
+sections:
+  - heading: "제품 개요"
+    body: "MESIM ESB: 서비스 버스 방식 통합연계(어댑터·변환·라우팅). MESIM APIG: API 게이트웨이(인증·유량제어·라우팅). 둘 다 Java(log4j) 기반 — 분석기 제품명 mesim-esb / mesim-apig"
+  - heading: "로그 수집"
+    body: "설치 경로의 logs 디렉터리에서 서버 로그(log4j)·어댑터/인터페이스 로그를 장애 시각 전후로 투입. OS 계층의 audit.log·syslog 를 함께 넣으면 계층 판별이 정확해짐"
+  - heading: "대표 장애 신호"
+    body: "Connection refused 연계 대상 접속 실패 · RejectedExecutionException/queue full 큐 포화 · transaction timed out 거래 타임아웃 · 변환/매핑 오류(SAXParse·JsonParse) · 401/403 인증 실패 · 429 유량 제한 · 502 백엔드 라우팅 실패"
+  - heading: "벤더 문의"
+    body: "공식 에러코드 표는 납품 매뉴얼 기준 — 메타빌드 기술지원 support@metabuild.co.kr. 보유 매뉴얼의 코드 표를 분석기 담당자에게 전달하면 에러코드 사전(errorcodes/)에 등재되어 자동 판정에 사용됨"
+  - heading: "MESIM EAI (지원 종료 EOS) 대응 정책"
+    body: "MESIM EAI 는 ESB/APIG 로 대체된 이전 세대 제품(제조사 표준 지원 종료). 로그는 Java/log4j 계열로 분석기 제품명 mesim-eai (ESB 룰·별칭 공유). 1차·2차 조치는 ESB 와 동일. 3차: 제조사 표준 기술지원이 없으므로 (1) 유지보수 계약사(SI/유지관리 업체)의 EAI 지원 범위 확인 (2) 보유한 EAI 설치·운영 매뉴얼의 에러코드 표를 분석기 담당자에게 전달해 사전 등재 (3) 반복 장애·보안 취약점은 ESB/APIG 전환 계획으로 관리. 필요 시 메타빌드 유상 기술지원 가능 여부 문의"

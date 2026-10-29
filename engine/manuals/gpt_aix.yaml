@@ -1,0 +1,15 @@
+product: aix
+title: IBM AIX 운영 참고 (GPT 수집 — 벤더 문서 대조 필요)
+sections:
+- heading: 로그 위치
+  body: AIX 오류 로그는 errdemon이 관리하며 기본 오류 보고는 errpt로 조회한다. 실제 저장 파일 위치는 error-log configuration
+    database를 따르며 시스템 메시지는 /var/adm/ras 계열 자료도 함께 사용한다.
+- heading: 장애 시 수집 방법
+  body: errpt -a, snap 진단 패키지, svmon, vmstat, iostat, lspath, lsvg, lspv 결과를 장애 시각에
+    수집한다. 하드웨어 문제는 diag 결과와 errpt IDENTIFIER를 함께 보존한다.
+- heading: 대표 장애 신호
+  body: errpt의 PERM 하드웨어 오류, DISK_ERR 계열, LVM_IO_FAIL, PV missing/stale PP, JFS2 I/O·fsck
+    required, MPIO path failure, paging space 부족과 프로세스 메모리 급증을 우선 확인한다.
+- heading: 1차 확인 명령
+  body: errpt | head -50; errpt -a; uptime; vmstat 1 5; svmon -G; iostat -Dl 1 5;
+    lspath; df -g 로 오류 이력·메모리·디스크·MPIO와 파일시스템을 확인한다.

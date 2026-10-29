@@ -1,0 +1,107 @@
+product: apache
+layer: web
+title: apache 로그 종류 카탈로그 (GPT 수집 — 벤더 문서 대조 필요)
+source: GPT 수집(벤더 문서 대조 필요)
+sources: []
+logtypes:
+- name: Error 로그
+  path: ServerRoot/logs/error_log 기본 소스 설치 또는 ErrorLog 설정 경로
+  format: 텍스트·[Day Mon DD HH:mm:ss.ffffff YYYY] [module:level] [pid:tid]
+  check: AH 코드·기동·모듈·proxy·SSL·CGI stderr·설정 오류
+  sample: '[Wed Sep 09 12:00:00.000000 2026] [core:error] [pid 1234] [client 127.0.0.1] AH...'
+- name: Access 로그
+  path: ServerRoot/logs/access_log 예시 또는 CustomLog 지정 경로
+  format: CLF/Combined·dd/MMM/yyyy:HH:mm:ss Z
+  check: 4xx·5xx·URI·client·bytes·referer·user-agent
+  sample: 127.0.0.1 - - [09/Sep/2026:12:00:00 +0900] "GET / HTTP/1.1" 200 1234
+- name: 가상호스트 Access
+  path: CustomLog별 설정 경로
+  format: CLF/Combined/custom·%t
+  check: VirtualHost별 상태코드·백엔드·요청 분리
+  sample: example.com 80 127.0.0.1 - - [09/Sep/2026:12:00:00 +0900] "GET / HTTP/1.1" 200 1234
+- name: 모듈 Trace 로그
+  path: ErrorLog와 동일·LogLevel <module>:traceN
+  format: ErrorLog 형식·microsecond timestamp
+  check: mod_proxy·module별 trace·AH 코드·backend 선택
+  sample: '[timestamp] [proxy:trace2] [pid:tid] ...'
+- name: mod_rewrite 로그
+  path: ErrorLog와 동일·LogLevel rewrite:trace1..8
+  format: ErrorLog 형식·microsecond timestamp
+  check: rewrite rule 매칭·internal redirect·rewrite loop
+  sample: '[timestamp] [rewrite:trace3] [pid:tid] ...'
+- name: SSL 요청 로그
+  path: ServerRoot/logs/ssl_request_log 예시 또는 CustomLog 지정
+  format: CustomLog·%t CLF 시간
+  check: TLS protocol·cipher·HTTPS URI·bytes
+  sample: '[09/Sep/2026:12:00:00 +0900] 127.0.0.1 TLSv1.3 TLS_AES_256_GCM_SHA384 "GET / HTTP/1.1" 1234'
+- name: SSL 오류 로그
+  path: ErrorLog와 동일·LogLevel ssl:*
+  format: ErrorLog 형식·microsecond timestamp
+  check: certificate·handshake·protocol·cipher·AH02xxx
+  sample: '[timestamp] [ssl:error] [pid:tid] AH02xxx: ...'
+- name: Forensic 로그
+  path: ForensicLog 지정 경로
+  format: 고정 텍스트·request 전후 2행·unique ID
+  check: 비정상 요청·보안 분석·처리 전후 누락 요청
+  sample: +<forensic-id>|GET / HTTP/1.1|Host:example.com|...
+- name: CGI Script 로그
+  path: ScriptLog 지정 경로
+  format: 텍스트·요청/응답 section timestamp
+  check: CGI stdin/stdout·header·실행 실패 디버깅
+  sample: '%% [<time>] <request-line>'
+- name: mod_jk 로그
+  path: ServerRoot/logs/mod_jk.log 기본, 예 /var/log/httpd/mod_jk.log
+  format: 텍스트·기본 [%a %b %d %H:%M:%S.%Q %Y]
+  check: AJP worker·backend connect·load balancer·worker ERROR
+  sample: '[Wed Sep 09 12:00:00.123 2026] [1234:...] [error] ...'
+- name: mod_jk 요청 로그
+  path: JkLogFile 또는 Apache CustomLog 설정
+  format: custom·JkLogStampFormat/Apache %t
+  check: JK_WORKER_NAME·route·duration·busy·worker error 상태
+  sample: worker1 example.com 0.012345
+- name: I/O Access 로그
+  path: CustomLog 지정 경로·mod_logio %I %O
+  format: CLF/Combined custom·%t
+  check: 실제 수신·송신 바이트·대용량 응답·전송 이상
+  sample: 127.0.0.1 - - [09/Sep/2026:12:00:00 +0900] "GET /" 200 1234 456 789
+- name: 파이프 로그
+  path: ErrorLog "|<program>" 또는 CustomLog "|<program>"
+  format: 대상 프로그램이 받는 텍스트·설정 timestamp
+  check: rotatelogs 실패·파이프 프로세스 종료·로그 유실
+  sample: <configured ErrorLog/CustomLog record>
+sections:
+- heading: 로그 종류 카탈로그 (전수)
+  body: 'Error 로그: ServerRoot/logs/error_log 기본 소스 설치 또는 ErrorLog 설정 경로 · Access 로그: ServerRoot/logs/access_log 예시 또는 CustomLog 지정 경로 · 가상호스트 Access: CustomLog별 설정 경로 · 모듈 Trace 로그: ErrorLog와 동일·LogLevel
+    <module>:traceN · mod_rewrite 로그: ErrorLog와 동일·LogLevel rewrite:trace1..8 · SSL 요청 로그: ServerRoot/logs/ssl_request_log 예시 또는 CustomLog 지정 · SSL 오류 로그: ErrorLog와 동일·LogLevel ssl:* · Forensic 로그: ForensicLog
+    지정 경로 · CGI Script 로그: ScriptLog 지정 경로 · mod_jk 로그: ServerRoot/logs/mod_jk.log 기본, 예 /var/log/httpd/mod_jk.log · mod_jk 요청 로그: JkLogFile 또는 Apache CustomLog 설정 · I/O Access 로그: CustomLog 지정 경로·mod_logio
+    %I %O · 파이프 로그: ErrorLog "|<program>" 또는 CustomLog "|<program>"'
+- heading: '로그: Error 로그'
+  body: 경로 ServerRoot/logs/error_log 기본 소스 설치 또는 ErrorLog 설정 경로 / 형식 텍스트·[Day Mon DD HH:mm:ss.ffffff YYYY] [module:level] [pid:tid] / 확인 AH 코드·기동·모듈·proxy·SSL·CGI stderr·설정 오류 / 샘플 [Wed Sep 09 12:00:00.000000
+    2026] [core:error] [pid 1234] [client 127.0.0.1] AH...
+- heading: '로그: Access 로그'
+  body: 경로 ServerRoot/logs/access_log 예시 또는 CustomLog 지정 경로 / 형식 CLF/Combined·dd/MMM/yyyy:HH:mm:ss Z / 확인 4xx·5xx·URI·client·bytes·referer·user-agent / 샘플 127.0.0.1 - - [09/Sep/2026:12:00:00 +0900] "GET
+    / HTTP/1.1" 200 1234
+- heading: '로그: 가상호스트 Access'
+  body: 경로 CustomLog별 설정 경로 / 형식 CLF/Combined/custom·%t / 확인 VirtualHost별 상태코드·백엔드·요청 분리 / 샘플 example.com 80 127.0.0.1 - - [09/Sep/2026:12:00:00 +0900] "GET / HTTP/1.1" 200 1234
+- heading: '로그: 모듈 Trace 로그'
+  body: 경로 ErrorLog와 동일·LogLevel <module>:traceN / 형식 ErrorLog 형식·microsecond timestamp / 확인 mod_proxy·module별 trace·AH 코드·backend 선택 / 샘플 [timestamp] [proxy:trace2] [pid:tid] ...
+- heading: '로그: mod_rewrite 로그'
+  body: 경로 ErrorLog와 동일·LogLevel rewrite:trace1..8 / 형식 ErrorLog 형식·microsecond timestamp / 확인 rewrite rule 매칭·internal redirect·rewrite loop / 샘플 [timestamp] [rewrite:trace3] [pid:tid] ...
+- heading: '로그: SSL 요청 로그'
+  body: 경로 ServerRoot/logs/ssl_request_log 예시 또는 CustomLog 지정 / 형식 CustomLog·%t CLF 시간 / 확인 TLS protocol·cipher·HTTPS URI·bytes / 샘플 [09/Sep/2026:12:00:00 +0900] 127.0.0.1 TLSv1.3 TLS_AES_256_GCM_SHA384
+    "GET / HTTP/1.1" 1234
+- heading: '로그: SSL 오류 로그'
+  body: '경로 ErrorLog와 동일·LogLevel ssl:* / 형식 ErrorLog 형식·microsecond timestamp / 확인 certificate·handshake·protocol·cipher·AH02xxx / 샘플 [timestamp] [ssl:error] [pid:tid] AH02xxx: ...'
+- heading: '로그: Forensic 로그'
+  body: 경로 ForensicLog 지정 경로 / 형식 고정 텍스트·request 전후 2행·unique ID / 확인 비정상 요청·보안 분석·처리 전후 누락 요청 / 샘플 +<forensic-id>|GET / HTTP/1.1|Host:example.com|...
+- heading: '로그: CGI Script 로그'
+  body: 경로 ScriptLog 지정 경로 / 형식 텍스트·요청/응답 section timestamp / 확인 CGI stdin/stdout·header·실행 실패 디버깅 / 샘플 %% [<time>] <request-line>
+- heading: '로그: mod_jk 로그'
+  body: 경로 ServerRoot/logs/mod_jk.log 기본, 예 /var/log/httpd/mod_jk.log / 형식 텍스트·기본 [%a %b %d %H:%M:%S.%Q %Y] / 확인 AJP worker·backend connect·load balancer·worker ERROR / 샘플 [Wed Sep 09 12:00:00.123 2026]
+    [1234:...] [error] ...
+- heading: '로그: mod_jk 요청 로그'
+  body: 경로 JkLogFile 또는 Apache CustomLog 설정 / 형식 custom·JkLogStampFormat/Apache %t / 확인 JK_WORKER_NAME·route·duration·busy·worker error 상태 / 샘플 worker1 example.com 0.012345
+- heading: '로그: I/O Access 로그'
+  body: 경로 CustomLog 지정 경로·mod_logio %I %O / 형식 CLF/Combined custom·%t / 확인 실제 수신·송신 바이트·대용량 응답·전송 이상 / 샘플 127.0.0.1 - - [09/Sep/2026:12:00:00 +0900] "GET /" 200 1234 456 789
+- heading: '로그: 파이프 로그'
+  body: 경로 ErrorLog "|<program>" 또는 CustomLog "|<program>" / 형식 대상 프로그램이 받는 텍스트·설정 timestamp / 확인 rotatelogs 실패·파이프 프로세스 종료·로그 유실 / 샘플 <configured ErrorLog/CustomLog record>

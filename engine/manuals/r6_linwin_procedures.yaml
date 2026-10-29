@@ -1,0 +1,1030 @@
+# 근거 매뉴얼·작성 기준 (r6 · 2026-10-16 · 아이디어 3 — linux / windows / auditd '이 판정 전용' 절차)
+# - 대상: '같은 제품·유형' 으로만 이어져 있던 판정 중, 기존 절차(os_procedures.yaml 등)가 그 판정의 원인·조치와 맞지 않은 것만 모았다.
+#   맞는 판정은 r6_linwin_proclinks.yaml 로 기존 절차에 잇고, 여기에는 새로 만들지 않았다.
+# - Linux: auditd(8)·auditctl(8)·aureport(8)·ausearch(8)·auditd.conf(5)·tcp(7)·proc(5)·smartctl(8)·mdadm(8)·iostat(1)·pidstat(1)·ionice(1)·quota(1)·repquota(8)·setquota(8)·xfs_quota(8)
+#   ·systemd.resource-control(5)·systemd-oomd.service(8)·oomctl(1)·oomd.conf(5) (man7.org), 커널 문서 'Control Group v2'·'Memory Resource Controller',
+#   RHEL 9 'Security hardening › Auditing the system'(service auditd 동작은 service 명령만 지원·augenrules --load), RHEL 8/9 'Managing, monitoring and updating the kernel'
+# - Windows: Microsoft Learn — Get-WinEvent·sc.exe·Get-Service·ServicesPipeTimeout, FailoverClusters 모듈(Get-ClusterResource·Get-ClusterLog·Move-ClusterGroup),
+#   Win32_UserProfile·ProfileList, Kernel-Power 41·CrashControl, Windows Update 문제 해결(DISM·sfc·wusa·Get-WindowsUpdateLog), Set-SmbClientConfiguration
+# - 작성 기준: 검증도구\knowledge_spec.md 5차 — 1차 읽기 전용, 2차 사전조건·영향·승인·백업/롤백 + 성공/실패, 3차 민감정보 마스킹·전달 승인
+# - 명령의 적용 버전은 note 에 표시(RHEL 6 = service·/var/log/messages·sosreport, RHEL 7+ = systemctl·journalctl, RHEL 8+ = sos report)
+procedures:
+# ── Linux ──
+- id: LNX-PROC-R6-AUDIT-BACKLOG
+  scope: id
+  products: [linux]
+  category: capacity
+  match: [LNX-AUDIT-BACKLOG]
+  title: 감사(audit) 백로그 초과·감사 이벤트 유실 (Linux auditd)
+  source: "auditctl(8)·auditd(8)·aureport(8)·augenrules(8) man 페이지(man7.org), RHEL 9 'Security hardening › Auditing the system' (service auditd 동작·augenrules --load)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 커널 감사 큐 상태·유실 수 확인 (읽기 전용)
+      cmd: |
+        auditctl -s
+        journalctl -k --since "-2 hours" | grep -i "backlog limit" | tail -20
+        grep -i "backlog limit" /var/log/messages | tail -20
+      check: "backlog 가 backlog_limit 에 근접하거나 lost 가 이전 조회보다 늘었으면 확정. failure 2 면 백로그 초과 시 커널 패닉 설정 — 즉시 2차 통보 · 정상: backlog 가 한도의 50% 미만, lost 증가 없음"
+      note: "적용: audit 2.x~3.x, RHEL 6~9 (journalctl 은 RHEL 7+, RHEL 6 은 /var/log/messages 줄만) · 권한: root · lost 는 부팅 후 누계라 몇 분 간격으로 두 번 조회해 증가 여부로 판단"
+    - do: auditd 동작·규칙 수·이벤트를 많이 만드는 규칙 확인 (읽기 전용)
+      cmd: |
+        systemctl status auditd --no-pager | head -15
+        auditctl -l | wc -l
+        aureport -k --summary -i -ts today | head -20
+        aureport -x --summary -i -ts today | head -20
+        df -h /var/log/audit
+      check: "auditd 가 active 가 아니거나 /var/log/audit 이 가득이면 소비 지연이 원인(감사 로그 디스크 절차 LNX-PROC-R6-AUDIT-DISK), 특정 key·실행 파일이 이벤트 대부분이면 규칙 폭주가 원인 · 정상: auditd active, 이벤트가 고르게 분포"
+      note: "적용: systemctl status 는 RHEL 7+ (RHEL 6 은 service auditd status) · aureport 는 감사 로그를 처음부터 읽으므로 -ts today 로 범위를 줄여 실행 · 권한: root"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 백로그 한도 상향 (영구 반영)
+      config:
+        file: /etc/audit/rules.d/audit.rules (맨 앞 제어 규칙)
+        snippet: |
+          -b 16384
+      cmd: |
+        cp -p /etc/audit/rules.d/audit.rules /var/tmp/audit.rules.before
+        augenrules --load
+        auditctl -s | grep -E "backlog_limit|lost"
+      check: "성공: auditctl -s 의 backlog_limit 이 새 값, 이후 'backlog limit exceeded' 와 lost 증가 없음 · 실패: 규칙 적재 오류 또는 enabled 2(-e 2 잠금)로 반영 안 됨 → 재부팅 때만 반영되므로 변경 일정을 다시 잡음"
+      note: "사전조건: 현재 auditctl -s 결과 보관, 규칙에 -e 2(immutable) 가 있는지 확인, 한도를 키우면 커널이 큐에 쓰는 메모리도 늘어남 · 영향: augenrules --load 는 규칙 전체를 다시 적재 · 승인: 시스템 담당·보안(감사) 담당 · 백업/롤백: /var/tmp/audit.rules.before 를 되돌려 놓고 augenrules --load · 적용: RHEL 7+ (RHEL 6 은 /etc/audit/audit.rules 수정 후 service auditd restart)"
+    - do: (2차·승인 후) 이벤트 폭주 규칙 축소
+      cmd: |
+        auditctl -l > /var/tmp/audit_rules_before.txt
+        vi /etc/audit/rules.d/<규칙파일>.rules
+        augenrules --load
+      check: "성공: aureport -k --summary 에서 해당 key 건수 감소, backlog 안정 · 실패: 감사 요건 누락 지적 또는 적재 오류 → 원본 규칙 파일 복원 후 augenrules --load"
+      note: "사전조건: 보안·감사 담당과 제외 가능한 규칙(key) 합의 — 감사 의무 규칙은 제외 금지 · 영향: 제외한 동작은 더 이상 기록되지 않음 · 승인: 보안 담당 · 백업/롤백: 수정 전 규칙 파일 사본과 /var/tmp/audit_rules_before.txt 로 복원"
+  - stage: 3
+    steps:
+    - do: 벤더(Red Hat)·보안 담당 전달 자료
+      cmd: |
+        auditctl -s > auditctl_s_$(date +%Y%m%d).txt ; auditctl -l > auditctl_l_$(date +%Y%m%d).txt
+        aureport --summary -i -ts today > aureport_$(date +%Y%m%d).txt
+        sos report --batch --tmp-dir /var/tmp
+      check: "auditctl 상태·규칙 목록·aureport 요약·sosreport"
+      note: "RHEL 6/7 은 sosreport --batch · 감사 규칙·요약에는 계정·경로·실행 파일이 들어 있음 — 민감정보 마스킹: 계정명·호스트명·IP·업무 경로 가림 후 전달 · 전달 승인: 보안 담당"
+
+- id: LNX-PROC-R6-AUDIT-DISK
+  scope: id
+  products: [linux]
+  category: disk
+  match: [LNX-AUDIT-DISK-FULL]
+  title: 감사 로그(/var/log/audit) 공간 부족·감사 중단 (Linux auditd)
+  source: "auditd.conf(5)·auditd(8) man 페이지(man7.org — SIGUSR1 순환·SIGUSR2 재개), RHEL 9 'Security hardening › Auditing the system' (service auditd rotate·resume·reload)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 감사 로그 파일시스템 사용률·파일 수 확인 (읽기 전용)
+      cmd: |
+        df -h /var/log/audit ; df -i /var/log/audit
+        ls -lh /var/log/audit/ | tail -20
+        du -sh /var/log/audit
+      check: "Use% 95% 이상 또는 IUse% 95% 이상이면 확정, 순환 파일(audit.log.N) 이 num_logs 보다 많거나 다른 파일이 섞여 있으면 순환 설정 이상 · 정상: 85% 미만"
+      note: "적용: RHEL 6~9·Ubuntu(auditd 설치 시) · 권한: root (/var/log/audit 는 root 만 읽기)"
+    - do: 공간 부족 시 동작 설정·감사 기록 상태 확인 (읽기 전용)
+      cmd: |
+        grep -E "^(max_log_file|num_logs|max_log_file_action|space_left|space_left_action|admin_space_left|admin_space_left_action|disk_full_action|disk_error_action)" /etc/audit/auditd.conf
+        auditctl -s | grep -E "enabled|lost"
+        journalctl -u auditd --since "-1 day" --no-pager | tail -20
+      check: "admin_space_left_action·disk_full_action 이 HALT·SINGLE 이면 시스템 정지 위험 — 즉시 2차 통보, SUSPEND 면 감사 기록이 멈춘 상태(보안 담당 통보) · 정상: 기록 계속, auditd 오류 메시지 없음"
+      note: "적용: journalctl 은 RHEL 7+ (RHEL 6 은 grep auditd /var/log/messages | tail -20) · 권한: root"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 오래된 감사 로그를 보관 위치로 옮긴 뒤 정리하고 기록 재개
+      cmd: |
+        tar czf /<보관경로>/audit_$(date +%Y%m%d).tgz /var/log/audit/audit.log.[0-9]*
+        tar tzf /<보관경로>/audit_$(date +%Y%m%d).tgz | wc -l
+        rm -f /var/log/audit/audit.log.<N>
+        service auditd resume
+      check: "성공: df 사용률 85% 미만, auditctl -s 의 enabled 1, ausearch -ts recent 에 새 기록 · 실패: 보관본 목록 수가 원본과 다름 → 삭제 중단, resume 후에도 기록 없음 → 3차"
+      note: "사전조건: 보안 감사 보존 기간·보관 서버 위치 확인, 보관본 검증(tar tzf) 전 삭제 금지, 현재 쓰는 audit.log 는 지우지 않음 · 영향: 정리한 로그는 서버에서 조회 불가 · 승인: 보안(감사) 담당·시스템 담당 · 백업/롤백: 보관본 tgz 를 /var/log/audit 로 풀어 복원 · 적용: RHEL 7+ 는 auditd 를 service 명령으로만 제어(systemctl stop/restart 거부), RHEL 6 도 service auditd resume"
+    - do: (2차·승인 후) 순환·여유 공간 동작 설정 조정
+      config:
+        file: /etc/audit/auditd.conf
+        snippet: |
+          max_log_file = <MB>
+          num_logs = <개수>
+          max_log_file_action = ROTATE
+          space_left = <MB>
+          space_left_action = SYSLOG
+          admin_space_left = <MB>
+          admin_space_left_action = SUSPEND
+          disk_full_action = SUSPEND
+      cmd: |
+        cp -p /etc/audit/auditd.conf /var/tmp/auditd.conf.before
+        service auditd reload
+        service auditd rotate
+      check: "성공: journalctl -u auditd 에 설정 오류 없이 재적재, 새 audit.log 생성 · 실패: 설정 오류 메시지 → /var/tmp/auditd.conf.before 복원 후 service auditd reload"
+      note: "사전조건: HALT·SINGLE·SUSPEND 중 무엇을 쓸지는 보안 기준(감사 중단 허용 여부)으로 보안 담당이 결정, (max_log_file × num_logs) 가 파일시스템 크기 안에 들어가는지 계산 · 영향: SUSPEND 는 공간 부족 시 감사 기록 중단, HALT 는 시스템 정지 · 승인: 보안 담당·시스템 담당 · 백업/롤백: /var/tmp/auditd.conf.before 를 되돌리고 service auditd reload"
+    - do: (2차·승인 후) /var/log/audit 파일시스템 증설 (LVM)
+      cmd: |
+        vgs ; lvs
+        lvextend -r -L +<크기>G /dev/<vg>/<lv>
+      check: "성공: df -h /var/log/audit 용량 증가 · 실패: 'Insufficient free space' → 디스크 추가 요청(pvcreate·vgextend)"
+      note: "사전조건: /var/log/audit 가 별도 LV 인지 확인(루트와 같으면 루트 FS 증설), vgs 의 VFree 확인, 최근 백업 · 영향: 온라인 확장(짧은 I/O 지연) · 승인: 시스템 담당(변경 관리) · 백업/롤백: XFS 는 축소 불가라 롤백 불가 — 확장량을 신중히 결정 · 적용: RHEL 7/8/9 (lvextend -r)"
+  - stage: 3
+    steps:
+    - do: 벤더·보안 담당 전달 자료
+      cmd: |
+        df -h > df_$(date +%Y%m%d).txt ; ls -lh /var/log/audit > auditdir_$(date +%Y%m%d).txt
+        cp /etc/audit/auditd.conf auditd_conf_$(date +%Y%m%d).txt
+        sos report --batch --tmp-dir /var/tmp
+      check: "df·감사 로그 목록·auditd.conf·sosreport (감사 로그 원본은 보안 담당 판단으로만)"
+      note: "RHEL 6/7 은 sosreport --batch · 민감정보 마스킹: 호스트명·IP·계정 가림, 감사 로그 원본은 계정·명령 기록이라 전달 금지(필요 시 보안 담당이 발췌) · 전달 승인: 보안 담당"
+
+- id: LNX-PROC-R6-CGROUP-OOM
+  scope: id
+  products: [linux]
+  category: memory
+  match: [LNX-DOCKER-OOM, LNX-MEMCG-OOM, LNX-SYSTEMD-OOMD]
+  title: cgroup 한도에 의한 메모리 종료 — 컨테이너 OOM·memcg OOM·systemd-oomd (Linux)
+  source: "커널 문서 'Control Group v2 (memory.max·memory.events)'·'Memory Resource Controller (cgroup v1)', systemd.resource-control(5)·systemd-oomd.service(8)·oomctl(1)·oomd.conf(5) (man7.org), Docker CLI 레퍼런스 (docker inspect·stats·update)"
+  verify_note: "미검증 — Docker·Podman 명령은 제조사 도메인 목록 밖 문서라 이번 작업에서 다시 확인하지 못함(docker update --memory·--memory-swap 은 일반 문법 기준), Podman 대응 명령은 적지 않음"
+  stages:
+  - stage: 1
+    steps:
+    - do: 종료 주체 구분 — 커널 memcg OOM / systemd-oomd / 컨테이너 (읽기 전용)
+      cmd: |
+        journalctl -k --since "-2 hours" | grep -iE -A 3 "memory cgroup out of memory|oom-kill" | tail -30
+        journalctl -u systemd-oomd --since "-1 day" --no-pager | tail -20
+        docker ps -a --format '{{.Names}} {{.Status}}' | head -20
+      check: "'Memory cgroup out of memory' 면 해당 cgroup 한도 도달(커널), systemd-oomd 기록에 종료된 cgroup 이 있으면 oomd 의 압력·스왑 기준 종료, 컨테이너 Exited (137) 면 OOM 의심(2단계 OOMKilled 로 확정) · 정상: 세 곳 모두 기록 없음"
+      note: "적용: RHEL 7+·Ubuntu 16.04+ (RHEL 6 은 grep -i 'memory cgroup' /var/log/messages), systemd-oomd 는 systemd 248+ 에서 켠 경우만(Ubuntu 22.04+ 등), docker 줄은 Docker 사용 서버만 · 권한: root 또는 docker 그룹"
+    - do: 한도·현재 사용량·OOM 계수 확인 (읽기 전용)
+      cmd: |
+        docker inspect --format '{{.Name}} OOMKilled={{.State.OOMKilled}} Memory={{.HostConfig.Memory}}' <container>
+        docker stats --no-stream | head -20
+        systemctl show <service> -p MemoryMax -p MemoryLimit -p MemoryCurrent
+        cat /sys/fs/cgroup/<cgroup 경로>/memory.events 2>/dev/null
+        cat /proc/pressure/memory 2>/dev/null ; oomctl 2>/dev/null | head -40
+      check: "OOMKilled=true 면 컨테이너 OOM 확정, memory.events 의 oom_kill 이 0 보다 크면 memcg OOM 확정, MemoryCurrent 가 MemoryMax 의 90% 이상이면 재발 임박, oomctl 의 압력이 Limit 이상 지속이면 oomd 재발 임박 · 정상: OOMKilled=false·oom_kill 0·사용량 한도의 80% 미만 (HostConfig.Memory 0 은 한도 없음)"
+      note: "적용: memory.events·memory.max·MemoryMax 는 cgroup v2(RHEL 9·Ubuntu 22.04+), cgroup v1(RHEL 7/8 기본)은 /sys/fs/cgroup/memory/<경로>/memory.failcnt·memory.limit_in_bytes 와 MemoryLimit · /proc/pressure 는 커널 4.20+ (RHEL 8 은 psi=1 부팅 옵션 필요) · 권한: root"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) systemd 서비스 메모리 한도 조정
+      cmd: |
+        systemctl show <service> -p MemoryMax -p MemoryLimit > /var/tmp/<service>_mem_before.txt
+        systemctl set-property <service> MemoryMax=<새 한도>
+        systemctl show <service> -p MemoryMax -p MemoryCurrent
+      check: "성공: MemoryMax 새 값 표시, 24시간 memory.events 의 oom_kill 증가 없음 · 실패: 사용량이 새 한도까지 계속 증가 → 누수 의심, 애플리케이션 담당 분석(힙·코어) 후 3차"
+      note: "사전조건: 호스트 free -m 의 available 이 늘릴 양 이상, 사용량 추세로 누수 여부 먼저 확인 · 영향: set-property 는 재기동 없이 즉시 반영·영구 저장, 한도를 너무 키우면 호스트 전체 OOM 위험 · 승인: 시스템 담당·서비스 담당 · 백업/롤백: 보관한 이전 값으로 set-property 재실행(RHEL 8+ 는 systemctl revert <service> 도 가능하나 다른 drop-in 까지 되돌림) · 적용: RHEL 7 은 MemoryLimit= (cgroup v1)"
+    - do: (2차·승인 후) 컨테이너 메모리 한도 조정 또는 JVM 힙을 한도 안으로
+      cmd: |
+        docker inspect --format '{{.HostConfig.Memory}} {{.HostConfig.MemorySwap}}' <container>
+        docker update --memory <새 한도> --memory-swap <새 한도 이상> <container>
+      check: "성공: HostConfig.Memory 가 새 값, 24시간 OOMKilled 재발 없음 · 실패: --memory-swap 관련 오류 → --memory-swap 을 새 한도 이상으로 함께 지정, 재발 시 애플리케이션 메모리 분석"
+      note: "사전조건: 배포 정의(compose·매니페스트)에도 같은 값 반영(재생성 시 원복 방지), JVM 은 -XX:MaxRAMPercentage 로 힙을 한도의 70~75% 로 · 영향: docker update 는 실행 중 반영, 정의 변경 후 재배포는 컨테이너 재생성(중단) · 승인: 서비스 담당·플랫폼 담당 · 백업/롤백: 첫 줄 출력(이전 값)으로 docker update 재실행"
+    - do: (2차·승인 후) systemd-oomd 종료 기준 조정
+      config:
+        file: systemctl edit <unit 또는 slice> (drop-in) · /etc/systemd/oomd.conf
+        snippet: |
+          # drop-in
+          ManagedOOMMemoryPressure=kill
+          ManagedOOMMemoryPressureLimit=<예: 80%>
+          # /etc/systemd/oomd.conf [OOM]
+          SwapUsedLimit=<예: 90%>
+          DefaultMemoryPressureDurationSec=<예: 30s>
+      cmd: |
+        oomctl > /var/tmp/oomctl_before.txt
+        systemctl edit <unit>
+        systemctl daemon-reload ; oomctl | head -40
+      check: "성공: oomctl 에 새 한도 표시, 평소 부하에서 oomd 종료 없음 · 실패: 종료 반복 → 메모리 증설·부하 조정 검토, 기준을 더 느슨하게 하면 커널 OOM 으로 넘어갈 수 있음"
+      note: "사전조건: 종료된 cgroup 이 업무 서비스인지 확인, 기준 완화 대신 메모리 증설이 맞는지 검토 · 영향: 기준 완화 시 메모리 압박이 길어져 응답 지연 · 승인: 시스템 담당·서비스 담당 · 백업/롤백: 추가한 drop-in 삭제(또는 systemctl revert <unit>) 후 daemon-reload, oomd.conf 는 사본 복원 · 적용: systemd 248+"
+  - stage: 3
+    steps:
+    - do: 벤더·플랫폼 담당 전달 자료
+      cmd: |
+        journalctl -k --since "-1 day" > kernel_$(date +%Y%m%d).log
+        docker inspect <container> > container_$(date +%Y%m%d).json
+        oomctl > oomctl_$(date +%Y%m%d).txt 2>/dev/null ; sos report --batch --tmp-dir /var/tmp
+      check: "커널 로그(memcg OOM 기록)·컨테이너 설정·oomctl·sosreport"
+      note: "docker inspect 결과에는 환경 변수(비밀번호·토큰)가 들어 있을 수 있음 — 민감정보 마스킹: Env 항목·호스트명·IP·계정 가림 후 전달 · 전달 승인: 보안 담당"
+
+- id: LNX-PROC-R6-PAGE-ALLOC
+  scope: id
+  products: [linux]
+  category: memory
+  match: [LNX-PAGE-ALLOC-FAIL]
+  title: 커널 페이지 할당 실패 — 메모리 단편화·예약 부족 (Linux)
+  source: "proc(5) (/proc/buddyinfo·/proc/meminfo·/proc/sys/vm/compact_memory), 커널 문서 'Documentation for /proc/sys/vm (min_free_kbytes·compact_memory)', RHEL 8/9 'Monitoring and managing system status and performance'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 실패 order·mode·호출 프로세스 확인 (읽기 전용)
+      cmd: |
+        journalctl -k --since "-2 hours" | grep -iE -A 5 "page allocation failure" | tail -40
+        grep -A 5 "page allocation failure" /var/log/messages | tail -40
+      check: "order:0 실패면 실제 메모리 고갈(LNX-PROC-MEMORY 로), order 2 이상이면 단편화, mode 에 GFP_ATOMIC 이 보이면 예약 여유 부족 — 호출 프로세스·드라이버(예: 네트워크 드라이버) 기록 · 정상: 기록 없음"
+      note: "적용: journalctl 은 RHEL 7+, /var/log/messages 는 RHEL 6 · 권한: root"
+    - do: 단편화·슬랩·예약량 확인 (읽기 전용)
+      cmd: |
+        cat /proc/buddyinfo
+        grep -E "MemAvailable|Slab|SUnreclaim|Committed_AS|CommitLimit" /proc/meminfo
+        sysctl vm.min_free_kbytes vm.zone_reclaim_mode ; free -m
+      check: "buddyinfo 오른쪽(높은 order) 열이 대부분 0 이면 단편화, SUnreclaim 이 수 GB 이고 계속 늘면 커널 슬랩 누수(3차) · 정상: 높은 order 에도 가용 블록이 있음"
+      note: "적용: RHEL 6~9 · 권한: 일반 사용자 조회 가능"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 수동 메모리 압축(compaction)으로 단편화 완화
+      cmd: |
+        cat /proc/buddyinfo > /var/tmp/buddyinfo_before.txt
+        echo 1 > /proc/sys/vm/compact_memory
+        cat /proc/buddyinfo
+      check: "성공: 높은 order 가용 블록 증가, 할당 실패 재발 감소 · 실패: 변화 없음 → min_free_kbytes 조정 단계로"
+      note: "사전조건: 업무 부하 낮은 시간, 커널 CONFIG_COMPACTION 사용(RHEL 7+ 기본) · 영향: 수행 중 CPU 사용·짧은 지연, 도중에 멈출 수 없음 · 승인: 시스템 담당 · 백업/롤백: 설정을 바꾸지 않는 1회 동작이라 롤백 불요(전후 buddyinfo 보관)"
+    - do: (2차·승인 후) vm.min_free_kbytes 단계적 상향
+      config:
+        file: /etc/sysctl.d/90-minfree.conf
+        snippet: |
+          vm.min_free_kbytes = <새 값>
+      cmd: |
+        sysctl vm.min_free_kbytes > /var/tmp/minfree_before.txt
+        sysctl -w vm.min_free_kbytes=<새 값>
+      check: "성공: 1주 동안 page allocation failure 재발 없음 · 실패: 가용 메모리 감소로 스왑·OOM 증가 → 이전 값 복원"
+      note: "사전조건: 현재값에서 조금씩(예: 2배 이내) 올림, 드라이버 결함 여부는 벤더 지식베이스로 먼저 확인 · 영향: 예약량만큼 애플리케이션이 쓸 수 있는 메모리 감소, 과도하면 OOM 유발 · 승인: 시스템 담당(변경 관리) · 백업/롤백: /var/tmp/minfree_before.txt 의 값으로 sysctl -w 재적용, 90-minfree.conf 삭제"
+  - stage: 3
+    steps:
+    - do: 벤더(Red Hat·드라이버 제조사) 전달 자료
+      cmd: |
+        journalctl -k --since "-1 day" > kernel_$(date +%Y%m%d).log
+        cat /proc/buddyinfo > buddyinfo.txt ; cat /proc/slabinfo > slabinfo.txt
+        sos report --batch --tmp-dir /var/tmp
+      check: "커널 로그(실패 스택)·buddyinfo·slabinfo·sosreport"
+      note: "RHEL 6/7 은 sosreport --batch · 민감정보 마스킹: 호스트명·IP·계정 가림 후 전달 · 전달 승인: 보안 담당"
+
+- id: LNX-PROC-R6-SOCKET-MEM
+  scope: id
+  products: [linux]
+  category: capacity
+  match: [LNX-SOCKET-BUFFER]
+  title: TCP 소켓 메모리·orphan 소켓 한도 초과 (Linux)
+  source: "tcp(7) (tcp_mem·tcp_max_orphans), proc(5) (/proc/net/sockstat), ss(8) (man7.org), RHEL 8/9 'Monitoring and managing system status and performance › Tuning the network performance'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 소켓 메모리·orphan 수와 한도 비교 (읽기 전용)
+      cmd: |
+        cat /proc/net/sockstat
+        sysctl net.ipv4.tcp_mem net.ipv4.tcp_max_orphans
+        journalctl -k --since "-2 hours" | grep -iE "socket memory|tcp_mem|orphan" | tail -20
+      check: "sockstat 의 TCP mem(페이지 수) 이 tcp_mem 세 번째 값에 근접하거나 orphan 이 tcp_max_orphans 에 근접하면 확정 · 정상: 둘 다 한도의 70% 미만"
+      note: "적용: RHEL 6~9 (journalctl 은 RHEL 7+, RHEL 6 은 /var/log/messages) · tcp_mem 단위는 바이트가 아니라 페이지(보통 4KB) · 권한: 일반 사용자 조회 가능"
+    - do: 상태별 연결 수·미종료 연결 소유 프로세스 확인 (읽기 전용)
+      cmd: |
+        ss -s
+        ss -tan state close-wait | wc -l
+        ss -tnp state close-wait | awk '{print $NF}' | sort | uniq -c | sort -rn | head
+      check: "CLOSE-WAIT 가 많은 프로세스가 소켓을 닫지 않는 원인(애플리케이션 담당 통보), TIME-WAIT·연결 수 급증이면 접속 폭주 · 정상: CLOSE-WAIT 소수"
+      note: "적용: RHEL 7+ (RHEL 6 은 netstat -antp | grep CLOSE_WAIT) · 권한: -p 프로세스 표시는 root"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 연결을 닫지 않는 원인 프로세스 재기동
+      cmd: |
+        systemctl restart <service>
+        ss -tan state close-wait | wc -l
+      check: "성공: CLOSE-WAIT·sockstat mem 감소, 서비스 active · 실패: 재기동 후 다시 증가 → 애플리케이션 연결 누수 수정 필요(3차)"
+      note: "사전조건: 1차 ss 출력 보관, 서비스 담당과 재기동 시각 합의 · 영향: 재기동 동안 서비스 중단·기존 연결 끊김 · 승인: 서비스 담당·시스템 담당 · 백업/롤백: 설정 변경 없음, 재기동 실패 시 systemctl status 로 원인 확인 후 이전 상태로 기동"
+    - do: (2차·승인 후) tcp_mem·tcp_max_orphans 임시 상향
+      config:
+        file: /etc/sysctl.d/90-tcpmem.conf
+        snippet: |
+          net.ipv4.tcp_mem = <min> <pressure> <max>
+          net.ipv4.tcp_max_orphans = <값>
+      cmd: |
+        sysctl net.ipv4.tcp_mem net.ipv4.tcp_max_orphans > /var/tmp/tcpmem_before.txt
+        sysctl -w net.ipv4.tcp_max_orphans=<값>
+        sysctl -p /etc/sysctl.d/90-tcpmem.conf
+      check: "성공: 커널 'socket memory'·'orphan' 메시지 중단 · 실패: free 가용 메모리 급감 또는 메시지 지속 → 이전 값 복원, 원인 프로세스 조치 우선"
+      note: "사전조건: free -m 여유 확인 — tcp(7) 기준 orphan 1개는 최대 약 64KB 의 스왑 불가 메모리를 씀 · 영향: 한도 상향만큼 커널이 소켓에 쓰는 메모리 증가(근본 해결 아님) · 승인: 시스템 담당(변경 관리) · 백업/롤백: /var/tmp/tcpmem_before.txt 값으로 sysctl -w 재적용, 90-tcpmem.conf 삭제"
+  - stage: 3
+    steps:
+    - do: 벤더 전달 자료
+      cmd: |
+        cat /proc/net/sockstat > sockstat_$(date +%Y%m%d).txt ; ss -s > ss_$(date +%Y%m%d).txt
+        sysctl -a 2>/dev/null | grep -E "tcp_mem|tcp_rmem|tcp_wmem|orphans" > sysctl_tcp.txt
+        sos report --batch --tmp-dir /var/tmp
+      check: "sockstat·ss 요약·TCP 파라미터·sosreport"
+      note: "RHEL 6/7 은 sosreport --batch · 민감정보 마스킹: 호스트명·IP(접속 상대 포함)·계정 가림 후 전달 · 전달 승인: 보안 담당"
+
+- id: LNX-PROC-R6-NPROC
+  scope: id
+  products: [linux]
+  category: capacity
+  match: [LNX-FORK-FAILED]
+  title: 프로세스·스레드 생성 실패 — nproc·pid_max·cgroup pids 한도 (Linux)
+  source: "proc(5) (kernel/pid_max·threads-max, /proc/<PID>/limits), limits.conf(5), systemd.resource-control(5) (TasksMax), 커널 문서 'Process Number Controller (pids)', RHEL 8/9 'Managing, monitoring and updating the kernel'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 시스템 전체 스레드 수와 커널 한도 비교 (읽기 전용)
+      cmd: |
+        ps -eLf --no-headers | wc -l
+        cat /proc/sys/kernel/pid_max /proc/sys/kernel/threads-max
+        journalctl -k --since "-2 hours" | grep -i "fork rejected" | tail -20
+      check: "전체 스레드 수가 pid_max·threads-max 의 90% 이상이면 시스템 한도, 'fork rejected by pids controller' 가 있으면 cgroup pids 한도 · 정상: 한도의 70% 미만, 기록 없음"
+      note: "적용: RHEL 7+ (RHEL 6 은 cgroup pids 없음, /var/log/messages 확인) · 권한: 일반 사용자 조회 가능"
+    - do: 사용자·서비스별 한도 도달 여부 확인 (읽기 전용)
+      cmd: |
+        ps -eLo user= | sort | uniq -c | sort -rn | head
+        cat /etc/security/limits.d/*nproc*.conf 2>/dev/null
+        grep "Max processes" /proc/<PID>/limits
+        systemctl show <service> -p TasksMax -p TasksCurrent
+      check: "사용자 스레드 수가 Max processes soft 값에 근접하면 사용자 한도, TasksCurrent 가 TasksMax 에 근접하면 서비스 cgroup 한도 · 정상: 각 한도의 80% 미만"
+      note: "적용: limits.d 기본 파일은 RHEL 7+ 20-nproc.conf·RHEL 6 90-nproc.conf, TasksMax 는 RHEL 8+ · 권한: /proc/<PID>/limits 는 소유자 또는 root"
+    - do: 좀비·메모리 커밋 원인 확인 (읽기 전용)
+      cmd: |
+        ps -eo stat,ppid,pid,comm | awk '$1 ~ /^Z/' | head
+        grep -E "Committed_AS|CommitLimit" /proc/meminfo ; sysctl vm.overcommit_memory ; free -m
+      check: "좀비가 많으면 부모 프로세스(PPID)가 회수하지 않는 것 — 부모 담당 통보, overcommit_memory=2 이고 Committed_AS 가 CommitLimit 에 근접하면 메모리 원인(ENOMEM) · 정상: 좀비 없음"
+      note: "적용: RHEL 6~9 · 권한: 일반 사용자 조회 가능"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 스레드 폭주·좀비 부모 프로세스 재기동
+      cmd: |
+        ps -eLo pid=,comm= | sort | uniq -c | sort -rn | head -5
+        systemctl restart <service>
+      check: "성공: 전체 스레드 수 정상 범위, 'fork' 실패 기록 중단 · 실패: 재기동 후 다시 증가 → 애플리케이션 스레드 누수(3차)"
+      note: "사전조건: 1차 결과 보관, JVM 이면 재기동 전 스레드 덤프(kill -3 <PID>, 프로세스 유지) 확보, 서비스 담당과 시각 합의 · 영향: 재기동 동안 서비스 중단 · 승인: 서비스 담당·시스템 담당 · 백업/롤백: 설정 변경 없음, 기동 실패 시 이전 상태로 기동"
+    - do: (2차·승인 후) 사용자·서비스·커널 한도 상향
+      config:
+        file: /etc/security/limits.d/90-nproc-<user>.conf · systemctl edit <service> · /etc/sysctl.d/90-pid.conf
+        snippet: |
+          <user>  soft  nproc  <값>
+          <user>  hard  nproc  <값>
+          # drop-in [Service]
+          TasksMax=<값>
+          # sysctl
+          kernel.pid_max = <값>
+      cmd: |
+        sysctl kernel.pid_max kernel.threads-max > /var/tmp/pid_before.txt
+        sysctl -p /etc/sysctl.d/90-pid.conf
+        systemctl daemon-reload ; systemctl show <service> -p TasksMax
+      check: "성공: 새 한도 표시, 서비스 재기동(또는 재로그인) 후 fork 실패 없음 · 실패: 한도 상향 후에도 소진 → 누수 원인 조치 우선"
+      note: "사전조건: 한도 상향 전 폭주 원인 확인(한도만 올리면 메모리 고갈로 번짐) · 영향: limits.d 는 새 로그인 세션부터, TasksMax 는 즉시, pid_max 는 즉시 반영 · 승인: 시스템 담당(변경 관리) · 백업/롤백: 추가한 limits.d·drop-in·sysctl.d 파일 삭제 후 daemon-reload·/var/tmp/pid_before.txt 값으로 sysctl -w · 적용: 64비트 커널 pid_max 최댓값 4194304"
+  - stage: 3
+    steps:
+    - do: 벤더 전달 자료
+      cmd: |
+        ps -eLf > threads_$(date +%Y%m%d).txt
+        cat /proc/<PID>/limits > limits_<PID>.txt ; sos report --batch --tmp-dir /var/tmp
+      check: "전체 스레드 목록·프로세스 한도·sosreport"
+      note: "ps -eLf 결과에는 명령줄 인자(비밀번호 등)가 보일 수 있음 — 민감정보 마스킹: 명령줄 인자·계정·호스트명·IP 가림 후 전달 · 전달 승인: 보안 담당"
+
+- id: LNX-PROC-R6-QUOTA
+  scope: id
+  products: [linux]
+  category: capacity
+  match: [LNX-DISK-QUOTA]
+  title: 디스크 쿼터(사용자·그룹·프로젝트) 초과 (Linux)
+  source: "quota(1)·repquota(8)·setquota(8)·xfs_quota(8) man 페이지(man7.org), RHEL 8/9 'Managing file systems › Limiting storage space usage with quotas (ext4·XFS)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 대상 계정의 사용량·한도·유예 확인 (읽기 전용)
+      cmd: |
+        quota -s -u <user>
+        repquota -as | head -40
+        xfs_quota -x -c 'report -h' <mount>
+      check: "blocks 또는 files 가 hard 한도에 도달했거나 soft 초과 후 grace 가 none(만료)이면 쓰기 실패 확정 · 정상: soft 한도 미만"
+      note: "적용: repquota 는 ext4 등 quota 도구 파일시스템, XFS 는 xfs_quota 의 report(조회만) — 해당 파일시스템 명령만 응답 · 권한: 다른 사용자 조회·repquota·xfs_quota -x 는 root"
+    - do: 사용량 상위 디렉터리 확인 (읽기 전용)
+      cmd: |
+        du -xsh <사용자 경로>/* 2>/dev/null | sort -rh | head
+        find <사용자 경로> -xdev -type f -size +100M -printf '%s %p\n' 2>/dev/null | sort -rn | head
+      check: "로그·임시·덤프 파일이 상위면 정리 대상(소유자 확인 후 2차), 업무 데이터 증가면 한도 조정 대상"
+      note: "적용: RHEL 6~9 · 권한: 해당 사용자 또는 root · 파일이 매우 많은 경로는 업무 부하 시간대를 피함"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 소유자 확인 뒤 불필요 파일 보관·정리
+      cmd: |
+        tar czf /<보관경로>/<user>_$(date +%Y%m%d).tgz <정리 대상>
+        rm -f <정리 대상 파일>
+      check: "성공: quota -s 사용량이 soft 한도 미만 · 실패: 변화 없음 → 열려 있는 삭제 파일(lsof +L1) 확인, 한도 조정 단계로"
+      note: "사전조건: 파일 소유자·업무 담당 확인, 보존 의무 확인 · 영향: 삭제 파일은 되돌릴 수 없음 · 승인: 업무 담당·시스템 담당 · 백업/롤백: 보관본 tgz 로 복원"
+    - do: (2차·승인 후) 쿼터 한도 조정
+      cmd: |
+        repquota -as > /var/tmp/repquota_before.txt
+        setquota -u <user> <블록soft> <블록hard> <inode soft> <inode hard> <mount>
+        xfs_quota -x -c 'limit -u bsoft=<값> bhard=<값> <user>' <mount>
+      check: "성공: quota -s -u <user> 에 새 한도 표시, 쓰기 성공 · 실패: 'not supported'·쿼터 꺼짐 → 마운트 옵션(usrquota·uquota) 확인"
+      note: "사전조건: 파일시스템 전체 여유(df -h)가 늘린 한도를 감당하는지 확인 · 영향: 한 계정이 공유 파일시스템을 더 차지할 수 있음 · 승인: 시스템 담당·용량 관리 담당 · 백업/롤백: /var/tmp/repquota_before.txt 의 이전 값으로 setquota·xfs_quota limit 재실행 · 적용: setquota 는 ext4 등, xfs_quota 는 XFS (해당 줄만 사용)"
+  - stage: 3
+    steps:
+    - do: 벤더 전달 자료
+      cmd: |
+        repquota -as > repquota_$(date +%Y%m%d).txt 2>/dev/null
+        xfs_quota -x -c 'state' <mount> > xfsquota_state.txt 2>/dev/null ; grep -E "quota" /proc/mounts > quota_mounts.txt
+      check: "쿼터 보고서·쿼터 상태·마운트 옵션"
+      note: "민감정보 마스킹: 사용자명·그룹명·호스트명·업무 경로 가림 후 전달 · 전달 승인: 보안 담당"
+
+- id: LNX-PROC-R6-SMART
+  scope: id
+  products: [linux]
+  category: disk
+  match: [LNX-SMART-FAIL]
+  title: SMART 디스크 고장 예고 — 진단·RAID 멤버 교체 준비 (Linux)
+  source: "smartctl(8)·smartd(8) (smartmontools), mdadm(8) (man7.org), RHEL 8/9 'Managing storage devices (mdadm 소프트웨어 RAID)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: SMART 건강 상태·핵심 속성 확인 (읽기 전용)
+      cmd: |
+        smartctl -H /dev/<sdX>
+        smartctl -A /dev/<sdX> | grep -iE "Reallocated|Pending|Uncorrectable|CRC"
+        smartctl -l error /dev/<sdX> | head -30
+      check: "overall-health FAILED 면 확정, Reallocated·Current_Pending·Offline_Uncorrectable 원값이 0 보다 크고 늘고 있으면 교체 대상, CRC 오류만 늘면 케이블·백플레인 의심 · 정상: PASSED, 핵심 속성 0"
+      note: "적용: smartmontools 설치 시, NVMe 는 smartctl -a /dev/nvme0 의 Media and Data Integrity Errors, 하드웨어 RAID 뒤 디스크는 smartctl -d megaraid,<N> /dev/<sdX> 또는 벤더 도구 · 권한: root"
+    - do: 디스크가 쓰이는 볼륨·RAID 와 경고 시작 시각 확인 (읽기 전용)
+      cmd: |
+        lsblk -o NAME,HCTL,SIZE,TYPE,MOUNTPOINT
+        cat /proc/mdstat ; pvs
+        journalctl -u smartd --since "-7 days" --no-pager | tail -20
+      check: "md RAID 멤버면 다른 멤버 정상([UU] 중 하나) 여부, 단일 디스크·RAID0 이면 데이터 손실 위험이 커서 백업 확인을 2차보다 먼저 요청 · 정상: smartd 경고 없음"
+      note: "적용: journalctl 은 RHEL 7+ (RHEL 6 은 grep smartd /var/log/messages | tail -20) · 권한: root"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 확장 자가진단으로 결함 확정
+      cmd: |
+        smartctl -t long /dev/<sdX>
+        smartctl -l selftest /dev/<sdX>
+      check: "성공: 자가진단 완료 'Completed without error' 면 관찰 유지, 'read failure' 등 실패 기록이면 교체 확정 · 실패: 진단 중단(Aborted)·응답 없음 → 즉시 교체 진행"
+      note: "사전조건: 업무 부하 낮은 시간, 백업 확인 · 영향: 수 시간 동안 해당 디스크 I/O 성능 저하(자료 변경 없음) · 승인: 시스템 담당 · 백업/롤백: 자료를 바꾸지 않아 롤백 불요, smartctl -X 로 진단 중단 가능"
+    - do: (2차·승인 후) 소프트웨어 RAID(md) 멤버 교체
+      cmd: |
+        mdadm --detail /dev/<md>
+        mdadm /dev/<md> --fail /dev/<sdX1> --remove /dev/<sdX1>
+        sfdisk -d /dev/<정상디스크> | sfdisk /dev/<새디스크>
+        mdadm /dev/<md> --add /dev/<새디스크1>
+      check: "성공: /proc/mdstat 재동기화 진행 후 [UU] 복귀 · 실패: 다른 멤버도 오류·재동기화 중단 → 즉시 중지하고 백업 복원 준비·3차"
+      note: "사전조건: 나머지 멤버 정상 확인, 최근 백업 확인, 부트 디스크면 교체 후 부트로더 설치 필요, 하드웨어 RAID 는 이 단계 대신 벤더 도구(COMMON-PROC-HARDWARE) · 영향: 재동기화 동안 I/O 성능 저하·이중화 없음 · 승인: 시스템 담당·스토리지 담당 · 백업/롤백: mdadm --detail·sfdisk -d 출력 보관, 교체한 디스크는 반납 전 보관 · 적용: RHEL 6~9"
+  - stage: 3
+    steps:
+    - do: 제조사(서버·디스크) 전달 자료
+      cmd: |
+        smartctl -x /dev/<sdX> > smart_<sdX>_$(date +%Y%m%d).txt
+        cat /proc/mdstat > mdstat.txt ; sos report --batch --tmp-dir /var/tmp
+      check: "SMART 전체 출력(시리얼·펌웨어 포함)·mdstat·sosreport"
+      note: "RHEL 6/7 은 sosreport --batch · 민감정보 마스킹: 호스트명·IP·계정 가림(디스크 시리얼은 RMA 에 필요하므로 제조사에만) · 전달 승인: 보안 담당"
+
+- id: LNX-PROC-R6-IO-LOAD
+  scope: id
+  products: [linux]
+  category: disk
+  match: [LEG-RHEL-WARN-IO-HIGH]
+  title: 디스크 I/O 사용률 높음·응답 지연 (Linux, 기존 도구 룰)
+  source: "iostat(1)·pidstat(1)·sar(1) (sysstat), iotop(8)·ionice(1) (man7.org), RHEL 8/9 'Monitoring and managing system status and performance › Factors affecting I/O and file system performance'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 장치별 사용률·대기 시간 확인 (읽기 전용)
+      cmd: |
+        iostat -xz 1 5
+        sar -d -p | tail -30
+      check: "%util 90% 이상이 지속되고 await(r_await/w_await) 가 평소의 수 배면 해당 장치 포화 · 정상: await 가 평소 수준"
+      note: "적용: sysstat 설치 시(sar 이력은 sysstat 수집 활성화 시), RHEL 6~9 · 병렬 처리하는 장치(NVMe·SAN LUN)는 %util 100% 라도 포화가 아닐 수 있어 await 로 판단 · 권한: 일반 사용자 가능"
+    - do: I/O 유발 프로세스·대기 프로세스 확인 (읽기 전용)
+      cmd: |
+        pidstat -d 1 5
+        iotop -obn 3 | head -30
+        ps -eo pid,stat,wchan:32,comm | awk '$2 ~ /^D/' | head -20
+      check: "특정 프로세스(백업·배치·DB 덤프)에 I/O 가 몰리면 일정 조정 대상, D 상태 프로세스 다수면 I/O 대기로 서비스 지연 중 · 정상: 상위 프로세스가 업무 정상 부하"
+      note: "적용: iotop 은 패키지 설치 시(없으면 pidstat 만) · 권한: root"
+    - do: 저장 경로·스케줄러 확인 (읽기 전용)
+      cmd: |
+        multipath -ll 2>/dev/null | grep -iE "failed|faulty"
+        cat /sys/block/<sdX>/queue/scheduler
+      check: "failed/faulty 경로가 있으면 경로 감소로 인한 지연 — 하드웨어 절차(LNX-PROC-HARDWARE)로 분기 · 정상: 출력 없음"
+      note: "적용: multipath 는 device-mapper-multipath 설치 시 · 권한: root"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) I/O 유발 프로세스의 우선순위 낮추기
+      cmd: |
+        ionice -p <PID>
+        ionice -c 3 -p <PID>
+      check: "성공: 업무 장치 await 감소·서비스 응답 회복 · 실패: 변화 없음 → 스케줄러가 우선순위를 쓰지 않는 경우, 작업 일정 조정 단계로"
+      note: "사전조건: 대상이 업무 핵심 프로세스가 아닌지 확인(DB 본체에 걸면 장애 확대), 첫 줄 출력(현재 클래스) 보관 · 영향: 대상 작업이 느려짐 · 승인: 시스템 담당·작업 소유 담당 · 백업/롤백: 보관한 원래 클래스로 ionice -c <원래 클래스> -n <원래 값> -p <PID> · 적용: 우선순위는 CFQ·BFQ 스케줄러에서 적용(RHEL 8+ 기본 mq-deadline·none 에서는 효과 제한)"
+    - do: (2차·승인 후) 배치·백업 실행 시각 조정
+      cmd: |
+        crontab -l -u <user> > /var/tmp/crontab_<user>_before.txt
+        crontab -e -u <user>
+      check: "성공: 업무 시간대 iostat await 정상, 작업도 기한 내 완료 · 실패: 작업 지연으로 후속 작업 실패 → 원래 일정 복원 후 스토리지 증설·분리 검토"
+      note: "사전조건: 작업 소유 담당과 시각 합의, 의존 작업 순서 확인 · 영향: 작업 완료 시각 변경 · 승인: 작업 소유 담당·시스템 담당 · 백업/롤백: crontab /var/tmp/crontab_<user>_before.txt 로 원복"
+  - stage: 3
+    steps:
+    - do: 벤더·스토리지 담당 전달 자료
+      cmd: |
+        iostat -xzt 5 12 > iostat_$(date +%Y%m%d).txt
+        sar -d -p > sar_disk_$(date +%Y%m%d).txt ; sos report --batch --tmp-dir /var/tmp
+      check: "1분간 iostat·sar 디스크 이력·sosreport"
+      note: "RHEL 6/7 은 sosreport --batch · 민감정보 마스킹: 호스트명·IP·계정·프로세스 명령줄 가림 후 전달 · 전달 승인: 보안 담당"
+
+- id: LNX-PROC-R6-ENV-HW
+  scope: id
+  products: [linux]
+  category: hardware
+  match: [LNX-THERMAL, LNX-PSU-FAIL]
+  title: 온도 임계 초과·전원 공급 장치(PSU) 장애 — 서버 환경 하드웨어 (Linux)
+  source: "ipmitool(1) (sdr type·sel elist), 커널 문서 'thermal sysfs', 서버 관리 콘솔(iLO/iDRAC/BMC) 제조사 가이드 — 이벤트 로그·센서 화면"
+  stages:
+  - stage: 1
+    steps:
+    - do: BMC 센서(온도·팬·전원)와 이벤트 로그 확인 (읽기 전용)
+      cmd: |
+        ipmitool sdr type Temperature
+        ipmitool sdr type Fan
+        ipmitool sdr type "Power Supply"
+        ipmitool sel elist | tail -20
+      check: "온도 센서가 upper critical 근접·팬 상태 이상이면 냉각 원인, Power Supply 'Failure detected'·'Redundancy Lost'·입력 전원 상실이면 PSU 원인 · 정상: 모든 센서 ok, SEL 신규 경고 없음"
+      note: "적용: IPMI 지원 서버·ipmi 드라이버 적재 시(없으면 iLO/iDRAC 웹 콘솔의 같은 화면) · SEL 지우기(sel clear) 금지 — 증거 보존 · 권한: root"
+    - do: OS 쪽 온도·클럭 저하·전원 기록 확인 (읽기 전용)
+      cmd: |
+        journalctl -k --since "-1 day" | grep -iE "temperature|throttl|power supply" | tail -20
+        grep -H . /sys/class/thermal/thermal_zone*/temp 2>/dev/null
+        grep MHz /proc/cpuinfo | sort | uniq -c | head
+      check: "'temperature above threshold'·'clock throttled' 반복이면 성능 저하 진행 중, CPU MHz 가 정격보다 크게 낮으면 스로틀링 · 정상: 기록 없음"
+      note: "적용: journalctl 은 RHEL 7+ (RHEL 6 은 /var/log/messages), thermal_zone 값 단위는 밀리도 · 현장 PSU LED·전원 케이블·PDU/UPS 입력과 전산실 온도는 시설 담당에 확인 요청 · 권한: 일반 사용자 조회 가능"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 업무 부하 이전 또는 서버 서비스 제외
+      cmd: |
+        # L4/로드밸런서·클러스터에서 <server> 제외 요청 (네트워크·서비스 담당)
+        uptime ; ipmitool sdr type Temperature
+      check: "성공: 서비스가 다른 서버에서 정상, 이 서버 온도·부하 하강 · 실패: 남은 서버 과부하 → 제외 철회 후 시설 냉각 조치 우선"
+      note: "사전조건: 이중화 서버 여유 용량 확인, 한쪽 PSU 만 남았으면 남은 PSU·전원 계통 정상 확인 · 영향: 남은 서버 부하 증가 · 승인: 서비스 담당·시스템 담당 · 백업/롤백: L4 에서 서버를 다시 포함시키면 원복"
+    - do: (2차·승인 후) 팬·PSU 교체(제조사) 후 상태 확인
+      cmd: |
+        ipmitool sdr type Fan ; ipmitool sdr type "Power Supply"
+        ipmitool sel elist | tail -10
+      check: "성공: 교체 부품 센서 ok, 'Redundancy Regained' 등 복구 이벤트 · 실패: 경고 지속 → 메인보드·백플레인 등 다른 부품 진단(제조사)"
+      note: "사전조건: 핫스왑 가능 부품인지 제조사 확인, 교체 전 나머지 PSU 정상 확인 · 영향: 핫스왑 불가 부품은 서버 정지 필요 · 승인: 시스템 담당·제조사 엔지니어·변경 관리 · 백업/롤백: 교체 전 부품 보관(불량 판정 전까지), 서버 정지가 필요하면 사전 백업·서비스 이전"
+  - stage: 3
+    steps:
+    - do: 제조사 케이스 자료
+      cmd: |
+        ipmitool sel elist > sel_$(date +%Y%m%d).txt ; ipmitool sdr elist > sdr_$(date +%Y%m%d).txt
+        sos report --batch --tmp-dir /var/tmp
+      check: "SEL·SDR 센서 값·sosreport·관리 콘솔 진단 보고서(AHS·TSR 등 제조사 수집 기능)"
+      note: "RHEL 6/7 은 sosreport --batch · 민감정보 마스킹: 호스트명·IP·계정 가림(장비 시리얼은 제조사 지원에 필요) · 전달 승인: 보안 담당"
+
+# ── Windows ──
+- id: WIN-PROC-R6-SVC-START
+  scope: id
+  products: [windows]
+  category: internal
+  match: ['7000', '7001', '7009', '7022', '7023', '7024']
+  title: 서비스 시작 실패·시작 중 멈춤·오류 종료 (SCM 7000·7001·7009·7022·7023·7024, Windows Server)
+  source: "Microsoft Learn — Service Control Manager 이벤트(7000·7001·7009·7022·7023·7024), sc.exe query·queryex·qc·config, Get-Service -RequiredServices, 'ServicesPipeTimeout' 서비스 시작 시간 초과, net helpmsg"
+  stages:
+  - stage: 1
+    steps:
+    - do: 실패 서비스·오류 문구 확인 (읽기 전용)
+      cmd: |
+        Get-WinEvent -FilterHashtable @{LogName="System"; ProviderName="Service Control Manager"; Id=7000,7001,7009,7022,7023,7024,7038; StartTime=(Get-Date).AddHours(-24)} -MaxEvents 30 -ErrorAction SilentlyContinue | Format-List TimeCreated,Id,Message
+      check: "7000 은 오류 문구(파일 없음·액세스 거부·로그온 실패·응답 없음), 7001 은 실패한 종속 서비스명, 7009·7022 는 시간 초과·시작 중 멈춤, 7023 은 Win32 오류, 7024 는 서비스 고유 오류, 7038 동반이면 서비스 계정 로그온 실패 · 정상: 기록 없음"
+      note: "적용: Windows Server 2008 R2+ · 권한: System 로그는 Event Log Readers 그룹 또는 관리자"
+    - do: 서비스 구성·종료 코드·종속 서비스 확인 (읽기 전용)
+      cmd: |
+        sc.exe qc <서비스>
+        sc.exe queryex <서비스>
+        Get-Service <서비스> -RequiredServices | Format-Table Name,Status,StartType
+        Get-CimInstance Win32_Service -Filter "Name='<서비스>'" | Format-List Name,State,StartMode,StartName,PathName,ExitCode
+      check: "WIN32_EXIT_CODE 1066 이면 SERVICE_EXIT_CODE 가 제품 고유 오류(제품 문서·로그로 해석), 그 밖의 값은 3단계 net helpmsg 로 해석, 종속 서비스 Disabled·Stopped 면 종속성 원인, STATE START_PENDING 지속이면 시작 중 멈춤(PID 기록) · 정상: RUNNING, 종속 서비스 Running"
+      note: "적용: Get-Service 의 StartType 열은 PowerShell 5.0+(없으면 Win32_Service 의 StartMode), sc.exe 는 PowerShell 에서 sc 별칭과 겹치므로 .exe 필수 · 권한: 일반 사용자 조회 가능"
+    - do: 오류 번호 해석·실행 파일·시작 시간 초과 설정 확인 (읽기 전용)
+      cmd: |
+        net helpmsg <Win32 오류 번호>
+        Test-Path "<PathName 의 실행 파일 경로>"
+        Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Control -Name ServicesPipeTimeout -ErrorAction SilentlyContinue
+      check: "Test-Path False 면 실행 파일 없음(제품 설치 손상), ServicesPipeTimeout 값이 없으면 기본 30초 — 7009·7022 가 부팅 직후에만 나면 기동 지연 원인 · 정상: 파일 존재"
+      note: "적용: Windows Server 2008 R2+ · net helpmsg 는 Win32 오류 번호에만 유효 · 권한: 일반 사용자 조회 가능"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 원인 수정 뒤 종속 서비스부터 순서대로 기동
+      cmd: |
+        sc.exe qc <서비스> > C:\Temp\<서비스>_qc_before.txt
+        Set-Service <종속 서비스> -StartupType Manual
+        Start-Service <종속 서비스> ; Start-Service <서비스>
+      check: "성공: Get-Service Status Running, 7000·7001·7023 재발 없음 · 실패: 같은 오류 → 오류 번호에 맞춰 계정·권한·실행 파일 원인을 고친 뒤 재시도, 제품 고유 오류는 3차"
+      note: '사전조건: 1차 이벤트·qc 결과 보관, 종속 서비스를 Disabled 로 둔 이유(보안 기준) 확인, 서비스 계정 비밀번호 변경은 services.msc 로그온 탭에서(명령행에 비밀번호 금지) · 영향: 비활성 서비스 활성화는 보안 기준 변경, 기동 중 자원 사용 · 승인: 서비스 담당·시스템 담당(보안 기준 변경은 보안 담당) · 백업/롤백: 보관한 qc 결과대로 sc.exe config <서비스> start= <이전 값> 복원 · 적용: Windows Server 2008 R2+ (C:\Temp 가 없으면 먼저 생성)'
+    - do: (2차·승인 후) 시작 중 멈춘(7022·START_PENDING) 프로세스 덤프 확보 후 정리·재기동
+      cmd: |
+        sc.exe queryex <서비스>
+        procdump -ma <PID> C:\Dumps\
+        Stop-Process -Id <PID> -Force
+        Start-Service <서비스>
+      check: "성공: 서비스 Running, 7022 재발 없음 · 실패: 다시 START_PENDING → 덤프를 공급업체에 전달(3차), 종속 자원(DB·네트워크) 대기 여부 확인"
+      note: '사전조건: Sysinternals ProcDump 반입 승인(없으면 작업 관리자 ''덤프 파일 만들기''), C:\Dumps 여유 공간 · 영향: 프로세스 강제 종료로 처리 중 작업 유실, 덤프에는 메모리 내 비밀번호·개인정보 포함 가능 · 승인: 서비스 담당·보안 담당(덤프 보관) · 백업/롤백: 구성은 바꾸지 않음 — 기동 실패 시 이전 상태 유지하고 3차'
+    - do: (2차·승인 후) 시작 시간 초과(7009·7022) 기준 상향
+      cmd: |
+        reg export "HKLM\SYSTEM\CurrentControlSet\Control" C:\Temp\control_before.reg
+        reg add "HKLM\SYSTEM\CurrentControlSet\Control" /v ServicesPipeTimeout /t REG_DWORD /d 60000 /f
+      check: "성공: 재부팅 후 7009·7022 미발생, 서비스 Running · 실패: 계속 시간 초과 → 서비스 초기화 지연 원인(외부 연결·디스크) 조사, 값 원복"
+      note: '사전조건: 느린 기동 원인을 먼저 확인(값 상향은 임시 조치), 재부팅 일정 확보 · 영향: 재부팅 후 반영, 모든 서비스의 시작 대기 시간이 늘어남 · 승인: 시스템 담당(변경 관리) · 백업/롤백: reg delete "HKLM\SYSTEM\CurrentControlSet\Control" /v ServicesPipeTimeout /f 후 재부팅(또는 control_before.reg 가져오기) · 적용: Windows Server 2008 R2+'
+  - stage: 3
+    steps:
+    - do: Microsoft·제품 공급업체 전달 자료
+      cmd: |
+        wevtutil epl System C:\Temp\System_<날짜>.evtx
+        sc.exe qc <서비스> > C:\Temp\<서비스>_qc.txt ; Get-ChildItem C:\Dumps
+      check: "System evtx·서비스 구성·덤프(있으면)·제품 자체 로그"
+      note: "민감정보 마스킹: evtx 의 컴퓨터 이름·도메인 계정·IP 와 서비스 계정명 가림, 덤프는 메모리 내용이라 별도 검토 · 전달 승인: 보안 담당(덤프 전달은 보안 담당 필수)"
+
+- id: WIN-PROC-R6-APP-HANG
+  scope: id
+  products: [windows]
+  category: internal
+  match: ['1002']
+  title: 응용 프로그램 응답 없음 (Application Hang 1002, Windows Server)
+  source: "Microsoft Learn — Application Hang 이벤트·Windows Error Reporting, Get-Process·Get-Counter, Sysinternals ProcDump(-ma)·작업 관리자 덤프 파일 만들기, WinDbg !analyze -hang"
+  stages:
+  - stage: 1
+    steps:
+    - do: 응답 없음 프로그램·발생 빈도 확인 (읽기 전용)
+      cmd: |
+        Get-WinEvent -FilterHashtable @{LogName="Application"; Id=1002; StartTime=(Get-Date).AddDays(-7)} -MaxEvents 20 -ErrorAction SilentlyContinue | Format-List TimeCreated,Message
+      check: "같은 프로그램·버전이 반복되면 그 프로그램 결함 또는 공통 자원 대기 — 발생 시각을 기록 · 정상: 기록 없음"
+      note: "적용: Windows Server 2008 R2+ · 권한: 일반 사용자 조회 가능"
+    - do: 현재 응답 상태와 같은 시각 자원 지연 확인 (읽기 전용)
+      cmd: |
+        Get-Process <exe 이름> -ErrorAction SilentlyContinue | Format-Table Id,ProcessName,Responding,CPU,WS,Handles,StartTime
+        Get-Counter "\Processor(_Total)\% Processor Time","\PhysicalDisk(_Total)\Avg. Disk sec/Transfer","\Memory\Available MBytes" -SampleInterval 2 -MaxSamples 5
+      check: "Responding False 가 지속되면 지금도 행 상태(2차 덤프 확보 대상), 디스크 sec/Transfer 0.05 초 이상·CPU 포화·가용 메모리 부족이면 자원 원인 · 정상: Responding True, 자원 여유"
+      note: "적용: Windows Server 2012 R2+ · Responding 은 창이 있는 프로그램에만 의미(서비스 프로세스는 이벤트·자원으로 판단) · 권한: 일반 사용자 조회 가능(다른 사용자 프로세스 일부 열은 관리자)"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 행 상태 프로세스 덤프 확보
+      cmd: |
+        procdump -ma <PID> C:\Dumps\
+      check: '성공: C:\Dumps 에 .dmp 생성(크기 ≈ 프로세스 메모리) · 실패: 접근 거부 → 관리자 권한·같은 비트(32/64) 도구 사용, 디스크 부족 → 다른 드라이브 지정'
+      note: "사전조건: Sysinternals ProcDump 반입 승인(없으면 작업 관리자 '덤프 파일 만들기'), 덤프 드라이브 여유가 프로세스 메모리 이상 · 영향: 덤프 쓰는 동안 프로세스 일시 정지, 덤프에 메모리 내 비밀번호·개인정보 포함 가능 · 승인: 서비스 담당·보안 담당(덤프 보관) · 백업/롤백: 자료 생성만 하므로 롤백 불요, 덤프는 보관 정책에 따라 보관·파기"
+    - do: (2차·승인 후) 프로세스 재기동
+      cmd: |
+        Stop-Process -Id <PID>
+        Start-Service <서비스>
+      check: "성공: Responding True·업무 기능 정상, 1002 재발 없음 · 실패: 곧 다시 행 → 덤프를 WinDbg(!analyze -v -hang) 또는 공급업체로 분석(3차)"
+      note: "사전조건: 덤프 확보 완료, 사용자 공지 · 영향: 처리 중 작업 유실 · 승인: 서비스 담당 · 백업/롤백: 구성 변경 없음 — 기동 실패 시 이벤트로 원인 확인 · 적용: 서비스가 아닌 프로그램은 Start-Service 대신 원래 실행 방법으로 기동"
+  - stage: 3
+    steps:
+    - do: 공급업체·Microsoft 전달 자료
+      cmd: |
+        wevtutil epl Application C:\Temp\Application_<날짜>.evtx
+        Get-ChildItem C:\Dumps ; Get-ChildItem C:\ProgramData\Microsoft\Windows\WER\ReportArchive | Sort-Object LastWriteTime -Descending | Select-Object -First 5
+      check: "Application evtx·행 덤프·WER 보고서·프로그램 버전"
+      note: "민감정보 마스킹: evtx 의 컴퓨터 이름·계정·IP 가림, 덤프는 메모리 내용(비밀번호·개인정보 가능)이라 원본 전달 전 별도 검토 · 전달 승인: 보안 담당(덤프는 보안 담당 필수)"
+
+- id: WIN-PROC-R6-CLUSTER-RES
+  scope: id
+  products: [windows]
+  category: internal
+  match: ['1069', '1146']
+  title: 장애 조치 클러스터 리소스 실패·RHS 중단 (FailoverClustering 1069·1146, Windows Server)
+  source: "Microsoft Learn — FailoverClusters PowerShell 모듈(Get-ClusterResource·Get-ClusterGroup·Get-ClusterNode·Get-ClusterLog·Start-ClusterResource·Move-ClusterGroup), 클러스터 리소스 SeparateMonitor·RHS(Resource Hosting Subsystem) 문서, 이벤트 1069·1146·1230"
+  stages:
+  - stage: 1
+    steps:
+    - do: 실패 리소스·소유 노드·노드 상태 확인 (읽기 전용)
+      cmd: |
+        Get-ClusterResource | Where-Object State -ne "Online" | Format-Table Name,ResourceType,OwnerGroup,OwnerNode,State
+        Get-ClusterGroup | Format-Table Name,OwnerNode,State
+        Get-ClusterNode | Format-Table Name,State
+      check: "Failed·Offline 리소스의 종류(디스크·IP·네트워크 이름·일반 서비스)로 원인 계층을 구분, 노드 Down·Paused 동반이면 노드 장애 · 정상: 모든 리소스 Online, 노드 Up"
+      note: "적용: Windows Server 2008 R2+ (FailoverClusters 모듈) · 권한: 클러스터 관리자"
+    - do: 실패 시각 전후 클러스터 이벤트 확인 (읽기 전용)
+      cmd: |
+        Get-WinEvent -FilterHashtable @{LogName="System"; ProviderName="Microsoft-Windows-FailoverClustering"; Id=1069,1146,1230,1205; StartTime=(Get-Date).AddHours(-24)} -MaxEvents 30 -ErrorAction SilentlyContinue | Sort-Object TimeCreated | Format-List TimeCreated,Id,Message
+      check: "1146 바로 앞에 1230(리소스 응답 시간 초과)이 있으면 그 리소스 DLL 이 RHS 를 멈추게 한 것, 1069 가 같은 리소스에 반복되면 그 리소스 원인(디스크·IP·서비스) · 정상: 기록 없음"
+      note: "적용: Windows Server 2008 R2+ · 권한: Event Log Readers 또는 관리자"
+    - do: 클러스터 로그로 원인 리소스·오류 확인 (조회·파일 생성)
+      cmd: |
+        Get-ClusterLog -Destination C:\Temp -TimeSpan 60
+        Select-String -Path C:\Temp\*cluster.log -Pattern " ERR " | Select-Object -Last 30
+        Get-ClusterResource <리소스> | Format-List Name,ResourceType,SeparateMonitor
+      check: "ERR 줄의 리소스명·오류 코드(예: 디스크 예약 실패·IP 충돌·서비스 시작 실패)가 원인, SeparateMonitor 0 이면 다른 리소스와 같은 RHS 를 공유 · 정상: 해당 시각 ERR 없음"
+      note: '적용: Windows Server 2012+ (-TimeSpan 은 분 단위) · C:\Temp 가 없으면 먼저 생성 · 클러스터 상태를 바꾸지 않음 · 권한: 클러스터 관리자'
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 원인 해소 뒤 리소스 온라인 또는 역할 이동
+      cmd: |
+        Get-ClusterGroup <역할> | Format-Table Name,OwnerNode,State
+        Start-ClusterResource <리소스>
+        Move-ClusterGroup <역할> -Node <노드>
+      check: "성공: 리소스·역할 Online, 1069 재발 없음 · 실패: 다시 Failed → 클러스터 로그의 원인(디스크·IP·서비스) 담당에게 이관, 반복 장애 시 3차"
+      note: "사전조건: 원인(디스크 경로·IP 충돌·서비스 계정) 해소 확인, 업무 영향 공지, 이동 대상 노드 상태 Up · 영향: 역할 이동 동안 서비스 중단(수 초~수 분) · 승인: 시스템 담당·서비스 담당 · 백업/롤백: 첫 줄 출력의 원래 소유 노드로 Move-ClusterGroup 재실행 · 운영 중 Test-Cluster 저장소 검사는 디스크를 오프라인시키므로 실행 금지"
+    - do: (2차·승인 후) RHS 를 반복 중단시키는 리소스를 별도 RHS 로 격리
+      cmd: |
+        (Get-ClusterResource <리소스>).SeparateMonitor
+        (Get-ClusterResource <리소스>).SeparateMonitor = 1
+        Stop-ClusterResource <리소스> ; Start-ClusterResource <리소스>
+      check: "성공: 리소스 Online, 1146 이 다른 리소스에 번지지 않음 · 실패: 해당 리소스만 계속 실패 → 리소스 DLL 공급업체(서드파티 리소스) 확인"
+      note: "사전조건: 이전 SeparateMonitor 값 기록, 오프라인/온라인 시간 확보 · 영향: 리소스 재시작 동안 해당 역할 중단 · 승인: 시스템 담당·서비스 담당 · 백업/롤백: SeparateMonitor 를 기록한 이전 값으로 되돌리고 리소스 재시작"
+  - stage: 3
+    steps:
+    - do: Microsoft·리소스 공급업체 전달 자료
+      cmd: |
+        Get-ClusterLog -Destination C:\Temp -TimeSpan 240
+        wevtutil epl System C:\Temp\System_<날짜>.evtx
+        Get-ClusterResource | Format-List * > C:\Temp\cluster_resources.txt
+      check: "모든 노드의 클러스터 로그·System evtx·리소스 구성"
+      note: "민감정보 마스킹: 노드·클러스터 이름·IP·도메인 계정·공유 경로 가림 후 전달 · 전달 승인: 보안 담당"
+
+- id: WIN-PROC-R6-PROFILE
+  scope: id
+  products: [windows]
+  category: internal
+  match: ['1500']
+  title: 사용자 프로필 로드 실패·임시 프로필 로그온 (User Profile Service 1500, Windows Server)
+  source: "Microsoft Learn — User Profile Service 이벤트(1500·1511·1515), Win32_UserProfile, 'ProfileList' 레지스트리(ProfileImagePath·State·RefCount), icacls"
+  verify_note: "미검증 — 임시 프로필 복구 시 ProfileList 의 <SID> / <SID>.bak 키 정리 순서는 Microsoft 지원 문서를 이번 작업에서 다시 확인하지 못해 일반 원칙만 적었다(2차는 지원 문서 확인 후 수행)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 대상 사용자·임시 프로필 여부 확인 (읽기 전용)
+      cmd: |
+        Get-WinEvent -FilterHashtable @{LogName="Application"; Id=1500,1511,1515; StartTime=(Get-Date).AddDays(-3)} -MaxEvents 20 -ErrorAction SilentlyContinue | Format-List TimeCreated,Id,ProviderName,Message
+        Get-CimInstance Win32_UserProfile | Format-Table LocalPath,SID,Loaded,Special,LastUseTime
+      check: '1511(임시 프로필)·1515(백업 프로필) 동반이면 프로필 매핑 문제, LocalPath 가 C:\Users\TEMP 이거나 같은 사용자 폴더가 <user>.<도메인> 등으로 둘이면 프로필 중복 · 정상: 기록 없음'
+      note: "적용: Windows Server 2008 R2+ · 권한: 관리자"
+    - do: ProfileList 레지스트리·폴더 권한 확인 (읽기 전용)
+      cmd: |
+        Get-ChildItem "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList" | Select-Object PSChildName
+        Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\<SID>*" | Format-List PSChildName,ProfileImagePath,State,RefCount
+        icacls C:\Users\<user>
+      check: "같은 SID 가 <SID> 와 <SID>.bak 로 둘 다 있으면 매핑 불일치(임시 프로필 원인), ProfileImagePath 폴더가 없거나 icacls 에 사용자·SYSTEM 의 전체 권한(F)이 없으면 경로·권한 원인 · 정상: SID 키 하나, 경로·권한 정상"
+      note: "적용: Windows Server 2008 R2+ · 수정은 2차 · 권한: 관리자"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) ProfileList 중복 키 정리 (사용자 로그오프 상태)
+      cmd: |
+        reg export "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList" C:\Temp\ProfileList_before.reg
+        regedit
+      check: "성공: 사용자 재로그온 시 원래 프로필 로드, 1500·1511 재발 없음 · 실패: 계속 임시 프로필 → 내보낸 키 복원 후 프로필 재생성 단계로"
+      note: '사전조건: 대상 사용자 로그오프·데이터 백업, Microsoft 지원 문서의 .bak 키 정리 절차 확인 · 영향: 잘못 고치면 사용자가 다른 프로필로 로그온 · 승인: 시스템 담당·사용자 부서 · 백업/롤백: reg import C:\Temp\ProfileList_before.reg 로 복원'
+    - do: (2차·승인 후) 데이터 보관 후 프로필 재생성
+      cmd: |
+        robocopy C:\Users\<user> <보관경로>\<user> /E /COPY:DAT /R:1 /W:1 /XJ
+        Get-CimInstance Win32_UserProfile | Where-Object LocalPath -eq "C:\Users\<user>" | Remove-CimInstance
+      check: "성공: 재로그온 시 새 프로필 생성, 보관 데이터 복사 후 업무 정상 · 실패: 삭제 오류(Loaded True) → 사용자 로그오프·재부팅 후 재시도"
+      note: "사전조건: 사용자 로그오프, robocopy 결과의 실패(FAILED) 0 확인 후 삭제 · 영향: 프로필 폴더·레지스트리 설정 삭제(되돌릴 수 없음), 애플리케이션 개인 설정 초기화 · 승인: 시스템 담당·사용자 부서 · 백업/롤백: robocopy 보관본을 새 프로필로 다시 복사(설정 일부는 복원 불가)"
+  - stage: 3
+    steps:
+    - do: Microsoft 전달 자료
+      cmd: |
+        wevtutil epl Application C:\Temp\Application_<날짜>.evtx
+        reg export "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList" C:\Temp\ProfileList.reg
+      check: "Application evtx·ProfileList 내보내기·icacls 결과"
+      note: "민감정보 마스킹: 사용자명·SID·컴퓨터 이름·도메인 가림 후 전달(개인 식별 정보) · 전달 승인: 보안 담당"
+
+- id: WIN-PROC-R6-UNEXPECTED-REBOOT
+  scope: id
+  products: [windows]
+  category: internal
+  match: ['41', '6008', '1001']
+  title: 비정상 종료·Stop 오류(버그체크) 후 재부팅 (Kernel-Power 41·EventLog 6008·WER 1001, Windows Server)
+  source: "Microsoft Learn — 'Kernel-Power event ID 41' 문제 해결(BugcheckCode·PowerButtonTimestamp), 'Overview of memory dump file options'(CrashControl·CrashDumpEnabled), WER-SystemErrorReporting 1001, wusa·pnputil"
+  stages:
+  - stage: 1
+    steps:
+    - do: 재부팅 전후 이벤트 순서 확인 (읽기 전용)
+      cmd: |
+        Get-WinEvent -FilterHashtable @{LogName="System"; Id=41,6008,1001,1074,6006,6005; StartTime=(Get-Date).AddDays(-7)} -MaxEvents 30 -ErrorAction SilentlyContinue | Sort-Object TimeCreated | Format-Table TimeCreated,Id,ProviderName -AutoSize
+        (Get-CimInstance Win32_OperatingSystem).LastBootUpTime
+      check: "6005 직전에 1074+6006 이 있으면 계획 종료(이 절차 아님), 41·6008 이면 비정상 종료, 1001(WER-SystemErrorReporting) 이 있으면 Stop 오류 · 정상: 41·6008 없음"
+      note: "적용: Windows Server 2008 R2+ · 권한: Event Log Readers 또는 관리자"
+    - do: 버그체크 코드·전원 원인 구분 (읽기 전용)
+      cmd: |
+        Get-WinEvent -FilterHashtable @{LogName="System"; Id=41; ProviderName="Microsoft-Windows-Kernel-Power"} -MaxEvents 3 -ErrorAction SilentlyContinue | ForEach-Object { $_.ToXml() }
+        Get-WinEvent -FilterHashtable @{LogName="System"; Id=1001; ProviderName="Microsoft-Windows-WER-SystemErrorReporting"} -MaxEvents 3 -ErrorAction SilentlyContinue | Format-List TimeCreated,Message
+      check: "BugcheckCode 가 0 이 아니면 Stop 오류(1001 의 버그체크 코드·덤프 경로 기록), BugcheckCode 0·PowerButtonTimestamp 0 이면 전원 상실·하드 리셋·응답 정지 — BMC(iLO/iDRAC)·UPS 로그로 같은 시각 전원 이벤트 확인 · 정상: 해당 없음"
+      note: "적용: Windows Server 2008 R2+ · 권한: 관리자"
+    - do: 덤프 존재·덤프 설정 확인 (읽기 전용)
+      cmd: |
+        Get-ChildItem C:\Windows\MEMORY.DMP,C:\Windows\Minidump -ErrorAction SilentlyContinue | Format-Table FullName,LastWriteTime,Length
+        Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Control\CrashControl | Format-List CrashDumpEnabled,DumpFile,MinidumpDir,AutoReboot,Overwrite
+        Get-HotFix | Sort-Object InstalledOn -Descending | Select-Object -First 5
+      check: "MEMORY.DMP 가 버그체크 시각과 같으면 분석 자료 확보 — 덮어쓰기 전에 2차에서 복사, CrashDumpEnabled 0 이면 덤프 미설정, 직전 설치 업데이트·드라이버가 있으면 우선 의심 · 정상: 덤프 설정 1·2·3·7 중 하나"
+      note: "적용: CrashDumpEnabled 7(자동 메모리 덤프)은 Windows Server 2012+ · 권한: 관리자"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 덤프 보존과 덤프 설정
+      cmd: |
+        Copy-Item C:\Windows\MEMORY.DMP <다른 볼륨>\MEMORY_<날짜>.DMP
+        reg export "HKLM\SYSTEM\CurrentControlSet\Control\CrashControl" C:\Temp\CrashControl_before.reg
+        reg add "HKLM\SYSTEM\CurrentControlSet\Control\CrashControl" /v CrashDumpEnabled /t REG_DWORD /d 2 /f
+      check: "성공: 덤프 사본 크기가 원본과 같음, reg query 값 2(커널 덤프) 확인 · 실패: 다음 버그체크 때도 덤프 미생성 → 시스템 볼륨 페이지 파일 크기·디스크 여유 확인"
+      note: '사전조건: 복사 대상 볼륨 여유(덤프 크기 이상), 커널 덤프는 시스템 볼륨 페이지 파일이 충분해야 생성됨 · 영향: 설정 반영은 재부팅 후, 덤프에는 메모리 내 비밀번호·개인정보 포함 가능 · 승인: 시스템 담당·보안 담당(덤프 보관) · 백업/롤백: reg import C:\Temp\CrashControl_before.reg 후 재부팅'
+    - do: (2차·승인 후) 직전 변경(업데이트·드라이버) 원복
+      cmd: |
+        Get-HotFix | Sort-Object InstalledOn -Descending | Select-Object -First 5
+        wusa /uninstall /kb:<번호> /norestart
+        pnputil /enum-drivers
+      check: "성공: 원복 후 1주 동안 41·1001 재발 없음 · 실패: 재발 → 덤프 분석(WinDbg !analyze -v)으로 원인 드라이버 확정 후 3차"
+      note: "사전조건: 덤프 분석 또는 시각 대조로 원인 변경을 특정, 보안 업데이트 원복은 보안 담당 협의 · 영향: 원복에 재부팅 필요, 보안 패치 제거 시 취약점 노출 · 승인: 시스템 담당·보안 담당(변경 관리) · 백업/롤백: 원복한 KB 는 카탈로그 패키지로 재설치, 드라이버는 장치 관리자에서 이전 버전으로 되돌리기 · 적용: pnputil /enum-drivers 는 Windows Server 2016+"
+  - stage: 3
+    steps:
+    - do: Microsoft·하드웨어 제조사 전달 자료
+      cmd: |
+        wevtutil epl System C:\Temp\System_<날짜>.evtx
+        msinfo32 /report C:\Temp\msinfo_<날짜>.txt
+        Get-ChildItem C:\Windows\Minidump
+      check: "System evtx·덤프(MEMORY.DMP 사본·미니덤프)·msinfo·BMC/UPS 이벤트 로그"
+      note: "민감정보 마스킹: evtx·msinfo 의 컴퓨터 이름·도메인 계정·IP 가림, 덤프는 메모리 내용(비밀번호·개인정보 가능)이라 원본 전달 전 별도 검토 · 전달 승인: 보안 담당(덤프 전달은 보안 담당 필수)"
+
+- id: WIN-PROC-R6-SHUTDOWN-TRACE
+  scope: id
+  products: [windows]
+  category: internal
+  match: ['1074', '6005', '6006', '7043']
+  title: 시스템 종료·재시작 주체 추적과 종료 지연 서비스 (User32 1074·EventLog 6005/6006·SCM 7043, Windows Server)
+  source: "Microsoft Learn — User32 1074(종료 시작 프로세스·사유), EventLog 6005/6006, Service Control Manager 7043(사전 종료 미완료), Get-ScheduledTask, Windows Update 자동 재시작 정책(그룹 정책 AU)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 종료·부팅 순서와 종료 주체 확인 (읽기 전용)
+      cmd: |
+        Get-WinEvent -FilterHashtable @{LogName="System"; Id=1074,6006,6005,6008,41,7043; StartTime=(Get-Date).AddDays(-7)} -MaxEvents 30 -ErrorAction SilentlyContinue | Sort-Object TimeCreated | Format-Table TimeCreated,Id,ProviderName -AutoSize
+        Get-WinEvent -FilterHashtable @{LogName="System"; Id=1074} -MaxEvents 5 -ErrorAction SilentlyContinue | Format-List TimeCreated,Message
+        (Get-CimInstance Win32_OperatingSystem).LastBootUpTime
+      check: "1074 → 6006 → 6005 순서면 정상 종료·재시작 — 1074 의 프로세스·사용자·사유를 변경 일정과 대조, 6008·41 이 끼어 있으면 비정상 종료 절차(WIN-PROC-R6-UNEXPECTED-REBOOT)로, 7043 이 있으면 그 서비스가 종료를 늦춤 · 정상: 계획된 변경과 일치"
+      note: "적용: Windows Server 2008 R2+ · 권한: Event Log Readers 또는 관리자"
+    - do: 자동 재시작 경로(예약 작업·업데이트 정책) 확인 (읽기 전용)
+      cmd: |
+        Get-ScheduledTask | Where-Object { $_.Actions.Execute -match 'shutdown|Restart-Computer' } | Format-Table TaskName,TaskPath,State
+        Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU" -ErrorAction SilentlyContinue | Format-List AUOptions,NoAutoRebootWithLoggedOnUsers,ScheduledInstallDay,ScheduledInstallTime
+      check: "1074 의 프로세스가 TrustedInstaller·업데이트 구성 요소면 업데이트 자동 재시작, shutdown.exe 와 사용자 계정이면 수동·원격 실행, 종료 명령 예약 작업이 있으면 그 작업 · 비계획이고 계정이 낯설면 보안 담당 통보(Security 로그 로그온 기록은 보안 담당이 확인)"
+      note: "적용: Get-ScheduledTask 는 Windows Server 2012+ · 정책 키가 없으면 그룹 정책 미설정 · 권한: 관리자"
+    - do: 종료를 늦춘 서비스(7043) 확인 (읽기 전용)
+      cmd: |
+        Get-WinEvent -FilterHashtable @{LogName="System"; Id=7043} -MaxEvents 10 -ErrorAction SilentlyContinue | Format-List TimeCreated,Message
+        sc.exe qc <서비스>
+      check: "같은 서비스가 재부팅 때마다 7043 이면 공급업체 결함·종료 처리 지연 — 실행 파일·버전 기록 · 정상: 기록 없음"
+      note: "적용: Windows Server 2008 R2+ · 권한: 일반 사용자 조회 가능"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 비계획 재시작 경로 차단
+      cmd: |
+        Get-ScheduledTask -TaskName <작업> -TaskPath <경로> | Export-ScheduledTask > C:\Temp\<작업>_before.xml
+        Disable-ScheduledTask -TaskName <작업> -TaskPath <경로>
+      check: "성공: 작업 State Disabled, 이후 비계획 1074 없음 · 실패: 다른 주체(업데이트 정책·원격 관리 도구)로 재발 → 그룹 정책 담당과 업데이트 재시작 시간 조정"
+      note: "사전조건: 작업 소유 담당 확인(정상 유지보수 작업일 수 있음), 업데이트 정책 변경은 그룹 정책 담당 · 영향: 해당 작업의 정상 기능도 멈춤 · 승인: 시스템 담당·작업 소유 담당 · 백업/롤백: Enable-ScheduledTask 로 원복(내보낸 XML 은 Register-ScheduledTask 로 재등록)"
+    - do: (2차·승인 후) 종료 지연 서비스(7043) 공급업체 수정 적용 후 확인
+      cmd: |
+        sc.exe qc <서비스> > C:\Temp\<서비스>_qc_before.txt
+        Get-WinEvent -FilterHashtable @{LogName="System"; Id=7043} -MaxEvents 5 -ErrorAction SilentlyContinue | Format-List TimeCreated,Message
+      check: "성공: 수정 적용 뒤 다음 계획 재부팅에서 7043 없음 · 실패: 재발 → 공급업체 의뢰(3차), 재부팅 전 해당 서비스를 먼저 수동 정지하는 운영 절차 검토"
+      note: "사전조건: 공급업체 패치·알려진 문제 확인, 다음 계획 재부팅 일정 · 영향: 패치 적용에 서비스 재시작이 필요할 수 있음 · 승인: 서비스 담당·시스템 담당 · 백업/롤백: 패치 전 설치 패키지·qc 결과 보관, 문제 시 공급업체 절차로 이전 버전 복원"
+  - stage: 3
+    steps:
+    - do: Microsoft·보안 담당 전달 자료
+      cmd: |
+        wevtutil epl System C:\Temp\System_<날짜>.evtx
+        Get-ScheduledTask | Format-Table TaskName,TaskPath,State > C:\Temp\tasks_<날짜>.txt
+      check: "System evtx·예약 작업 목록·변경 이력 대조표"
+      note: "민감정보 마스킹: 1074 메시지의 사용자 계정·컴퓨터 이름·도메인 가림 후 전달 · 전달 승인: 보안 담당(비계획 재시작 조사 결과는 보안 담당이 전달 범위 결정)"
+
+- id: WIN-PROC-R6-WU
+  scope: id
+  products: [windows]
+  category: internal
+  match: ['20']
+  title: Windows Update 설치 실패 (WindowsUpdateClient 20, Windows Server)
+  source: "Microsoft Learn — Windows Update 문제 해결(일반 오류 코드·구성 요소 재설정), DISM /Online /Cleanup-Image (CheckHealth·RestoreHealth), sfc /scannow, wusa, Get-WindowsUpdateLog"
+  stages:
+  - stage: 1
+    steps:
+    - do: 실패 KB·오류 코드·최근 설치 이력 확인 (읽기 전용)
+      cmd: |
+        Get-WinEvent -FilterHashtable @{LogName="System"; ProviderName="Microsoft-Windows-WindowsUpdateClient"; Id=20} -MaxEvents 10 -ErrorAction SilentlyContinue | Format-List TimeCreated,Message
+        Get-HotFix | Sort-Object InstalledOn -Descending | Select-Object -First 10
+      check: "오류 코드 기록 — 0x80070070 은 디스크 공간 부족, 0x80070002 는 파일 없음(다운로드·구성 요소 손상), 0x800f081f 는 복구 원본 없음 · 같은 KB 반복 실패면 2차 대상"
+      note: "적용: Windows Server 2008 R2+ · 권한: 일반 사용자 조회 가능"
+    - do: 디스크 여유·구성 요소 저장소·업데이트 서비스 상태 확인 (읽기 전용)
+      cmd: |
+        Get-Volume -DriveLetter C | Format-List SizeRemaining,Size
+        DISM /Online /Cleanup-Image /CheckHealth
+        Get-Service wuauserv,bits,TrustedInstaller | Format-Table Name,Status,StartType
+      check: "C: 여유가 수 GB 미만이면 공간 원인(디스크 절차), CheckHealth 가 손상(repairable) 표시면 구성 요소 저장소 원인, wuauserv Disabled 면 정책·서비스 원인 · 정상: 손상 없음"
+      note: "적용: Get-Volume·DISM /CheckHealth 는 Windows Server 2012+ (CheckHealth 는 기록된 손상 표시만 조회 — 빠름), StartType 열은 PowerShell 5.0+ · 권한: 관리자"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 구성 요소 저장소 복구
+      cmd: |
+        DISM /Online /Cleanup-Image /RestoreHealth
+        sfc /scannow
+      check: "성공: DISM '복원 작업이 완료되었습니다'·sfc 위반 없음 또는 복구 완료 후 업데이트 재시도 성공 · 실패: 0x800f081f(원본 없음) → /Source 로 같은 버전 설치 미디어 지정, 그래도 실패면 3차"
+      note: "사전조건: 백업 또는 VM 스냅샷, 업무 부하 낮은 시간(수십 분 소요·CPU·디스크 부하), 폐쇄망은 WSUS·설치 미디어를 /Source 로 지정 · 영향: 시스템 파일 교체, 재부팅이 필요할 수 있음 · 승인: 시스템 담당(변경 관리) · 백업/롤백: 스냅샷·시스템 상태 백업으로 복원 · 적용: RestoreHealth 는 Windows Server 2012+"
+    - do: (2차·승인 후) 업데이트 다운로드 캐시 초기화 후 재시도
+      cmd: |
+        net stop wuauserv ; net stop bits
+        Rename-Item C:\Windows\SoftwareDistribution SoftwareDistribution.old
+        net start bits ; net start wuauserv
+      check: "성공: 재검색 후 해당 KB 설치 성공·이벤트 19(설치 성공) 기록 · 실패: 같은 오류 → 수동 설치 단계로"
+      note: "사전조건: 진행 중인 업데이트 설치가 없는지 확인 · 영향: 업데이트 이력 표시 일부 초기화, 재다운로드 트래픽 발생 · 승인: 시스템 담당 · 백업/롤백: 서비스 정지 후 새 SoftwareDistribution 을 지우고 SoftwareDistribution.old 를 원래 이름으로 되돌림"
+    - do: (2차·승인 후) 카탈로그 패키지 수동 설치
+      cmd: |
+        wusa C:\Temp\<KB 패키지>.msu /quiet /norestart
+        Get-HotFix -Id <KB번호>
+      check: "성공: Get-HotFix 에 KB 표시(재부팅 후 완료) · 실패: wusa 종료 코드·이벤트 확인 후 3차"
+      note: "사전조건: 서버 OS·빌드에 맞는 패키지, 재부팅 일정 확보 · 영향: 재부팅 필요 · 승인: 시스템 담당(변경 관리)·보안 담당 · 백업/롤백: wusa /uninstall /kb:<번호> 로 제거"
+  - stage: 3
+    steps:
+    - do: Microsoft 전달 자료
+      cmd: |
+        Get-WindowsUpdateLog -LogPath C:\Temp\WindowsUpdate_<날짜>.log
+        Copy-Item C:\Windows\Logs\CBS\CBS.log,C:\Windows\Logs\DISM\dism.log C:\Temp\
+      check: "WindowsUpdate.log·CBS.log·dism.log·실패 KB 와 오류 코드"
+      note: '적용: Get-WindowsUpdateLog 는 Windows Server 2016+ (2012 R2 는 C:\Windows\WindowsUpdate.log 복사) · 민감정보 마스킹: 컴퓨터 이름·도메인·WSUS 서버 주소·계정 가림 후 전달 · 전달 승인: 보안 담당'
+
+- id: WIN-PROC-R6-DCOM
+  scope: id
+  products: [windows]
+  category: internal
+  match: ['10010']
+  title: DCOM 서버 등록 시간 초과 (DistributedCOM 10010, Windows Server)
+  source: 'Microsoft Learn — DistributedCOM 이벤트 10010, ''DCOM 구성(dcomcnfg)'', HKCR\CLSID·HKCR\AppID 레지스트리(LocalService·RunAs)'
+  stages:
+  - stage: 1
+    steps:
+    - do: CLSID 별 발생 빈도 확인 (읽기 전용)
+      cmd: |
+        Get-WinEvent -FilterHashtable @{LogName="System"; Id=10010; StartTime=(Get-Date).AddDays(-7)} -MaxEvents 200 -ErrorAction SilentlyContinue | ForEach-Object { ($_.Message | Select-String -Pattern '\{[0-9A-Fa-f-]{36}\}').Matches[0].Value } | Group-Object | Sort-Object Count -Descending | Select-Object -First 10 Count,Name
+      check: "특정 CLSID 가 대부분이면 그 구성 요소를 2단계에서 식별, 같은 시각 업무 기능 장애가 없고 간헐적이면 관찰(일부 구성 요소는 정상 동작 중에도 기록됨) · 정상: 기록 없음"
+      note: "적용: Windows Server 2008 R2+ · 권한: Event Log Readers 또는 관리자"
+    - do: CLSID 의 구성 요소·연결 서비스 확인 (읽기 전용)
+      cmd: |
+        Get-ItemProperty "Registry::HKEY_CLASSES_ROOT\CLSID\{<CLSID>}" | Format-List "(default)",AppID
+        Get-ItemProperty "Registry::HKEY_CLASSES_ROOT\AppID\{<AppID>}" -ErrorAction SilentlyContinue | Format-List "(default)",LocalService,RunAs
+        Get-Service <LocalService 값> | Format-Table Name,Status,StartType
+      check: "LocalService 의 서비스가 Stopped·Disabled 면 활성화 실패 원인, 서비스가 Running 인데 반복되면 시작 지연·권한 문제(2차) · 정상: 관련 서비스 Running·기능 정상"
+      note: "적용: Windows Server 2008 R2+ · RunAs 계정명은 공유 시 가림 · 권한: 일반 사용자 조회 가능"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 관련 서비스·COM+ 애플리케이션 재기동
+      cmd: |
+        Get-Service <서비스> | Format-Table Name,Status,StartType
+        Restart-Service <서비스>
+      check: "성공: 서비스 Running, 해당 CLSID 의 10010 재발 없음 · 실패: 재발 → dcomcnfg 의 ID·시작 권한 확인 단계로"
+      note: "사전조건: 서비스 담당과 재기동 시각 합의, 의존 서비스 확인 · 영향: 재기동 동안 해당 기능 중단 · 승인: 서비스 담당·시스템 담당 · 백업/롤백: 구성 변경 없음 — 기동 실패 시 이벤트로 원인 확인 후 이전 상태로 기동"
+    - do: (2차·승인 후) DCOM ID·시작 권한을 공급업체 권장값과 대조·수정
+      cmd: |
+        reg export "HKCR\AppID\{<AppID>}" C:\Temp\AppID_before.reg
+        dcomcnfg
+      check: "성공: 권장값으로 맞춘 뒤 10010 재발 없음·기능 정상 · 실패: 다른 오류(10016 권한 거부 등) 발생 → 내보낸 키 복원"
+      note: '사전조건: 공급업체·Microsoft 문서의 권장 ID·권한 확인(임의 권한 확대 금지) · 영향: 권한 변경은 보안 수준에 영향 · 승인: 시스템 담당·보안 담당 · 백업/롤백: reg import C:\Temp\AppID_before.reg 로 복원'
+  - stage: 3
+    steps:
+    - do: Microsoft·구성 요소 공급업체 전달 자료
+      cmd: |
+        wevtutil epl System C:\Temp\System_<날짜>.evtx
+        reg export "HKCR\AppID\{<AppID>}" C:\Temp\AppID_<날짜>.reg
+      check: "System evtx·CLSID/AppID 구성·관련 서비스 상태"
+      note: "민감정보 마스킹: 컴퓨터 이름·도메인 계정(RunAs)·IP 가림 후 전달 · 전달 승인: 보안 담당"
+
+- id: WIN-PROC-R6-SMB-TIMEOUT
+  scope: id
+  products: [windows]
+  category: disk
+  match: ['3013']
+  title: SMB 리디렉터 요청 시간 초과 — 원격 파일 서버 응답 지연 (3013, Windows Server)
+  source: "Microsoft Learn — SmbShare 모듈(Get-SmbConnection·Get-SmbClientConfiguration·Set-SmbClientConfiguration -SessionTimeout), Test-NetConnection, SMB 클라이언트 이벤트 로그 문제 해결"
+  verify_note: "미검증 — Microsoft-Windows-SMBClient/Connectivity 로그가 존재하는 최소 OS 버전을 확인하지 못해 -ErrorAction SilentlyContinue 로만 조회한다"
+  stages:
+  - stage: 1
+    steps:
+    - do: 대상 파일 서버·발생 빈도·현재 연결 확인 (읽기 전용)
+      cmd: |
+        Get-WinEvent -FilterHashtable @{LogName="System"; Id=3013; StartTime=(Get-Date).AddDays(-1)} -MaxEvents 20 -ErrorAction SilentlyContinue | Format-List TimeCreated,ProviderName,Message
+        Get-SmbConnection | Format-Table ServerName,ShareName,Dialect,NumOpens
+        Get-SmbClientConfiguration | Format-List SessionTimeout,KeepConn
+      check: "같은 서버가 반복되면 그 서버·경로 문제, 여러 서버면 이 서버의 네트워크 문제 · 정상: 기록 없음"
+      note: "적용: SmbShare 모듈은 Windows Server 2012+ · 권한: 관리자"
+    - do: 네트워크 도달성·SMB 클라이언트 연결 로그 확인 (읽기 전용)
+      cmd: |
+        Test-NetConnection <파일서버> -Port 445
+        Get-WinEvent -LogName "Microsoft-Windows-SMBClient/Connectivity" -MaxEvents 20 -ErrorAction SilentlyContinue | Format-List TimeCreated,Id,Message
+      check: "TcpTestSucceeded False 면 네트워크·방화벽 원인(네트워크 담당), 성공인데 시간 초과가 반복되면 파일 서버 측 지연 — 서버 담당에 같은 시각 디스크 지연(Disk 153·Storport 129)·자원 부족 확인 요청 · 정상: 연결 성공·연결 오류 기록 없음"
+      note: "적용: Test-NetConnection 은 Windows Server 2012 R2+ · 권한: 일반 사용자 가능"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 파일 서버 측 지연 원인 해소 확인 (서버 담당)
+      cmd: |
+        Get-WinEvent -FilterHashtable @{LogName="System"; Id=129,153; StartTime=(Get-Date).AddDays(-1)} -MaxEvents 20 -ErrorAction SilentlyContinue | Format-Table TimeCreated,Id,ProviderName
+        Test-NetConnection <파일서버> -Port 445 -InformationLevel Detailed
+      check: "성공: 서버 측 저장 지연 이벤트 해소 후 클라이언트 3013 재발 없음 · 실패: 서버 정상인데 지속 → 네트워크 경로(스위치·방화벽 세션) 점검 요청"
+      note: "사전조건: 첫 줄은 파일 서버에서 서버 담당이 실행, 경로 조치는 네트워크 담당 · 영향: 조회만 함(서버 조치는 각 담당 절차) · 승인: 서버 담당·네트워크 담당 · 백업/롤백: 이 단계는 설정을 바꾸지 않아 롤백 불요 — 서버·네트워크 변경은 각 담당 절차의 백업 기준 적용"
+    - do: (2차·승인 후) 클라이언트 세션 시간 초과 상향 (임시)
+      cmd: |
+        Get-SmbClientConfiguration | Format-List SessionTimeout > C:\Temp\smbclient_before.txt
+        Set-SmbClientConfiguration -SessionTimeout <초> -Confirm:$false
+      check: "성공: Get-SmbClientConfiguration 의 SessionTimeout 새 값, 3013 감소 · 실패: 변화 없음 → 원복하고 서버·네트워크 원인 조치에 집중"
+      note: '사전조건: 서버 측 지연이 일시적임을 확인(근본 해결 아님) · 영향: 실제 장애 시 감지·장애 조치가 늦어짐, 이 서버의 모든 SMB 연결에 적용 · 승인: 시스템 담당 · 백업/롤백: C:\Temp\smbclient_before.txt 의 값으로 Set-SmbClientConfiguration -SessionTimeout 재실행 · 적용: Windows Server 2012+'
+  - stage: 3
+    steps:
+    - do: Microsoft 전달 자료
+      cmd: |
+        wevtutil epl System C:\Temp\System_<날짜>.evtx
+        wevtutil epl Microsoft-Windows-SMBClient/Connectivity C:\Temp\SMBClient_<날짜>.evtx
+        Get-SmbConnection | Format-List * > C:\Temp\smbconn_<날짜>.txt
+      check: "System·SMB 클라이언트 evtx·SMB 연결 정보·파일 서버 측 이벤트(서버 담당)"
+      note: "민감정보 마스킹: 파일 서버 이름·공유 경로·IP·계정 가림 후 전달 · 전달 승인: 보안 담당"

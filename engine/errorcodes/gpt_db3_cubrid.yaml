@@ -1,0 +1,870 @@
+product: cubrid
+layer: db
+note: GPT 협업 수집분 — 벤더 공식 문서와 대조 후 확정
+codes:
+- code: '-13'
+  severity: critical
+  category: disk
+  title: 볼륨 페이지 읽기 오류
+  immediate:
+  - "`grep -n -A1 -w \"CODE = -13\" $CUBRID/log/server/<db>_*.err | tail -20` 로 읽기 실패한 볼륨 이름·페이지 번호와 반복 여부 확인 — 같은 볼륨이 반복되면 해당 볼륨 디스크 결함 의심 (9.3·10.x·11.x)"
+  - "`cubrid spacedb <db>` 로 오류 볼륨 번호(volid)와 실제 볼륨 경로를 대응한 뒤 `df -h <볼륨 경로>` 로 해당 파일시스템 상태 확인"
+  - "`dmesg -T | grep -i -E \"I/O error|medium error|blk_update\" | tail -20` 으로 OS 디스크 오류 동반 여부 확인 — 동반되면 스토리지 장애로 확정, 없으면 DB 내부 손상 쪽으로 2차 의뢰(Linux)"
+  short:
+  - "(2차·업무 담당 승인 후, 롤백: 보류한 배치를 원래 일정으로 재개) 오류 볼륨을 쓰는 대량 조회·배치 일시 보류, 스토리지 담당에 경로·디스크 점검 요청"
+  - OS 디스크 로그와 SMART 및 파일시스템 상태를 점검
+  mid:
+  - 결함 디스크나 스토리지 경로를 교체하고 DB 무결성을 검증
+  long:
+  - I/O 오류와 디스크 상태를 상시 모니터링하고 백업 복구훈련을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://github.com/CUBRID/cubrid/blob/develop/src/base/error_code.h)
+  note: ER_IO_READ
+  vendor_cause: 볼륨 페이지 읽기 I/O 오류가 발생했다.
+  vendor_action: ''
+  vendor_url: https://github.com/CUBRID/cubrid/blob/develop/src/base/error_code.h
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: '서버 오류 번호(음수)·ER_ 이름은 8.4~11.4 동일 — cub_server.log/cub_broker 오류 로그 ''Time: MM/DD/YY hh:mm:ss.mmm - ERROR *** file … ERROR CODE = -n'' 형식 공통'
+- code: '-14'
+  severity: critical
+  category: disk
+  title: 볼륨 페이지 쓰기 오류
+  immediate:
+  - "`grep -n -A1 -w \"CODE = -14\" $CUBRID/log/server/<db>_*.err | tail -20` 로 쓰기 실패한 볼륨 이름·페이지 번호 확인 — 같은 볼륨이 반복되면 해당 파일시스템 문제 (9.3·10.x·11.x)"
+  - "`cubrid spacedb <db>` 로 오류 볼륨 번호(volid)와 실제 볼륨 경로를 대응한 뒤 `df -h <볼륨 경로>` 로 해당 파일시스템 상태 확인·`df -i <볼륨 경로>` — 사용률 100% 또는 inode 소진, `mount | grep <마운트 지점>` 에 ro 가 보이면 확정"
+  - "`dmesg -T | grep -i -E \"I/O error|medium error|blk_update\" | tail -20` 으로 OS 디스크 오류 동반 여부 확인 — 동반되면 스토리지 장애로 확정, 없으면 DB 내부 손상 쪽으로 2차 의뢰(Linux)"
+  short:
+  - 파일시스템과 스토리지 로그 및 디스크 오류를 분석
+  mid:
+  - 결함 장치나 경로를 복구하고 데이터 정합성을 검증
+  long:
+  - 스토리지 이중화와 쓰기 오류 임계치 경보를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://github.com/CUBRID/cubrid/blob/develop/src/base/error_code.h)
+  note: ER_IO_WRITE
+  vendor_cause: 볼륨 페이지 쓰기 I/O 오류가 발생했다.
+  vendor_action: ''
+  vendor_url: https://github.com/CUBRID/cubrid/blob/develop/src/base/error_code.h
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: '서버 오류 번호(음수)·ER_ 이름은 8.4~11.4 동일 — cub_server.log/cub_broker 오류 로그 ''Time: MM/DD/YY hh:mm:ss.mmm - ERROR *** file … ERROR CODE = -n'' 형식 공통'
+- code: '-17'
+  severity: error
+  category: storage
+  title: 잘못된 페이지 ID
+  immediate:
+  - "`grep -nE \"CODE = -17([^0-9]|$)\" $CUBRID/log/server/<db>_*.err | tail -20` 로 오류의 페이지·볼륨 번호와 직전 I/O 오류(-13·-14) 확인 — 그대로 기록·보존"
+  - "`cubrid spacedb -s <db>` 와 `dmesg -T | grep -i \"I/O error\" | tail` 로 볼륨 상태·디스크 I/O 오류 동반 여부 확인(읽기 전용) — 같은 작업 반복 실행은 보류하고 2차에 보고"
+  short:
+  - "(2차·승인 후) 업무 영향이 적은 시간에 `cubrid checkdb -C <db> <schema.table>` 로 오류 테이블 범위만 일관성 점검(부하 발생, 롤백: 점검만 수행 — --repair 는 backupdb 완료 후 제조사 지시로만)"
+  - "서버 error log와 선행 I/O 및 내부 오류를 분석"
+  mid:
+  - DB 무결성을 검사하고 동일 오류 반복 시 벤더 진단을 수행
+  long:
+  - 정기 무결성 검사와 패치 검증 및 장애 로그 자동수집을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://github.com/CUBRID/cubrid/blob/develop/src/base/error_code.h)
+  note: ER_PB_BAD_PAGEID
+  vendor_cause: "ER_PB_BAD_PAGEID — 페이지 버퍼가 요청받은 페이지 ID 가 볼륨에 할당되지 않았거나 범위를 벗어난 값이라는 내부 오류. 볼륨·인덱스 손상, 디스크 I/O 오류 뒤 불일치, 엔진 결함이 흔한 원인."
+  vendor_action: ''
+  vendor_url: https://github.com/CUBRID/cubrid/blob/develop/src/base/error_code.h
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: '서버 오류 번호(음수)·ER_ 이름은 8.4~11.4 동일 — cub_server.log/cub_broker 오류 로그 ''Time: MM/DD/YY hh:mm:ss.mmm - ERROR *** file … ERROR CODE = -n'' 형식 공통'
+- code: '-19'
+  severity: critical
+  category: internal
+  title: 미고정 페이지 참조
+  immediate:
+  - "`grep -nE \"CODE = -19([^0-9]|$)\" $CUBRID/log/server/<db>_*.err | tail -20` 로 오류 페이지·Tran·CLIENT 와 직전 오류 확보"
+  - "`cubrid tranlist <db>` 로 해당 Tran 의 사용자·프로그램 확인(읽기 전용) — 같은 작업 재실행은 보류하고 2차에 보고"
+  short:
+  - "(2차·승인 후) 영향 작업 보류 또는 해당 트랜잭션 정리(`cubrid killtran -i <tran_index> <db>`, 롤백: 정리된 거래는 애플리케이션 재처리) 후 서버 로그의 선행 오류와 페이지 관리 상태 분석"
+  - "서버 로그의 선행 오류와 페이지 관리 상태를 분석"
+  mid:
+  - DB 무결성을 검증하고 재현 시 벤더 패치와 진단을 진행
+  long:
+  - 내부 오류 반복 감지와 진단자료 자동수집 체계를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://github.com/CUBRID/cubrid/blob/develop/src/base/error_code.h)
+  note: ER_PB_UNFIXED_PAGEPTR
+  vendor_cause: 고정되지 않은 페이지 포인터를 참조했다.
+  vendor_action: ''
+  vendor_url: https://github.com/CUBRID/cubrid/blob/develop/src/base/error_code.h
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: '서버 오류 번호(음수)·ER_ 이름은 8.4~11.4 동일 — cub_server.log/cub_broker 오류 로그 ''Time: MM/DD/YY hh:mm:ss.mmm - ERROR *** file … ERROR CODE = -n'' 형식 공통'
+- code: '-21'
+  severity: critical
+  category: storage
+  title: 알 수 없는 섹터
+  immediate:
+  - "`grep -n -A1 -w \"CODE = -21\" $CUBRID/log/server/<db>_*.err | tail -20` 로 오류 볼륨·섹터 정보와 반복 여부 확인 — 같은 볼륨·섹터가 반복되면 볼륨 손상 의심 (9.3·10.x·11.x)"
+  - "`cubrid spacedb <db>` 로 오류 볼륨 번호(volid)와 실제 볼륨 경로를 대응한 뒤 `df -h <볼륨 경로>` 로 해당 파일시스템 상태 확인"
+  - "`dmesg -T | grep -i -E \"I/O error|medium error|blk_update\" | tail -20` 으로 OS 디스크 오류 동반 여부 확인 — 동반되면 스토리지 장애로 확정, 없으면 DB 내부 손상 쪽으로 2차 의뢰(Linux)"
+  short:
+  - "(2차·업무 담당 승인 후, 롤백: 보류한 배치를 원래 일정으로 재개) 해당 볼륨 쓰기 부하가 큰 배치 일시 보류, `cubrid checkdb <db>` 로 일관성 검사(검사 전용 — `-r` 복구 옵션은 쓰지 않음)"
+  - 스토리지 오류와 볼륨 메타데이터 및 선행 I/O 오류를 분석
+  mid:
+  - 백업을 검증하고 손상 볼륨 또는 스토리지를 복구
+  long:
+  - 볼륨 무결성 검사와 스토리지 장애 예측 모니터링을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://github.com/CUBRID/cubrid/blob/develop/src/base/error_code.h)
+  note: ER_DISK_UNKNOWN_SECTOR
+  vendor_cause: 알 수 없는 디스크 섹터가 지정됐다.
+  vendor_action: ''
+  vendor_url: https://github.com/CUBRID/cubrid/blob/develop/src/base/error_code.h
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: '서버 오류 번호(음수)·ER_ 이름은 8.4~11.4 동일 — cub_server.log/cub_broker 오류 로그 ''Time: MM/DD/YY hh:mm:ss.mmm - ERROR *** file … ERROR CODE = -n'' 형식 공통'
+- code: '-22'
+  severity: critical
+  category: storage
+  title: 알 수 없는 페이지
+  immediate:
+  - "`grep -n -A1 -w \"CODE = -22\" $CUBRID/log/server/<db>_*.err | tail -20` 로 오류 볼륨·페이지 번호와 영향 객체 확인 — 같은 페이지가 반복되면 해당 객체 손상 의심 (9.3·10.x·11.x)"
+  - "`cubrid spacedb <db>` 로 오류 볼륨 번호(volid)와 실제 볼륨 경로를 대응한 뒤 `df -h <볼륨 경로>` 로 해당 파일시스템 상태 확인"
+  - "`dmesg -T | grep -i -E \"I/O error|medium error|blk_update\" | tail -20` 으로 OS 디스크 오류 동반 여부 확인 — 동반되면 스토리지 장애로 확정, 없으면 DB 내부 손상 쪽으로 2차 의뢰(Linux)"
+  short:
+  - "(2차·업무 담당 승인 후, 롤백: 보류한 작업을 원래 일정으로 재개) 영향 객체를 쓰는 업무 일시 보류, `cubrid checkdb <db>` 로 일관성 검사(검사 전용 — `-r` 복구 옵션은 쓰지 않음)"
+  - 서버 로그와 볼륨 메타데이터 및 I/O 오류를 분석
+  mid:
+  - DB 검사와 필요 시 백업 복구를 수행하고 스토리지 원인을 제거
+  long:
+  - 페이지 오류 추세와 백업 복구 가능성을 정기 검증
+  source: GPT 수집·벤더 문서 대조 완료(https://github.com/CUBRID/cubrid/blob/develop/src/base/error_code.h)
+  note: ER_DISK_UNKNOWN_PAGE
+  vendor_cause: 알 수 없는 디스크 페이지가 지정됐다.
+  vendor_action: ''
+  vendor_url: https://github.com/CUBRID/cubrid/blob/develop/src/base/error_code.h
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: '서버 오류 번호(음수)·ER_ 이름은 8.4~11.4 동일 — cub_server.log/cub_broker 오류 로그 ''Time: MM/DD/YY hh:mm:ss.mmm - ERROR *** file … ERROR CODE = -n'' 형식 공통'
+- code: '-50'
+  severity: critical
+  category: storage
+  title: 이동 레코드 손상
+  immediate:
+  - "`grep -n -A1 -w \"CODE = -50\" $CUBRID/log/server/<db>_*.err | tail -20` 로 손상된 이동(relocated) 레코드의 OID·클래스(테이블) 확인 — 같은 테이블이 반복되면 해당 테이블 손상 의심 (9.3·10.x·11.x)"
+  - "`grep -c -w \"CODE = -50\" $CUBRID/log/server/<db>_*.err` 로 파일별 발생 건수 확인, HA 면 `cubrid heartbeat status` 로 복제 노드 존재 확인(복구 방법 결정 자료)"
+  short:
+  - "(2차·업무 담당 승인 후, 롤백: 보류한 변경 업무를 원래 일정으로 재개) 해당 테이블 변경 작업 일시 보류, `cubrid checkdb <db>` 로 일관성 검사(검사 전용 — `-r` 복구 옵션은 쓰지 않음)"
+  - 서버 로그와 스토리지 오류 및 객체 손상 범위를 분석
+  mid:
+  - 정상 백업 복구 또는 벤더 권고 절차로 데이터 정합성을 복원
+  long:
+  - 객체 무결성 검사와 백업 복구훈련을 정례화
+  source: GPT 수집·벤더 문서 대조 완료(https://github.com/CUBRID/cubrid/blob/develop/src/base/error_code.h)
+  note: ER_HEAP_BAD_RELOCATION_RECORD
+  vendor_cause: Heap의 relocation 레코드가 올바르지 않다.
+  vendor_action: ''
+  vendor_url: https://github.com/CUBRID/cubrid/blob/develop/src/base/error_code.h
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: '서버 오류 번호(음수)·ER_ 이름은 8.4~11.4 동일 — cub_server.log/cub_broker 오류 로그 ''Time: MM/DD/YY hh:mm:ss.mmm - ERROR *** file … ERROR CODE = -n'' 형식 공통'
+- code: '-51'
+  severity: error
+  category: storage
+  title: Heap 객체 타입 오류
+  immediate:
+  - "`grep -n -A1 -w \"CODE = -51\" $CUBRID/log/server/<db>_*.err | tail -20` 로 타입이 맞지 않는 heap 객체 OID·클래스(테이블) 확인 — 같은 테이블이 반복되면 해당 테이블 손상 의심 (9.3·10.x·11.x)"
+  - "`grep -c -w \"CODE = -51\" $CUBRID/log/server/<db>_*.err` 로 파일별 발생 건수 확인, HA 면 `cubrid heartbeat status` 로 복제 노드 존재 확인(복구 방법 결정 자료)"
+  short:
+  - "(2차·업무 담당 승인 후, 롤백: 보류한 변경 업무를 원래 일정으로 재개) 해당 테이블 변경 작업 일시 보류, `cubrid checkdb <db>` 로 일관성 검사(검사 전용 — `-r` 복구 옵션은 쓰지 않음)"
+  - 스토리지 오류와 객체 페이지 상태 및 백업 가용성을 확인
+  mid:
+  - 정상 백업을 이용해 복구하고 하부 스토리지 결함을 제거
+  long:
+  - 데이터 무결성 점검과 백업 검증을 정기 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://github.com/CUBRID/cubrid/blob/develop/src/base/error_code.h)
+  note: ER_HEAP_BAD_OBJECT_TYPE
+  vendor_cause: Heap 객체 타입이 올바르지 않다.
+  vendor_action: ''
+  vendor_url: https://github.com/CUBRID/cubrid/blob/develop/src/base/error_code.h
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: '서버 오류 번호(음수)·ER_ 이름은 8.4~11.4 동일 — cub_server.log/cub_broker 오류 로그 ''Time: MM/DD/YY hh:mm:ss.mmm - ERROR *** file … ERROR CODE = -n'' 형식 공통'
+- code: '-52'
+  severity: critical
+  category: storage
+  title: 오버플로 객체 손상
+  immediate:
+  - "`grep -n -A1 -w \"CODE = -52\" $CUBRID/log/server/<db>_*.err | tail -20` 로 손상된 overflow 객체 OID·클래스(테이블) 확인 — 같은 테이블이 반복되면 해당 테이블 손상 의심 (9.3·10.x·11.x)"
+  - "`grep -c -w \"CODE = -52\" $CUBRID/log/server/<db>_*.err` 로 파일별 발생 건수 확인, HA 면 `cubrid heartbeat status` 로 복제 노드 존재 확인(복구 방법 결정 자료)"
+  short:
+  - "(2차·업무 담당 승인 후, 롤백: 보류한 변경 업무를 원래 일정으로 재개) 해당 테이블 변경 작업 일시 보류, `cubrid checkdb <db>` 로 일관성 검사(검사 전용 — `-r` 복구 옵션은 쓰지 않음)"
+  - 서버 오류 로그와 디스크 및 페이지 손상을 분석
+  mid:
+  - 백업 복구 또는 벤더 권고 복구를 수행해 정합성을 확인
+  long:
+  - 대형 객체 무결성 검사와 스토리지 상태 감시를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://github.com/CUBRID/cubrid/blob/develop/src/base/error_code.h)
+  note: ER_HEAP_OVFADDRESS_CORRUPTED
+  vendor_cause: Heap overflow 주소가 손상됐다.
+  vendor_action: ''
+  vendor_url: https://github.com/CUBRID/cubrid/blob/develop/src/base/error_code.h
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: '서버 오류 번호(음수)·ER_ 이름은 8.4~11.4 동일 — cub_server.log/cub_broker 오류 로그 ''Time: MM/DD/YY hh:mm:ss.mmm - ERROR *** file … ERROR CODE = -n'' 형식 공통'
+- code: '-74'
+  severity: error
+  category: lock
+  title: 클래스 잠금 시간초과
+  immediate:
+  - "`cubrid lockdb -o <path>/lockdb_<db>.txt <db>` 로 잠금 표를 파일로 보존(읽기 전용) 후 `grep -n -i -B3 -A6 \"holders\" <path>/lockdb_<db>.txt | head -80` 으로 대상 객체의 보유·대기 Tran_index 확인 — 같은 보유 트랜잭션이 여러 대기를 막고 있으면 원인 트랜잭션 (9.3·10.x·11.x)"
+  - "lockdb 출력 상단의 트랜잭션 표에서 보유 Tran_index 의 프로그램·사용자·호스트를 확인하고 `grep -n -i \"lock_timeout\" $CUBRID/conf/cubrid.conf` 로 잠금 대기 한도 설정값 확인(-1 은 무한 대기)"
+  short:
+  - "(2차·업무 담당 승인 후, 롤백: 종료된 트랜잭션은 롤백되므로 해당 업무 재처리 필요) 보유 트랜잭션이 끝나지 않으면 `cubrid killtran -i <Tran_index> <db>` 로 종료"
+  - 장기 트랜잭션과 해당 클래스의 동시 DDL 및 DML을 분석
+  mid:
+  - 트랜잭션 범위와 객체 접근 순서를 개선
+  long:
+  - LOCK_TIMEOUT 이벤트와 장기 트랜잭션을 상시 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://www.cubrid.org/manual/en/latest/admin/control.html)
+  note: ER_LK_OBJECT_TIMEOUT_CLASS_MSG
+  vendor_cause: 다른 트랜잭션의 클래스 잠금 해제를 기다리다 lock timeout이 발생했다.
+  vendor_action: ''
+  vendor_url: https://www.cubrid.org/manual/en/10.0/admin/control.html
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: '서버 오류 번호(음수)·ER_ 이름은 8.4~11.4 동일 — cub_server.log/cub_broker 오류 로그 ''Time: MM/DD/YY hh:mm:ss.mmm - ERROR *** file … ERROR CODE = -n'' 형식 공통'
+- code: '-75'
+  severity: error
+  category: lock
+  title: 인스턴스 잠금 시간초과
+  immediate:
+  - "`cubrid lockdb -o <path>/lockdb_<db>.txt <db>` 로 잠금 표를 파일로 보존(읽기 전용) 후 `grep -n -i -B3 -A6 \"holders\" <path>/lockdb_<db>.txt | head -80` 으로 대상 객체의 보유·대기 Tran_index 확인 — 같은 보유 트랜잭션이 여러 대기를 막고 있으면 원인 트랜잭션 (9.3·10.x·11.x)"
+  - "lockdb 출력 상단의 트랜잭션 표에서 보유 Tran_index 의 프로그램·사용자·호스트를 확인하고 `grep -n -i \"lock_timeout\" $CUBRID/conf/cubrid.conf` 로 잠금 대기 한도 설정값 확인(-1 은 무한 대기)"
+  short:
+  - "(2차·업무 담당 승인 후, 롤백: 종료된 트랜잭션은 롤백되므로 해당 업무 재처리 필요) 보유 트랜잭션이 끝나지 않으면 `cubrid killtran -i <Tran_index> <db>` 로 종료"
+  - 상충 SQL과 장기 트랜잭션 및 인덱스 상태를 분석
+  mid:
+  - 트랜잭션 범위와 접근 순서를 최적화해 잠금 시간을 축소
+  long:
+  - 잠금 대기시간과 반복 충돌 SQL을 지속 관리
+  source: GPT 수집·벤더 문서 대조 완료(https://www.cubrid.org/manual/en/latest/admin/control.html)
+  note: ER_LK_OBJECT_TIMEOUT_CLASSOF_MSG
+  vendor_cause: 다른 트랜잭션의 클래스 인스턴스 잠금 해제를 기다리다 timeout이 발생했다.
+  vendor_action: ''
+  vendor_url: https://www.cubrid.org/manual/en/10.0/admin/control.html
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: '서버 오류 번호(음수)·ER_ 이름은 8.4~11.4 동일 — cub_server.log/cub_broker 오류 로그 ''Time: MM/DD/YY hh:mm:ss.mmm - ERROR *** file … ERROR CODE = -n'' 형식 공통'
+- code: '-78'
+  severity: critical
+  category: storage
+  title: 논리로그 읽기 오류
+  immediate:
+  - "`grep -n -A1 -w \"CODE = -78\" $CUBRID/log/server/<db>_*.err | tail -20` 로 읽기 실패한 로그 페이지·파일 확인 — 반복되면 로그 볼륨 손상 의심 (9.3·10.x·11.x)"
+  - "`cat $CUBRID_DATABASES/databases.txt` 로 <db> 의 로그 경로(log-path) 확인 후 `ls -l <로그경로>/<db>_lgat <로그경로>/<db>_lgar*` 와 `tail -20 <로그경로>/<db>_lginf` 로 활성·보관 로그 존재·크기와 생성·제거 이력 확인 — 파일이 없거나 0 바이트면 확정"
+  - "`dmesg -T | grep -i -E \"I/O error|medium error|blk_update\" | tail -20` 으로 OS 디스크 오류 동반 여부 확인 — 동반되면 스토리지 장애로 확정, 없으면 DB 내부 손상 쪽으로 2차 의뢰(Linux)"
+  short:
+  - 디스크 I/O와 로그파일 손상 및 파일 권한을 분석
+  mid:
+  - 정상 백업과 로그를 확보해 복구하고 스토리지 결함을 제거
+  long:
+  - 로그파일 다중 백업과 I/O 오류 모니터링을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://github.com/CUBRID/cubrid/blob/develop/src/base/error_code.h)
+  note: ER_LOG_READ
+  vendor_cause: 트랜잭션 로그를 읽는 중 오류가 발생했다.
+  vendor_action: ''
+  vendor_url: https://github.com/CUBRID/cubrid/blob/develop/src/base/error_code.h
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: '서버 오류 번호(음수)·ER_ 이름은 8.4~11.4 동일 — cub_server.log/cub_broker 오류 로그 ''Time: MM/DD/YY hh:mm:ss.mmm - ERROR *** file … ERROR CODE = -n'' 형식 공통'
+- code: '-79'
+  severity: critical
+  category: storage
+  title: 논리로그 쓰기 오류
+  immediate:
+  - "`grep -n -A1 -w \"CODE = -79\" $CUBRID/log/server/<db>_*.err | tail -20` 로 쓰기 실패한 로그 볼륨·페이지 확인 — 반복되면 로그 파일시스템 문제 (9.3·10.x·11.x)"
+  - "`cat $CUBRID_DATABASES/databases.txt` 로 <db> 의 로그 경로(log-path) 확인 후 `df -h <로그경로>` 와 `df -i <로그경로>` 로 공간·inode 확인 — 100% 또는 `mount | grep <마운트 지점>` 에 ro 가 보이면 확정"
+  - "`dmesg -T | grep -i -E \"I/O error|medium error|blk_update\" | tail -20` 으로 OS 디스크 오류 동반 여부 확인 — 동반되면 스토리지 장애로 확정, 없으면 DB 내부 손상 쪽으로 2차 의뢰(Linux)"
+  short:
+  - "(2차·업무 담당 승인 후, 롤백: 보류한 배치를 원래 일정으로 재개) 로그 볼륨 공간 확보 전까지 대량 변경 배치 보류"
+  - 파일시스템 full과 디스크 오류 및 로그 경로 상태를 분석
+  mid:
+  - 로그 저장공간을 증설하거나 결함 스토리지를 복구
+  long:
+  - 로그 볼륨 용량예측과 쓰기 오류 즉시경보를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://github.com/CUBRID/cubrid/blob/develop/src/base/error_code.h)
+  note: ER_LOG_WRITE
+  vendor_cause: 트랜잭션 로그를 쓰는 중 오류가 발생했다.
+  vendor_action: ''
+  vendor_url: https://github.com/CUBRID/cubrid/blob/develop/src/base/error_code.h
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: '서버 오류 번호(음수)·ER_ 이름은 8.4~11.4 동일 — cub_server.log/cub_broker 오류 로그 ''Time: MM/DD/YY hh:mm:ss.mmm - ERROR *** file … ERROR CODE = -n'' 형식 공통'
+- code: '-81'
+  severity: critical
+  category: storage
+  title: 논리로그 페이지 손상
+  immediate:
+  - "`grep -nE \"CODE = -81([^0-9]|$)\" $CUBRID/log/server/<db>_*.err $CUBRID/log/*applylogdb*.err 2>/dev/null | tail -20` 로 손상 로그 페이지 번호·파일 확인 후 기록"
+  - "`ls -l <db경로>/<db>_lgat <db경로>/<db>_lgar*` 와 `dmesg -T | grep -i \"I/O error\" | tail` 로 로그 파일 존재·디스크 오류 확인 — 반복 기동·복구 시도는 보류하고 2차에 보고"
+  - "HA 이면 `cubrid applyinfo -L <copylog_path> -r <peer_host> -a <db>` 로 복제 로그 상태 확인(읽기 전용)"
+  short:
+  - "(2차·승인 후) 백업(backupdb)과 아카이브 로그 가용성 확인 뒤 restoredb 복구 계획 수립(롤백: 복구 전 손상 DB 디렉터리 전체를 별도 보관)"
+  - "archive와 active log 및 백업 가용성을 검증"
+  mid:
+  - 정상 로그 또는 백업을 이용해 복구하고 데이터 정합성을 확인
+  long:
+  - 로그 무결성 검증과 복구훈련을 정례화
+  source: GPT 수집·벤더 문서 대조 완료(https://github.com/CUBRID/cubrid/blob/develop/src/base/error_code.h)
+  note: ER_LOG_PAGE_CORRUPTED
+  vendor_cause: "ER_LOG_PAGE_CORRUPTED — 트랜잭션 로그(활성·아카이브) 또는 HA 복제 로그의 페이지가 손상되어 읽을 수 없다는 뜻. 디스크 I/O 오류·파일시스템 손상·비정상 종료 중 쓰기 중단이 흔한 원인."
+  vendor_action: ''
+  vendor_url: https://github.com/CUBRID/cubrid/blob/develop/src/base/error_code.h
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: '서버 오류 번호(음수)·ER_ 이름은 8.4~11.4 동일 — cub_server.log/cub_broker 오류 로그 ''Time: MM/DD/YY hh:mm:ss.mmm - ERROR *** file … ERROR CODE = -n'' 형식 공통'
+- code: '-96'
+  severity: critical
+  category: storage
+  title: 미디어 복구 필요
+  immediate:
+  - "`grep -n -A1 -w \"CODE = -96\" $CUBRID/log/server/<db>_*.err | tail -20` 로 미디어 복구가 필요한 볼륨 확인 — 특정 볼륨만이면 해당 볼륨 손상 (9.3·10.x·11.x)"
+  - "`cubrid server status` 로 <db> 기동 여부 확인, `cat $CUBRID_DATABASES/databases.txt` 로 <db> 의 로그 경로(log-path) 확인 후 `cat <로그경로>/<db>_bkvinf` 로 마지막 백업 볼륨 위치를 보고 `ls -l <백업 경로>` 로 실재 확인 — 백업이 없으면 즉시 2차·제조사 의뢰"
+  - "`ls -l <로그경로>/<db>_lgar*` 와 `tail -20 <로그경로>/<db>_lginf` 로 백업 이후 보관 로그가 번호 순서대로 빠짐없이 남았는지 확인(복원 가능 시점 판단 자료)"
+  short:
+  - "(2차·승인 후, 롤백: 복원 전 현재 볼륨·로그 전체를 별도 경로에 복사 보관) DB 중지 후 `cubrid restoredb` 로 백업+보관 로그 복원 — 업무 중단 승인 필요"
+  - 손상 볼륨과 archive log 및 백업 시점을 검증
+  mid:
+  - 공식 recovery 절차로 볼륨을 복구하고 서비스 정상화를 확인
+  long:
+  - 정기 백업 검증과 미디어 복구훈련을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://github.com/CUBRID/cubrid/blob/develop/src/base/error_code.h)
+  note: ER_LOG_MAYNEED_MEDIA_RECOVERY
+  vendor_cause: 데이터베이스에 미디어 복구가 필요할 수 있는 상태가 감지됐다.
+  vendor_action: ''
+  vendor_url: https://github.com/CUBRID/cubrid/blob/develop/src/base/error_code.h
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: '서버 오류 번호(음수)·ER_ 이름은 8.4~11.4 동일 — cub_server.log/cub_broker 오류 로그 ''Time: MM/DD/YY hh:mm:ss.mmm - ERROR *** file … ERROR CODE = -n'' 형식 공통'
+- code: '-97'
+  severity: critical
+  category: storage
+  title: 아카이브 로그 누락
+  immediate:
+  - "`grep -n -A1 -w \"CODE = -97\" $CUBRID/log/server/<db>_*.err | tail -20` 로 요구되는 로그 페이지·보관 로그 번호 확인 — 요구 번호를 기록해 둔다 (9.3·10.x·11.x)"
+  - "`cat $CUBRID_DATABASES/databases.txt` 로 <db> 의 로그 경로(log-path) 확인 후 `ls -l <로그경로>/<db>_lgar*` 와 `grep -n -i \"archive\" <로그경로>/<db>_lginf | tail -20` 으로 요구 번호의 보관 로그 존재와 제거 이력 확인 — 파일이 없고 제거 기록이 있으면 보관 로그 제거로 확정"
+  short:
+  - 로그 보존정책과 archive 삭제 이력 및 백업 저장소를 점검
+  mid:
+  - 누락 로그를 복원하거나 가능한 백업 시점으로 복구계획을 수립
+  long:
+  - archive 보존정책과 복구 가능성 자동검증을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://github.com/CUBRID/cubrid/blob/develop/src/base/error_code.h)
+  note: ER_LOG_NOTIN_ARCHIVE
+  vendor_cause: 필요한 로그가 아카이브에 존재하지 않는다.
+  vendor_action: ''
+  vendor_url: https://github.com/CUBRID/cubrid/blob/develop/src/base/error_code.h
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: '서버 오류 번호(음수)·ER_ 이름은 8.4~11.4 동일 — cub_server.log/cub_broker 오류 로그 ''Time: MM/DD/YY hh:mm:ss.mmm - ERROR *** file … ERROR CODE = -n'' 형식 공통'
+- code: '-966'
+  severity: error
+  category: lock
+  title: 객체 교착 잠금시간초과
+  immediate:
+  - "`grep -n -A2 -w \"CODE = -966\" $CUBRID/log/server/<db>_*.err | tail -30` 으로 교착 발생 시각·Tran·CLIENT(프로그램) 확인 — 같은 프로그램 쌍이 반복되면 객체 접근 순서 문제 (9.3·10.x·11.x)"
+  - "이벤트 로그가 있으면 `grep -n -A20 \"DEADLOCK\" $CUBRID/log/server/<db>_*.event | tail -60` 으로 교착 참여 트랜잭션·SQL 확인(이벤트 로그가 생성되는 버전), 발생 중이면 `cubrid lockdb -o <path>/lockdb_<db>.txt <db>` 로 잠금 표를 파일로 보존(읽기 전용)"
+  short:
+  - "(2차·애플리케이션 담당 승인 후, 롤백: 재처리 전 중복 반영 여부 확인) 실패한 트랜잭션 재처리"
+  - DEADLOCK 이벤트와 상충 SQL의 잠금 획득 순서를 분석
+  mid:
+  - 객체 접근 순서를 통일하고 트랜잭션 범위를 축소
+  long:
+  - 교착 로그 자동수집과 애플리케이션 재시도 정책을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://www.cubrid.org/manual/en/latest/admin/control.html)
+  note: ER_LK_OBJECT_DL_TIMEOUT_SIMPLE_MSG
+  vendor_cause: 교착상태 때문에 객체 잠금을 기다리던 트랜잭션이 timeout됐다.
+  vendor_action: ''
+  vendor_url: https://www.cubrid.org/manual/en/10.0/admin/control.html
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: '서버 오류 번호(음수)·ER_ 이름은 8.4~11.4 동일 — cub_server.log/cub_broker 오류 로그 ''Time: MM/DD/YY hh:mm:ss.mmm - ERROR *** file … ERROR CODE = -n'' 형식 공통'
+- code: '-967'
+  severity: error
+  category: lock
+  title: 클래스 교착 잠금시간초과
+  immediate:
+  - "`grep -n -A2 -w \"CODE = -967\" $CUBRID/log/server/<db>_*.err | tail -30` 으로 교착 발생 시각·Tran·CLIENT(프로그램) 확인 — 같은 프로그램 쌍이 반복되면 객체 접근 순서 문제 (9.3·10.x·11.x)"
+  - "이벤트 로그가 있으면 `grep -n -A20 \"DEADLOCK\" $CUBRID/log/server/<db>_*.event | tail -60` 으로 교착 참여 트랜잭션·SQL 확인(이벤트 로그가 생성되는 버전), 발생 중이면 `cubrid lockdb -o <path>/lockdb_<db>.txt <db>` 로 잠금 표를 파일로 보존(읽기 전용)"
+  short:
+  - "(2차·애플리케이션 담당 승인 후, 롤백: 재처리 전 중복 반영 여부 확인) 실패한 트랜잭션 재처리"
+  - 상충 SQL과 클래스 잠금 획득 순서를 분석
+  mid:
+  - DDL 및 DML 수행 순서와 트랜잭션 구조를 개선
+  long:
+  - 클래스 교착 발생률과 장기 트랜잭션을 상시 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://www.cubrid.org/manual/en/latest/admin/control.html)
+  note: ER_LK_OBJECT_DL_TIMEOUT_CLASS_MSG
+  vendor_cause: 교착상태 때문에 클래스 잠금을 기다리던 트랜잭션이 timeout됐다.
+  vendor_action: ''
+  vendor_url: https://www.cubrid.org/manual/en/10.0/admin/control.html
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: '서버 오류 번호(음수)·ER_ 이름은 8.4~11.4 동일 — cub_server.log/cub_broker 오류 로그 ''Time: MM/DD/YY hh:mm:ss.mmm - ERROR *** file … ERROR CODE = -n'' 형식 공통'
+- code: '-968'
+  severity: error
+  category: lock
+  title: 인스턴스 교착시간초과
+  immediate:
+  - "`grep -n -A2 -w \"CODE = -968\" $CUBRID/log/server/<db>_*.err | tail -30` 으로 교착 발생 시각·Tran·CLIENT(프로그램) 확인 — 같은 프로그램 쌍이 반복되면 객체 접근 순서 문제 (9.3·10.x·11.x)"
+  - "이벤트 로그가 있으면 `grep -n -A20 \"DEADLOCK\" $CUBRID/log/server/<db>_*.event | tail -60` 으로 교착 참여 트랜잭션·SQL 확인(이벤트 로그가 생성되는 버전), 발생 중이면 `cubrid lockdb -o <path>/lockdb_<db>.txt <db>` 로 잠금 표를 파일로 보존(읽기 전용)"
+  short:
+  - "(2차·애플리케이션 담당 승인 후, 롤백: 재처리 전 중복 반영 여부 확인) 실패한 트랜잭션 재처리"
+  - 관련 SQL과 객체 접근 순서 및 잠금 보유시간을 분석
+  mid:
+  - 잠금 순서를 통일하고 트랜잭션 단위를 축소
+  long:
+  - DEADLOCK 이벤트와 반복 SQL을 자동 분석하는 체계를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://www.cubrid.org/manual/en/latest/admin/control.html)
+  note: ER_LK_OBJECT_DL_TIMEOUT_CLASSOF_MSG
+  vendor_cause: 교착상태 때문에 클래스 인스턴스 잠금을 기다리던 트랜잭션이 timeout됐다.
+  vendor_action: ''
+  vendor_url: https://www.cubrid.org/manual/en/10.0/admin/control.html
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: '서버 오류 번호(음수)·ER_ 이름은 8.4~11.4 동일 — cub_server.log/cub_broker 오류 로그 ''Time: MM/DD/YY hh:mm:ss.mmm - ERROR *** file … ERROR CODE = -n'' 형식 공통'
+- code: '-1022'
+  severity: warn
+  category: security
+  title: 허용되지 않은 IP
+  immediate:
+  - "`grep -n -i \"access_ip_control\" $CUBRID/conf/cubrid.conf` 로 서버 접근제어 사용 여부와 허용 목록 파일 경로 확인 후 `cat <허용 목록 파일>` 에서 <db> 항목에 접속 IP 가 있는지 확인 — 없으면 설정대로 거부된 것 (9.3·10.x·11.x)"
+  - "`grep -n -A1 -w \"CODE = -1022\" $CUBRID/log/server/<db>_*.err | tail -20` 로 거부된 접속 IP·시각과 반복 횟수 확인 — 미등록 IP 의 반복 시도면 보안 담당에 통보 (9.3·10.x·11.x)"
+  short:
+  - "(2차·보안 담당 승인 후, 롤백: 허용 목록 파일 사본을 보관했다가 되돌림) 업무 IP 면 허용 목록에 추가해 반영, 미인가 IP 면 방화벽 차단"
+  - 접속 주체와 접근 허용 목록 및 반복 시도 여부를 분석
+  mid:
+  - 업무 IP만 허용하도록 서버 접근제어 정책을 정비
+  long:
+  - 접근 거부 로그와 비정상 IP 반복 시도를 상시 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://www.cubrid.org/manual/en/8.4.4/admin/control.html)
+  note: 8.4.4/10.0 공식매뉴얼의 서버 접근제한 코드
+  vendor_cause: access_ip_control에 의해 허용되지 않은 IP 주소에서 데이터베이스에 접근했다.
+  vendor_action: 허용할 IP를 access_ip_control_file에 등록하고 cubrid server acl reload로 변경 내용을 적용한다.
+  vendor_url: https://www.cubrid.org/manual/en/8.4.4/admin/control.html
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: 서버 접근 제한(ACL)은 8.4.4 이후
+- code: '-10001'
+  severity: error
+  category: internal
+  title: CAS 내부 오류
+  immediate:
+  - "`cubrid broker status -b` 로 브로커별 AS(CAS 수)·JQ(대기열)·LONG-T·LONG-Q·ERR-Q 확인 — ERR-Q 가 계속 늘면 진행 중 (9.3·10.x·11.x)"
+  - "`ls -lt $CUBRID/log/broker/error_log/ | head` 로 최근 CAS 오류 로그를 찾고 `grep -n -- \"-10001\" $CUBRID/log/broker/error_log/<broker>_*.err | tail -20` 으로 시각·EID 확인, 같은 시각 SQL 은 `grep -n \"<MM/DD HH:MM>\" $CUBRID/log/broker/sql_log/<broker>_<n>.sql.log | tail -40` 으로 대조"
+  - "`cubrid broker status -f <broker>` 로 해당 CAS 의 STATUS·마지막 접근 시각 확인 — 같은 CAS 만 반복되면 해당 CAS·질의 문제"
+  short:
+  - CAS 재시작 횟수와 선행 서버 오류 및 요청 SQL을 분석
+  mid:
+  - 재현 가능한 오류는 패치 여부를 검토하고 구성 또는 애플리케이션을 수정
+  long:
+  - CAS 내부 오류율과 비정상 재시작을 상시 모니터링
+  source: GPT 수집·벤더 문서 대조 완료(https://www.cubrid.org/manual/en/latest/admin/control.html)
+  note: CAS_ER_INTERNAL
+  vendor_cause: "CAS_ER_INTERNAL(-10001) — 브로커의 CAS 프로세스 안에서 분류되지 않은 내부 오류가 났다는 뜻. 선행 서버 오류의 전파, 드라이버·CAS 버전 불일치, CAS 결함이 흔한 원인."
+  vendor_action: ''
+  vendor_url: https://www.cubrid.org/manual/en/latest/admin/control.html
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: CAS(브로커) 오류 -10xxx 는 8.4~11.4 동일
+- code: '-10014'
+  severity: error
+  category: storage
+  title: CAS 파일 열기 실패
+  immediate:
+  - "`ls -ld $CUBRID/log/broker/sql_log $CUBRID/log/broker/error_log` 와 `df -h $CUBRID/log`·`df -i $CUBRID/log` 로 CUBRID 실행 계정 쓰기 권한과 공간·inode 확인 — 100% 또는 소유자 불일치면 확정 (9.3·10.x·11.x)"
+  - "CUBRID 실행 계정으로 `ulimit -n` 과 `ls /proc/<CAS PID>/fd | wc -l` 로 열린 파일 수 한도 근접 여부 확인(CAS PID 는 `cubrid broker status -f <broker>`, Linux)"
+  short:
+  - CAS 실행 계정 권한과 디스크 공간 및 open file 한도를 점검
+  mid:
+  - 파일 경로와 권한 및 운영계정 정책을 표준화
+  long:
+  - 파일 접근 오류와 디스크 및 FD 사용률을 상시 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://www.cubrid.org/manual/en/latest/admin/control.html)
+  note: CAS_ER_OPEN_FILE
+  vendor_cause: "CAS_ER_OPEN_FILE(-10014) Cannot open file — CAS 가 SQL 로그·임시 결과 등 필요한 파일을 열지 못했다는 뜻. 로그 디렉터리 권한·디스크 가득참·open files 한도 초과가 흔한 원인."
+  vendor_action: ''
+  vendor_url: https://www.cubrid.org/manual/en/latest/admin/control.html
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: CAS(브로커) 오류 -10xxx 는 8.4~11.4 동일
+- code: '-10016'
+  severity: error
+  category: connection
+  title: 서버 버전 불일치
+  immediate:
+  - "`cubrid_rel` 와 `cubrid broker status -f <broker>` 로 서버·브로커 버전과 접속 드라이버 버전 확인"
+  - "`$CUBRID/log/broker/error_log/<broker>_<n>.err` 에서 같은 시각 -10016 발생 CAS·클라이언트 확인 — 비호환 연결 차단은 2차에 요청"
+  short:
+  - "(2차·승인 후) 비호환 클라이언트 접속 차단 또는 드라이버 교체(롤백: 기존 드라이버·설정 보관 후 원복)"
+  - "CUBRID 서버와 broker 및 드라이버 버전 조합을 점검"
+  mid:
+  - 지원되는 동일 계열 버전으로 구성요소를 정렬
+  long:
+  - 업그레이드 전 서버와 broker 호환성 검증을 자동화
+  source: GPT 수집·벤더 문서 대조 완료(https://www.cubrid.org/manual/en/latest/admin/control.html)
+  note: CAS_ER_VERSION
+  vendor_cause: DB 서버 버전이 클라이언트(CAS) 버전과 호환되지 않는다.
+  vendor_action: ''
+  vendor_url: https://www.cubrid.org/manual/en/latest/admin/control.html
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: CAS(브로커) 오류 -10xxx 는 8.4~11.4 동일
+- code: '-10018'
+  severity: warn
+  category: security
+  title: CAS 접근 권한 거부
+  immediate:
+  - "`grep -n -E \"ACCESS_CONTROL\" $CUBRID/conf/cubrid_broker.conf` 로 브로커 접근제어 사용 여부와 ACL 파일 경로 확인 후 `cat <ACL 파일>` 에서 해당 브로커 구역의 DB·사용자·IP 목록에 접속 IP 가 있는지 확인 — 없으면 설정대로 거부된 것 (9.3·10.x·11.x)"
+  - "`grep -n -- \"-10018\" $CUBRID/log/broker/error_log/<broker>_*.err | tail -20` 과 애플리케이션 로그로 거부된 클라이언트 IP·시각·반복 횟수 확인 — 미등록 IP 의 반복 시도면 보안 담당에 통보"
+  short:
+  - access.denied와 broker ACL 설정 및 업무 IP를 비교
+  mid:
+  - 필요한 IP만 허용하고 불필요한 접근 규칙을 제거
+  long:
+  - 접근 거부 추세와 반복 미인가 접속을 상시 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://www.cubrid.org/manual/en/latest/admin/control.html)
+  note: CAS_ER_NOT_AUTHORIZED_CLIENT
+  vendor_cause: 클라이언트 접근이 허가되지 않아 CAS가 접근을 거부했다.
+  vendor_action: ''
+  vendor_url: https://www.cubrid.org/manual/en/latest/admin/control.html
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: CAS(브로커) 오류 -10xxx 는 8.4~11.4 동일
+- code: '-10026'
+  severity: error
+  category: capacity
+  title: Prepared문 한도초과
+  immediate:
+  - "`grep -n -i \"MAX_PREPARED_STMT_COUNT\" $CUBRID/conf/cubrid_broker.conf` 로 브로커별 한도 확인(없으면 기본값 적용) (9.3·10.x·11.x)"
+  - "`grep -n -- \"-10026\" $CUBRID/log/broker/error_log/<broker>_*.err | tail -20` 또는 애플리케이션 로그와 `cubrid broker status -f <broker>` 로 오류 CAS·클라이언트 IP 확인 — 같은 애플리케이션에서 반복되면 statement close 누락(누수) 의심"
+  short:
+  - 애플리케이션 statement close 누락과 풀링 패턴을 분석
+  mid:
+  - statement 누수를 수정하고 필요 용량에 맞춰 한도를 조정
+  long:
+  - CAS별 prepared statement 사용률과 누수를 모니터링
+  source: GPT 수집·벤더 문서 대조 완료(https://www.cubrid.org/manual/en/latest/admin/control.html)
+  note: CAS_ER_MAX_PREPARED_STMT_COUNT_EXCEEDED
+  vendor_cause: 접속당 prepared statement 수가 MAX_PREPARED_STMT_COUNT를 초과했다.
+  vendor_action: ''
+  vendor_url: https://www.cubrid.org/manual/en/latest/admin/control.html
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: CAS(브로커) 오류 -10xxx 는 8.4~11.4 동일
+- code: '-10103'
+  severity: warn
+  category: security
+  title: SSL 모드 허용 안됨
+  immediate:
+  - "`grep -n -i \"SSL\" $CUBRID/conf/cubrid_broker.conf` 로 브로커별 SSL 설정(ON/OFF) 확인, `cubrid broker status -b` 로 대상 브로커 이름·포트 확인(11.0+)"
+  - "애플리케이션 접속 설정(드라이버 URL 의 SSL 사용 속성)과 브로커 값 비교 — 한쪽만 SSL 이면 확정, 드라이버 버전이 11.0 미만이면 SSL 미지원 여부 확인"
+  short:
+  - 드라이버와 broker의 TLS 지원 설정 및 인증서 구성을 점검
+  mid:
+  - 허용된 TLS 모드로 접속 설정을 표준화하고 취약 설정을 제거
+  long:
+  - TLS 설정 변경과 인증서 수명주기를 중앙 관리
+  source: GPT 수집·벤더 문서 대조 완료(https://www.cubrid.org/manual/en/latest/admin/control.html)
+  note: CAS_ER_SSL_TYPE_NOT_ALLOWED
+  vendor_cause: 브로커와 클라이언트가 서로 허용되지 않는 SSL 모드로 연결을 요청했다.
+  vendor_action: 브로커와 클라이언트의 암호화 모드를 일치시키고 브로커 SSL 설정을 변경했다면 브로커를 재시작한다.
+  vendor_url: https://www.cubrid.org/manual/en/latest/admin/control.html
+  versions:
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: SSL(CAS_ER_SSL_TYPE_NOT_ALLOWED)은 11.0 도입
+- code: '-10200'
+  severity: error
+  category: security
+  title: CAS 인증 실패
+  immediate:
+  - "`grep -n -- \"-10200\" $CUBRID/log/broker/error_log/<broker>_*.err | tail -20` 과 애플리케이션 로그로 실패 계정·대상 DB 이름·클라이언트 IP·횟수 확인(비밀번호 값은 기록하지 않음) (9.3·10.x·11.x)"
+  - "`cubrid broker status -f <broker>` 로 같은 DB 에 정상 접속 중인 CAS(DB·HOST 칸) 존재 확인 — 정상 세션이 있으면 특정 애플리케이션 설정(비밀번호 변경 미반영) 문제"
+  short:
+  - "(2차·보안 담당 승인 후, 롤백: 추가한 제한 규칙 삭제) 미인가 반복 시도 출처 IP 를 브로커 ACL·방화벽으로 제한"
+  - 계정 상태와 비밀번호 변경 이력 및 애플리케이션 저장정보를 점검
+  mid:
+  - 접속 비밀정보를 정상화하고 계정 관리 절차를 정비
+  long:
+  - 인증 실패율과 반복 로그인 시도를 상시 모니터링
+  source: GPT 수집·벤더 문서 대조 완료(https://www.cubrid.org/manual/en/latest/admin/control.html)
+  note: CAS_ER_IS
+  vendor_cause: "CAS_ER_IS(-10200) Authentication failure — 브로커(CAS) 단계 인증이 실패했다는 뜻. 잘못된 계정·비밀번호, 비밀번호 변경 뒤 애플리케이션 설정 미반영, 접근 대상 DB 이름 오류가 흔한 원인."
+  vendor_action: ''
+  vendor_url: https://www.cubrid.org/manual/en/latest/admin/control.html
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: CAS(브로커) 오류 -10xxx 는 8.4~11.4 동일
+- code: '-902'
+  severity: critical
+  category: upstream
+  title: Java SP 서버 미기동
+  immediate:
+  - cubrid pl status <db>로 상태를 확인하고 PL 서버를 정상 기동
+  short:
+  - PL 서버 로그와 프로세스 및 설정 포트를 점검
+  mid:
+  - PL 서버 기동 의존성과 자동복구 절차를 개선
+  long:
+  - PL 서버 상태와 CAS 연계 헬스체크를 상시 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://www.cubrid.org/manual/en/latest/admin/control.html)
+  note: Java VM is not running
+  vendor_cause: Java 저장 프로시저 서버가 시작되지 않았다.
+  vendor_action: cubrid javasp start <db_name> 명령으로 Java 저장 프로시저 서버를 시작한다.
+  vendor_url: https://www.cubrid.org/manual/en/latest/admin/control.html
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: Java SP 서버 오류 — 8.4 이후 동일
+- code: '-903'
+  severity: critical
+  category: upstream
+  title: Java SP 서버 접속 실패
+  immediate:
+  - "`grep -n -i \"stored_procedure\" $CUBRID/conf/cubrid.conf` 로 Java SP 사용 여부·포트 설정 확인 — 사용 안 함이면 SP 호출과 설정 불일치"
+  - "`ps -ef | grep -i -E \"javasp|cub_pl\" | grep -v grep` 로 SP 서버 프로세스 존재 확인(11.x 별도 프로세스), `ls -lt $CUBRID/log/server/ | head` 후 `tail -100 $CUBRID/log/server/<db>_<최근>.err` 로 SP 서버 종료·JVM 오류 확인"
+  short:
+  - CAS와 PL 서버 로그 및 stored_procedure_port 설정을 분석
+  verify_note: "미검증 — 버전별 Java SP/PL 서버 프로세스 이름(cub_javasp·cub_pl)과 상태 조회 명령(cubrid javasp status 등), 9.3·10.x 의 cub_server 내장 JVM 여부를 공식 매뉴얼로 확인 못 함"
+  mid:
+  - 네트워크와 포트 설정을 정상화하고 비정상 프로세스를 재기동
+  long:
+  - CAS와 PL 서버 연결상태 및 포트 헬스체크를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://www.cubrid.org/manual/en/latest/admin/control.html)
+  note: CAS에서 Java SP 서버 연결 불가
+  vendor_cause: Java SP 서버가 불안정·접근 불가하거나 예기치 않게 종료되어 CAS가 연결하지 못했다.
+  vendor_action: Java SP 서버를 재시작하고 실패하면 프로세스를 강제 종료 후 재시작하며 CAS에서 포트 접근과 방화벽을 확인한다.
+  vendor_url: https://www.cubrid.org/manual/en/latest/admin/control.html
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: Java SP 서버 오류 — 8.4 이후 동일
+- code: '-905'
+  severity: error
+  category: upstream
+  title: Java SP 패킷 통신 오류
+  immediate:
+  - "`ps -ef | grep -i -E \"javasp|cub_pl\" | grep -v grep` 로 SP 서버 프로세스 생존·기동 시각 확인(11.x 별도 프로세스) — 기동 시각이 오류 직후면 SP 서버가 그 사이 다시 뜬 것"
+  - "`grep -n -- \"-905\" $CUBRID/log/broker/error_log/<broker>_*.err | tail -20` 과 `tail -100 $CUBRID/log/server/<db>_<최근>.err` 로 같은 시각 CAS·서버 오류 확인 — 특정 SP 만 반복되면 해당 SP·드라이버 버전 문제"
+  short:
+  - "(2차·업무 담당 승인 후, 롤백: 호출 재개) 오류가 반복되는 SP 호출 업무를 일시 보류·우회"
+  - 잘못된 패킷과 프로세스 비정상 상태 및 버전 호환성을 분석
+  verify_note: "미검증 — 버전별 Java SP/PL 서버 프로세스 이름(cub_javasp·cub_pl)과 상태 조회 명령(cubrid javasp status 등), 9.3·10.x 의 cub_server 내장 JVM 여부를 공식 매뉴얼로 확인 못 함"
+  mid:
+  - PL 서버와 CUBRID 구성요소 버전을 검증하고 필요 시 패치를 적용
+  long:
+  - PL 통신 오류율과 프로세스 재시작 추세를 상시 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://www.cubrid.org/manual/en/latest/admin/control.html)
+  note: CAS가 Java SP의 잘못된 패킷 수신
+  vendor_cause: CAS가 Java SP 서버로부터 잘못된 패킷을 수신했다.
+  vendor_action: ''
+  vendor_url: https://www.cubrid.org/manual/en/latest/admin/control.html
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: Java SP 서버 오류 — 8.4 이후 동일

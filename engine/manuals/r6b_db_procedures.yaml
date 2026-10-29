@@ -1,0 +1,122 @@
+# 근거 매뉴얼·작성 기준 (r6b DB 전용 절차 — 검토자 지적 결함 수정, 2026-10-16)
+# 목적: 기존 절차에 잘못 묶여 있던 판정(데이터 제약 위반·인증 실패)에 맞는 전용 절차를 준다. 모두 scope: id — 이름 붙인 판정에만 붙는다.
+# - SQL Server 2012~2022: Microsoft Learn 'Database engine events and errors (0 to 999 · 2000 to 2999)', 'sys.foreign_keys', 'sys.foreign_key_columns',
+#   'sys.check_constraints', 'sys.key_constraints', 'sys.index_columns', 'IDENT_CURRENT', 'DBCC CHECKIDENT', 'SET LOCK_TIMEOUT'
+# - MySQL 5.7 / 8.0 / 8.4: MySQL Reference Manual 'Server Error Message Reference (ER_ACCESS_DENIED_ERROR 1045)', 'Access Control, Stage 1: Connection Verification',
+#   'Troubleshooting Problems Connecting to MySQL', 'The mysql.user Table', 'Performance Schema host_cache Table', 'ALTER USER Statement (ACCOUNT UNLOCK)'
+# 작성 기준(검증도구/knowledge_spec.md): 1차 = 읽기 전용 조회·자료 보존만, 2차 = 명령마다 사전조건·영향·승인·백업/롤백 + 성공/실패 판단,
+#   3차 = 제조사 의뢰 자료 + 민감정보 마스킹·전달 승인. 비밀번호는 명령행에 쓰지 않는다(mysql -p 는 프롬프트 입력, sqlcmd 는 -E Windows 인증).
+# 자리표시자: <server> <db> <schema> <table> <제약명> <user> <host> <관리계정> <log_error 경로> <애플리케이션 로그> <수집폴더>
+procedures:
+# ── SQL Server ──
+- id: MS-PROC-R6B-CONSTRAINT
+  scope: id
+  products: [mssql]
+  category: internal
+  match: [MSSQL-547, MSSQL-2627]
+  title: 데이터 제약 위반 — FOREIGN KEY·CHECK 충돌(547)·PRIMARY KEY/UNIQUE 중복 키(2627)
+  source: "Microsoft Learn — 'Database engine events and errors (0 to 999: 547, 2000 to 2999: 2627·2601)', 'sys.foreign_keys / sys.foreign_key_columns', 'sys.check_constraints', 'sys.key_constraints', 'IDENT_CURRENT (Transact-SQL)', 'DBCC CHECKIDENT (Transact-SQL)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: "오류 원문에서 제약 이름·객체·중복 키 값 기록 (읽기 전용) — 547·2627 은 사용자 오류라 대개 ERRORLOG 가 아니라 애플리케이션 로그에 남는다"
+      cmd: |
+        Select-String -Path "<애플리케이션 로그>" -Pattern "conflicted with the (FOREIGN KEY|CHECK|REFERENCE) constraint|Violation of (PRIMARY|UNIQUE) KEY constraint|Cannot insert duplicate key" | Select-Object -Last 20
+      check: "547: 'conflicted with the FOREIGN KEY/CHECK constraint \"<제약명>\" … table \"<table>\", column '<col>'' 에서 제약·테이블·컬럼과 INSERT/UPDATE/DELETE 중 무엇인지 기록 · 2627: 'Violation of PRIMARY KEY/UNIQUE KEY constraint' 의 제약명·객체·'The duplicate key value is (…)' 기록 · 고유 인덱스(제약 아님) 위반은 2601 로 나오며 같은 방법으로 본다"
+      note: "적용: SQL Server 2012~2022 · 권한: 애플리케이션 로그 읽기 · 중복 키 값·입력값은 개인정보일 수 있어 기록 시 가림"
+    - do: "제약 정의 확인 (읽기 전용, 카탈로그 뷰만 조회)"
+      cmd: |
+        sqlcmd -S <server> -d <db> -E -Q "SELECT name, type_desc, OBJECT_NAME(parent_object_id) AS tbl FROM sys.objects WHERE name = N'<제약명>'"
+        sqlcmd -S <server> -d <db> -E -Q "SELECT fk.name, OBJECT_NAME(fk.parent_object_id) AS child_tbl, COL_NAME(fkc.parent_object_id, fkc.parent_column_id) AS child_col, OBJECT_NAME(fk.referenced_object_id) AS parent_tbl, COL_NAME(fkc.referenced_object_id, fkc.referenced_column_id) AS parent_col, fk.delete_referential_action_desc, fk.is_disabled, fk.is_not_trusted FROM sys.foreign_keys fk JOIN sys.foreign_key_columns fkc ON fkc.constraint_object_id = fk.object_id WHERE fk.name = N'<제약명>'"
+        sqlcmd -S <server> -d <db> -E -Q "SELECT name, OBJECT_NAME(parent_object_id) AS tbl, definition, is_disabled FROM sys.check_constraints WHERE name = N'<제약명>'"
+        sqlcmd -S <server> -d <db> -E -Q "SELECT kc.name, kc.type_desc, c.name AS column_name, c.is_identity FROM sys.key_constraints kc JOIN sys.index_columns ic ON ic.object_id = kc.parent_object_id AND ic.index_id = kc.unique_index_id JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id WHERE kc.name = N'<제약명>' ORDER BY ic.key_ordinal"
+      check: "type_desc 로 FOREIGN_KEY_CONSTRAINT·CHECK_CONSTRAINT·PRIMARY_KEY_CONSTRAINT·UNIQUE_CONSTRAINT 구분 · 547(FK): INSERT/UPDATE 면 부모 행 없음, DELETE 면 자식 행이 참조 중 · 547(CHECK): definition 과 입력값 대조 · 2627: 키 컬럼 목록과 is_identity 기록"
+      note: "적용: SQL Server 2012~2022 · 권한: 해당 DB 의 메타데이터 조회(VIEW DEFINITION) · 데이터 행은 아직 읽지 않는다"
+    - do: "중복·참조 대상 행 존재 확인 (읽기 전용, 잠금 대기 5초 제한)"
+      cmd: |
+        sqlcmd -S <server> -d <db> -E -Q "SET LOCK_TIMEOUT 5000; SELECT COUNT(*) AS cnt FROM <schema>.<부모 또는 대상 table> WHERE <키 컬럼> = <오류 원문의 값>"
+        sqlcmd -S <server> -d <db> -E -Q "SELECT IDENT_CURRENT(N'<schema>.<table>') AS ident_current"     # 키가 IDENTITY 인 2627 만
+      check: "547(FK, INSERT): cnt 0 이면 부모 행 없음 확정 · 2627: cnt 1 이상이면 같은 키 재입력(재처리·중복 전송) 확정 · IDENTITY 키에서 ident_current 가 실제 최대 키보다 작으면 시드 어긋남(IDENTITY_INSERT·데이터 이관 후 흔함) · 오류 1222(잠금 시간 초과)면 운영 부하 시간을 피해 다시 조회"
+      note: "적용: SQL Server 2012~2022 · 권한: 대상 테이블 SELECT · 키 컬럼에 인덱스가 있는 조건만 쓴다(전체 스캔 금지) · 조회 결과 값은 개인정보일 수 있어 화면 캡처 시 가림"
+  - stage: 2
+    steps:
+    - do: "(2차·승인 후) 애플리케이션 처리 순서·중복 재처리 수정 — 우선 조치"
+      config:
+        file: 애플리케이션 입력·배치 로직(개발팀)
+        snippet: |
+          547(FK): 부모 행 먼저 입력 → 자식 입력, 삭제는 자식 → 부모 순서
+          547(CHECK): 입력 검증에 CHECK 정의(sys.check_constraints.definition)와 같은 규칙 반영
+          2627: 입력 전 존재 확인 또는 재처리 멱등 처리(같은 키는 갱신·건너뜀)
+      check: "성공: 같은 업무 재실행 시 547·2627 미발생 · 실패: 계속 나면 다른 경로(배치·연계)에서 같은 키를 넣는지 애플리케이션 로그로 추적"
+      note: "사전조건: 1차에서 제약 종류와 대상 행을 확정, 업무 담당과 올바른 데이터 기준 합의 · 영향: 애플리케이션 배포 필요 · 승인: 개발팀·업무 담당(변경 관리) · 백업/롤백: 배포 전 이전 버전 보관, 문제 시 이전 버전으로 되돌림 · 제약을 끄는 조치(NOCHECK·DROP CONSTRAINT)는 데이터 정합성을 깨므로 하지 않는다"
+    - do: "(2차·승인 후) 데이터 보정 — 부모 행 보충 또는 중복·고아 행 정리(업무 담당이 대상 행 확정 시만)"
+      cmd: |
+        sqlcmd -S <server> -d <db> -E -Q "SELECT * INTO <schema>.<table>_bak_<YYYYMMDD> FROM <schema>.<table> WHERE <보정 대상 조건>"
+        sqlcmd -S <server> -d <db> -E          # 대화형: BEGIN TRAN → 승인된 보정 DML → @@ROWCOUNT 가 예상 건수면 COMMIT, 아니면 ROLLBACK
+      check: "성공: 보정 건수가 승인 건수와 같고 같은 업무 재실행 시 오류 없음 · 실패: 건수가 다르면 ROLLBACK 후 조건 재확인, 다른 FK 에 걸리면(547 연쇄) 의존 순서 재계획"
+      note: "사전조건: 보정 대상 행·건수를 업무 담당이 서면 확정, 백업 테이블 공간 확인 · 영향: 보정 중 대상 행 잠금, 업무 데이터 변경 · 승인: 업무 책임자·DBA · 백업/롤백: 보정 전 <table>_bak_<YYYYMMDD> 로 대상 행 복사, 원복은 백업 테이블에서 다시 입력(삭제였으면 INSERT, 갱신이었으면 UPDATE)"
+    - do: "(2차·승인 후) IDENTITY 시드 어긋남(2627·IDENTITY 키)일 때만 시드 재설정"
+      cmd: |
+        sqlcmd -S <server> -d <db> -E -Q "DBCC CHECKIDENT (N'<schema>.<table>', NORESEED)"
+        sqlcmd -S <server> -d <db> -E -Q "DBCC CHECKIDENT (N'<schema>.<table>', RESEED, <현재 최대 키 값>)"
+      check: "성공: NORESEED 재조회 시 current identity value 가 최대 키 이상, 새 입력에서 2627 미발생 · 실패: 계속 중복이면 IDENTITY_INSERT 로 키를 직접 넣는 경로가 있는지 개발팀 확인"
+      note: "사전조건: NORESEED 출력(현재 시드) 기록, 최대 키 값을 1차 조회로 확인 · 영향: 이후 새 행의 키 번호가 바뀜(재설정 값이 최대값보다 작으면 다시 중복) · 승인: DBA·개발팀 · 백업/롤백: 기록한 이전 시드 값으로 RESEED 해 되돌릴 수 있음"
+  - stage: 3
+    steps:
+    - do: "분석·지원 의뢰 자료(대개 애플리케이션·데이터 문제라 Microsoft 의뢰는 드묾)"
+      cmd: |
+        sqlcmd -S <server> -d <db> -E -Q "SELECT OBJECT_DEFINITION(OBJECT_ID(N'<schema>.<제약명>'))" -o <수집폴더>\constraint_def.txt
+        sqlcmd -S <server> -E -Q "SELECT @@VERSION" -o <수집폴더>\version.txt
+      check: "오류 원문(제약명·객체)·제약 정의·1차 조회 결과·애플리케이션 처리 순서 설명·버전"
+      note: "민감정보 마스킹: 중복 키 값·입력값(개인정보), 서버·DB·테이블 이름 중 업무명, 로그인 이름을 가린 뒤 전달 · 전달 승인: DBA 확인 후 보안 담당 승인 · OBJECT_DEFINITION 은 CHECK 제약 정의만 돌려주며 FK·PK 는 1차의 카탈로그 조회 결과를 첨부"
+
+# ── MySQL ──
+- id: MY-PROC-R6B-AUTH
+  scope: id
+  products: [mysql]
+  category: security
+  match: [MY-1045]
+  title: 접속 거부 — 인증 실패 (1045 Access denied for user)
+  source: "MySQL 8.0 Reference Manual — 'Server Error Message Reference (ER_ACCESS_DENIED_ERROR 1045)', 'Access Control, Stage 1: Connection Verification', 'Troubleshooting Problems Connecting to MySQL', 'The Performance Schema host_cache Table', 'ALTER USER Statement'"
+  stages:
+  - stage: 1
+    steps:
+    - do: "오류 원문의 계정·접속지·비밀번호 사용 여부 기록 (읽기 전용)"
+      cmd: |
+        grep -n "Access denied for user" <log_error 경로> | tail -20
+      check: "'<user>'@'<host>' 의 host 는 서버가 본 클라이언트 주소 · '(using password: NO)' 면 애플리케이션 설정에 비밀번호 누락, YES 면 틀린 비밀번호 또는 계정·host 불일치 · error log 에 없으면 클라이언트(애플리케이션) 오류 원문으로 같은 항목 기록"
+      note: "적용: MySQL 5.7/8.0/8.4 — 8.0 은 접속 실패가 Note 등급이라 log_error_verbosity=3 일 때만 error log 에 남음 · 권한: 로그 읽기(mysql 또는 root)"
+    - do: "계정·host 패턴·플러그인·잠금·만료 확인 (읽기 전용, 별도 관리 계정으로 접속) — 비밀번호 열은 조회하지 않는다"
+      cmd: |
+        mysql -u <관리계정> -p -e "SELECT user, host, plugin, account_locked, password_expired FROM mysql.user WHERE user IN ('<user>', '') ORDER BY user, host;"
+      check: "오류 원문의 host 와 맞는 'user'@'host' 행이 없으면 host 불일치 확정 · user 가 빈('') 익명 계정이 같은 host(예: localhost)에 있으면 더 구체적인 익명 계정이 먼저 매칭돼 1045 가 날 수 있음 · account_locked=Y 면 잠김, password_expired=Y 면 만료 · 정상: 맞는 행 1개, N/N"
+      note: "적용: 5.7.6+/8.0/8.4 (account_locked) · 권한: mysql 스키마 SELECT · 관리 계정 비밀번호는 -p 프롬프트로 입력"
+    - do: "접속지별 인증 실패 누적 확인 (읽기 전용) — 설정 미반영인지 무차별 대입인지 구분"
+      cmd: |
+        mysql -u <관리계정> -p -e "SELECT IP, HOST, COUNT_AUTHENTICATION_ERRORS, SUM_CONNECT_ERRORS, LAST_SEEN FROM performance_schema.host_cache ORDER BY COUNT_AUTHENTICATION_ERRORS DESC LIMIT 10;"
+      check: "알려진 WAS·배치 IP 에서만 늘면 비밀번호 변경 미반영(커넥션 풀·배치 설정), 모르는 IP 에서 급증하면 보안 담당에 즉시 공유 · SUM_CONNECT_ERRORS 가 max_connect_errors 에 가까우면 곧 1129(호스트 차단)로 번짐"
+      note: "적용: 5.6+/8.0/8.4 · host_cache 는 TCP 접속·host_cache_size>0 일 때만 채워지고 localhost·소켓 접속은 보이지 않음 · 권한: performance_schema SELECT"
+  - stage: 2
+    steps:
+    - do: "(2차·승인 후) 애플리케이션·배치 접속 정보 정정 (using password: NO 이거나 비밀번호 변경 미반영)"
+      config:
+        file: 애플리케이션 데이터소스·배치 접속 설정(비밀번호 저장소)
+        snippet: |
+          사용자 = <user>, 비밀번호 = 비밀번호 저장소의 현재 값(설정 파일 평문 금지), 접속 주소 = 계정 host 패턴과 맞는 주소
+      check: "성공: 해당 접속지에서 1045 소멸, host_cache 의 COUNT_AUTHENTICATION_ERRORS 증가 멈춤 · 실패: 계속 1045 면 계정·host 불일치(다음 단계) 또는 다른 접속처가 남아 있음"
+      note: "사전조건: 같은 계정을 쓰는 모든 접속처 목록 확인 · 영향: 풀 재초기화(대개 WAS 재기동) 동안 지연 · 승인: 애플리케이션·DB 담당 · 백업/롤백: 변경 전 설정 파일 사본 보관 후 원복"
+    - do: "(2차·승인 후) 계정 잠금·만료 해제 또는 host 불일치 정정"
+      cmd: |
+        mysql -u <관리계정> -p -e "SHOW CREATE USER '<user>'@'<host>'; SHOW GRANTS FOR '<user>'@'<host>';" > /tmp/<user>_before.sql
+        mysql -u <관리계정> -p -e "ALTER USER '<user>'@'<host>' ACCOUNT UNLOCK;"      # account_locked=Y 일 때만
+        mysql -u <관리계정> -p          # 대화형 세션에서: 만료면 ALTER USER … IDENTIFIED BY …, host 불일치면 맞는 host 로 CREATE USER + 같은 GRANT (비밀번호는 셸 -e 로 넘기지 않음)
+      check: "성공: 해당 접속지에서 접속 성공, mysql.user 의 account_locked·password_expired 가 N · 실패: 곧 다시 잠기면 잘못된 비밀번호로 시도하는 접속처가 남은 것 — 1차 host_cache 로 출처 재확인"
+      note: "사전조건: 잠금·만료가 보안 정책에 따른 의도된 조치가 아닌지 보안 담당 확인, 변경 전 SHOW CREATE USER·SHOW GRANTS 결과 보관 · 영향: 잠금 해제·새 host 계정은 즉시 접속 허용 범위를 넓힘, 익명 계정 정리는 그 계정을 쓰던 접속에 영향 · 승인: 보안 담당·DBA · 백업/롤백: 보관한 /tmp/<user>_before.sql 의 문장으로 재생성·재잠금(ALTER USER … ACCOUNT LOCK), 추가한 host 계정은 DROP USER 로 제거"
+  - stage: 3
+    steps:
+    - do: "제조사·보안 분석 자료"
+      cmd: |
+        grep -n "Access denied for user" <log_error 경로> | tail -200 > /tmp/mysql_access_denied.txt
+        mysql -u <관리계정> -p -e "SELECT VERSION(); SELECT user, host, plugin, account_locked, password_expired FROM mysql.user WHERE user = '<user>';" > /tmp/mysql_account.txt
+      check: "접속 거부 기록·계정 속성(비밀번호 제외)·host_cache 결과·클라이언트 오류 원문·버전"
+      note: "민감정보 마스킹: 계정명·호스트명·IP 를 가리고 비밀번호·인증 문자열(authentication_string)은 절대 포함하지 않음, 무차별 대입이 의심되면 원본은 보안 담당만 보관 · 전달 승인: 보안 담당 승인"

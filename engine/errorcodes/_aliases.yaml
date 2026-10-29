@@ -1,0 +1,1486 @@
+# 코드 별칭 — 로그 메시지 패턴을 사전의 의사코드(코드가 없는 제품용)로 연결
+aliases:
+- product: tomcat
+  code: TOMCAT-HEAP-OOM
+  regex: 'OutOfMemoryError: Java heap space'
+- product: tomcat
+  code: TOMCAT-METASPACE-OOM
+  regex: 'OutOfMemoryError: Metaspace|OutOfMemoryError: PermGen'
+- product: tomcat
+  code: TOMCAT-GC-OVERHEAD
+  regex: GC overhead limit exceeded
+- product: tomcat
+  code: TOMCAT-POOL-EXHAUSTED
+  regex: connection is not available|Timeout waiting for idle object|Unable to acquire JDBC Connection
+- product: tomcat
+  code: TOMCAT-CLIENT-ABORT
+  regex: ClientAbortException
+- product: tomcat
+  code: TOMCAT-CONNECTION-RESET
+  regex: Connection reset by peer|Connection reset
+- product: tomcat
+  code: TOMCAT-BROKEN-PIPE
+  regex: Broken pipe
+- product: tomcat
+  code: TOMCAT-ADDRESS-IN-USE
+  regex: Address already in use
+- product: tomcat
+  code: TOMCAT-TOO-MANY-OPEN-FILES
+  regex: Too many open files
+- product: tomcat
+  code: TOMCAT-NO-SPACE
+  regex: No space left on device
+- product: tomcat
+  code: TOMCAT-ACCEPT-FAILED
+  regex: Socket accept failed
+- product: tomcat
+  code: TOMCAT-CONTEXT-START-FAILED
+  regex: Context \[.*\] startup failed|One or more listeners failed to start
+- product: nginx
+  code: NGX-WORKER-CONNECTIONS
+  regex: worker_connections are not enough
+- product: nginx
+  code: NGX-UPSTREAM-CONNECT
+  regex: connect\(\) failed .* while connecting to upstream
+- product: nginx
+  code: NGX-UPSTREAM-TIMEOUT
+  regex: upstream timed out
+- product: nginx
+  code: NGX-NO-LIVE-UPSTREAMS
+  regex: no live upstreams
+- product: nginx
+  code: NGX-UPSTREAM-CLOSED
+  regex: upstream prematurely closed connection
+- product: nginx
+  code: NGX-UPSTREAM-BIG-HEADER
+  regex: upstream sent too big header
+- product: nginx
+  code: NGX-SSL-HANDSHAKE
+  regex: SSL_do_handshake\(\) failed
+- product: nginx
+  code: NGX-ACCEPT-FAILED
+  regex: accept4?\(\) failed
+- product: nginx
+  code: NGX-TOO-MANY-OPEN-FILES
+  regex: Too many open files
+- product: nginx
+  code: NGX-NO-SPACE
+  regex: No space left on device
+- product: linux
+  code: LNX-OOM-KILLER
+  regex: 'Out of memory: Kill(ed)? process|oom-killer'
+- product: linux
+  code: LNX-MEMCG-OOM
+  regex: Memory cgroup out of memory
+- product: linux
+  code: LNX-SOFT-LOCKUP
+  regex: soft lockup
+- product: linux
+  code: LNX-HUNG-TASK
+  regex: blocked for more than \d+ seconds|hung_task
+- product: linux
+  code: LNX-KERNEL-PANIC
+  regex: Kernel panic
+- product: linux
+  code: LNX-BUFFER-IO
+  regex: 'Buffer I/O error|blk_update_request: I/O error|I/O error, dev'
+- product: linux
+  code: LNX-EXT4-ERROR
+  regex: EXT4-fs error
+- product: linux
+  code: LNX-XFS-CORRUPTION
+  regex: XFS .*(corruption|Corruption)
+- product: linux
+  code: LNX-NO-SPACE
+  regex: No space left on device
+- product: linux
+  code: LNX-CONNTRACK-FULL
+  regex: 'nf_conntrack: .*table full'
+- product: linux
+  code: LNX-NETDEV-WATCHDOG
+  regex: NETDEV WATCHDOG
+- product: linux
+  code: LNX-MCE-HARDWARE
+  regex: 'Machine check events|mce: \[Hardware Error\]|EDAC .* CE|Hardware Error'
+- product: linux
+  code: LNX-READONLY-FS
+  regex: Remounting filesystem read-only|read-only file ?system
+- product: linux
+  code: LNX-NFS-NOT-RESPONDING
+  regex: 'nfs: server .* not responding'
+# 5차 보강: FMA 메시지 ID 를 일반 SUNW-MSG-ID 별칭보다 먼저
+- product: solaris
+  code: PCIEX-8000-5Y
+  regex: PCIEX-8000-5Y
+- product: solaris
+  code: FMD-8000-2K
+  regex: FMD-8000-2K
+- product: solaris
+  code: SOL-KERNEL-PANIC
+  regex: panic\[
+- product: solaris
+  code: SOL-SWAP-EXHAUSTED
+  regex: out of swap|no swap space
+- product: solaris
+  code: SOL-FS-FULL
+  regex: file system full
+- product: solaris
+  code: SOL-NFS-NOT-RESPONDING
+  regex: NFS server .* not responding
+- product: solaris
+  code: SOL-SCSI-BUS-HUNG
+  regex: 'SCSI bus .*hung|scsi: .*reset'
+- product: solaris
+  code: SOL-ZFS-FAULT
+  regex: 'ZFS-8000|zfs: .*fault'
+- product: solaris
+  code: SOL-SMF-MAINTENANCE
+  regex: Method "start" exited|transitioned to maintenance
+- product: solaris
+  code: SOL-FMA-FAULT
+  regex: SUNW-MSG-ID
+- product: hpux
+  code: HPUX-SWAP-RESERVATION
+  regex: Deferred swap reservation failure
+- product: hpux
+  code: HPUX-VXFS-FULL
+  regex: 'vxfs: .*file system full|file system full'
+- product: hpux
+  code: HPUX-LVM-LOST-QUORUM
+  regex: Lost quorum
+- product: hpux
+  code: HPUX-PVLINK-FAILED
+  regex: PVLink .* Failed
+- product: hpux
+  code: HPUX-SCSI-ASYNC-WRITE
+  regex: Asynchronous write failed
+- product: tomcat
+  code: TOMCAT-OOM-THREAD
+  regex: unable to create (new )?native thread
+- product: tomcat
+  code: TOMCAT-THREADPOOL-FULL
+  regex: maxThreads.*(reached|exhausted)|All threads \(\d+\) are currently busy
+- product: tomcat
+  code: TOMCAT-SSL-INIT-FAIL
+  regex: Failed to initialize (component|the SSLEngine)|keystore password was incorrect|SSLContext
+- product: tomcat
+  code: TOMCAT-LISTENER-FAIL
+  regex: Exception sending context initialized event to listener|Error listenerStart
+- product: tomcat
+  code: TOMCAT-SERVLET-INIT-FAIL
+  regex: Servlet\.init\(\) for servlet .* threw exception|Servlet\.init\(\) threw
+- product: tomcat
+  code: TOMCAT-FILTER-FAIL
+  regex: Exception starting filter|Error filterStart
+- product: tomcat
+  code: TOMCAT-DEPLOY-FAIL
+  regex: Error deploying web application|Failed to deploy application
+- product: tomcat
+  code: TOMCAT-CLASSLOADER-LEAK
+  regex: appears to have started a thread named .* but has failed to stop it|likely to create a memory leak
+- product: tomcat
+  code: TOMCAT-JDBC-DRIVER-LEAK
+  regex: registered the JDBC driver .* but failed to unregister it
+- product: tomcat
+  code: TOMCAT-SESSION-PERSIST-FAIL
+  regex: Cannot serialize session attribute|Exception loading sessions from persistent storage
+- product: tomcat
+  code: TOMCAT-CLUSTER-MEMBER-LOST
+  regex: Member disappeared|Received member disappeared
+- product: tomcat
+  code: TOMCAT-CLUSTER-SEND-FAIL
+  regex: Unable to send message through cluster sender|ChannelException
+- product: tomcat
+  code: TOMCAT-AJP-SECRET
+  regex: AJP connector configured with secretRequired="true" but no secret
+- product: tomcat
+  code: TOMCAT-AJP-REJECT
+  regex: An invalid request has been received.*secret|AJP.*(rejected|Invalid)
+- product: tomcat
+  code: TOMCAT-REQUEST-HEADER-TOO-LARGE
+  regex: Request header is too large
+- product: tomcat
+  code: TOMCAT-INVALID-CHARACTER
+  regex: Invalid character found in (the request target|method name)
+- product: tomcat
+  code: TOMCAT-MAX-POST-SIZE
+  regex: exceeds the maximum size|maxPostSize
+- product: tomcat
+  code: TOMCAT-SOCKET-TIMEOUT
+  regex: SocketTimeoutException|Read timed out
+- product: tomcat
+  code: TOMCAT-JNDI-DS-FAIL
+  regex: Cannot create JDBC driver of class|NamingException|Name \[.*\] is not bound
+- product: tomcat
+  code: TOMCAT-DS-VALIDATION-FAIL
+  regex: Failed to validate connection|Connection validation failed
+- product: tomcat
+  code: TOMCAT-STUCK-THREAD
+  regex: 'Thread (?:\[[^\]]+\]|"[^"]+") \(id=(?:\[\d+\]|\d+)\) has been (?:active for|interrupted because it was active for)'
+- product: tomcat
+  code: TOMCAT-TEMP-DIR-FAIL
+  regex: Unable to create the directory|work directory
+- product: tomcat
+  code: TOMCAT-LOG-WRITE-FAIL
+  regex: Unable to open (log )?file|FileHandler
+- product: tomcat
+  code: TOMCAT-JSP-COMPILE-FAIL
+  regex: Unable to compile class for JSP|JasperException
+- product: tomcat
+  code: TOMCAT-WEBSOCKET-FAIL
+  regex: WebSocket.*(failed|error)|Upgrade.*failed
+- product: tomcat
+  code: TOMCAT-HTTP2-FAIL
+  regex: HTTP/2.*(failed|error)|ALPN
+- product: tomcat
+  code: TOMCAT-MANAGER-AUTH-FAIL
+  regex: manager.*(401|403)|Access to the requested resource has been denied
+- product: tomcat
+  code: TOMCAT-REALM-FAIL
+  regex: Exception performing authentication|JNDIRealm.*(Exception|failed)|DataSourceRealm.*Exception
+- product: tomcat
+  code: TOMCAT-ASYNC-TIMEOUT
+  regex: Async.*timeout|AsyncContext.*timed out
+- product: tomcat
+  code: TOMCAT-RESPONSE-COMMITTED
+  regex: Cannot (call sendRedirect\(\)|set header|forward) after (the )?response has been committed
+- product: tomcat
+  code: TOMCAT-JAR-SCAN-FAIL
+  regex: Failed to scan \[.*\] from classloader hierarchy|Failed to scan JAR
+- product: tomcat
+  code: TOMCAT-STARTUP-SLOW
+  regex: Creation of SecureRandom instance for session ID generation.*took \[\d{4,}\]
+- product: jeus
+  code: JEUS-LICENSE-FAIL
+  regex: '[Ll]icense.*(invalid|expired|fail|not found)|라이선스.*(만료|오류|실패)'
+- product: jeus
+  code: JEUS-PORT-BIND-FAIL
+  regex: Address already in use|BindException
+- product: jeus
+  code: JEUS-DEPLOY-FAIL
+  regex: '[Dd]eploy.*(fail|exception)|Failed to deploy'
+- product: jeus
+  code: JEUS-CONTEXT-INIT-FAIL
+  regex: Exception sending context initialized event|ContextInitialization.*fail|contextInitialized.*Exception
+- product: jeus
+  code: JEUS-THREAD-BLOCK
+  regex: '[Bb]locked thread|thread.*blocked for|Thread state.*BLOCKED'
+- product: jeus
+  code: JEUS-THREADPOOL-FULL
+  regex: thread pool.*(full|exhausted)|No available thread|worker thread.*(max|full)
+- product: jeus
+  code: JEUS-METASPACE-OOM
+  regex: 'OutOfMemoryError: Metaspace'
+- product: jeus
+  code: JEUS-GC-OVERHEAD
+  regex: GC overhead limit exceeded
+- product: jeus
+  code: JEUS-OOM
+  regex: OutOfMemoryError
+- product: jeus
+  code: JEUS-DS-CONNECT-FAIL
+  regex: 'Failed to (get|create) (a )?connection|Could not connect to|Connection refused.*(jdbc|datasource)|IO Error: The Network Adapter'
+- product: jeus
+  code: JEUS-DS-POOL-EXHAUSTED
+  regex: pool.*(exhausted|full)|no available connection|Connection pool.*(max|timeout)
+- product: jeus
+  code: JEUS-DS-CHECK-FAIL
+  regex: check query.*fail|connection check.*fail|validation.*fail
+- product: jeus
+  code: JEUS-TX-TIMEOUT
+  regex: Transaction.*(timed out|timeout)|TransactionTimedOut
+- product: jeus
+  code: JEUS-TX-ROLLBACK
+  regex: rolled back|RollbackException|setRollbackOnly
+- product: jeus
+  code: JEUS-TX-RECOVERY-FAIL
+  regex: recovery.*fail|XA.*recover.*fail
+- product: jeus
+  code: JEUS-SESSION-REPL-FAIL
+  regex: session.*(replicat|backup).*(fail|error)
+- product: jeus
+  code: JEUS-CLUSTER-MEMBER-LOST
+  regex: member.*(left|removed|lost|suspect)|node.*(down|disconnected)
+- product: jeus
+  code: JEUS-DAS-CONNECT-FAIL
+  regex: DAS.*(connect|connection).*(fail|refused)|Cannot connect to (the )?DAS|INDEPENDENT
+- product: jeus
+  code: JEUS-WEBTOB-CONNECT-FAIL
+  regex: WebtoB.*(connect|connection).*(fail|refused)|WJP.*connect.*fail
+- product: jeus
+  code: JEUS-WEBTOB-DISCONNECT
+  regex: WebtoB.*(disconnect|closed|lost)
+- product: jeus
+  code: JEUS-SSL-INIT-FAIL
+  regex: SSL.*(init|handshake).*(fail|error)|keystore
+- product: jeus
+  code: JEUS-AUTH-FAIL
+  regex: Authentication failed|LoginException|login.*fail
+- product: jeus
+  code: JEUS-SERVLET-EXCEPTION
+  regex: ServletException|Servlet.*threw exception
+- product: jeus
+  code: JEUS-JSP-COMPILE-FAIL
+  regex: JSP.*compil.*(fail|error)|JasperException
+- product: jeus
+  code: JEUS-EJB-POOL-FULL
+  regex: EJB.*pool.*(full|exhausted)
+- product: jeus
+  code: JEUS-JMS-CONNECT-FAIL
+  regex: JMS.*(connect|connection).*(fail|refused)
+- product: jeus
+  code: JEUS-JMS-STORE-FULL
+  regex: JMS.*(store|journal).*(full|no space)
+- product: jeus
+  code: JEUS-LOG-WRITE-FAIL
+  regex: No space left on device|log.*write.*fail
+- product: jeus
+  code: JEUS-CONFIG-PARSE-FAIL
+  regex: domain\.xml.*(parse|invalid|error)|SAXParseException|XML.*parsing error
+- product: jeus
+  code: JEUS-CLASSLOADER-FAIL
+  regex: ClassNotFoundException|NoClassDefFoundError
+- product: jeus
+  code: JEUS-STARTUP-TIMEOUT
+  regex: boot.*time.?out|startup.*timed out
+- product: jeus
+  code: JEUS-SERVER-BOOT-FAIL
+  regex: boot.*fail|Failed to (boot|start) (the )?server|Server.*failed to start
+- product: jeus
+  code: JEUS-JNDI-LOOKUP-FAIL
+  regex: NameNotFoundException|JNDI.*lookup.*fail|not bound
+- product: jeus
+  code: JEUS-ADMIN-AUTH-FAIL
+  regex: webadmin.*(auth|login).*fail|administrator.*(auth|login).*fail
+- product: webtob
+  code: WEBTOB-HTH-HANG
+  regex: hth.*(hang|not respond|no response)
+- product: webtob
+  code: WEBTOB-HTH-RESTART
+  regex: hth.*(restart|respawn)|HTH.*restart
+- product: webtob
+  code: WEBTOB-HTH-DOWN
+  regex: hth.*(down|dead|terminated|exit)|HTH.*(down|dead)
+- product: webtob
+  code: WEBTOB-HTL-DOWN
+  regex: htl.*(down|dead|terminated|exit)|HTL.*(down|dead)
+- product: webtob
+  code: WEBTOB-WSM-DOWN
+  regex: wsm.*(down|dead|terminated|exit)|WSM.*(down|dead)
+- product: webtob
+  code: WEBTOB-SVR-RESTART
+  regex: server.*(restart|respawn)|svr.*restart
+- product: webtob
+  code: WEBTOB-SVR-QUEUE-FULL
+  regex: server.*queue.*(full|overflow)|svr.*queue.*full
+- product: webtob
+  code: WEBTOB-SVR-MAXPROC
+  regex: MaxProc|max(imum)? proc.*(exceed|reached)
+- product: webtob
+  code: WEBTOB-SVR-TIMEOUT
+  regex: '[Ss]erver.*time.?out|svr.*timeout|SvrTimeout'
+- product: webtob
+  code: WEBTOB-SERVER-DOWN
+  regex: server.*(down|dead|died|terminated)|svr.*(down|dead)
+- product: webtob
+  code: WEBTOB-JSV-QUEUE-FULL
+  regex: '[Qq]ueue.*(full|overflow)|QCount|queue.*exceed'
+- product: webtob
+  code: WEBTOB-JSV-TIMEOUT
+  regex: JSV.*time.?out|jsv.*time.?out
+- product: webtob
+  code: WEBTOB-JSV-RECONNECT
+  regex: JSV.*(reconnect|re-?connected)|jsv.*(reconnect)
+- product: webtob
+  code: WEBTOB-JSV-DISCONNECT
+  regex: JSV.*(disconnect|closed|lost)|jsv.*(disconnect|closed)|connection.*JEUS.*(closed|lost)
+- product: webtob
+  code: WEBTOB-CLIENT-MAX
+  regex: MaxUser|max(imum)? (client|user).*(exceed|reached)|too many clients
+- product: webtob
+  code: WEBTOB-CLIENT-DISCONNECT
+  regex: '[Cc]lient.*(disconnect|closed|reset)'
+- product: webtob
+  code: WEBTOB-TIMEOUT
+  regex: '[Cc]lient.*time.?out|Timeout.*client'
+- product: webtob
+  code: WEBTOB-CONFIG-ERROR
+  regex: wscfl.*(error|fail)|config.*(error|invalid)|syntax error
+- product: webtob
+  code: WEBTOB-LICENSE-FAIL
+  regex: '[Ll]icense.*(invalid|expired|fail|not found)'
+- product: webtob
+  code: WEBTOB-PORT-BIND-FAIL
+  regex: Address already in use|bind.*fail|EADDRINUSE
+- product: webtob
+  code: WEBTOB-SSL-CERT-EXPIRED
+  regex: certificate.*expired|cert.*expire
+- product: webtob
+  code: WEBTOB-SSL-HANDSHAKE
+  regex: SSL.*handshake.*(fail|error)|SSL_accept
+- product: webtob
+  code: WEBTOB-SSL-INIT-FAIL
+  regex: SSL.*(init|cert|key).*(fail|error)|certificate.*(fail|error|invalid)
+- product: webtob
+  code: WEBTOB-SHM-FAIL
+  regex: shm.*(fail|error)|shared memory.*(fail|error)|shmget
+- product: webtob
+  code: WEBTOB-IPC-FAIL
+  regex: ipc.*(fail|error)|semaphore.*(fail|error)|msgget|semget
+- product: webtob
+  code: WEBTOB-DISK-FULL
+  regex: No space left on device|disk.*full
+- product: webtob
+  code: WEBTOB-LOG-WRITE-FAIL
+  regex: log.*write.*(fail|error)|cannot (open|write) log
+- product: webtob
+  code: WEBTOB-CGI-FAIL
+  regex: CGI.*(fail|error)|cgi.*(exec|fail)
+- product: webtob
+  code: WEBTOB-FILE-NOT-FOUND
+  regex: File (does )?not (exist|found)|404.*not found|No such file
+- product: webtob
+  code: WEBTOB-ACCESS-DENIED
+  regex: '[Aa]ccess denied|403|Forbidden'
+- product: webtob
+  code: WEBTOB-HEADER-TOO-LARGE
+  regex: '[Hh]eader.*too (large|long)|431'
+- product: webtob
+  code: WEBTOB-REQUEST-TOO-LARGE
+  regex: '[Rr]equest.*too (large|long)|413'
+- product: webtob
+  code: WEBTOB-INVALID-REQUEST
+  regex: '[Ii]nvalid request|400 Bad Request|malformed'
+- product: webtob
+  code: WEBTOB-NODE-DOWN
+  regex: node.*(down|dead|unreachable)
+- product: webtob
+  code: WEBTOB-BOOT-FAIL
+  regex: wsboot.*(fail|error)|boot.*fail|cannot boot
+- product: webtob
+  code: WEBTOB-FD-EXHAUSTED
+  regex: Too many open files|EMFILE|fd.*exhaust
+- product: nginx
+  code: NGX-BIND-FAIL
+  regex: bind\(\) to .* failed|Address already in use
+- product: nginx
+  code: NGX-CONFIG-INVALID
+  regex: invalid (parameter|value|number)|unknown directive|unexpected "}"|configuration file .* test failed
+- product: nginx
+  code: NGX-WORKER-KILLED
+  regex: worker process \d+ exited on signal 9
+- product: nginx
+  code: NGX-WORKER-EXIT-SIGNAL
+  regex: worker process \d+ exited on signal|exited with fatal code
+- product: nginx
+  code: NGX-UPSTREAM-SENT-INVALID-HEADER
+  regex: upstream sent (invalid|no valid) (header|HTTP/1.0 header)
+- product: nginx
+  code: NGX-UPSTREAM-BIG-BODY
+  regex: an upstream response is buffered to a temporary file
+- product: nginx
+  code: NGX-CLIENT-BODY-TOO-LARGE
+  regex: client intended to send too large body
+- product: nginx
+  code: NGX-CLIENT-HEADER-TOO-LARGE
+  regex: client sent too (large|long) (request|header)
+- product: nginx
+  code: NGX-CLIENT-TIMEOUT
+  regex: client timed out
+- product: nginx
+  code: NGX-CLIENT-CLOSED
+  regex: client (prematurely )?closed connection
+- product: nginx
+  code: NGX-SSL-KEY-MISMATCH
+  regex: key values mismatch|SSL_CTX_use_PrivateKey
+- product: nginx
+  code: NGX-SSL-CERT-FAIL
+  regex: cannot load certificate|SSL_CTX_use_certificate|PEM_read_bio
+- product: nginx
+  code: NGX-SSL-VERIFY-FAIL
+  regex: client SSL certificate verify error|certificate verify failed
+- product: nginx
+  code: NGX-SSL-STAPLING-FAIL
+  regex: OCSP.*(failed|error)|stapling
+- product: nginx
+  code: NGX-SSL-PROTOCOL-ERROR
+  regex: SSL_read\(\) failed|SSL_write\(\) failed|SSL routines.*(version|cipher|protocol)|http request.*sent to HTTPS port
+- product: nginx
+  code: NGX-UPSTREAM-HOST-NOT-FOUND
+  regex: host not found in upstream
+- product: nginx
+  code: NGX-DNS-RESOLVE-FAIL
+  regex: could not be resolved|resolver
+- product: nginx
+  code: NGX-DIRECTORY-INDEX-FORBIDDEN
+  regex: directory index of .* is forbidden
+- product: nginx
+  code: NGX-PERMISSION-DENIED
+  regex: 'failed \(13: Permission denied\)'
+- product: nginx
+  code: NGX-OPEN-FILE-FAIL
+  regex: open\(\) ".*" failed \(2:|No such file or directory
+- product: nginx
+  code: NGX-LIMIT-REQ
+  regex: limiting requests
+- product: nginx
+  code: NGX-LIMIT-CONN
+  regex: limiting connections
+- product: nginx
+  code: NGX-CONN-RESET
+  regex: Connection reset by peer
+- product: nginx
+  code: NGX-RECV-FAIL
+  regex: recv\(\) failed
+- product: nginx
+  code: NGX-SEND-FAIL
+  regex: send\(\) failed|sendfile\(\) failed
+- product: nginx
+  code: NGX-READV-FAIL
+  regex: readv\(\) failed
+- product: nginx
+  code: NGX-WRITEV-FAIL
+  regex: writev\(\) failed
+- product: nginx
+  code: NGX-SIGNAL-RELOAD
+  regex: signal 1 \(SIGHUP\) received|reconfiguring
+- product: nginx
+  code: NGX-PID-FILE-FAIL
+  regex: open\(\) ".*\.pid" failed
+- product: nginx
+  code: NGX-SHM-ALLOC-FAIL
+  regex: could not allocate|zone .* is too small
+- product: nginx
+  code: NGX-EPOLL-FAIL
+  regex: epoll_(ctl|wait|create)\(\) failed
+- product: nginx
+  code: NGX-UPSTREAM-RESPONSE-EMPTY
+  regex: upstream sent no valid HTTP|empty response
+- product: nginx
+  code: NGX-UPSTREAM-NEXT-TRIES
+  regex: upstream server temporarily disabled
+- product: nginx
+  code: NGX-PROXY-PROTOCOL-BROKEN
+  regex: broken header|PROXY protocol
+- product: nginx
+  code: NGX-FASTCGI-STDERR
+  regex: FastCGI sent in stderr
+- product: nginx
+  code: NGX-FASTCGI-FAIL
+  regex: connect\(\) to unix:.*fastcgi|FastCGI.*(failed|error)
+- product: nginx
+  code: NGX-CACHE-WRITE-FAIL
+  regex: cache.*(failed|error)
+- product: nginx
+  code: NGX-UPSTREAM-TEMP-FAIL
+  regex: cannot create temporary|temp file
+- product: nginx
+  code: NGX-STREAM-UPSTREAM-FAIL
+  regex: while proxying connection|stream
+- product: nginx
+  code: NGX-REWRITE-CYCLE
+  regex: rewrite or internal redirection cycle
+- product: iis
+  code: IIS-HTTPERR-TIMER-CONNECTIONIDLE
+  regex: Timer_ConnectionIdle
+- product: iis
+  code: IIS-HTTPERR-TIMER-MINBYTESPERSECOND
+  regex: Timer_MinBytesPerSecond
+- product: iis
+  code: IIS-HTTPERR-CONNECTION-ABANDONED
+  regex: Connection_Abandoned_By_ReqQueue|Connection_Abandoned_By_AppPool
+- product: iis
+  code: IIS-HTTPERR-QUEUEFULL
+  regex: QueueFull
+- product: iis
+  code: IIS-HTTPERR-APPOFFLINE
+  regex: AppOffline|AppPoolTimer|AppShutdown
+- product: iis
+  code: IIS-HTTPERR-BADREQUEST
+  regex: BadRequest
+- product: iis
+  code: IIS-HTTPERR-REQUEST-LENGTH
+  regex: RequestLength|EntityTooLarge|FieldLength
+- product: iis
+  code: IIS-HTTPERR-URL-LENGTH
+  regex: URL_Length|UrlLength
+- product: iis
+  code: IIS-HTTPERR-VERB
+  regex: \bVerb\b
+- product: iis
+  code: IIS-HTTPERR-HOSTNAME
+  regex: Hostname
+- product: iis
+  code: IIS-HTTPERR-CLIENT-RESET
+  regex: Client_Reset|Timer_EntityBody|Timer_HeaderWait
+- product: iis
+  code: IIS-HTTPERR-INTERNAL
+  regex: \bInternal\b
+- product: iis
+  code: IIS-HTTPERR-HEADER
+  regex: \bHeader\b
+- product: iis
+  code: IIS-HTTPERR-FORBIDDEN
+  regex: Forbidden
+- product: iis
+  code: IIS-HTTPERR-CONNLIMIT
+  regex: ConnLimit|Connection_Dropped_List_Full
+- product: iis
+  code: IIS-HTTPERR-LOGGING-FAIL
+  regex: LoggingFailure
+- product: linux
+  code: LNX-SEGFAULT
+  regex: segfault at|SIGSEGV
+- product: linux
+  code: LNX-GENERAL-PROTECTION
+  regex: general protection (ip|fault)
+- product: linux
+  code: LNX-TCP-SYN-FLOOD
+  regex: Possible SYN flooding
+- product: linux
+  code: LNX-SOCKET-BUFFER
+  regex: out of socket memory|too many orphaned sockets
+- product: linux
+  code: LNX-TOO-MANY-OPEN-FILES
+  regex: 'Too many open files|VFS: file-max limit .* reached'
+- product: linux
+  code: LNX-FORK-FAILED
+  regex: 'fork: (retry|Cannot allocate memory|Resource temporarily unavailable)|cgroup: fork rejected'
+- product: linux
+  code: LNX-CPU-STALL
+  regex: rcu_sched detected stalls|rcu_preempt detected stalls|RCU.*stall
+- product: linux
+  code: LNX-NMI-WATCHDOG
+  regex: hard LOCKUP|NMI Watchdog detected LOCKUP
+- product: linux
+  code: LNX-BOND-FAILOVER
+  regex: 'bond\d+: (link status definitely down|making interface .* the new active one)'
+- product: linux
+  code: LNX-LINK-DOWN
+  regex: Link is Down|NIC Link is Down|link down
+- product: linux
+  code: LNX-MULTIPATH-FAIL
+  regex: 'multipathd?: .*(fail|remaining active paths|path down)|multipath: Failing path'
+- product: linux
+  code: LNX-SMART-FAIL
+  regex: smartd.*(FAILED|failing|Prefailure|Currently unreadable)
+- product: linux
+  code: LNX-SCSI-ERROR
+  regex: 'sd \S+: \[\S+\] (Sense Key|Add\. Sense|Unhandled error|FAILED Result)|Medium Error|SCSI error ?: .*return code'
+- product: linux
+  code: LNX-MD-RAID-DEGRADED
+  regex: 'md/raid.*(Disk failure|degraded)|md: .*(degraded|Operation continuing on)'
+- product: linux
+  code: LNX-LVM-FAIL
+  regex: 'lvm.*(Couldn.t find device|missing)|device-mapper: .*(error|fail)'
+- product: linux
+  code: LNX-SWAP-FULL
+  regex: swap.*(full|exhausted)|Out of swap
+- product: linux
+  code: LNX-PAGE-ALLOC-FAIL
+  regex: page allocation (failure|stalls)
+- product: linux
+  code: LNX-DISK-QUOTA
+  regex: Disk quota exceeded|quota exceeded
+- product: linux
+  code: LNX-NTP-UNREACHABLE
+  regex: ntpd.*(unreachable|no servers)|chronyd.*(unreachable|Source .* offline)
+- product: linux
+  code: LNX-CLOCK-SKEW
+  regex: chronyd.*(Can.t synchronise|no majority)|ntpd.*time reset|clock skew
+- product: linux
+  code: LNX-SSH-AUTH-FAIL
+  regex: sshd.*(Failed password|authentication failure|Invalid user|maximum authentication attempts)
+- product: linux
+  code: LNX-SUDO-FAIL
+  regex: sudo:.*(incorrect password|NOT in sudoers|authentication failure)
+- product: linux
+  code: LNX-SELINUX-DENIAL
+  regex: avc:\s+denied|SELinux is preventing
+- product: linux
+  code: LNX-SYSTEMD-WATCHDOG
+  regex: Watchdog timeout.*\.service|watchdog timeout
+- product: linux
+  code: LNX-SYSTEMD-UNIT-FAILED
+  regex: 'systemd.*: (Failed to start|Unit .* entered failed state|.*\.service: (Main process exited|Failed with result))'
+- product: linux
+  code: LNX-CRON-FAIL
+  regex: CRON.*\(CMD\).*(error|fail)|cron.*failed
+- product: linux
+  code: LNX-DNS-FAIL
+  regex: Temporary failure in name resolution|Name or service not known|systemd-resolved.*(failed|timed out)
+- product: linux
+  code: LNX-FS-INODE-FULL
+  regex: out of inodes|inodes.*exhausted
+- product: linux
+  code: LNX-KDUMP-FAIL
+  regex: kdump.*(fail|not (loaded|operational))|crashkernel.*(fail|not)
+- product: linux
+  code: LNX-THERMAL
+  regex: temperature above threshold|thermal.*(critical|throttl)
+- product: linux
+  code: LNX-PSU-FAIL
+  regex: '[Pp]ower [Ss]upply.*(fail|lost|AC lost|Failure)'
+- product: linux
+  code: LNX-AUDIT-BACKLOG
+  regex: 'audit: backlog limit exceeded'
+- product: linux
+  code: LNX-AUDIT-DISK-FULL
+  regex: auditd.*(disk (is )?full|low disk space)
+- product: linux
+  code: LNX-JOURNAL-CORRUPT
+  regex: journal.*(corrupted|Corrupted|File corruption)
+- product: linux
+  code: LNX-DOCKER-OOM
+  regex: docker.*OOM|containerd.*oom
+- product: solaris
+  code: SOL-SVC-MAINTENANCE
+  regex: transitioned to maintenance|maintenance mode
+- product: solaris
+  code: SOL-SVC-DEGRADED
+  regex: transitioned to degraded|degraded
+- product: solaris
+  code: SOL-ZPOOL-FAULTED
+  regex: FAULTED|ZFS-8000-(3C|5E|HC|JQ)
+- product: solaris
+  code: SOL-ZPOOL-DEGRADED
+  regex: DEGRADED|ZFS-8000-(2Q|4J|D3)
+- product: solaris
+  code: SOL-ZFS-CHECKSUM
+  regex: checksum error|ZFS-8000-(8A|GH)
+- product: solaris
+  code: SOL-ZFS-NO-SPACE
+  regex: out of space|ENOSPC
+- product: solaris
+  code: SOL-MPXIO-PATH-OFFLINE
+  regex: 'mpxio.*offline|multipath status: degraded|path .* offline'
+- product: solaris
+  code: SOL-DISK-RETRYABLE
+  regex: Retryable|Soft Error|Transport Error
+- product: solaris
+  code: SOL-DISK-ERROR
+  regex: 'Error for Command|Hard Error|Fatal Error|Requested Block:'
+- product: solaris
+  code: SOL-MEMORY-ECC
+  regex: ECC|Correctable Error|SUN4[UV]-8000-(6H|F2)|memory error
+- product: solaris
+  code: SOL-CPU-FAULT
+  regex: cpu.*fault|SUN4[UV]-8000-(0X|4P|7Y)|CPU .* offlined
+- product: solaris
+  code: SOL-FMA-RETIRE
+  regex: fmd.*(retire|faulted|isolat)|fault\.
+- product: solaris
+  code: SOL-IPMP-FAIL
+  regex: in\.mpathd.*(failed|The link has gone down|NIC failure)
+- product: solaris
+  code: SOL-LINK-DOWN
+  regex: link down|Link is down
+- product: solaris
+  code: SOL-TOO-MANY-OPEN-FILES
+  regex: Too many open files|EMFILE
+- product: solaris
+  code: SOL-FORK-FAIL
+  regex: fork.*(fail|EAGAIN|Resource temporarily unavailable)|out of processes
+- product: solaris
+  code: SOL-SHM-FAIL
+  regex: shmget|shared memory.*(fail|EINVAL|ENOMEM)|shmsys
+- product: solaris
+  code: SOL-ZONE-FAIL
+  regex: zone .* (failed|halted|could not)|zoneadm.*(fail|error)
+- product: solaris
+  code: SOL-LDOM-FAIL
+  regex: ldmd.*(error|fail)|domain .* (fault|panic)
+- product: solaris
+  code: SOL-CLUSTER-NODE-LOST
+  regex: 'CMM: Node .* (died|is down|has been removed)|Cluster.*node.*(down|lost)'
+- product: solaris
+  code: SOL-SSH-FAIL
+  regex: sshd.*(Failed|Invalid user|authentication)
+- product: solaris
+  code: SOL-SUDO-FAIL
+  regex: sudo:.*(incorrect password|NOT in sudoers)
+- product: solaris
+  code: SOL-RBAC-DENY
+  regex: not authorized|RBAC|profile.*denied
+- product: solaris
+  code: SOL-AUTH-FAIL
+  regex: Failed password|authentication failed|login.*failed|REPEATED LOGIN FAILURES
+- product: solaris
+  code: SOL-NTP-FAIL
+  regex: ntp.*(unreachable|no server|synchronization lost)|xntpd.*error
+- product: solaris
+  code: SOL-CORE-DUMP
+  regex: core dumped|savecore|Core dump
+- product: solaris
+  code: SOL-INODE-FULL
+  regex: out of inodes|inode.*full
+- product: solaris
+  code: SOL-NIC-ERROR
+  regex: '(nxge|ixgbe|e1000g|bge|igb)\d+: .*(error|fail|reset)'
+- product: solaris
+  code: SOL-SVM-METADEVICE-FAIL
+  regex: 'md: .*(needs maintenance|Maintenance|error)|metadevice.*(fail|error)'
+- product: solaris
+  code: SOL-CRON-FAIL
+  regex: cron.*(fail|error|not executed)
+- product: solaris
+  code: SOL-SENDMAIL-QUEUE
+  regex: sendmail.*(queue|deferred|rejecting)
+- product: solaris
+  code: SOL-AUDIT-FULL
+  regex: audit.*(full|no space|soft limit)
+- product: solaris
+  code: SOL-RESOURCE-CONTROL
+  regex: rctl|resource control
+- product: solaris
+  code: SOL-USB-ERROR
+  regex: usb.*(error|fail)
+- product: solaris
+  code: SOL-FIBRE-OFFLINE
+  regex: fp.*offline|fc.*link.*(down|offline)|qlc.*(offline|loop down)|emlxs.*(down|offline)
+- product: solaris
+  code: SOL-DNS-FAIL
+  regex: name resolution|DNS.*(fail|timeout)|gethostbyname.*fail
+- product: solaris
+  code: SOL-LDAP-FAIL
+  regex: ldap.*(fail|cannot|unable|timeout)|ldap_cachemgr
+- product: solaris
+  code: SOL-TMP-FULL
+  regex: /tmp.*full|tmpfs.*(full|out of)
+- product: solaris
+  code: SOL-DISK-FULL
+  regex: No space left
+- product: solaris
+  code: SOL-CPU-HIGH-LOAD
+  regex: load average.*(high|exceed)|CPU.*(overload|100%)
+- product: solaris
+  code: SOL-PROCESS-KILLED
+  regex: SIGKILL|Killed
+# 5차 보강(2026-10-16): IBM 문서의 실제 errpt LABEL → IDENTIFIER — 옛 일반 별칭(AIX-FS-FULL 등)보다 먼저 와야 한다(처음 맞는 별칭이 이김)
+- product: aix
+  code: F7FA22C9
+  regex: J2_FS_FULL
+- product: aix
+  code: 9C110A13
+  regex: J2_SNAP_EIO
+- product: aix
+  code: CF71B5B3
+  regex: J2_LOG_WAIT|JFS_LOG_WAIT
+- product: aix
+  code: 4B97B439
+  regex: J2_METADATA_CORRUPT
+- product: aix
+  code: B6DB68E0
+  regex: J2_FSCK_REQUIRED
+- product: aix
+  code: 891A3632
+  regex: NVME_ERR4
+- product: aix
+  code: A2205861
+  regex: DELAYED_INTS
+- product: aix
+  code: AIX-CORE-DUMP
+  regex: CORE DUMP|core dump|SOFTWARE PROGRAM ABNORMALLY TERMINATED
+- product: aix
+  code: AIX-SC-DISK-ERR
+  regex: SC_DISK_ERR|SCSI.*ERROR
+- product: aix
+  code: AIX-DISK-OP-ERROR
+  regex: DISK OPERATION ERROR|DISK_ERR
+- product: aix
+  code: AIX-LVM-IO-FAIL
+  regex: LVM_IO_FAIL|LVM.*I/O ERROR|PHYSICAL VOLUME DECLARED MISSING
+- product: aix
+  code: AIX-LVM-STALE
+  regex: LVM_SA_STALEPP|STALE|stale partition
+- product: aix
+  code: AIX-VG-QUORUM-LOST
+  regex: LVM_SA_QUORCLOSE|QUORUM LOST|quorum
+- product: aix
+  code: AIX-JFS2-ERROR
+  regex: JFS2_META_CORRUPTION|JFS2_LOG_WAIT|JFS2.*(error|corrupt)
+- product: aix
+  code: AIX-FS-FULL
+  regex: JFS2_FS_FULL|FILE SYSTEM FULL|filesystem full|No space left
+- product: aix
+  code: AIX-PAGING-LOW
+  regex: PGSP_KILL|PAGING SPACE LOW|paging space.*low|out of paging space
+- product: aix
+  code: AIX-MEMORY-ERROR
+  regex: MEMORY|SCAN_ERROR_CHRP|memory.*(error|fault)
+- product: aix
+  code: AIX-CPU-ERROR
+  regex: CPU.*(ERROR|FAILURE)|PROCESSOR.*(ERROR|FAIL)
+- product: aix
+  code: AIX-FC-LINK-DOWN
+  regex: FCS_ERR|LINK_ERR|fscsi.*(error|fail)|FIBRE.*(DOWN|ERROR)
+- product: aix
+  code: AIX-MPIO-PATH-FAIL
+  regex: PATH HAS FAILED|MPIO.*(fail|Failed)|path.*failed
+- product: aix
+  code: AIX-ETHERCHANNEL-FAILOVER
+  regex: ECH_.*FAILOVER|EtherChannel.*(failover|backup)
+- product: aix
+  code: AIX-ENT-LINK-DOWN
+  regex: ETHERNET DOWN|GOENT_LINK_DOWN|ent\d+.*(link down|DOWN)
+- product: aix
+  code: AIX-ENV-TEMP
+  regex: ENVIRONMENTAL|TEMPERATURE|thermal
+- product: aix
+  code: AIX-POWER-FAIL
+  regex: POWER.*(FAIL|LOSS)|EPOW|power supply
+- product: aix
+  code: AIX-SYSTEM-DUMP
+  regex: SYSDUMP|SYSTEM DUMP|DUMP_STATS
+- product: aix
+  code: AIX-KERNEL-PANIC
+  regex: KERNEL_PANIC|kernel panic|SYSTEM CRASH
+- product: aix
+  code: AIX-SRC-FAIL
+  regex: SRC.*(fail|error)|srcmstr.*(error|fail)|SUBSYSTEM.*(FAIL|ABNORMAL)
+- product: aix
+  code: AIX-HACMP-NODE-DOWN
+  regex: node_down|NODE.*DOWN|node.*failed
+- product: aix
+  code: AIX-HACMP-EVENT
+  regex: HACMP|PowerHA.*(event|error)|EVENT (FAILED|ERROR)|clstrmgr
+- product: aix
+  code: AIX-NFS-HANG
+  regex: NFS server .* not responding|nfs.*hang
+- product: aix
+  code: AIX-FD-EXHAUSTED
+  regex: Too many open files|EMFILE
+- product: aix
+  code: AIX-PROC-LIMIT
+  regex: maxuproc|too many processes|fork.*(fail|EAGAIN)
+- product: aix
+  code: AIX-SSH-FAIL
+  regex: sshd.*(Failed|Invalid user|authentication)
+- product: aix
+  code: AIX-SUDO-FAIL
+  regex: sudo:.*(incorrect password|NOT in sudoers)
+- product: aix
+  code: AIX-AUTH-FAIL
+  regex: Failed password|authentication failed|login.*failed|3004-
+- product: aix
+  code: AIX-NTP-FAIL
+  regex: ntp.*(unreachable|no server|synchronization lost)|xntpd.*error
+- product: aix
+  code: AIX-HMC-CONNECT-FAIL
+  regex: HMC.*(connect|connection).*(fail|lost)|RMC.*(inactive|fail)
+- product: aix
+  code: AIX-VIOS-PATH-FAIL
+  regex: VIOS.*(fail|path)|vscsi.*(fail|error)|VSCSI
+- product: aix
+  code: AIX-INODE-FULL
+  regex: out of inodes|inode.*full
+- product: aix
+  code: AIX-FS-MOUNT-FAIL
+  regex: mount.*(fail|error)|Cannot mount
+- product: aix
+  code: AIX-TAPE-ERROR
+  regex: TAPE_ERR|tape.*(error|fail)
+- product: aix
+  code: AIX-DUMP-DEVICE-FULL
+  regex: DUMP DEVICE.*(FULL|TOO SMALL)|dump device.*small
+- product: aix
+  code: AIX-ERRLOG-FULL
+  regex: ERRLOG.*(FULL|ON)|error log.*full
+- product: aix
+  code: AIX-LICENSE-EXPIRE
+  regex: license.*(expire|invalid)
+- product: aix
+  code: AIX-TMP-FULL
+  regex: /tmp.*full
+- product: aix
+  code: AIX-DISK-FULL
+  regex: filesystem.*full
+- product: aix
+  code: AIX-CPU-HIGH
+  regex: CPU.*(overload|100%|high)
+- product: aix
+  code: AIX-PROCESS-KILLED
+  regex: SIGKILL|Killed
+- product: aix
+  code: AIX-DNS-FAIL
+  regex: name resolution|DNS.*(fail|timeout)|gethostbyname.*fail
+- product: aix
+  code: AIX-NIM-FAIL
+  regex: nim.*(fail|error)|NIM.*(FAIL|ERROR)
+- product: hpux
+  code: HPUX-PANIC
+  regex: panic|System Panic
+- product: hpux
+  code: HPUX-LVM-PV-MISSING
+  regex: PV .* (missing|unavailable)|Physical Volume.*(missing|unavailable)
+- product: hpux
+  code: HPUX-LVM-STALE
+  regex: stale|STALE
+- product: hpux
+  code: HPUX-VXVM-FAIL
+  regex: vxvm|VxVM.*(error|fail)|vxdmp
+- product: hpux
+  code: HPUX-DISK-ERROR
+  regex: disk.*(error|fail)|SCSI.*(error|fail)|I/O error
+- product: hpux
+  code: HPUX-FS-INODE-FULL
+  regex: out of inodes|inode.*full
+- product: hpux
+  code: HPUX-MEMORY-LOW
+  regex: memory.*(low|exhausted)|Out of memory|cannot allocate
+- product: hpux
+  code: HPUX-NPROC-LIMIT
+  regex: nproc|proc table (is )?full|too many processes
+- product: hpux
+  code: HPUX-NFILE-LIMIT
+  regex: file table (is )?full|nfile|Too many open files
+- product: hpux
+  code: HPUX-APA-FAILOVER
+  regex: APA|lan900.*(failover|down)|Auto-Port-Aggregation
+- product: hpux
+  code: HPUX-LAN-DOWN
+  regex: lan\d+.*(down|DOWN|fail)|LAN.*(down|fail)|link down
+- product: hpux
+  code: HPUX-FC-LINK-DOWN
+  regex: fcd\d+.*(down|offline|fail)|Fibre Channel.*(down|offline)
+- product: hpux
+  code: HPUX-SERVICEGUARD-PKG-FAIL
+  regex: cmcld.*(package|pkg).*(fail|halt)|Package.*(fail|halted)
+- product: hpux
+  code: HPUX-SERVICEGUARD-NODE-FAIL
+  regex: cmcld.*(node|member).*(fail|down|timed out)|Serviceguard.*(node|member).*(fail|down)
+- product: hpux
+  code: HPUX-EMS-ALERT
+  regex: EMS|Event Monitoring|EVENT.*(CRITICAL|SERIOUS|MAJOR)
+- product: hpux
+  code: HPUX-CPU-DEALLOC
+  regex: CPU.*(deallocat|deconfigured|failed)|processor.*(deallocat|deconfigured)
+- product: hpux
+  code: HPUX-MEMORY-DEALLOC
+  regex: memory.*(deallocat|deconfigured)|Page Deallocation
+- product: hpux
+  code: HPUX-NFS-HANG
+  regex: NFS server .* not responding|nfs.*hang
+- product: hpux
+  code: HPUX-SSH-FAIL
+  regex: sshd.*(Failed|Invalid user|authentication)
+- product: hpux
+  code: HPUX-SUDO-FAIL
+  regex: sudo:.*(incorrect password|NOT in sudoers)
+- product: hpux
+  code: HPUX-AUTH-FAIL
+  regex: Failed password|authentication failed|login.*failed
+- product: hpux
+  code: HPUX-NTP-FAIL
+  regex: ntp.*(unreachable|no server|synchronization lost)|xntpd.*error
+- product: hpux
+  code: HPUX-CORE-DUMP
+  regex: core dumped|Core dump
+- product: hpux
+  code: HPUX-DUMP-FAIL
+  regex: savecrash.*(fail|error)|dump.*(fail|error)
+- product: hpux
+  code: HPUX-SHM-FAIL
+  regex: shmget|shared memory.*(fail|ENOMEM|EINVAL)|shmmax
+- product: hpux
+  code: HPUX-SEM-FAIL
+  regex: semget|semaphore.*(fail|ENOSPC)|semmni|semmns
+- product: hpux
+  code: HPUX-IPC-EXHAUSTED
+  regex: ipc.*(exhausted|ENOSPC)
+- product: hpux
+  code: HPUX-VPAR-FAIL
+  regex: vpar.*(fail|error|panic)|vPar
+- product: hpux
+  code: HPUX-SWAP-FULL
+  regex: swap.*(full|exhausted)|no swap space
+- product: hpux
+  code: HPUX-TMP-FULL
+  regex: /tmp.*full
+- product: hpux
+  code: HPUX-DISK-FULL
+  regex: No space left
+- product: hpux
+  code: HPUX-DNS-FAIL
+  regex: name resolution|DNS.*(fail|timeout)|gethostbyname.*fail
+- product: hpux
+  code: HPUX-CRON-FAIL
+  regex: cron.*(fail|error)
+- product: hpux
+  code: HPUX-CPU-HIGH
+  regex: CPU.*(overload|100%|high)
+- product: hpux
+  code: HPUX-PROCESS-KILLED
+  regex: SIGKILL|Killed
+- product: hpux
+  code: HPUX-FS-MOUNT-FAIL
+  regex: mount.*(fail|error)|Cannot mount
+- product: hpux
+  code: HPUX-TAPE-ERROR
+  regex: tape.*(error|fail)|stape
+- product: hpux
+  code: HPUX-LICENSE-EXPIRE
+  regex: license.*(expire|invalid)
+- product: hpux
+  code: HPUX-SYSLOG-FULL
+  regex: syslog.*(full|No space)
+- product: hpux
+  code: HPUX-ONLINE-DIAG
+  regex: Online Diagnostics|STM|diagnostic.*(alert|warning)
+- product: mesim-esb
+  code: ESB-ADAPTER-DOWN
+  regex: '[Aa]dapter.*(down|stopped|dead|not (running|available))|어댑터.*(중지|정지|다운)'
+- product: mesim-esb
+  code: ESB-DB-CONNECT-FAIL
+  regex: '(JDBC|DB|Database).*(connect|Connection).*(fail|refused|timed? ?out)|SQLException.*(connect|Connection)|IO Error: The Network Adapter'
+- product: mesim-esb
+  code: ESB-FILE-TRANSFER-FAIL
+  regex: '[Ff]ile.*(transfer|send|receive).*(fail|error)|파일.*(전송|수신).*(실패|오류)'
+- product: mesim-esb
+  code: ESB-WAS-CONNECT-FAIL
+  regex: WAS.*(connect|Connection).*(fail|refused)
+- product: mesim-esb
+  code: ESB-MW-CONNECT-FAIL
+  regex: (MQ|Tuxedo|Tmax|TP).*(connect|Connection).*(fail|refused)|MQRC_
+- product: mesim-esb
+  code: ESB-JMS-CONNECT-FAIL
+  regex: JMS.*(connect|Connection).*(fail|refused)|JMSException
+- product: mesim-esb
+  code: ESB-FTP-CONNECT-FAIL
+  regex: (FTP|SFTP).*(connect|login|Connection).*(fail|refused)|530 Login
+- product: mesim-esb
+  code: ESB-HTTP-CONNECT-FAIL
+  regex: HTTP.*(connect|Connection).*(fail|refused|timed? ?out)|HttpHostConnectException|ConnectTimeoutException
+- product: mesim-esb
+  code: ESB-WEBSERVICE-FAIL
+  regex: (SOAP|WebService|Web Service).*(fail|fault|error)|SOAPFaultException|WebServiceException
+- product: mesim-esb
+  code: ESB-ENDPOINT-DOWN
+  regex: '[Ee]ndpoint.*(down|unavailable|not (available|found)|unreachable)|UnknownHostException|No route to host'
+- product: mesim-esb
+  code: ESB-TCP-CONNECT-FAIL
+  regex: TCP.*(connect|Connection).*(fail|refused)|ConnectException|Connection refused
+- product: mesim-esb
+  code: ESB-ROUTING-FAIL
+  regex: '[Rr]out(e|ing).*(fail|error|not found)|No route|라우팅.*(실패|오류)'
+- product: mesim-esb
+  code: ESB-TRANSFORM-FAIL
+  regex: TransformException|SAXParseException|JsonParseException|UnmarshalException|(변환|매핑).*(오류|실패)
+- product: mesim-esb
+  code: ESB-MESSAGE-VERIFY-FAIL
+  regex: (validat|verif).*(fail|error)|검증.*(실패|오류)|schema.*invalid
+- product: mesim-esb
+  code: ESB-XA-TRANSACTION-FAIL
+  regex: XA.*(fail|error|exception)|XAException|Transaction.*(rolled back|rollback)|HeuristicMixedException
+- product: mesim-esb
+  code: ESB-DATA-QUALITY-FAIL
+  regex: (품질|quality).*(오류|실패|fail|error)
+- product: mesim-esb
+  code: ESB-BROKER-FAIL
+  regex: '[Bb]roker.*(down|fail|error|not available)|브로커.*(장애|오류)'
+- product: mesim-esb
+  code: ESB-LOAD-BALANCE-FAIL
+  regex: (load ?balanc|LB).*(fail|error)|부하분산.*(실패|오류)
+- product: mesim-esb
+  code: ESB-TRANSACTION-DELAY
+  regex: (slow|delay|지연).*(transaction|거래|interface|인터페이스)|(transaction|거래).*(slow|delay|지연)|elapsed.*\d{5,}ms
+- product: mesim-esb
+  code: ESB-LARGE-DATA-OVERLOAD
+  regex: (large|대용량).*(overload|timeout|지연|fail)|message.*too (large|big)
+- product: mesim-apig
+  code: APIG-APIKEY-INVALID
+  regex: (api[ -]?key|apikey|인증키).*(invalid|expired|not found|missing|오류|만료)
+- product: mesim-apig
+  code: APIG-TOKEN-FAIL
+  regex: '[Tt]oken.*(invalid|expired|fail|error|만료|오류)|JWT.*(invalid|expired)'
+- product: mesim-apig
+  code: APIG-AUTH-FAIL
+  regex: (auth|Authentication|인증).*(fail|denied|error|실패)|\b401\b|Unauthorized
+- product: mesim-apig
+  code: APIG-AUTHZ-DENY
+  regex: (authoriz|permission|권한).*(denied|fail|거부|없)|\b403\b|Forbidden
+- product: mesim-apig
+  code: APIG-API-NOT-PUBLISHED
+  regex: (not published|unpublished|미공개|미배포)|API.*not (found|registered)
+- product: mesim-apig
+  code: APIG-API-DISABLED
+  regex: (disabled|blocked|차단|비활성).*(API|api)|API.*(disabled|blocked|차단|비활성)
+- product: mesim-apig
+  code: APIG-ROUTE-FAIL
+  regex: '[Rr]out(e|ing).*(fail|error|not found)|No route|라우팅.*(실패|오류)|\b404\b'
+- product: mesim-apig
+  code: APIG-BACKEND-CONNECT-FAIL
+  regex: '[Bb]ackend.*(connect|Connection).*(fail|refused)|Connection refused|ConnectException|HttpHostConnectException'
+- product: mesim-apig
+  code: APIG-BACKEND-TIMEOUT
+  regex: '[Bb]ackend.*(timeout|timed out)|\b504\b|Gateway Time-?out|SocketTimeoutException|Read timed out'
+- product: mesim-apig
+  code: APIG-BACKEND-DOWN
+  regex: '[Bb]ackend.*(down|unavailable|not available)|\b502\b|Bad Gateway|백엔드.*(장애|다운)'
+- product: mesim-apig
+  code: APIG-TRAFFIC-LIMIT
+  regex: (rate|traffic|throttl|유량|TPS).*(limit|exceed|제한|초과)|\b429\b|Too Many Requests
+- product: mesim-apig
+  code: APIG-TRAFFIC-SPIKE
+  regex: (traffic|트래픽).*(spike|surge|급증|burst)|request.*(spike|surge)
+- product: mesim-apig
+  code: APIG-CIRCUIT-OPEN
+  regex: '[Cc]ircuit.*(open|breaker)|서비스 차단|CircuitBreaker'
+- product: mesim-apig
+  code: APIG-LOADBALANCE-FAIL
+  regex: (load ?balanc|LB).*(fail|error)|부하분산.*(실패|오류)|no available (node|instance)
+- product: mesim-apig
+  code: APIG-CACHE-FAIL
+  regex: '[Cc]ache.*(fail|error)|캐시.*(실패|오류)'
+- product: mesim-apig
+  code: APIG-FORMAT-CONVERT-FAIL
+  regex: (convert|transform|변환).*(fail|error|실패|오류)|JsonParseException|SAXParseException
+- product: mesim-apig
+  code: APIG-GATEWAY-DOWN
+  regex: '[Gg]ateway.*(down|stopped|dead|fail)|게이트웨이.*(장애|다운|중지)'
+- product: mesim-apig
+  code: APIG-QOS-DEGRADE
+  regex: (QoS|quality|품질).*(degrad|저하|낮)|SLA.*(violat|breach)
+- product: mesim-apig
+  code: APIG-EVENT-ALERT
+  regex: (EVENT|ALERT|이벤트|경보).*(발생|raised|triggered)
+- product: mesim-apig
+  code: APIG-OPENAPI-PROCESS-FAIL
+  regex: (OpenAPI|Open API|API).*(process|처리).*(fail|error|실패|오류)|\b500\b|Internal Server Error
+- product: mesim-eai
+  code: ESB-ADAPTER-DOWN
+  regex: '[Aa]dapter.*(down|stopped|dead|not (running|available))|어댑터.*(중지|정지|다운)'
+- product: mesim-eai
+  code: ESB-DB-CONNECT-FAIL
+  regex: '(JDBC|DB|Database).*(connect|Connection).*(fail|refused|timed? ?out)|SQLException.*(connect|Connection)|IO Error: The Network Adapter'
+- product: mesim-eai
+  code: ESB-FILE-TRANSFER-FAIL
+  regex: '[Ff]ile.*(transfer|send|receive).*(fail|error)|파일.*(전송|수신).*(실패|오류)'
+- product: mesim-eai
+  code: ESB-WAS-CONNECT-FAIL
+  regex: WAS.*(connect|Connection).*(fail|refused)
+- product: mesim-eai
+  code: ESB-MW-CONNECT-FAIL
+  regex: (MQ|Tuxedo|Tmax|TP).*(connect|Connection).*(fail|refused)|MQRC_
+- product: mesim-eai
+  code: ESB-JMS-CONNECT-FAIL
+  regex: JMS.*(connect|Connection).*(fail|refused)|JMSException
+- product: mesim-eai
+  code: ESB-FTP-CONNECT-FAIL
+  regex: (FTP|SFTP).*(connect|login|Connection).*(fail|refused)|530 Login
+- product: mesim-eai
+  code: ESB-HTTP-CONNECT-FAIL
+  regex: HTTP.*(connect|Connection).*(fail|refused|timed? ?out)|HttpHostConnectException|ConnectTimeoutException
+- product: mesim-eai
+  code: ESB-WEBSERVICE-FAIL
+  regex: (SOAP|WebService|Web Service).*(fail|fault|error)|SOAPFaultException|WebServiceException
+- product: mesim-eai
+  code: ESB-ENDPOINT-DOWN
+  regex: '[Ee]ndpoint.*(down|unavailable|not (available|found)|unreachable)|UnknownHostException|No route to host'
+- product: mesim-eai
+  code: ESB-TCP-CONNECT-FAIL
+  regex: TCP.*(connect|Connection).*(fail|refused)|ConnectException|Connection refused
+- product: mesim-eai
+  code: ESB-ROUTING-FAIL
+  regex: '[Rr]out(e|ing).*(fail|error|not found)|No route|라우팅.*(실패|오류)'
+- product: mesim-eai
+  code: ESB-TRANSFORM-FAIL
+  regex: TransformException|SAXParseException|JsonParseException|UnmarshalException|(변환|매핑).*(오류|실패)
+- product: mesim-eai
+  code: ESB-MESSAGE-VERIFY-FAIL
+  regex: (validat|verif).*(fail|error)|검증.*(실패|오류)|schema.*invalid
+- product: mesim-eai
+  code: ESB-XA-TRANSACTION-FAIL
+  regex: XA.*(fail|error|exception)|XAException|Transaction.*(rolled back|rollback)|HeuristicMixedException
+- product: mesim-eai
+  code: ESB-DATA-QUALITY-FAIL
+  regex: (품질|quality).*(오류|실패|fail|error)
+- product: mesim-eai
+  code: ESB-BROKER-FAIL
+  regex: '[Bb]roker.*(down|fail|error|not available)|브로커.*(장애|오류)'
+- product: mesim-eai
+  code: ESB-LOAD-BALANCE-FAIL
+  regex: (load ?balanc|LB).*(fail|error)|부하분산.*(실패|오류)
+- product: mesim-eai
+  code: ESB-TRANSACTION-DELAY
+  regex: (slow|delay|지연).*(transaction|거래|interface|인터페이스)|(transaction|거래).*(slow|delay|지연)|elapsed.*\d{5,}ms
+- product: mesim-eai
+  code: ESB-LARGE-DATA-OVERLOAD
+  regex: (large|대용량).*(overload|timeout|지연|fail)|message.*too (large|big)
+- product: postgresql
+  code: PG-WAL-FULL
+  regex: could not write to file "pg_(wal|xlog)|No space left on device.*pg_(wal|xlog)|pg_(wal|xlog).*No space left
+- product: postgresql
+  code: PG-TXID-WRAPAROUND
+  regex: database is not accepting commands to avoid wraparound|must be vacuumed within|transaction ID wraparound
+- product: postgresql
+  code: PG-CHECKPOINT-FREQ
+  regex: checkpoints are occurring too frequently
+- product: postgresql
+  code: PG-IDLE-IN-TXN
+  regex: idle-in-transaction timeout|terminating connection due to idle-in-transaction
+- product: postgresql
+  code: PG-PANIC
+  regex: '^PANIC:'
+- product: postgresql
+  code: PG-ARCHIVE-FAIL
+  regex: archive command failed|archiving (write-ahead|transaction) log file .* failed
+- product: postgresql
+  code: PG-STANDBY-DISCONNECT
+  regex: terminating walsender|replication connection .* (lost|terminated)|could not receive data from WAL stream|could not connect to the primary server
+- product: jeus
+  code: JEUS-WEBAPP-RELOAD-FAIL
+  regex: reload.*(fail|error|exception)|redeploy.*(fail|error)
+- product: nginx
+  code: NGX-TOO-MANY-REDIRECTS
+  regex: rewrite or internal redirection cycle
+- product: tomcat
+  code: TOMCAT-SESSION-EXPIRE-FAIL
+  regex: Session event listener threw exception|Exception invalidating session
+- product: tomcat
+  code: TOMCAT-VALVE-ERROR
+  regex: Valve.*(Exception|error)|Exception Processing ErrorPage
+- product: tomcat
+  code: TOMCAT-NIO-SELECTOR-FAIL
+  regex: Error running socket processor|NioEndpoint.*(Exception|error)|Socket processing failed
+- product: tomcat
+  code: TOMCAT-CONNECTOR-FAIL
+  regex: Failed to initialize connector|Protocol handler initialization failed|Failed to start connector
+- product: tomcat
+  code: TOMCAT-JMX-BIND-FAIL
+  regex: JMX.*(bind|Address already in use|failed)|jmxremote.*(fail|error)
+- product: webtob
+  code: WEBTOB-DIRECTORY-LISTING
+  regex: '[Dd]irectory (listing|index)'
+- product: webtob
+  code: WEBTOB-KEEPALIVE-MAX
+  regex: KeepAliveMax|keep-?alive.*(max|limit|exceed)
+- product: webtob
+  code: WEBTOB-URI-REJECT
+  regex: URI.*(reject|denied|invalid|not allowed)
+- product: webtob
+  code: WEBTOB-CACHE-FAIL
+  regex: '[Cc]ache.*(fail|error)'
+- product: webtob
+  code: WEBTOB-JSV-PREMATURE
+  regex: 'JSV(\(QED\))?: premature client close'
+- product: webtob
+  code: HTH0113
+  regex: HTH0113|Client has closed connection\. Discard response
+- product: linux
+  code: LNX-EXT3-ERROR
+  regex: EXT3-fs error
+- product: linux
+  code: LNX-IPCONNTRACK-FULL
+  regex: 'ip_conntrack: table full'
+- product: linux
+  code: LNX-APPARMOR-DENIED
+  regex: apparmor="DENIED"
+- product: linux
+  code: LNX-UPSTART-FAIL
+  regex: 'init: .* (main process .* terminated with status|respawning too fast)'
+- product: linux
+  code: LNX-SYSTEMD-OOMD
+  regex: systemd-oomd.*Killed .* due to memory
+- product: apache
+  code: AH01630
+  regex: client denied by server configuration
+  note: Apache 2.2 이하 메시지 문구 → 2.4 AH 코드 대응(버전 검증 2026-09-11)
+- product: apache
+  code: AH00161
+  regex: server reached MaxClients setting
+  note: Apache 2.2 이하 메시지 문구 → 2.4 AH 코드 대응(버전 검증 2026-09-11)
+- product: apache
+  code: AH01102
+  regex: 'proxy: error reading status line from remote server'
+  note: Apache 2.2 이하 메시지 문구 → 2.4 AH 코드 대응(버전 검증 2026-09-11)
+- product: apache
+  code: AH00898
+  regex: 'proxy: AJP: failed to make connection to backend'
+  note: 'Apache 2.2 이하 메시지 문구 → 2.4 AH 코드 대응(버전 검증 2026-09-11). 룰 학습 3차(10-15, GPT 13차) 바로잡음 — HTTP 연결 실패는 AH01114, ''attempt to connect … failed'' 는 AH00957 로 나눴다'
+- product: apache
+  code: AH01114
+  regex: 'proxy: HTTP: failed to make connection to backend'
+  note: 'Apache 2.2 이하 메시지 문구 → 2.4 AH 코드 대응(버전 검증 2026-09-11). 룰 학습 3차(10-15, GPT 13차) 바로잡음 — AH01114 = HTTP: failed to make connection to backend'
+- product: apache
+  code: AH00957
+  regex: 'proxy: .*attempt to connect to .* failed'
+  note: 'Apache 2.2 이하 메시지 문구 → 2.4 AH 코드 대응(버전 검증 2026-09-11). 룰 학습 3차(10-15, GPT 13차) 바로잡음 — AH00957 = attempt to connect … failed(사전 ''백엔드 연결 시도 실패'')'
+- product: apache
+  code: AH00526
+  regex: Syntax error on line \d+ of
+  note: Apache 2.2 이하 메시지 문구 → 2.4 AH 코드 대응(버전 검증 2026-09-11)
+- product: apache
+  code: AH00072
+  regex: 'make_sock: could not bind to address'
+  note: Apache 2.2 이하 메시지 문구 → 2.4 AH 코드 대응(버전 검증 2026-09-11)
+- product: apache
+  code: AH00052
+  regex: child pid \d+ exit signal Segmentation fault
+  note: Apache 2.2 이하 메시지 문구 → 2.4 AH 코드 대응(버전 검증 2026-09-11)
+- product: apache
+  code: AH00169
+  regex: caught SIGTERM, shutting down
+  note: Apache 2.2 이하 메시지 문구 → 2.4 AH 코드 대응(버전 검증 2026-09-11)
+- product: apache
+  code: AH01215
+  regex: Premature end of script headers
+  note: Apache 2.2 이하 메시지 문구 → 2.4 AH 코드 대응(버전 검증 2026-09-11)
+- product: apache
+  code: AH02032
+  regex: 'certificate (?:has )?expired|Certificate Verification: Error \(10\)'
+  note: Apache 2.2 이하 메시지 문구 → 2.4 AH 코드 대응(버전 검증 2026-09-11)
+- product: apache
+  code: AH01071
+  regex: Got error '.*' from .*
+  note: Apache 2.2 이하 메시지 문구 → 2.4 AH 코드 대응(버전 검증 2026-09-11)
+- product: apache
+  code: AH00646
+  regex: Cannot write to (?:log|error log)
+  note: Apache 2.2 이하 메시지 문구 → 2.4 AH 코드 대응(버전 검증 2026-09-11)
+- product: apache
+  code: AH01909
+  regex: server certificate does NOT include an ID which matches the server name
+  note: Apache 2.2 이하 메시지 문구 → 2.4 AH 코드 대응(버전 검증 2026-09-11)
+- product: apache
+  code: AH00558
+  regex: Could not reliably determine the server's fully qualified domain name
+  note: Apache 2.2 이하 메시지 문구 → 2.4 AH 코드 대응(버전 검증 2026-09-11)
+- product: apache
+  code: AH01110
+  regex: 'proxy: .*error reading response'
+  note: 'Apache 2.2 이하 메시지 문구 → 2.4 AH 코드 대응(버전 검증 2026-09-11). 룰 학습 3차(10-15, GPT 13차) 바로잡음 — 예전엔 AH01114(연결 생성 실패)로 묶여 있었다. AH01110 = error reading response'
+- product: apache
+  code: AH00992
+  regex: proxy:.*worker.*already used by another worker
+  note: Apache 2.2 이하 메시지 문구 → 2.4 AH 코드 대응(버전 검증 2026-09-11)
+- product: apache
+  code: AH01084
+  regex: 'proxy: pass request body failed'
+  note: Apache 2.2 이하 메시지 문구 → 2.4 AH 코드 대응(버전 검증 2026-09-11). 룰 학습 3차(10-15) — 'File does not exist:' 는 404(AH00128)라 여기서 뺐다(백엔드 본문 전달 실패로 오판)
+- product: apache
+  code: AH00128
+  regex: 'File does not exist:'
+  note: 룰 학습 3차(2026-10-15) — Apache 2.2 의 404 문구를 2.4 AH00128 로(예전엔 AH01084 로 잘못 이어졌다)
+# MS-SQL ERRORLOG 본문만 남는 메시지 → 사전 코드(룰 학습 2차 2026-10-15, GPT 11차 대조). 파서 db_logs._MS_SIG 가 이 줄을 이벤트로 남긴다
+- product: mssql
+  code: MSSQL-833
+  regex: I/O requests taking longer than \d+ seconds to complete
+- product: mssql
+  code: MSSQL-17883
+  regex: appears to be non-yielding on Scheduler
+- product: mssql
+  code: MSSQL-17884
+  regex: (?:haven't|have not) been picked up by a worker thread in the last \d+ seconds
+- product: mssql
+  code: MSSQL-5144
+  regex: Autogrow of file [^\r\n]{1,256}? was cancelled by user or timed out after \d+ milliseconds
+- product: mssql
+  code: MSSQL-5145
+  regex: Autogrow of file [^\r\n]{1,256}? took \d+ milliseconds
+- product: mssql
+  code: MSSQL-825
+  regex: A read of the file .{1,400}? succeeded after failing \d+ time
+- product: iis
+  code: IIS-HTTPERR-TIMER-APPPOOL
+  regex: Timer_AppPool

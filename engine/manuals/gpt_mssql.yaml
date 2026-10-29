@@ -1,0 +1,15 @@
+product: mssql
+title: Microsoft SQL Server 운영 참고 (GPT 수집 — 벤더 문서 대조 필요)
+sections:
+- heading: 로그 위치
+  body: Windows 기본 오류 로그는 <drive>:\Program Files\Microsoft SQL Server\MSSQL.<n>\MSSQL\LOG\ERRORLOG,
+    Linux는 /var/opt/mssql/log/errorlog이다. SERVERPROPERTY('ErrorLogFileName')으로 확인한다.
+- heading: 장애 시 수집 방법
+  body: sp_readerrorlog 결과, Windows Event Log 또는 Linux journal, system_health Extended
+    Events, 필요 시 SQLDumper 덤프와 관련 DMV 결과를 장애 시각 기준으로 수집한다.
+- heading: 대표 장애 신호
+  body: 오류 701/802 메모리, 1205 교착, 823/824/825 I/O, 9002 로그 가득참, 18456 로그인 실패, 17182/17826
+    네트워크 초기화 실패를 우선 확인한다.
+- heading: 1차 확인 명령
+  body: sqlcmd -Q "SELECT @@SERVERNAME,SERVERPROPERTY('ProductVersion'); SELECT state_desc
+    FROM sys.databases;" 와 EXEC sp_readerrorlog 0,1; 을 실행해 인스턴스와 DB 상태를 확인한다.

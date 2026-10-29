@@ -1,0 +1,81 @@
+product: oracle
+layer: db
+title: oracle 로그 종류 카탈로그 (GPT 수집 — 벤더 문서 대조 필요)
+source: GPT 수집(벤더 문서 대조 필요)
+sources: []
+logtypes:
+- name: Alert 로그
+  path: $ORACLE_BASE/diag/rdbms/<DB>/<SID>/trace/alert_<SID>.log
+  format: 텍스트·ISO-8601 계열 타임스탬프
+  check: ORA-00600·ORA-07445·ORA-04031·ORA-00060·STARTUP·SHUTDOWN
+  sample: 'ORA-00600: internal error code...'
+- name: Alert XML 로그
+  path: $ORACLE_BASE/diag/rdbms/<DB>/<SID>/alert/log.xml
+  format: XML·ISO-8601 계열 타임스탬프
+  check: ADR alert 이벤트·ORA 오류·인스턴스 상태변화
+  sample: XML message record 형식
+- name: 프로세스 Trace
+  path: $ORACLE_BASE/diag/rdbms/<DB>/<SID>/trace/*.trc
+  format: 텍스트·프로세스별 형식
+  check: ORA-00600·ORA-07445·call stack·SQL trace
+  sample: <SID>_ora_<PID>.trc 또는 <SID>_<BG>_<PID>.trc
+- name: Incident Dump
+  path: $ORACLE_BASE/diag/rdbms/<DB>/<SID>/incident/incdir_<ID>/*
+  format: 텍스트/덤프·이벤트시각 포함
+  check: Critical incident·ORA-00600·ORA-07445·메모리 오류
+  sample: incident ID 포함 dump/trace 형식
+- name: Listener 로그
+  path: ADR Listener Home의 trace/listener.log, XML은 alert/log.xml
+  format: 텍스트/XML·타임스탬프
+  check: TNS-12541·TNS-12514·접속 거부·서비스 등록·listener start/stop
+  sample: 접속 descriptor·client address·return code 형식
+- name: SQL*Net 로그
+  path: ADR Network Home의 trace/sqlnet.log
+  format: 텍스트·타임스탬프
+  check: TNS 연결·인증·프로토콜·timeout 오류
+  sample: TNS-nnnnn 메시지 형식
+- name: 통합 감사 로그
+  path: AUDSYS.AUD$UNIFIED, 조회 UNIFIED_AUDIT_TRAIL
+  format: 관계형 레코드·EVENT_TIMESTAMP
+  check: 로그인·권한·DDL·DML·RMAN·Data Pump 감사
+  sample: EVENT_TIMESTAMP,DBUSERNAME,ACTION_NAME,RETURN_CODE,... 형식
+- name: OS 감사 Spillover
+  path: $ORACLE_BASE/audit/$ORACLE_SID
+  format: 바이너리 .bin·감사 이벤트시각
+  check: DB가 audit table에 기록 불가할 때 감사 누락 여부
+  sample: OS spillover audit binary record 형식
+- name: 온라인 Redo 로그
+  path: V$LOGFILE.MEMBER 지정 경로
+  format: 바이너리·SCN/redo record
+  check: redo member 손상·log switch·LGWR I/O·ORA-00313 계열
+  sample: 바이너리 redo record·SCN 기반
+- name: Archive Redo 로그
+  path: LOG_ARCHIVE_DEST_n 설정 경로
+  format: 바이너리·SCN/sequence
+  check: ORA-00257·archive destination full·sequence 누락·복구 로그 부족
+  sample: archived redo binary·thread/sequence 기반
+sections:
+- heading: 로그 종류 카탈로그 (전수)
+  body: 'Alert 로그: $ORACLE_BASE/diag/rdbms/<DB>/<SID>/trace/alert_<SID>.log · Alert XML 로그: $ORACLE_BASE/diag/rdbms/<DB>/<SID>/alert/log.xml · 프로세스 Trace: $ORACLE_BASE/diag/rdbms/<DB>/<SID>/trace/*.trc
+    · Incident Dump: $ORACLE_BASE/diag/rdbms/<DB>/<SID>/incident/incdir_<ID>/* · Listener 로그: ADR Listener Home의 trace/listener.log, XML은 alert/log.xml · SQL*Net 로그: ADR Network Home의 trace/sqlnet.log ·
+    통합 감사 로그: AUDSYS.AUD$UNIFIED, 조회 UNIFIED_AUDIT_TRAIL · OS 감사 Spillover: $ORACLE_BASE/audit/$ORACLE_SID · 온라인 Redo 로그: V$LOGFILE.MEMBER 지정 경로 · Archive Redo 로그: LOG_ARCHIVE_DEST_n 설정 경로'
+- heading: '로그: Alert 로그'
+  body: '경로 $ORACLE_BASE/diag/rdbms/<DB>/<SID>/trace/alert_<SID>.log / 형식 텍스트·ISO-8601 계열 타임스탬프 / 확인 ORA-00600·ORA-07445·ORA-04031·ORA-00060·STARTUP·SHUTDOWN / 샘플 ORA-00600: internal error code...'
+- heading: '로그: Alert XML 로그'
+  body: 경로 $ORACLE_BASE/diag/rdbms/<DB>/<SID>/alert/log.xml / 형식 XML·ISO-8601 계열 타임스탬프 / 확인 ADR alert 이벤트·ORA 오류·인스턴스 상태변화 / 샘플 XML message record 형식
+- heading: '로그: 프로세스 Trace'
+  body: 경로 $ORACLE_BASE/diag/rdbms/<DB>/<SID>/trace/*.trc / 형식 텍스트·프로세스별 형식 / 확인 ORA-00600·ORA-07445·call stack·SQL trace / 샘플 <SID>_ora_<PID>.trc 또는 <SID>_<BG>_<PID>.trc
+- heading: '로그: Incident Dump'
+  body: 경로 $ORACLE_BASE/diag/rdbms/<DB>/<SID>/incident/incdir_<ID>/* / 형식 텍스트/덤프·이벤트시각 포함 / 확인 Critical incident·ORA-00600·ORA-07445·메모리 오류 / 샘플 incident ID 포함 dump/trace 형식
+- heading: '로그: Listener 로그'
+  body: 경로 ADR Listener Home의 trace/listener.log, XML은 alert/log.xml / 형식 텍스트/XML·타임스탬프 / 확인 TNS-12541·TNS-12514·접속 거부·서비스 등록·listener start/stop / 샘플 접속 descriptor·client address·return code 형식
+- heading: '로그: SQL*Net 로그'
+  body: 경로 ADR Network Home의 trace/sqlnet.log / 형식 텍스트·타임스탬프 / 확인 TNS 연결·인증·프로토콜·timeout 오류 / 샘플 TNS-nnnnn 메시지 형식
+- heading: '로그: 통합 감사 로그'
+  body: 경로 AUDSYS.AUD$UNIFIED, 조회 UNIFIED_AUDIT_TRAIL / 형식 관계형 레코드·EVENT_TIMESTAMP / 확인 로그인·권한·DDL·DML·RMAN·Data Pump 감사 / 샘플 EVENT_TIMESTAMP,DBUSERNAME,ACTION_NAME,RETURN_CODE,... 형식
+- heading: '로그: OS 감사 Spillover'
+  body: 경로 $ORACLE_BASE/audit/$ORACLE_SID / 형식 바이너리 .bin·감사 이벤트시각 / 확인 DB가 audit table에 기록 불가할 때 감사 누락 여부 / 샘플 OS spillover audit binary record 형식
+- heading: '로그: 온라인 Redo 로그'
+  body: 경로 V$LOGFILE.MEMBER 지정 경로 / 형식 바이너리·SCN/redo record / 확인 redo member 손상·log switch·LGWR I/O·ORA-00313 계열 / 샘플 바이너리 redo record·SCN 기반
+- heading: '로그: Archive Redo 로그'
+  body: 경로 LOG_ARCHIVE_DEST_n 설정 경로 / 형식 바이너리·SCN/sequence / 확인 ORA-00257·archive destination full·sequence 누락·복구 로그 부족 / 샘플 archived redo binary·thread/sequence 기반

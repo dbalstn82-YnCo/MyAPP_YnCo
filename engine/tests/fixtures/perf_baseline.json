@@ -1,0 +1,174 @@
+{
+ "access.log_20260202": {
+  "product": "accesslog",
+  "rules": [
+   "WEB-ACC-001",
+   "WEB-ACC-002"
+  ],
+  "findings": 3,
+  "events": 3
+ },
+ "alert_orcl.log": {
+  "product": "oracle",
+  "rules": [
+   "DB-ORA-004",
+   "LEG-ORA-00XXX-ERR",
+   "LEG-ORA-WARN-TABLELOCK"
+  ],
+  "findings": 5,
+  "events": 6
+ },
+ "altibase_boot.log": {
+  "product": "altibase",
+  "rules": [
+   "DB-ALT-002",
+   "DB-ALT-003",
+   "LEG-ALTIBASE-ERR-W-036F"
+  ],
+  "findings": 3,
+  "events": 3
+ },
+ "catalina.out": {
+  "product": "tomcat",
+  "rules": [
+   "APP-POOL-010",
+   "WAS-POOL-002"
+  ],
+  "findings": 4,
+  "events": 4
+ },
+ "errpt_db2.txt": {
+  "product": "aix-errpt",
+  "rules": [
+   "C1348779",
+   "LEG-AIX-DISK-ERR",
+   "LEG-KW-DISK-WARN",
+   "OS-AIX-ERRPT-001",
+   "OS-AIX-ERRPT-002",
+   "OS-AIX-ERRPT-003"
+  ],
+  "findings": 13,
+  "events": 9
+ },
+ "httperr1.log": {
+  "product": "iis-httperr",
+  "rules": [
+   "IIS-HTTPERR-TIMER-CONNECTIONIDLE",
+   "WEB-IIS-HTTPERR-001",
+   "WEB-IIS-HTTPERR-002",
+   "WEB-IIS-HTTPERR-004"
+  ],
+  "findings": 6,
+  "events": 6
+ },
+ "listener.log": {
+  "product": "oracle-listener",
+  "rules": [
+   "DB-ORA-LSNR-001",
+   "DB-ORA-LSNR-002",
+   "DB-ORA-LSNR-004"
+  ],
+  "findings": 8,
+  "events": 12
+ },
+ "mesim_eai.log": {
+  "product": "mesim-eai",
+  "rules": [
+   "APP-THREAD-015",
+   "SW-ESB-001",
+   "SW-ESB-003",
+   "SW-ESB-004"
+  ],
+  "findings": 4,
+  "events": 5
+ },
+ "mesim_esb.log": {
+  "product": "mesim-esb",
+  "rules": [
+   "APP-THREAD-015",
+   "SW-ESB-001",
+   "SW-ESB-003",
+   "SW-ESB-004"
+  ],
+  "findings": 4,
+  "events": 5
+ },
+ "mysql-slow.log": {
+  "product": "mysql-slow",
+  "rules": [
+   "DB-MYS-SLOW-001",
+   "MY-SLOW-QUERY"
+  ],
+  "findings": 3,
+  "events": 3
+ },
+ "nginx_error.log": {
+  "product": "nginx",
+  "rules": [
+   "WEB-NGX-005"
+  ],
+  "findings": 2,
+  "events": 2
+ },
+ "postgresql-2026-09-09.csv": {
+  "product": "postgresql-csv",
+  "rules": [
+   "DB-PG-001",
+   "DB-PG-002",
+   "DB-PG-003",
+   "DB-PG-004",
+   "DB-PG-ARCH-001",
+   "DB-PG-CKPT-001"
+  ],
+  "findings": 8,
+  "events": 8
+ },
+ "SystemOut.log": {
+  "product": "websphere",
+  "rules": [
+   "J2CA0045E",
+   "J2CA0056I",
+   "WSVR0001I",
+   "WSVR0605W",
+   "WSVR0606W"
+  ],
+  "findings": 5,
+  "events": 7
+ },
+ "weblogic.log": {
+  "product": "weblogic",
+  "rules": [
+   "BEA-000337"
+  ],
+  "findings": 1,
+  "events": 2
+ },
+ "webtob_error.log": {
+  "product": "webtob",
+  "rules": [
+   "WEB-WTB-001",
+   "WEB-WTB-002"
+  ],
+  "findings": 3,
+  "events": 4
+ },
+ "win_security_events.csv": {
+  "product": "windows",
+  "rules": [
+   "OS-WIN-SEC-001",
+   "OS-WIN-SEC-002",
+   "OS-WIN-SEC-003"
+  ],
+  "findings": 5,
+  "events": 7
+ },
+ "win_system_events.csv": {
+  "product": "windows",
+  "rules": [
+   "OS-WIN-001",
+   "OS-WIN-002"
+  ],
+  "findings": 2,
+  "events": 3
+ }
+}

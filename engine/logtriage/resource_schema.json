@@ -1,0 +1,2097 @@
+{
+  "format": "resource-info-v1",
+  "sheets": [
+    {
+      "sheet": "서버",
+      "header_end": 2,
+      "max_col": 29,
+      "fields": [
+        {
+          "id": "A",
+          "label": "기본항목 / NO",
+          "group": "기본항목",
+          "secret": false
+        },
+        {
+          "id": "B",
+          "label": "기본항목 / 관리센터",
+          "group": "기본항목",
+          "secret": false
+        },
+        {
+          "id": "C",
+          "label": "기본항목 / 등급",
+          "group": "기본항목",
+          "secret": false
+        },
+        {
+          "id": "D",
+          "label": "기본항목 / 구성ID",
+          "group": "기본항목",
+          "secret": false
+        },
+        {
+          "id": "E",
+          "label": "기본항목 / 구성자원명",
+          "group": "기본항목",
+          "secret": false
+        },
+        {
+          "id": "F",
+          "label": "기본항목 / Hostname",
+          "group": "기본항목",
+          "secret": false
+        },
+        {
+          "id": "G",
+          "label": "기본항목 / 도입년",
+          "group": "기본항목",
+          "secret": false
+        },
+        {
+          "id": "H",
+          "label": "기본항목 / 계정",
+          "group": "기본항목",
+          "secret": false
+        },
+        {
+          "id": "I",
+          "label": "기본항목 / 비밀번호",
+          "group": "기본항목",
+          "secret": true
+        },
+        {
+          "id": "J",
+          "label": "기본항목 / IP",
+          "group": "기본항목",
+          "secret": false
+        },
+        {
+          "id": "K",
+          "label": "기본항목 / port",
+          "group": "기본항목",
+          "secret": false
+        },
+        {
+          "id": "L",
+          "label": "기본항목 / 설치위치",
+          "group": "기본항목",
+          "secret": false
+        },
+        {
+          "id": "M",
+          "label": "HW 구성정보 / 제조사",
+          "group": "HW 구성정보",
+          "secret": false
+        },
+        {
+          "id": "N",
+          "label": "HW 구성정보 / 모델명",
+          "group": "HW 구성정보",
+          "secret": false
+        },
+        {
+          "id": "O",
+          "label": "HW 구성정보 / OS",
+          "group": "HW 구성정보",
+          "secret": false
+        },
+        {
+          "id": "P",
+          "label": "HW 구성정보 / Core수량",
+          "group": "HW 구성정보",
+          "secret": false
+        },
+        {
+          "id": "Q",
+          "label": "HW 구성정보 / Memory",
+          "group": "HW 구성정보",
+          "secret": false
+        },
+        {
+          "id": "R",
+          "label": "HW 구성정보 / SLA 등록업무",
+          "group": "HW 구성정보",
+          "secret": false
+        },
+        {
+          "id": "S",
+          "label": "HW 구성정보 / 사용 유무",
+          "group": "HW 구성정보",
+          "secret": false
+        },
+        {
+          "id": "T",
+          "label": "시스템 SW / WAS",
+          "group": "시스템 SW",
+          "secret": false
+        },
+        {
+          "id": "U",
+          "label": "시스템 SW / WEB",
+          "group": "시스템 SW",
+          "secret": false
+        },
+        {
+          "id": "V",
+          "label": "시스템 SW / DBMS",
+          "group": "시스템 SW",
+          "secret": false
+        },
+        {
+          "id": "W",
+          "label": "시스템 SW / 상용SW",
+          "group": "시스템 SW",
+          "secret": false
+        },
+        {
+          "id": "X",
+          "label": "사용여부 / 정보조회",
+          "group": "사용여부",
+          "secret": false
+        },
+        {
+          "id": "Y",
+          "label": "사용여부 / 정보유통",
+          "group": "사용여부",
+          "secret": false
+        },
+        {
+          "id": "Z",
+          "label": "사용여부 / 비고",
+          "group": "사용여부",
+          "secret": false
+        },
+        {
+          "id": "AA",
+          "label": "SW 점검자 / 이름",
+          "group": "SW 점검자",
+          "secret": false
+        },
+        {
+          "id": "AB",
+          "label": "SW 점검자 / 연락처",
+          "group": "SW 점검자",
+          "secret": false
+        },
+        {
+          "id": "AC",
+          "label": "SW 점검자 / 솔루션",
+          "group": "SW 점검자",
+          "secret": false
+        }
+      ],
+      "key_fields": [
+        "D"
+      ],
+      "required": [
+        "D"
+      ],
+      "expected": [
+        {
+          "cell": "A1",
+          "value": "기본항목"
+        },
+        {
+          "cell": "M1",
+          "value": "HW 구성정보"
+        },
+        {
+          "cell": "T1",
+          "value": "시스템 SW"
+        },
+        {
+          "cell": "X1",
+          "value": "사용여부"
+        },
+        {
+          "cell": "AA1",
+          "value": "SW 점검자"
+        },
+        {
+          "cell": "A2",
+          "value": "NO"
+        },
+        {
+          "cell": "B2",
+          "value": "관리센터"
+        },
+        {
+          "cell": "C2",
+          "value": "등급"
+        },
+        {
+          "cell": "D2",
+          "value": "구성ID"
+        },
+        {
+          "cell": "E2",
+          "value": "구성자원명"
+        },
+        {
+          "cell": "F2",
+          "value": "Hostname"
+        },
+        {
+          "cell": "G2",
+          "value": "도입년"
+        },
+        {
+          "cell": "H2",
+          "value": "계정"
+        },
+        {
+          "cell": "I2",
+          "value": "비밀번호"
+        },
+        {
+          "cell": "J2",
+          "value": "IP"
+        },
+        {
+          "cell": "K2",
+          "value": "port"
+        },
+        {
+          "cell": "L2",
+          "value": "설치위치"
+        },
+        {
+          "cell": "M2",
+          "value": "제조사"
+        },
+        {
+          "cell": "N2",
+          "value": "모델명"
+        },
+        {
+          "cell": "O2",
+          "value": "OS"
+        },
+        {
+          "cell": "P2",
+          "value": "Core수량"
+        },
+        {
+          "cell": "Q2",
+          "value": "Memory"
+        },
+        {
+          "cell": "R2",
+          "value": "SLA 등록업무"
+        },
+        {
+          "cell": "S2",
+          "value": "사용 유무"
+        },
+        {
+          "cell": "T2",
+          "value": "WAS"
+        },
+        {
+          "cell": "U2",
+          "value": "WEB"
+        },
+        {
+          "cell": "V2",
+          "value": "DBMS"
+        },
+        {
+          "cell": "W2",
+          "value": "상용SW"
+        },
+        {
+          "cell": "X2",
+          "value": "정보조회"
+        },
+        {
+          "cell": "Y2",
+          "value": "정보유통"
+        },
+        {
+          "cell": "Z2",
+          "value": "비고"
+        },
+        {
+          "cell": "AA2",
+          "value": "이름"
+        },
+        {
+          "cell": "AB2",
+          "value": "연락처"
+        },
+        {
+          "cell": "AC2",
+          "value": "솔루션"
+        }
+      ]
+    },
+    {
+      "sheet": "서버 네트워크 보안",
+      "header_end": 2,
+      "max_col": 41,
+      "fields": [
+        {
+          "id": "A",
+          "label": "기본항목 / NO",
+          "group": "기본항목",
+          "secret": false
+        },
+        {
+          "id": "B",
+          "label": "기본항목 / 관리센터",
+          "group": "기본항목",
+          "secret": false
+        },
+        {
+          "id": "C",
+          "label": "기본항목 / 용도",
+          "group": "기본항목",
+          "secret": false
+        },
+        {
+          "id": "D",
+          "label": "기본항목 / 등급",
+          "group": "기본항목",
+          "secret": false
+        },
+        {
+          "id": "E",
+          "label": "기본항목 / 구성ID",
+          "group": "기본항목",
+          "secret": false
+        },
+        {
+          "id": "F",
+          "label": "기본항목 / 기관명",
+          "group": "기본항목",
+          "secret": false
+        },
+        {
+          "id": "G",
+          "label": "기본항목 / 구성자원명",
+          "group": "기본항목",
+          "secret": false
+        },
+        {
+          "id": "H",
+          "label": "기본항목 / Hostname",
+          "group": "기본항목",
+          "secret": false
+        },
+        {
+          "id": "I",
+          "label": "기본항목 / 계정",
+          "group": "기본항목",
+          "secret": false
+        },
+        {
+          "id": "J",
+          "label": "기본항목 / 비밀번호",
+          "group": "기본항목",
+          "secret": true
+        },
+        {
+          "id": "K",
+          "label": "기본항목 / IP",
+          "group": "기본항목",
+          "secret": false
+        },
+        {
+          "id": "L",
+          "label": "기본항목 / Port",
+          "group": "기본항목",
+          "secret": false
+        },
+        {
+          "id": "M",
+          "label": "기본항목 / 1차교체",
+          "group": "기본항목",
+          "secret": false
+        },
+        {
+          "id": "N",
+          "label": "기본항목 / 2차교체",
+          "group": "기본항목",
+          "secret": false
+        },
+        {
+          "id": "O",
+          "label": "기본항목 / 이중화대상",
+          "group": "기본항목",
+          "secret": false
+        },
+        {
+          "id": "P",
+          "label": "기본항목 / 도입년도",
+          "group": "기본항목",
+          "secret": false
+        },
+        {
+          "id": "Q",
+          "label": "기본항목 / 망구분",
+          "group": "기본항목",
+          "secret": false
+        },
+        {
+          "id": "R",
+          "label": "기본항목 / 설치위치",
+          "group": "기본항목",
+          "secret": false
+        },
+        {
+          "id": "S",
+          "label": "HW 구성정보 / 제조사",
+          "group": "HW 구성정보",
+          "secret": false
+        },
+        {
+          "id": "T",
+          "label": "HW 구성정보 / 모델명",
+          "group": "HW 구성정보",
+          "secret": false
+        },
+        {
+          "id": "U",
+          "label": "HW 구성정보 / OS",
+          "group": "HW 구성정보",
+          "secret": false
+        },
+        {
+          "id": "V",
+          "label": "HW 구성정보 / CPU(Ghz)",
+          "group": "HW 구성정보",
+          "secret": false
+        },
+        {
+          "id": "W",
+          "label": "HW 구성정보 / Core수량",
+          "group": "HW 구성정보",
+          "secret": false
+        },
+        {
+          "id": "X",
+          "label": "HW 구성정보 / Memory",
+          "group": "HW 구성정보",
+          "secret": false
+        },
+        {
+          "id": "Y",
+          "label": "HW 구성정보 / SLA 등록업무",
+          "group": "HW 구성정보",
+          "secret": false
+        },
+        {
+          "id": "Z",
+          "label": "HW 구성정보 / 사용 유무",
+          "group": "HW 구성정보",
+          "secret": false
+        },
+        {
+          "id": "AA",
+          "label": "시스템 SW / WAS",
+          "group": "시스템 SW",
+          "secret": false
+        },
+        {
+          "id": "AB",
+          "label": "시스템 SW / WEB",
+          "group": "시스템 SW",
+          "secret": false
+        },
+        {
+          "id": "AC",
+          "label": "시스템 SW / DBMS",
+          "group": "시스템 SW",
+          "secret": false
+        },
+        {
+          "id": "AD",
+          "label": "시스템 SW / 상용SW",
+          "group": "시스템 SW",
+          "secret": false
+        },
+        {
+          "id": "AE",
+          "label": "사용여부 / 정보조회",
+          "group": "사용여부",
+          "secret": false
+        },
+        {
+          "id": "AF",
+          "label": "사용여부 / 정보유통",
+          "group": "사용여부",
+          "secret": false
+        },
+        {
+          "id": "AG",
+          "label": "사용여부 / 비고",
+          "group": "사용여부",
+          "secret": false
+        },
+        {
+          "id": "AH",
+          "label": "HW 점검자 / 이름",
+          "group": "HW 점검자",
+          "secret": false
+        },
+        {
+          "id": "AI",
+          "label": "HW 점검자 / 연락처",
+          "group": "HW 점검자",
+          "secret": false
+        },
+        {
+          "id": "AJ",
+          "label": "SW 점검자 / 이름",
+          "group": "SW 점검자",
+          "secret": false
+        },
+        {
+          "id": "AK",
+          "label": "SW 점검자 / 연락처",
+          "group": "SW 점검자",
+          "secret": false
+        },
+        {
+          "id": "AL",
+          "label": "SW 점검자 / 솔루션",
+          "group": "SW 점검자",
+          "secret": false
+        },
+        {
+          "id": "AM",
+          "label": "이름",
+          "group": "기본 정보",
+          "secret": false
+        },
+        {
+          "id": "AN",
+          "label": "연락처",
+          "group": "기본 정보",
+          "secret": false
+        },
+        {
+          "id": "AO",
+          "label": "공문수신처",
+          "group": "기본 정보",
+          "secret": false
+        }
+      ],
+      "key_fields": [
+        "E"
+      ],
+      "required": [
+        "E"
+      ],
+      "expected": [
+        {
+          "cell": "A1",
+          "value": "기본항목"
+        },
+        {
+          "cell": "S1",
+          "value": "HW 구성정보"
+        },
+        {
+          "cell": "AA1",
+          "value": "시스템 SW"
+        },
+        {
+          "cell": "AE1",
+          "value": "사용여부"
+        },
+        {
+          "cell": "AH1",
+          "value": "HW 점검자"
+        },
+        {
+          "cell": "AJ1",
+          "value": "SW 점검자"
+        },
+        {
+          "cell": "A2",
+          "value": "NO"
+        },
+        {
+          "cell": "B2",
+          "value": "관리센터"
+        },
+        {
+          "cell": "C2",
+          "value": "용도"
+        },
+        {
+          "cell": "D2",
+          "value": "등급"
+        },
+        {
+          "cell": "E2",
+          "value": "구성ID"
+        },
+        {
+          "cell": "F2",
+          "value": "기관명"
+        },
+        {
+          "cell": "G2",
+          "value": "구성자원명"
+        },
+        {
+          "cell": "H2",
+          "value": "Hostname"
+        },
+        {
+          "cell": "I2",
+          "value": "계정"
+        },
+        {
+          "cell": "J2",
+          "value": "비밀번호"
+        },
+        {
+          "cell": "K2",
+          "value": "IP"
+        },
+        {
+          "cell": "L2",
+          "value": "Port"
+        },
+        {
+          "cell": "M2",
+          "value": "1차교체"
+        },
+        {
+          "cell": "N2",
+          "value": "2차교체"
+        },
+        {
+          "cell": "O2",
+          "value": "이중화대상"
+        },
+        {
+          "cell": "P2",
+          "value": "도입년도"
+        },
+        {
+          "cell": "Q2",
+          "value": "망구분"
+        },
+        {
+          "cell": "R2",
+          "value": "설치위치"
+        },
+        {
+          "cell": "S2",
+          "value": "제조사"
+        },
+        {
+          "cell": "T2",
+          "value": "모델명"
+        },
+        {
+          "cell": "U2",
+          "value": "OS"
+        },
+        {
+          "cell": "V2",
+          "value": "CPU(Ghz)"
+        },
+        {
+          "cell": "W2",
+          "value": "Core수량"
+        },
+        {
+          "cell": "X2",
+          "value": "Memory"
+        },
+        {
+          "cell": "Y2",
+          "value": "SLA 등록업무"
+        },
+        {
+          "cell": "Z2",
+          "value": "사용 유무"
+        },
+        {
+          "cell": "AA2",
+          "value": "WAS"
+        },
+        {
+          "cell": "AB2",
+          "value": "WEB"
+        },
+        {
+          "cell": "AC2",
+          "value": "DBMS"
+        },
+        {
+          "cell": "AD2",
+          "value": "상용SW"
+        },
+        {
+          "cell": "AE2",
+          "value": "정보조회"
+        },
+        {
+          "cell": "AF2",
+          "value": "정보유통"
+        },
+        {
+          "cell": "AG2",
+          "value": "비고"
+        },
+        {
+          "cell": "AH2",
+          "value": "이름"
+        },
+        {
+          "cell": "AI2",
+          "value": "연락처"
+        },
+        {
+          "cell": "AJ2",
+          "value": "이름"
+        },
+        {
+          "cell": "AK2",
+          "value": "연락처"
+        },
+        {
+          "cell": "AL2",
+          "value": "솔루션"
+        },
+        {
+          "cell": "AM2",
+          "value": "이름"
+        },
+        {
+          "cell": "AN2",
+          "value": "연락처"
+        },
+        {
+          "cell": "AO2",
+          "value": "공문수신처"
+        }
+      ]
+    },
+    {
+      "sheet": "서울청사",
+      "header_end": 2,
+      "max_col": 32,
+      "fields": [
+        {
+          "id": "A",
+          "label": "기본항목 / NO",
+          "group": "기본항목",
+          "secret": false
+        },
+        {
+          "id": "B",
+          "label": "기본항목 / 관리센터",
+          "group": "기본항목",
+          "secret": false
+        },
+        {
+          "id": "C",
+          "label": "기본항목 / 용도",
+          "group": "기본항목",
+          "secret": false
+        },
+        {
+          "id": "D",
+          "label": "기본항목 / 등급",
+          "group": "기본항목",
+          "secret": false
+        },
+        {
+          "id": "E",
+          "label": "기본항목 / 구성자원명",
+          "group": "기본항목",
+          "secret": false
+        },
+        {
+          "id": "F",
+          "label": "기본항목 / Hostname",
+          "group": "기본항목",
+          "secret": false
+        },
+        {
+          "id": "G",
+          "label": "기본항목 / 계정",
+          "group": "기본항목",
+          "secret": false
+        },
+        {
+          "id": "H",
+          "label": "기본항목 / 비밀번호",
+          "group": "기본항목",
+          "secret": true
+        },
+        {
+          "id": "I",
+          "label": "기본항목 / IP",
+          "group": "기본항목",
+          "secret": false
+        },
+        {
+          "id": "J",
+          "label": "기본항목 / 설치위치",
+          "group": "기본항목",
+          "secret": false
+        },
+        {
+          "id": "K",
+          "label": "도입년도",
+          "group": "기본 정보",
+          "secret": false
+        },
+        {
+          "id": "L",
+          "label": "망구분",
+          "group": "기본 정보",
+          "secret": false
+        },
+        {
+          "id": "M",
+          "label": "HW 구성정보 / 제조사",
+          "group": "HW 구성정보",
+          "secret": false
+        },
+        {
+          "id": "N",
+          "label": "HW 구성정보 / 모델명",
+          "group": "HW 구성정보",
+          "secret": false
+        },
+        {
+          "id": "O",
+          "label": "HW 구성정보 / OS",
+          "group": "HW 구성정보",
+          "secret": false
+        },
+        {
+          "id": "P",
+          "label": "HW 구성정보 / CPU(Ghz)",
+          "group": "HW 구성정보",
+          "secret": false
+        },
+        {
+          "id": "Q",
+          "label": "HW 구성정보 / Core수량",
+          "group": "HW 구성정보",
+          "secret": false
+        },
+        {
+          "id": "R",
+          "label": "HW 구성정보 / Memory",
+          "group": "HW 구성정보",
+          "secret": false
+        },
+        {
+          "id": "S",
+          "label": "HW 구성정보 / SLA 등록업무",
+          "group": "HW 구성정보",
+          "secret": false
+        },
+        {
+          "id": "T",
+          "label": "HW 구성정보 / 사용 유무",
+          "group": "HW 구성정보",
+          "secret": false
+        },
+        {
+          "id": "U",
+          "label": "시스템 SW / WAS",
+          "group": "시스템 SW",
+          "secret": false
+        },
+        {
+          "id": "V",
+          "label": "시스템 SW / WEB",
+          "group": "시스템 SW",
+          "secret": false
+        },
+        {
+          "id": "W",
+          "label": "시스템 SW / DBMS",
+          "group": "시스템 SW",
+          "secret": false
+        },
+        {
+          "id": "X",
+          "label": "시스템 SW / 상용SW",
+          "group": "시스템 SW",
+          "secret": false
+        },
+        {
+          "id": "Y",
+          "label": "사용여부 / 정보조회",
+          "group": "사용여부",
+          "secret": false
+        },
+        {
+          "id": "Z",
+          "label": "사용여부 / 정보유통",
+          "group": "사용여부",
+          "secret": false
+        },
+        {
+          "id": "AA",
+          "label": "사용여부 / 비고",
+          "group": "사용여부",
+          "secret": false
+        },
+        {
+          "id": "AB",
+          "label": "HW 점검자 / 이름",
+          "group": "HW 점검자",
+          "secret": false
+        },
+        {
+          "id": "AC",
+          "label": "HW 점검자 / 연락처",
+          "group": "HW 점검자",
+          "secret": false
+        },
+        {
+          "id": "AD",
+          "label": "SW 점검자 / 이름",
+          "group": "SW 점검자",
+          "secret": false
+        },
+        {
+          "id": "AE",
+          "label": "SW 점검자 / 연락처",
+          "group": "SW 점검자",
+          "secret": false
+        },
+        {
+          "id": "AF",
+          "label": "SW 점검자 / 솔루션",
+          "group": "SW 점검자",
+          "secret": false
+        }
+      ],
+      "key_fields": [
+        "F",
+        "I"
+      ],
+      "required": [
+        "F",
+        "I"
+      ],
+      "expected": [
+        {
+          "cell": "A1",
+          "value": "기본항목"
+        },
+        {
+          "cell": "M1",
+          "value": "HW 구성정보"
+        },
+        {
+          "cell": "U1",
+          "value": "시스템 SW"
+        },
+        {
+          "cell": "Y1",
+          "value": "사용여부"
+        },
+        {
+          "cell": "AB1",
+          "value": "HW 점검자"
+        },
+        {
+          "cell": "AD1",
+          "value": "SW 점검자"
+        },
+        {
+          "cell": "A2",
+          "value": "NO"
+        },
+        {
+          "cell": "B2",
+          "value": "관리센터"
+        },
+        {
+          "cell": "C2",
+          "value": "용도"
+        },
+        {
+          "cell": "D2",
+          "value": "등급"
+        },
+        {
+          "cell": "E2",
+          "value": "구성자원명"
+        },
+        {
+          "cell": "F2",
+          "value": "Hostname"
+        },
+        {
+          "cell": "G2",
+          "value": "계정"
+        },
+        {
+          "cell": "H2",
+          "value": "비밀번호"
+        },
+        {
+          "cell": "I2",
+          "value": "IP"
+        },
+        {
+          "cell": "J2",
+          "value": "설치위치"
+        },
+        {
+          "cell": "K2",
+          "value": "도입년도"
+        },
+        {
+          "cell": "L2",
+          "value": "망구분"
+        },
+        {
+          "cell": "M2",
+          "value": "제조사"
+        },
+        {
+          "cell": "N2",
+          "value": "모델명"
+        },
+        {
+          "cell": "O2",
+          "value": "OS"
+        },
+        {
+          "cell": "P2",
+          "value": "CPU(Ghz)"
+        },
+        {
+          "cell": "Q2",
+          "value": "Core수량"
+        },
+        {
+          "cell": "R2",
+          "value": "Memory"
+        },
+        {
+          "cell": "S2",
+          "value": "SLA 등록업무"
+        },
+        {
+          "cell": "T2",
+          "value": "사용 유무"
+        },
+        {
+          "cell": "U2",
+          "value": "WAS"
+        },
+        {
+          "cell": "V2",
+          "value": "WEB"
+        },
+        {
+          "cell": "W2",
+          "value": "DBMS"
+        },
+        {
+          "cell": "X2",
+          "value": "상용SW"
+        },
+        {
+          "cell": "Y2",
+          "value": "정보조회"
+        },
+        {
+          "cell": "Z2",
+          "value": "정보유통"
+        },
+        {
+          "cell": "AA2",
+          "value": "비고"
+        },
+        {
+          "cell": "AB2",
+          "value": "이름"
+        },
+        {
+          "cell": "AC2",
+          "value": "연락처"
+        },
+        {
+          "cell": "AD2",
+          "value": "이름"
+        },
+        {
+          "cell": "AE2",
+          "value": "연락처"
+        },
+        {
+          "cell": "AF2",
+          "value": "솔루션"
+        }
+      ]
+    },
+    {
+      "sheet": "8. SW 현황",
+      "header_end": 6,
+      "max_col": 17,
+      "fields": [
+        {
+          "id": "A",
+          "label": "구성자원명",
+          "group": "기본 정보",
+          "secret": false
+        },
+        {
+          "id": "B",
+          "label": "호스트네임",
+          "group": "기본 정보",
+          "secret": false
+        },
+        {
+          "id": "C",
+          "label": "SW명",
+          "group": "기본 정보",
+          "secret": false
+        },
+        {
+          "id": "D",
+          "label": "버전",
+          "group": "기본 정보",
+          "secret": false
+        },
+        {
+          "id": "E",
+          "label": "제조사",
+          "group": "기본 정보",
+          "secret": false
+        },
+        {
+          "id": "F",
+          "label": "용도",
+          "group": "기본 정보",
+          "secret": false
+        },
+        {
+          "id": "G",
+          "label": "라이선스 / (13)수량*",
+          "group": "라이선스",
+          "secret": false
+        },
+        {
+          "id": "H",
+          "label": "라이선스 / (14)유형* (CPU, Core, User, Site, 서버)",
+          "group": "라이선스",
+          "secret": false
+        },
+        {
+          "id": "I",
+          "label": "라이선스 / (15)기간* (기간/영구)",
+          "group": "라이선스",
+          "secret": false
+        },
+        {
+          "id": "J",
+          "label": "엔지니어 / 소속",
+          "group": "엔지니어",
+          "secret": false
+        },
+        {
+          "id": "K",
+          "label": "엔지니어 / 이름",
+          "group": "엔지니어",
+          "secret": false
+        },
+        {
+          "id": "L",
+          "label": "엔지니어 / 연락처",
+          "group": "엔지니어",
+          "secret": false
+        },
+        {
+          "id": "M",
+          "label": "엔지니어 / 이메일",
+          "group": "엔지니어",
+          "secret": false
+        },
+        {
+          "id": "N",
+          "label": "영업 / 소속",
+          "group": "영업",
+          "secret": false
+        },
+        {
+          "id": "O",
+          "label": "영업 / 이름",
+          "group": "영업",
+          "secret": false
+        },
+        {
+          "id": "P",
+          "label": "영업 / 연락처",
+          "group": "영업",
+          "secret": false
+        },
+        {
+          "id": "Q",
+          "label": "영업 / 이메일",
+          "group": "영업",
+          "secret": false
+        }
+      ],
+      "key_fields": [
+        "B",
+        "C"
+      ],
+      "required": [
+        "B",
+        "C"
+      ],
+      "expected": [
+        {
+          "cell": "A4",
+          "value": "구성자원명"
+        },
+        {
+          "cell": "B4",
+          "value": "호스트네임"
+        },
+        {
+          "cell": "C4",
+          "value": "SW명"
+        },
+        {
+          "cell": "D4",
+          "value": "버전"
+        },
+        {
+          "cell": "E4",
+          "value": "제조사"
+        },
+        {
+          "cell": "F4",
+          "value": "용도"
+        },
+        {
+          "cell": "G4",
+          "value": "라이선스"
+        },
+        {
+          "cell": "J4",
+          "value": "엔지니어"
+        },
+        {
+          "cell": "N4",
+          "value": "영업"
+        },
+        {
+          "cell": "G6",
+          "value": "(13)수량*"
+        },
+        {
+          "cell": "H6",
+          "value": "(14)유형*\n(CPU, Core, User, Site, 서버)"
+        },
+        {
+          "cell": "I6",
+          "value": "(15)기간*\n(기간/영구)"
+        },
+        {
+          "cell": "J6",
+          "value": "소속"
+        },
+        {
+          "cell": "K6",
+          "value": "이름"
+        },
+        {
+          "cell": "L6",
+          "value": "연락처"
+        },
+        {
+          "cell": "M6",
+          "value": "이메일"
+        },
+        {
+          "cell": "N6",
+          "value": "소속"
+        },
+        {
+          "cell": "O6",
+          "value": "이름"
+        },
+        {
+          "cell": "P6",
+          "value": "연락처"
+        },
+        {
+          "cell": "Q6",
+          "value": "이메일"
+        }
+      ]
+    },
+    {
+      "sheet": "백업현황(수정)",
+      "header_end": 3,
+      "max_col": 48,
+      "fields": [
+        {
+          "id": "A",
+          "label": "대상장비 기본 정보 / 기관명",
+          "group": "대상장비 기본 정보",
+          "secret": false
+        },
+        {
+          "id": "B",
+          "label": "대상장비 기본 정보 / 구성ID",
+          "group": "대상장비 기본 정보",
+          "secret": false
+        },
+        {
+          "id": "C",
+          "label": "대상장비 기본 정보 / 업무명",
+          "group": "대상장비 기본 정보",
+          "secret": false
+        },
+        {
+          "id": "D",
+          "label": "대상장비 기본 정보 / 업무등급",
+          "group": "대상장비 기본 정보",
+          "secret": false
+        },
+        {
+          "id": "E",
+          "label": "대상장비 기본 정보 / 구성자원명",
+          "group": "대상장비 기본 정보",
+          "secret": false
+        },
+        {
+          "id": "F",
+          "label": "대상장비 기본 정보 / DB서버 여부",
+          "group": "대상장비 기본 정보",
+          "secret": false
+        },
+        {
+          "id": "G",
+          "label": "대상장비 기본 정보 / DB 종류",
+          "group": "대상장비 기본 정보",
+          "secret": false
+        },
+        {
+          "id": "H",
+          "label": "대상장비 기본 정보 / HostName",
+          "group": "대상장비 기본 정보",
+          "secret": false
+        },
+        {
+          "id": "I",
+          "label": "대상장비 기본 정보 / OS종류",
+          "group": "대상장비 기본 정보",
+          "secret": false
+        },
+        {
+          "id": "J",
+          "label": "대상장비 기본 정보 / 망 구분",
+          "group": "대상장비 기본 정보",
+          "secret": false
+        },
+        {
+          "id": "K",
+          "label": "대상장비 기본 정보 / 서버전산실(층)",
+          "group": "대상장비 기본 정보",
+          "secret": false
+        },
+        {
+          "id": "L",
+          "label": "백업 수행 정보 / 백업 수행 여부",
+          "group": "백업 수행 정보",
+          "secret": false
+        },
+        {
+          "id": "M",
+          "label": "백업 수행 정보 / 백업 미수행 사유",
+          "group": "백업 수행 정보",
+          "secret": false
+        },
+        {
+          "id": "N",
+          "label": "백업 수행 정보 / 백업 소관",
+          "group": "백업 수행 정보",
+          "secret": false
+        },
+        {
+          "id": "O",
+          "label": "백업 수행 정보 / 구분",
+          "group": "백업 수행 정보",
+          "secret": false
+        },
+        {
+          "id": "P",
+          "label": "백업 수행 정보 / 정책No",
+          "group": "백업 수행 정보",
+          "secret": false
+        },
+        {
+          "id": "Q",
+          "label": "백업 수행 정보 / 백업정책ID",
+          "group": "백업 수행 정보",
+          "secret": false
+        },
+        {
+          "id": "R",
+          "label": "백업 수행 정보 / 구분 : FS → 파일시스템 백업일 경우 / 대상 경로",
+          "group": "백업 수행 정보",
+          "secret": false
+        },
+        {
+          "id": "S",
+          "label": "백업 수행 정보 / 구분 : FS → 파일시스템 백업일 경우 / 제외 대상 경로",
+          "group": "백업 수행 정보",
+          "secret": false
+        },
+        {
+          "id": "T",
+          "label": "백업 수행 정보 / 구분 : DB → DATABASE 백업일 경우 / SID",
+          "group": "백업 수행 정보",
+          "secret": false
+        },
+        {
+          "id": "U",
+          "label": "백업 수행 정보 / 구분 : DB → DATABASE 백업일 경우 / DB 백업방식",
+          "group": "백업 수행 정보",
+          "secret": false
+        },
+        {
+          "id": "V",
+          "label": "백업 수행 정보 / 구분 : DB → DATABASE 백업일 경우 / DUMP일 경우 EXPORT 정보",
+          "group": "백업 수행 정보",
+          "secret": false
+        },
+        {
+          "id": "W",
+          "label": "백업 수행 정보 / 백업방식",
+          "group": "백업 수행 정보",
+          "secret": false
+        },
+        {
+          "id": "X",
+          "label": "백업 수행 정보 / 구성방식",
+          "group": "백업 수행 정보",
+          "secret": false
+        },
+        {
+          "id": "Y",
+          "label": "백업 수행 정보 / FULL백업 주기",
+          "group": "백업 수행 정보",
+          "secret": false
+        },
+        {
+          "id": "Z",
+          "label": "백업 수행 정보 / 시작시간 (hh:mm)",
+          "group": "백업 수행 정보",
+          "secret": false
+        },
+        {
+          "id": "AA",
+          "label": "백업 수행 정보 / 소요시간 (분)",
+          "group": "백업 수행 정보",
+          "secret": false
+        },
+        {
+          "id": "AB",
+          "label": "백업 수행 정보 / 보관주기 (주/월/년)",
+          "group": "백업 수행 정보",
+          "secret": false
+        },
+        {
+          "id": "AC",
+          "label": "백업 수행 정보 / 백업용량 (GB)",
+          "group": "백업 수행 정보",
+          "secret": false
+        },
+        {
+          "id": "AD",
+          "label": "백업 수행 정보 / 파일수",
+          "group": "백업 수행 정보",
+          "secret": false
+        },
+        {
+          "id": "AE",
+          "label": "백업 수행 정보 / 증분백업 여부",
+          "group": "백업 수행 정보",
+          "secret": false
+        },
+        {
+          "id": "AF",
+          "label": "백업 수행 정보 / OS 백업 관련 / OS백업 여부",
+          "group": "백업 수행 정보",
+          "secret": false
+        },
+        {
+          "id": "AG",
+          "label": "백업 수행 정보 / OS 백업 관련 / OS백업 미수행 사유",
+          "group": "백업 수행 정보",
+          "secret": false
+        },
+        {
+          "id": "AH",
+          "label": "백업 시스템 현황 / 백업SW명",
+          "group": "백업 시스템 현황",
+          "secret": false
+        },
+        {
+          "id": "AI",
+          "label": "백업 시스템 현황 / 백업SW버전",
+          "group": "백업 시스템 현황",
+          "secret": false
+        },
+        {
+          "id": "AJ",
+          "label": "백업 시스템 현황 / 백업 마스터 서버 구성ID(호스트명)",
+          "group": "백업 시스템 현황",
+          "secret": false
+        },
+        {
+          "id": "AK",
+          "label": "백업 시스템 현황 / 백업장비 구성ID",
+          "group": "백업 시스템 현황",
+          "secret": false
+        },
+        {
+          "id": "AL",
+          "label": "백업장비, 백업대상서버 위치 / 백업장비 위치 / (설치좌표)",
+          "group": "백업장비, 백업대상서버 위치",
+          "secret": false
+        },
+        {
+          "id": "AM",
+          "label": "백업장비, 백업대상서버 위치 / 백업장비 위치 / (층)",
+          "group": "백업장비, 백업대상서버 위치",
+          "secret": false
+        },
+        {
+          "id": "AN",
+          "label": "백업장비, 백업대상서버 위치 / 백업 받는 서버 백업장비 위치 정보 (O 위치 동일, X 위치 다름)",
+          "group": "백업장비, 백업대상서버 위치",
+          "secret": false
+        },
+        {
+          "id": "AO",
+          "label": "소산 정보 / 소산여부",
+          "group": "소산 정보",
+          "secret": false
+        },
+        {
+          "id": "AP",
+          "label": "소산 정보 / 소산 미실시 사유",
+          "group": "소산 정보",
+          "secret": false
+        },
+        {
+          "id": "AQ",
+          "label": "소산 정보 / 온라인 소산 정보 / 파일소산용량 (GB)",
+          "group": "소산 정보",
+          "secret": false
+        },
+        {
+          "id": "AR",
+          "label": "소산 정보 / 온라인 소산 정보 / DB소산용량 (GB)",
+          "group": "소산 정보",
+          "secret": false
+        },
+        {
+          "id": "AS",
+          "label": "소산 정보 / 온라인 소산 정보 / 온라인 소산주기",
+          "group": "소산 정보",
+          "secret": false
+        },
+        {
+          "id": "AT",
+          "label": "소산 정보 / 오프라인 소산 정보 / 파일소산용량 (GB)",
+          "group": "소산 정보",
+          "secret": false
+        },
+        {
+          "id": "AU",
+          "label": "소산 정보 / 오프라인 소산 정보 / DB소산용량 (GB)",
+          "group": "소산 정보",
+          "secret": false
+        },
+        {
+          "id": "AV",
+          "label": "소산 정보 / 오프라인 소산 정보 / 오프라인 소산주기",
+          "group": "소산 정보",
+          "secret": false
+        }
+      ],
+      "key_fields": [
+        "B",
+        "Q",
+        "R",
+        "T"
+      ],
+      "required": [
+        "B",
+        "Q"
+      ],
+      "expected": [
+        {
+          "cell": "A1",
+          "value": "대상장비 기본 정보"
+        },
+        {
+          "cell": "L1",
+          "value": "백업 수행 정보"
+        },
+        {
+          "cell": "AH1",
+          "value": "백업 시스템 현황"
+        },
+        {
+          "cell": "AL1",
+          "value": "백업장비, 백업대상서버 위치"
+        },
+        {
+          "cell": "AO1",
+          "value": "소산 정보"
+        },
+        {
+          "cell": "A2",
+          "value": "기관명"
+        },
+        {
+          "cell": "B2",
+          "value": "구성ID"
+        },
+        {
+          "cell": "C2",
+          "value": "업무명"
+        },
+        {
+          "cell": "D2",
+          "value": "업무등급"
+        },
+        {
+          "cell": "E2",
+          "value": "구성자원명"
+        },
+        {
+          "cell": "F2",
+          "value": "DB서버 여부"
+        },
+        {
+          "cell": "G2",
+          "value": "DB 종류"
+        },
+        {
+          "cell": "H2",
+          "value": "HostName"
+        },
+        {
+          "cell": "I2",
+          "value": "OS종류"
+        },
+        {
+          "cell": "J2",
+          "value": "망 구분"
+        },
+        {
+          "cell": "K2",
+          "value": "서버전산실(층)"
+        },
+        {
+          "cell": "L2",
+          "value": "백업 수행 여부"
+        },
+        {
+          "cell": "M2",
+          "value": "백업 미수행 사유"
+        },
+        {
+          "cell": "N2",
+          "value": "백업\n소관"
+        },
+        {
+          "cell": "O2",
+          "value": "구분"
+        },
+        {
+          "cell": "P2",
+          "value": "정책No"
+        },
+        {
+          "cell": "Q2",
+          "value": "백업정책ID"
+        },
+        {
+          "cell": "R2",
+          "value": "구분 : FS → 파일시스템 백업일 경우"
+        },
+        {
+          "cell": "T2",
+          "value": "구분 : DB → DATABASE 백업일 경우"
+        },
+        {
+          "cell": "W2",
+          "value": "백업방식"
+        },
+        {
+          "cell": "X2",
+          "value": "구성방식"
+        },
+        {
+          "cell": "Y2",
+          "value": "FULL백업 주기"
+        },
+        {
+          "cell": "Z2",
+          "value": "시작시간\n(hh:mm)"
+        },
+        {
+          "cell": "AA2",
+          "value": "소요시간\n(분)"
+        },
+        {
+          "cell": "AB2",
+          "value": "보관주기\n(주/월/년)"
+        },
+        {
+          "cell": "AC2",
+          "value": "백업용량\n(GB)"
+        },
+        {
+          "cell": "AD2",
+          "value": "파일수"
+        },
+        {
+          "cell": "AE2",
+          "value": "증분백업\n여부"
+        },
+        {
+          "cell": "AF2",
+          "value": "OS 백업 관련"
+        },
+        {
+          "cell": "AH2",
+          "value": "백업SW명"
+        },
+        {
+          "cell": "AI2",
+          "value": "백업SW버전"
+        },
+        {
+          "cell": "AJ2",
+          "value": "백업 마스터 서버 구성ID(호스트명)"
+        },
+        {
+          "cell": "AK2",
+          "value": "백업장비 구성ID"
+        },
+        {
+          "cell": "AL2",
+          "value": "백업장비 위치"
+        },
+        {
+          "cell": "AN2",
+          "value": "백업 받는 서버\n백업장비 위치 정보\n(O 위치 동일, X 위치 다름)"
+        },
+        {
+          "cell": "AO2",
+          "value": "소산여부"
+        },
+        {
+          "cell": "AP2",
+          "value": "소산 미실시 사유"
+        },
+        {
+          "cell": "AQ2",
+          "value": "온라인 소산 정보"
+        },
+        {
+          "cell": "AT2",
+          "value": "오프라인 소산 정보"
+        },
+        {
+          "cell": "R3",
+          "value": "대상 경로"
+        },
+        {
+          "cell": "S3",
+          "value": "제외 대상 경로"
+        },
+        {
+          "cell": "T3",
+          "value": "SID"
+        },
+        {
+          "cell": "U3",
+          "value": "DB 백업방식"
+        },
+        {
+          "cell": "V3",
+          "value": "DUMP일 경우 EXPORT 정보"
+        },
+        {
+          "cell": "AF3",
+          "value": "OS백업 여부"
+        },
+        {
+          "cell": "AG3",
+          "value": "OS백업\n미수행 사유"
+        },
+        {
+          "cell": "AL3",
+          "value": "(설치좌표)"
+        },
+        {
+          "cell": "AM3",
+          "value": "(층)"
+        },
+        {
+          "cell": "AQ3",
+          "value": "파일소산용량\n(GB)"
+        },
+        {
+          "cell": "AR3",
+          "value": "DB소산용량\n(GB)"
+        },
+        {
+          "cell": "AS3",
+          "value": "온라인 소산주기"
+        },
+        {
+          "cell": "AT3",
+          "value": "파일소산용량\n(GB)"
+        },
+        {
+          "cell": "AU3",
+          "value": "DB소산용량\n(GB)"
+        },
+        {
+          "cell": "AV3",
+          "value": "오프라인 소산주기"
+        }
+      ]
+    },
+    {
+      "sheet": "전용회선정보",
+      "header_end": 2,
+      "max_col": 21,
+      "fields": [
+        {
+          "id": "B",
+          "label": "순번",
+          "group": "기본 정보",
+          "secret": false
+        },
+        {
+          "id": "C",
+          "label": "기관명",
+          "group": "기본 정보",
+          "secret": false
+        },
+        {
+          "id": "D",
+          "label": "구분",
+          "group": "기본 정보",
+          "secret": false
+        },
+        {
+          "id": "E",
+          "label": "사용 유무",
+          "group": "기본 정보",
+          "secret": false
+        },
+        {
+          "id": "F",
+          "label": "통신사",
+          "group": "기본 정보",
+          "secret": false
+        },
+        {
+          "id": "G",
+          "label": "회선 속도",
+          "group": "기본 정보",
+          "secret": false
+        },
+        {
+          "id": "H",
+          "label": "요금납부",
+          "group": "기본 정보",
+          "secret": false
+        },
+        {
+          "id": "I",
+          "label": "회선 번호",
+          "group": "기본 정보",
+          "secret": false
+        },
+        {
+          "id": "J",
+          "label": "회선비용",
+          "group": "기본 정보",
+          "secret": false
+        },
+        {
+          "id": "K",
+          "label": "거리구간",
+          "group": "기본 정보",
+          "secret": false
+        },
+        {
+          "id": "L",
+          "label": "회선비용(광주이전)",
+          "group": "기본 정보",
+          "secret": false
+        },
+        {
+          "id": "M",
+          "label": "이전비용",
+          "group": "기본 정보",
+          "secret": false
+        },
+        {
+          "id": "N",
+          "label": "거리구간",
+          "group": "기본 정보",
+          "secret": false
+        },
+        {
+          "id": "O",
+          "label": "노드정보",
+          "group": "기본 정보",
+          "secret": false
+        },
+        {
+          "id": "P",
+          "label": "상위국(설치장소)",
+          "group": "기본 정보",
+          "secret": false
+        },
+        {
+          "id": "Q",
+          "label": "하위국(설치장소)",
+          "group": "기본 정보",
+          "secret": false
+        },
+        {
+          "id": "R",
+          "label": "이용서비스",
+          "group": "기본 정보",
+          "secret": false
+        },
+        {
+          "id": "S",
+          "label": "사용여부",
+          "group": "기본 정보",
+          "secret": false
+        },
+        {
+          "id": "T",
+          "label": "공문수신처",
+          "group": "기본 정보",
+          "secret": false
+        },
+        {
+          "id": "U",
+          "label": "기관 담당자",
+          "group": "기본 정보",
+          "secret": false
+        }
+      ],
+      "key_fields": [
+        "I"
+      ],
+      "required": [
+        "I"
+      ],
+      "expected": [
+        {
+          "cell": "B2",
+          "value": "순번"
+        },
+        {
+          "cell": "C2",
+          "value": "기관명"
+        },
+        {
+          "cell": "D2",
+          "value": "구분"
+        },
+        {
+          "cell": "E2",
+          "value": "사용 유무"
+        },
+        {
+          "cell": "F2",
+          "value": "통신사"
+        },
+        {
+          "cell": "G2",
+          "value": "회선 속도"
+        },
+        {
+          "cell": "H2",
+          "value": "요금납부"
+        },
+        {
+          "cell": "I2",
+          "value": "회선 번호"
+        },
+        {
+          "cell": "J2",
+          "value": "회선비용"
+        },
+        {
+          "cell": "K2",
+          "value": "거리구간"
+        },
+        {
+          "cell": "L2",
+          "value": "회선비용(광주이전)"
+        },
+        {
+          "cell": "M2",
+          "value": "이전비용"
+        },
+        {
+          "cell": "N2",
+          "value": "거리구간"
+        },
+        {
+          "cell": "O2",
+          "value": "노드정보"
+        },
+        {
+          "cell": "P2",
+          "value": "상위국(설치장소)"
+        },
+        {
+          "cell": "Q2",
+          "value": "하위국(설치장소)"
+        },
+        {
+          "cell": "R2",
+          "value": "이용서비스"
+        },
+        {
+          "cell": "S2",
+          "value": "사용여부"
+        },
+        {
+          "cell": "T2",
+          "value": "공문수신처"
+        },
+        {
+          "cell": "U2",
+          "value": "기관 담당자"
+        }
+      ]
+    }
+  ]
+}

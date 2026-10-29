@@ -1,0 +1,108 @@
+# 7차 '연결 적합성' 검토 — DB 묶음 A(Oracle · Tibero · Altibase) (2026-10-16)
+# 대상: knowledge_link_audit 의 '이 판정 전용인데 판정 제목 핵심어가 절차에 하나도 없음' 대기열(검증도구/kw7/A_dba.json, 61건).
+# 판정마다 절차의 1차 단계가 실제로 그 판정을 진단하는지 읽고 셋 중 하나로 정했다.
+#   (a) 맞음 — 낱말만 다름: fit_reviewed: true + 어느 1차 단계가 진단하는지(reviewed)
+#   (b) 더 맞는 기존 절차 있음: primary: true 로 그 절차를 1순위로
+#   (c) 맞는 절차 없음: r7_dba_procedures.yaml 에 전용 절차(scope: id)를 새로 만듦 — 이름 붙인 전용 절차가 자동으로 이긴다(여기에는 적지 않음)
+# 기존 절차·기존 proclinks 파일은 고치지 않는다.
+links:
+# ══════════════ (a) 맞음 — Oracle ══════════════
+- procedure: ORA-PROC-R6-SQLERR
+  match: [ORA-00001]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 검토 — 1차 2단계 'DB 쪽 원인 확인'이 dba_constraints·dba_cons_columns 로 위반 제약의 테이블·컬럼을, dba_sequences last_number 와 최대 키 비교로 시퀀스 뒤처짐을 진단하고 1단계가 같은 키 재유입(재처리 루프)을 본다 — 판정 제목 '고유 제약조건 위반'을 절차는 '중복 키·제약'으로 적었을 뿐"
+- procedure: ORA-PROC-R6-CLIENT
+  match: [ORA-01041]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 검토 — 1차 1단계가 ORA-01041 직전의 ORA-03113/03135(끊긴 연결 핸들 재사용)를, 2단계가 같은 시각 alert log ORA-00600/07445(서버 프로세스 비정상 종료)와 sqlplus -v·JDBC 드라이버 대 DB 버전을 확인 — 판정 vendor_cause(hostdef 확장 포인터가 빈 내부 오류의 세 원인)와 1:1 대응"
+- procedure: ORA-PROC-R6-INSTSTATE
+  match: [ORA-12560, TNS-12560]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 검토 — 1차 1단계가 ORACLE_SID·ORACLE_HOME 과 실행 중 pmon 이름 대조(로컬 접속 ORA-12560 의 대표 원인), pmon·tnslsnr 존재, lsnrctl services 등록 상태를 확인하고 2단계가 인스턴스 단계를 확인 — '프로토콜 어댑터 오류'의 원인(환경변수 불일치·인스턴스 미기동·리스너)을 그대로 진단"
+- procedure: ORA-PROC-CONNECTION
+  match: [TNS-12505, TNS-12518, TNS-12520, TNS-12547, ORA-12516, ORA-12518]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 검토 — 1차 1단계 lsnrctl status/services 가 리스너에 등록된 인스턴스(SID)·핸들러 상태(READY/BLOCKED)와 listener.log 의 refused·TNS 오류를 보여 TNS-12505(SID 미등록)·TNS-12520/ORA-12516(가용 핸들러 없음·blocked)을 진단하고, 2단계 v$resource_limit processes·sessions 사용률이 TNS-12518/ORA-12518(서버 프로세스로 hand-off 실패)·TNS-12547(서버 프로세스 생성 중 단절)의 PROCESSES 한도 원인을 진단 — 판정 제목의 '핸들러·hand-off·SID' 를 절차는 '리스너·프로세스 한도'로 적었을 뿐. 2차 PROCESSES 상향·리스너 재등록도 맞음"
+- procedure: ORA-PROC-INTERNAL
+  match: [ORA-07445, ORA-00603, ORA-03113, ORA-03114]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 검토 — 1차 1단계가 pmon·v$instance 로 인스턴스 다운 여부, alert log 의 ORA-00600/ORA-07445, adrci show incident 로 인시던트를 확인: ORA-07445(코어덤프 내부 오류)는 제목 그대로, ORA-00603(치명 오류로 세션 종료)은 같은 시각 ORA-600/7445 인시던트가 원인, ORA-03113/03114(통신 채널 단절·연결 없음)는 서버 측 원인(인스턴스 종료·서버 프로세스 치명 오류)을 먼저 가르는 단계라 맞음 — 서버 측 기록이 없으면 네트워크 원인으로 ORA-PROC-R6-NETWORK 판정을 함께 본다"
+- procedure: ORA-PROC-STORAGE
+  match: [ORA-00257, ORA-19809, ORA-19815, ORA-16014]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 검토 — 1차 1단계가 v$recovery_file_dest(FRA 한도·사용량)·v$recovery_area_usage·v$archive_dest(status·error)·df 를 조회: ORA-00257(아카이버 오류)·ORA-16014(아카이브 목적지 없음)은 목적지 error·공간, ORA-19809(복구영역 한도 초과)·ORA-19815(사용률 경고)는 space_used/space_limit 로 그대로 진단. 2차 '백업 완료 아카이브 정리·FRA 상향'도 맞음"
+- procedure: ORA-PROC-R5-CAPACITY
+  match: [ORA-01651]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 검토 — 1차 2단계가 dba_free_space 의 SYSTEM 여유와 dba_tablespaces status='OFFLINE' 을 조회하고 확인 기준에 'SYSTEM 여유 0 근접이면 ORA-01650/01651' 을 적음 — save undo 를 SYSTEM 에 못 잡는 ORA-01651 의 두 조건(오프라인 테이블스페이스·SYSTEM 공간)을 그대로 진단, 2차 '롤백·SYSTEM 공간 확보'도 맞음"
+- procedure: ORA-PROC-R6-OBJECT
+  match: [ORA-08103]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 검토 — 1차 1단계 dba_objects last_ddl_time > sysdate-1/24 조회와 확인 기준 '오류 직전 last_ddl_time → 동시 TRUNCATE/파티션 DDL(ORA-08103)' 이 '객체가 더 이상 존재하지 않음'의 주원인(동시 DDL)을 진단, 2차 analyze validate·RMAN validate 가 남은 원인(블록 손상)을 가름"
+# ══════════════ (a) 맞음 — Altibase ══════════════
+- procedure: ALT-PROC-R5-LOCK
+  match: [ERR-11041]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 검토 — 1차 1단계 V$LOCK_WAIT(TRANS_ID·WAIT_FOR_TRANS_ID)와 보유 트랜잭션의 세션·문장 조회, 확인 기준 '서로 기다리면 교착(ERR-11041)' 이 '교착상태 감지'를 그대로 진단(절차 제목은 '교착')"
+- procedure: ALT-PROC-R6-DISCONNECT
+  match: [ERR-5104F, ERR-71015, ERR-71018, ERR-71019]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 검토 — ERR-5104F(통신 링크 실패)는 절차 제목·1차 1단계 grep 에 그대로 있고 trc 의 timeout 기록·QUERY/FETCH/UTRANS/IDLE_TIMEOUT 대조가 제조사 원인(서버 timeout 세션 종료)을, 2단계 netstat reset·직전 앱 오류가 네트워크 단절·연결 공유를 진단 · 1차 1단계가 trc 의 ERR-71015/71018/71019 와 세션 수 대 MAX_CLIENT, 2단계가 /proc fd 수 대 open files 한도(select 실패 71015)·ss 연결 수·netstat reset(클라이언트·네트워크 단절 71018/71019)을 확인 — 'select/read/write 시스템호출 실패'를 절차는 '소켓 시스템 호출 실패'로 적었을 뿐"
+- procedure: ALT-PROC-R5-UPSTREAM
+  match: [ERR-61000, ERR-6100D, ERR-61016, ERR-61023, ERR-61036, ERR-6103A, ERR-3109F]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 검토 — 1차 1단계: V$REPRECEIVER *_FAILURE_COUNT 증가로 복제 대상 행 없음·UPDATE/DELETE 대상 없음(ERR-61000/61036/6103A), V$REPSENDER NET_ERROR_FLAG·PEER_IP/PEER_PORT 와 V$PROPERTY REPLICATION% 로 Handshake 실패(6100D, IP·REPLICATION_PORT_NO 불일치)·복제 비활성(61023, REPLICATION_PORT_NO=0)을 진단. 2단계: altibase_rp.log 의 ERR-3109F(스키마 불일치) 구분과 df -h 로그 디렉터리(61016 XLog 생성 실패 = 로그 공간 부족)를 확인 — 판정 제목의 '복제'를 절차는 '이중화(Replication)'로 적었을 뿐. 61016 은 2차에서 로그 공간 확보가 먼저임(재시작은 그 뒤)"
+- procedure: ALT-PROC-R5-DISK
+  match: [ERR-91044]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 검토 — 1차 1단계가 altibase_error.log 의 91044 와 대상(iLoader 데이터) 파일 ls -l·df -h·df -i·ulimit 을 확인 — '데이터파일 I/O 오류'(iLoader 파일 없음·공간 부족·크기 한도)를 그대로 진단. 파일 크기 한도는 ulimit -f 도 함께 보면 됨(판정 1차 줄에 있음)"
+- procedure: ALT-PROC-R6-PROTOCOL
+  match: [ERR-91015]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 검토 — 1차 1단계 trc 의 ERR-91015 발생 시각·출처, 2단계 V$VERSION 과 V$SESSION 클라이언트 패키지·프로토콜 버전 대조가 '통신 실패'의 제조사 원인(상위 버전 클라이언트의 하위 서버 접속)을 진단"
+- procedure: ALT-PROC-R5-CAPACITY
+  match: [ERR-71016]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 검토 — 1차 2단계 'OS 파일 디스크립터 확인 (ERR-71016)' 이 ulimit -n 과 /proc/<PID>/fd 수를 비교 — 'accept 시스템호출 실패'의 제조사 원인(계정 FD 한도 초과)을 그대로 진단, 2차 limits.conf 상향도 맞음"
+# ══════════════ (a) 맞음 — Tibero ══════════════
+- procedure: TBR-PROC-R6-REDO
+  match: [TBR-1007, TBR-1018, TBR-1019, TBR-1039, TBR-1042]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 검토 — 1차 1단계 slog 의 TBR-1007/1018/1019/1039/1042 와 v$log·v$logfile 로 오류 멤버의 그룹·상태(CURRENT 여부·다중화)를, 2단계 ls -l·df·dmesg I/O 오류로 멤버 없음·크기 불일치(잘림)·I/O 오류를 진단 — 판정 제목의 '리두로그·로그그룹·로그파일'을 절차는 '리두 로그 멤버'로 적었을 뿐"
+- procedure: TBR-PROC-R5-MEMORY
+  match: [TBR-1015]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 검토 — 1차 1단계 tip 의 DB_CACHE_SIZE·TOTAL_SHM_SIZE 와 free/vmstat, 2단계 v$parameters·ACTIVE 세션 급증 시각 대조가 '버퍼캐시 블록 고정 실패'(캐시 크기 대비 동시 작업량)를 진단 — 절차 제목 '버퍼 캐시 부족'과 같은 판정"
+- procedure: TBR-PROC-R6-RECOVERY
+  match: [TBR-1028, TBR-1043, TBR-1044, TBR-24018]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 검토 — 1차 1단계 v$instance·v$recover_file·v$datafile 로 복구 진행 단계와 CF/DD 불일치(TBR-24018), 2단계 slog 의 TBR-1028/1043/1044 와 아카이브 목록·크기(잘린 로그 파일)를 확인 — '로그파일 유효하지 않음·미디어복구 종료 실패·로그파일 읽기 실패·CF DD 정합성 오류'를 절차는 '미디어 복구 진행 오류'로 묶어 적었을 뿐"
+- procedure: TBR-PROC-R5-UPSTREAM
+  match: [TBR-11048]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 검토 — 1차 2단계 'DB 링크 대상 확인'이 dba_db_links 와 slog 의 TBR-11048 줄을 보고 '원격 DB 메시지(문자셋 등)를 원격 담당과 대조'를 확인 기준으로 둠 — 'DBLink 문자 변환 오류'(원격 문자셋·변환 길이)를 진단, 2차 '링크 SQL 수정'도 맞음"
+- procedure: TBR-PROC-INTERNAL
+  match: [TBR-1091]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 검토 — Crash Recovery 실패는 기동 실패로 드러나므로 1차 '프로세스·리스너·최근 오류 확인'(tbsvr 유무, sys.log [E]/[F]·TBR- 동반 코드, tbsvr.out callstack)이 실패 위치를 찾는 진단이고, 동반 코드가 리두(TBR-1007/1042)·블록(TBR-1009) 이면 그 판정 절차로 넘어간다. 2차 단계별 기동(NOMOUNT→MOUNT→OPEN)은 실패 단계 확인용 — 같은 기동 반복은 하지 않음(판정 1차 줄과 같음)"
+# ══════════════ (b) 더 맞는 기존 절차 — 1순위 지정 ══════════════
+- procedure: ORA-PROC-R6-INSTSTATE
+  match: [ORA-01033]
+  primary: true
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 검토 — ORA-01033(초기화/종료 진행 중)은 인스턴스가 NOMOUNT/MOUNT 단계거나 종료 중일 때 접속한 것이라, 기존 ORA-PROC-INTERNAL(ORA-600·블록 손상, 2차 '인스턴스 다운 시 기동')보다 INSTSTATE 1차 2단계(v$instance status STARTED/MOUNTED·logins 와 alert log 로 기동·복구 진행 여부)와 2차 '진행 중 작업 확인 뒤 alter database open' 이 맞음. 12c+ PDB 미오픈이면 ORA-PROC-R6-DBSTATE 1차(v$pdbs)도 참고"
+- procedure: ALT-PROC-R6-DISCONNECT
+  match: [ERR-51043]
+  primary: true
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 검토 — ERR-51043(통신 링크 단절)의 제조사 원인은 서버 timeout 강제 종료·사용자 강제 종료·DB 종료라, 세션 수 한도만 보는 기존 ALT-PROC-CONNECTION 보다 DISCONNECT 1차 1단계(trc 의 timeout 기록·QUERY/FETCH/UTRANS/IDLE_TIMEOUT 대조)와 2단계(서버 프로세스 생존·netstat reset)가 맞음, 2차 timeout 프로퍼티·연결풀 검증도 맞음"
+- procedure: TBR-PROC-R6-FILE
+  match: [TBR-1013, TBR-1014]
+  primary: true
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 검토 — 로그파일·데이터파일 생성 실패는 경로 부재·권한·공간·같은 이름 파일이 원인이라, 테이블스페이스 사용률만 보는 기존 TBR-PROC-STORAGE(2차가 오히려 데이터파일 추가)보다 FILE 1차(실패 경로·errno, ls -ld·df -h/-i·mount·v$datafile 경로 대조)와 2차(디렉터리·권한 정정 후 실패 작업 재실행)가 맞음. TBR-1014 의 크기 한도 원인은 TBR-7107(블록 크기별 상한) 판정 참고"
+- procedure: TBR-PROC-R6-RECOVERY
+  match: [TBR-1027]
+  primary: true
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 검토 — TBR-1027(아카이브로그 없음)은 미디어 복구에 필요한 로그를 못 찾은 것이라, 공간 부족 절차인 기존 TBR-PROC-STORAGE(2차가 아카이브 이관)보다 RECOVERY 1차 2단계(요구 thread·sequence 가 아카이브 디렉터리에 있는지 ls 로 확인)와 2차 '요구 로그를 백업 매체에서 복원 후 복구 계속'이 맞음 — STORAGE 2차의 아카이브 이관은 오히려 이 오류를 만들 수 있음"

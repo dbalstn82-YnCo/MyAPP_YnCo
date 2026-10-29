@@ -1,0 +1,201 @@
+# 상용SW — Tmax BizMaster EAI (어댑터 eaiAdapter · 업무 앱 GISS · 허브 JEUS) — 2026-04 실로그 학습분
+# 제품명: bizmaster-adapter(adt_*.log, start로그), bizmaster-app(eai.log*, err.out.*) — 허브 JeusServer.log 는 jeus 룰(WAS-JEUS-HUB-*)
+rules:
+- id: SW-BM-001
+  layer: sw
+  product:
+  - bizmaster-adapter
+  match:
+    regex: Uncaught exception while processing request
+  severity: critical
+  category: internal
+  verdict: 어댑터 요청 처리 중 처리되지 않은 예외 — 해당 요청 처리 실패 가능(재시도·영속화 여부 확인 필요)
+  immediate:
+  - "`grep -n -A20 'Uncaught exception while processing request' <path>/adt_<YYYYMMDD>.log | tail -60` 로 원인 예외 클래스와 bxId 확보 — Caused by 의 최하위 예외가 판정 기준"
+  - "`grep -n '<bxId>' <path>/adt_<YYYYMMDD>.log | head -20` 로 같은 bxId 의 재요청·재처리 기록 확인 — 이후 성공 기록이 없으면 미처리 거래로 2차 이관"
+  - "`grep -c 'Uncaught exception while processing request' <path>/adt_<YYYYMMDD>.log` 로 당일 건수 확인 — 전일 같은 시간대보다 급증하면 연계 대상 응답·전문 형식 변경 의심"
+  short:
+  - 예외 원인(전문 형식·연계 대상 응답)별로 분류해 반복 여부 확인
+  mid:
+  - 어댑터 예외 처리(재시도·격리) 보강
+  long:
+  - 거래 유실 감지·재처리 절차 표준화
+  versions:
+  - BizMaster 4.x (Tmax EAI, JEUS 6 기반)
+  version_note: BizMaster 어댑터(adt_YYYYMMDD.log) 실로그 문구
+- id: SW-BM-002
+  layer: sw
+  product:
+  - bizmaster-adapter
+  match:
+    regex: Failed to re-send message|resend request .* failed due to sync-ack timeout|send response .* failed due to sync-ack timeout
+  severity: error
+  category: upstream
+  verdict: 어댑터↔허브(BizMaster) 응답 없음 — 메시지 재전송 실패·sync-ack 타임아웃 반복
+  immediate:
+  - "허브 도달 확인: `nc -zvw3 <hub_host> <hub_port>` 와 `ss -tn dst <hub_host>` — 포트 도달 실패 또는 ESTAB 연결 없음이면 허브(JEUS)·구간 장애로 2차 즉시 호출"
+  - "`grep -n -E 'Failed to re-send message|sync-ack timeout' <path>/adt_<YYYYMMDD>.log | tail -20` 로 최근 발생 시각 확인 — 지금도 계속 찍히면 진행 중 장애"
+  - "`ls <msg_dir>/unsent | wc -l` 와 `ls <msg_dir>/sending | wc -l` 로 미전송 적체 건수 확인(파일은 옮기거나 지우지 않음) — 평소보다 폭증 시 2차 즉시 호출"
+  short:
+  - 허브 JeusServer.log 에서 같은 시각 relay/agent 연결 오류(Network-0708) 대조
+  - unsent/sending 파일 수와 가장 오래된 파일 시각(mtime)을 어댑터 재기동 전후로 비교, bxId 별 요청-ACK-응답 결과를 대조해 유실·중복·재처리 필요 건 확정
+  - 메시지 파일 이동·삭제·재전송은 1·2차에서 하지 않음 — 원본 보존·목록/해시 확보 후 멱등성·처리 결과·운영 절차가 확인된 건만 승인 후 재처리
+  verify_note: "미검증 — 어댑터 unsent/sending 디렉터리의 실제 위치(<msg_dir>)는 납품 구성마다 달라 매뉴얼로 확인하지 못함(실로그 문구 기준)"
+  mid:
+  - sync-ack 타임아웃·재전송 주기 파라미터 점검
+  long:
+  - 어댑터-허브 구간 헬스체크와 적체 감시
+  versions:
+  - BizMaster 4.x (Tmax EAI, JEUS 6 기반)
+  version_note: BizMaster 어댑터(adt_YYYYMMDD.log) 실로그 문구
+- id: SW-BM-003
+  layer: sw
+  product:
+  - bizmaster-adapter
+  match:
+    regex: Enqueued request .* is expired
+  severity: error
+  category: capacity
+  verdict: 어댑터 큐 대기 요청 만료 — 처리 지연으로 요청 폐기
+  immediate:
+  - "`grep -c 'is expired' <path>/adt_<YYYYMMDD>.log` 와 `grep -n 'is expired' <path>/adt_<YYYYMMDD>.log | tail -20` 로 만료 건수·최근 시각 확인 — 최근 시각까지 계속 늘면 진행 중"
+  - "`grep -n 'Active thread count' <path>/adt_<YYYYMMDD>.log | tail -10` 로 [MEMORY USAGE] 의 활성 스레드 수 추이 확인 — 상한 근처에서 고정이면 처리 스레드 포화"
+  - "연계 대상 도달 확인: `nc -zvw3 <대상 host> <port>` — 도달은 되는데 만료가 계속이면 대상(기관 서버) 응답 지연으로 대상 측 문의"
+  short:
+  - expiry timeout 대비 실제 처리 시간 분포 분석
+  mid:
+  - 큐 크기·처리 스레드·만료 시간 재산정
+  long:
+  - 요청 유량 제어와 우선순위 처리
+  versions:
+  - BizMaster 4.x (Tmax EAI, JEUS 6 기반)
+  version_note: BizMaster 어댑터(adt_YYYYMMDD.log) 실로그 문구
+- id: SW-BM-004
+  layer: sw
+  product:
+  - bizmaster-adapter
+  match:
+    regex: BM-MEM-LOW
+  severity: error
+  category: memory
+  verdict: 어댑터 JVM 메모리 압박 징후 — [MEMORY USAGE] free/total 3% 미만(committed heap 기준, Xmx·GC·OOM 증거로 확인 필요)
+  immediate:
+  - "`grep -n 'MEMORY USAGE' <path>/adt_<YYYYMMDD>.log | tail -20` 로 free/total 추이 확인 — 연속으로 3% 미만이 이어지면 메모리 압박 지속"
+  - "`jstat -gcutil <PID> 1000 5` 로 O(Old) 사용률·FGC 증가 확인(JDK 버전은 `<JAVA_HOME>/bin/java -version`) — O 95% 이상에서 FGC 가 계속 늘면 힙 고갈 임박"
+  - "`jstack <PID> > <path>/td_$(date +%H%M%S).txt` 로 스레드 덤프 확보(스레드 덤프, 프로세스는 유지) — 힙 덤프는 응답 정지가 길어 2차·승인 후"
+  short:
+  - 힙 상한(-Xmx, 실로그 기준 512MB)과 미전송 메시지 적체량의 상관 확인
+  - "(2차·승인 후, 롤백: 없음 — 덤프 중 수 초~수십 초 응답 정지) `jmap -dump:format=b,file=<path>/adapter.hprof <PID>` 로 힙 덤프 확보(JDK 6+) 후 어댑터 재기동, 덤프는 2차 분석 자료로 보관"
+  mid:
+  - 힙 크기 상향 또는 메시지 보관 정책 조정
+  long:
+  - 메모리 사용 추이 상시 기록과 임계 경보
+  versions:
+  - BizMaster 4.x (Tmax EAI, JEUS 6 기반)
+  version_note: BizMaster 어댑터(adt_YYYYMMDD.log) 실로그 문구
+- id: SW-BM-005
+  layer: sw
+  product:
+  - bizmaster-adapter
+  match:
+    regex: Cannot move (sending )?message file|message file .* already exists|Resending .* message failed
+  severity: error
+  category: storage
+  verdict: 어댑터 메시지 파일 상태 전이 실패(이동 실패·기존 파일 존재) — 중복·누락 여부 확인 필요
+  immediate:
+  - "`ls -ld <msg_dir>/unsent <msg_dir>/sending` 와 `df -h <msg_dir>` · `df -i <msg_dir>` 로 디렉터리 존재·권한·공간·inode 확인 — 사용률 95% 이상이거나 실행 계정 쓰기 권한이 없으면 확정"
+  - "`grep -n -E 'Cannot move|already exists|Resending .* message failed' <path>/adt_<YYYYMMDD>.log | tail -20` 로 대상 메시지 파일명 확보 후 `ls -l <msg_dir>/*/<파일명>` 로 같은 이름이 어느 폴더에 있는지만 확인(옮기거나 지우지 않음)"
+  short:
+  - 해당 메시지 파일 목록·해시 확보(이동·삭제 금지) 후 멱등성 확인 뒤 정리 방안 협의
+  verify_note: "미검증 — 어댑터 unsent/sending 디렉터리의 실제 위치(<msg_dir>)는 납품 구성마다 달라 매뉴얼로 확인하지 못함(실로그 문구 기준)"
+  mid:
+  - 저장소 정리 절차와 디스크 감시
+  long:
+  - 메시지 저장소 이중화·백업
+  versions:
+  - BizMaster 4.x (Tmax EAI, JEUS 6 기반)
+  version_note: BizMaster 어댑터(adt_YYYYMMDD.log) 실로그 문구
+- id: SW-BM-006
+  layer: sw
+  product:
+  - bizmaster-app
+  match:
+    regex: Remote host timed out|응답 시간이 초과|\[-407\]|^-407
+  severity: error
+  category: upstream
+  verdict: 연계 기관 서버 응답 시간 초과(-407) — 상대 기관 지연 또는 구간 네트워크 문제
+  immediate:
+  - "`grep -n -E 'Remote host timed out|응답 시간이 초과|-407' <path>/eai.log | tail -30` 로 대상 기관 코드·시각 확인 — 한 기관에 몰리면 상대 기관 지연, 여러 기관에 걸치면 이쪽 구간·EAI 서버 쪽"
+  - "`nc -zvw3 <기관 서버> <port>` 로 구간 도달 확인 — 도달 실패면 방화벽·회선(네트워크 담당 요청), 도달 성공이면 상대 처리 지연(상대 기관 문의)"
+  short:
+  - 기관별 실패율·응답 시간 집계, 상대 기관 담당에 상태 문의
+  mid:
+  - 타임아웃 값·재시도 정책 검토
+  long:
+  - 기관별 연계 품질 지표 관리
+  versions:
+  - BizMaster 4.x (Tmax EAI, JEUS 6 기반)
+  version_note: BizMaster 업무 앱(GISS eai.log) 실로그 문구
+- id: SW-BM-007
+  layer: sw
+  product:
+  - bizmaster-app
+  match:
+    regex: Connection reset|\[-402\]|IO 예외|Connection refused|connect 조작을 거부
+  severity: error
+  category: connection
+  verdict: 연계 기관 서버 연결 실패·끊김(-402 등) — 상대 서버 다운·연결 거부·리셋
+  immediate:
+  - "`grep -n -E 'Connection reset|Connection refused|-402|IO 예외' <path>/eai.log | tail -30` 로 대상 기관·실패 시작 시각 확인 — refused 는 상대 포트 미기동, reset 은 상대·방화벽이 연결을 닫음"
+  - "`nc -zvw3 <기관 서버> <port>` 로 지금 연결 가능 여부 확인 — 실패가 계속이면 상대 기관 작업(기동·배포) 이력 문의, 성공이면 간헐 장애로 시각만 기록"
+  short:
+  - 기관별 실패 건수와 지속 시간 집계
+  mid:
+  - 연결 실패 시 자동 재시도·우회 정책
+  long:
+  - 연계 구간 헬스체크
+  versions:
+  - BizMaster 4.x (Tmax EAI, JEUS 6 기반)
+  version_note: BizMaster 업무 앱(GISS eai.log) 실로그 문구
+- id: SW-BM-008
+  layer: sw
+  product:
+  - bizmaster-app
+  match:
+    regex: 'SocketTimeoutException: Read timed out'
+  severity: warn
+  category: upstream
+  verdict: 연계 소켓 읽기 타임아웃 — 상대 응답 지연
+  immediate:
+  - "`grep -n 'SocketTimeoutException: Read timed out' <path>/eai.log | tail -30` 로 대상·시각 확인 후 `grep -n -e '-407' <path>/eai.log | tail -30` 과 같은 시각 동반 여부 대조 — 함께 늘면 상대 응답 지연 확정, 기관별로 집계"
+  - "`ss -tn dst <기관 서버 IP> | head` 로 상대와의 연결 상태·Send-Q 확인 — Send-Q 가 계속 크면 상대 수신 지연·구간 문제"
+  short:
+  - 읽기 타임아웃 값 대비 상대 평균 응답 시간 확인
+  mid:
+  - 타임아웃 재산정
+  long:
+  - 응답 시간 추이 관리
+  versions:
+  - BizMaster 4.x (Tmax EAI, JEUS 6 기반)
+  version_note: BizMaster 업무 앱(GISS eai.log) 실로그 문구
+- id: SW-BM-009
+  layer: sw
+  product:
+  - bizmaster-adapter
+  match:
+    regex: Adapter Shell .* initialized|AdapterShell.*initialized|DeployService started
+  severity: warn
+  category: internal
+  verdict: 어댑터 기동(재기동) 기록 — 이 시각 전후로 증상 비교 필요
+  immediate:
+  - "`grep -n -E 'Adapter ?Shell.*initialized|DeployService started' <path>/adt_<YYYYMMDD>.log` 로 기동 시각 확보 — 운영자 작업 기록에 없는 시각이면 비정상 종료 후 자동 기동 의심"
+  - "기동 직전 마지막 [MEMORY USAGE]·예외·미전송(unsent/sending) 건수와 기동 후 허브 연결 오류(Network-0708)·재전송 실패(BM-002) 지속 여부를 전후 비교"
+  short:
+  - 재기동 사유(수동/자동·누가)와 err.out 생성 시각(파일명) 대조, 재기동 전 덤프 확보 여부 확인
+  mid:
+  - 재기동 절차에 증거(덤프·적체 목록) 보존 단계 추가
+  long:
+  - 재기동 이력 기록 체계
+  versions:
+  - BizMaster 4.x (Tmax EAI, JEUS 6 기반)
+  version_note: BizMaster 어댑터(adt_YYYYMMDD.log) 실로그 문구

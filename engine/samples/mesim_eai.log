@@ -1,0 +1,7 @@
+2026-09-02 13:59:01,220 [pool-3-thread-11] INFO  com.metabuild.mesim.eai.adapter.HttpAdapter - IF-ORD-0021 request sent (txId=20260902-8812)
+2026-09-02 14:01:55,481 [pool-3-thread-12] ERROR com.metabuild.mesim.eai.adapter.HttpAdapter - IF-PAY-0007 연계 대상 접속 실패: java.net.ConnectException: Connection refused (connection to 10.20.5.31:8443)
+	at java.base/sun.nio.ch.NioSocketImpl.connect(NioSocketImpl.java:589)
+	at com.metabuild.mesim.eai.adapter.HttpAdapter.send(HttpAdapter.java:212)
+2026-09-02 14:02:03,102 [pool-3-thread-14] ERROR com.metabuild.mesim.eai.core.QueueManager - 처리 큐 적체 감지: queue full (size=10000) — java.util.concurrent.RejectedExecutionException
+2026-09-02 14:02:41,660 [pool-3-thread-09] WARN  com.metabuild.mesim.eai.tx.TxMonitor - 거래 타임아웃: txId=20260902-8853 elapsed=30012ms (transaction timed out)
+2026-09-02 14:05:12,004 [pool-3-thread-11] INFO  com.metabuild.mesim.eai.adapter.HttpAdapter - IF-PAY-0007 재시도 성공 (txId=20260902-8901)

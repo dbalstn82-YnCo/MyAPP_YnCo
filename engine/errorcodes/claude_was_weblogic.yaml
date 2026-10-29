@@ -1,0 +1,1021 @@
+product: weblogic
+layer: was
+note: GPT 협업 수집분 — 벤더 공식 문서와 대조 후 확정
+codes:
+- code: BEA-000339
+  severity: info
+  category: thread
+  title: 정지 스레드 정상 복귀
+  immediate:
+  - '`grep -nE "BEA-000337|BEA-000339" <DOMAIN_HOME>/servers/<server>/logs/<server>.log | tail -20` 로 같은 스레드(ExecuteThread 번호)의 STUCK(BEA-000337) 시각과 복귀(BEA-000339) 시각을 짝지어 정지 시간 확인 — 짝이 맞고 재발이 없으면 일시 지연으로 판단'
+  - WLST(`java weblogic.WLST` → `connect(url='t3://<admin_host>:<port>')`, 자격증명은 프롬프트 입력) 에서 `domainRuntime()` → `cd('ServerRuntimes/<server>/ThreadPoolRuntime/ThreadPoolRuntime')` → `ls()` 로 HoggingThreadCount·StuckThreadCount(버전에 따라 없을 수 있음)·QueueLength 확인 — 0·평소 수준이면 정상 복귀
+  short:
+  - 같은 스레드가 STUCK→unstuck 을 반복하면 BEA-000337 직후 스택의 정지 지점(JDBC·소켓 read·synchronized 대기)을 모아 DB·연동 담당에 전달
+  mid:
+  - 반복 지연 구간에 JDBC Statement Timeout·외부 호출 read timeout 설정, 지연 업무를 별도 Work Manager(max-threads-constraint)로 격리
+  long:
+  - StuckThreadCount·HoggingThreadCount 를 WLDF Watch 또는 감시 도구로 임계(Stuck>0 5분 지속) 경보 등록
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  note: 공식 메시지는 stuck 상태였던 스레드가 다시 사용 가능해졌다는 알림이므로 info가 타당함
+  vendor_cause: 이전에 stuck 상태였던 스레드가 다시 사용 가능한 상태로 복귀함
+  vendor_action: 조치 불필요
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 10.3.6·12.1.3·12.2.1.x·14.1.1·14.1.2 동일(EOS 된 10.3.6/12.1.3 도 동일 ID)
+- code: BEA-000362
+  severity: critical
+  category: internal
+  title: 서버 시작 실패
+  immediate:
+  - '`grep -nE "<(Critical|Error|Emergency)>" <DOMAIN_HOME>/servers/<server>/logs/<server>.log | tail -30` 으로 BEA-000362 직전의 첫 오류(근본 원인)와 Reason 문구 확인'
+  - WLST(`java weblogic.WLST` → `connect(url='t3://<admin_host>:<port>')`, 자격증명은 프롬프트 입력) 에서 `state('<server>')` 또는 `ps -ef | grep "weblogic.Name=<server>" | grep -v grep` 으로 상태·프로세스 확인 — FAILED·프로세스 없음이면 서버 장애로 즉시 보고
+  short:
+  - '(2차·승인 후, 롤백: 변경 전 config.xml 사본) 근본 원인(설정·포트·boot.properties·라이브러리) 수정 뒤 Node Manager 또는 `startManagedWebLogic.sh <server> t3://<admin_host>:<port>` 로 기동, BEA-000365 RUNNING 확인'
+  mid:
+  - 기동 전 점검표(포트 점유 `ss -ltn`, 디스크 여유, config.xml 변경 이력)와 Node Manager CrashRecoveryEnabled·RestartMax 정책 정비
+  long:
+  - ServerRuntime State≠RUNNING 감시 경보와 config.xml 형상 관리(변경 승인·백업) 체계화
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  vendor_cause: 서버가 FAILED 로 전이해 서비스를 멈췄음을 알리는 Critical 메시지 — Reason 문구와 직전 오류가 근본 원인이며 설정(config.xml) 오류·포트 충돌·보안 초기화 실패·필수 하위시스템 실패가 흔한 원인이다.
+  vendor_action: 로그 파일을 조사해 실패의 근본 원인을 확인
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 10.3.6·12.1.3·12.2.1.x·14.1.1·14.1.2 동일(EOS 된 10.3.6/12.1.3 도 동일 ID)
+- code: BEA-000365
+  severity: info
+  category: internal
+  title: 서버 상태 변경
+  immediate:
+  - '`grep -n "BEA-000365" <DOMAIN_HOME>/servers/<server>/logs/<server>.log | tail -20` 으로 상태 전이 순서(STARTING→STANDBY→ADMIN→RESUMING→RUNNING, SUSPENDING→SHUTTING_DOWN→SHUTDOWN, FAILED) 확인 — RUNNING 으로 끝나면 정상'
+  - FAILED·FORCE_SHUTTING_DOWN 이 보이면 같은 시각 `grep -nE "<(Critical|Emergency)>" <DOMAIN_HOME>/servers/<server>/logs/<server>.log | tail -20` 으로 원인 메시지 확인, 계획 작업(배포·정기 점검) 이력과 대조
+  short:
+  - 계획되지 않은 SHUTDOWN/FAILED 전이면 원인 메시지(BEA-000362·000383·000386) 항목 조치로 넘기고 Node Manager 로그(`<DOMAIN_HOME>/nodemanager/nodemanager.log`, 10.3.6 은 `<WL_HOME>/common/nodemanager/nodemanager.log`)의 자동 기동 이력 확인
+  mid:
+  - 계획 작업 시 상태 전이 시각을 변경 요청에 기록하는 운영 절차, 비계획 전이 시 즉시 통보 경로 정비
+  long:
+  - ServerRuntime State 감시(RUNNING 외 상태 5분 지속 시 경보)
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  note: 정상적인 서버 상태 변경을 알리는 Notification 메시지이므로 warn보다 info가 타당함
+  vendor_cause: 서버가 시작 또는 종료 절차를 진행하면서 상태가 변경됨
+  vendor_action: 조치 불필요
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 10.3.6·12.1.3·12.2.1.x·14.1.1·14.1.2 동일(EOS 된 10.3.6/12.1.3 도 동일 ID)
+- code: BEA-000386
+  severity: critical
+  category: internal
+  title: 서버 하위시스템 실패
+  immediate:
+  - '`grep -n -A 30 "BEA-000386" <DOMAIN_HOME>/servers/<server>/logs/<server>.log | head -60` 으로 Reason 예외 클래스와 실패한 하위시스템 이름 확인'
+  - WLST(`java weblogic.WLST` → `connect(url='t3://<admin_host>:<port>')`, 자격증명은 프롬프트 입력) 에서 `state('<server>')` 로 서버가 RUNNING 유지인지 FAILED 인지 확인 — RUNNING 이면 해당 기능만 영향, FAILED 면 서버 장애로 보고
+  short:
+  - '(2차·승인 후, 롤백: 변경 전 config.xml·관련 모듈 사본) 예외가 가리키는 자원(데이터소스 URL·JMS 저장소 경로·키스토어)을 바로잡은 뒤 서버 기동, BEA-000365 RUNNING 확인'
+  mid:
+  - 하위시스템별 의존 자원(DB·파일 저장소·LDAP) 기동 순서와 가용성 확인을 기동 스크립트 사전 점검에 포함
+  long:
+  - Critical 레벨 로그 경보와 하위시스템 의존 자원 가용성 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  vendor_cause: 서버 하위시스템(JMS·JDBC·보안·배포 등) 하나가 초기화 또는 운영 중 실패했음을 알리는 Critical 메시지 — Reason 의 예외가 근본 원인이며, 필수 하위시스템이면 이어서 서버가 FAILED 로 갈 수 있다.
+  vendor_action: 로그 파일을 조사해 실패의 근본 원인을 확인
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 10.3.6·12.1.3·12.2.1.x·14.1.1·14.1.2 동일(EOS 된 10.3.6/12.1.3 도 동일 ID)
+- code: BEA-000415
+  severity: info
+  category: capacity
+  title: 파일 디스크립터 한도 정보
+  immediate:
+  - '`grep -n "BEA-000415" <DOMAIN_HOME>/servers/<server>/logs/<server>.log | tail -3` 으로 soft/hard 값 확인 후 `grep "open files" /proc/<PID>/limits` 와 비교 — soft 가 4096 미만이면 부족 위험 (Linux)'
+  - 현재 사용량 `ls /proc/<PID>/fd | wc -l` 확인 — soft 한도의 80% 이상이면 BEA-002616·Too many open files 위험으로 보고 (Linux, AIX 는 `procfiles <PID> | head`)
+  short:
+  - '(2차·승인 후, 롤백: 원래 limits.conf 사본) `/etc/security/limits.conf` 의 기동 계정 nofile soft/hard 상향(예: 65536) 후 다음 기동 때 BEA-000415 값으로 반영 확인'
+  mid:
+  - 기동 스크립트에서 `ulimit -n` 값을 기동 로그에 남기고 서버별 FD 사용 추세 수집
+  long:
+  - FD 사용률(사용/soft) 80% 경보 등록, OS 표준 이미지에 nofile 기준값 반영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  note: 소켓 연결 거부가 아니라 운영체제의 soft/hard 파일 디스크립터 한도를 알리는 정보 메시지임
+  vendor_cause: 파일 디스크립터 soft·hard 한도를 알리는 정보성 메시지임
+  vendor_action: 조치 불필요
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 10.3.6·12.1.3·12.2.1.x·14.1.1·14.1.2 동일(EOS 된 10.3.6/12.1.3 도 동일 ID)
+- code: BEA-000438
+  severity: warn
+  category: internal
+  title: 네이티브 IO 로드 실패
+  immediate:
+  - '`grep -n -B2 -A5 "BEA-000438" <DOMAIN_HOME>/servers/<server>/logs/<server>.log` 로 msg 부분(UnsatisfiedLinkError 등 실패 라이브러리 이름) 확인'
+  - '기동 환경의 `echo $LD_LIBRARY_PATH`(AIX: `echo $LIBPATH`)와 `ls <WL_HOME>/server/native/` 하위 플랫폼 디렉터리 확인 — 서버는 Java I/O 로 계속 동작하므로 영향은 처리량 저하 여부로 판단'
+  short:
+  - '(2차·승인 후, 롤백: 원래 setDomainEnv.sh 사본) 플랫폼 라이브러리 경로를 `setDomainEnv.sh` 의 라이브러리 경로에 반영하고 다음 기동 시 BEA-000446(Native IO Enabled) 출력 확인'
+  mid:
+  - 지원 플랫폼·JDK 조합(인증 매트릭스) 대조, 서버 튜닝의 Native IO Enabled 설정 표준화
+  long:
+  - 기동 로그의 BEA-000438 출력 여부를 기동 점검 항목에 포함
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  vendor_cause: 네이티브 Performance Pack(muxer 라이브러리)을 로드하지 못해 Java I/O 로 대체 동작함 — 라이브러리 경로(LD_LIBRARY_PATH·LIBPATH) 누락이나 OS·아키텍처·JDK 비트 수 불일치가 흔한 원인이다.
+  vendor_action: 네이티브 라이브러리 경로가 환경에 올바르게 설정됐는지 확인
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 10.3.6·12.1.3·12.2.1.x·14.1.1·14.1.2 동일(EOS 된 10.3.6/12.1.3 도 동일 ID)
+- code: BEA-000503
+  severity: error
+  category: connection
+  title: 수신 메시지 헤더 처리 실패
+  immediate:
+  - '`grep -n -A 20 "BEA-000503" <DOMAIN_HOME>/servers/<server>/logs/<server>.log | head -40` 으로 예외와 상대 JVM(원격 서버·클라이언트) 식별, 빈도(1회성/반복) 확인 — 1회성이면 일시적 손상으로 판단'
+  - 같은 시각 상대 서버 로그의 BEA-000503·PeerGone 메시지와 `netstat -an | grep <port> | wc -l`(연결 수) 확인
+  short:
+  - 반복 시 클라이언트·서버 WebLogic 버전(PSU) 불일치와 중간 장비(방화벽·LB)의 T3 세션 절단 여부 점검
+  mid:
+  - 서버 간 WebLogic 버전·PSU 일치화, T3 경로 장비의 idle timeout 을 WebLogic 하트비트 주기보다 길게 설정
+  long:
+  - '반복 기준(예: 1시간 10회 이상) 초과 시 서버 로그·config.xml 로 My Oracle Support 의뢰 절차 수립'
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  note: 일반 소켓 수신 오류가 아니라 수신 메시지 헤더 또는 abbreviation 처리 실패임
+  vendor_cause: 수신 메시지 처리 중 오류가 발생했으며 메시지가 손상됐을 가능성이 높음
+  vendor_action: 일시적이면 조치 불필요; 계속되면 서버 로그와 구성을 첨부해 My Oracle Support에 문의
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 10.3.6·12.1.3·12.2.1.x·14.1.1·14.1.2 동일(EOS 된 10.3.6/12.1.3 도 동일 ID)
+- code: BEA-000622
+  severity: warn
+  category: internal
+  title: 종료된 풀에 자원 반환 시도
+  immediate:
+  - "`grep -n -B5 -A10 \"BEA-000622\" <DOMAIN_HOME>/servers/<server>/logs/<server>.log` 로 반환 대상 풀 이름과 직전 SHUTTING_DOWN(BEA-000365)·애플리케이션 redeploy 시각 확인 — 종료·redeploy 중 발생이면 서비스 영향 없음"
+  - "RUNNING 중 반복이면 같은 시각 배포 이력 `grep -n \"BEA-149\" <DOMAIN_HOME>/servers/<server>/logs/<server>.log | tail -20` 확인"
+  short:
+  - 개발 담당에 애플리케이션 종료(ServletContextListener·EJB remove) 시 자원 close 누락 수정 요청 — 서버 조치는 불필요
+  mid:
+  - 애플리케이션 종료 훅에서 커넥션·스레드·풀 자원 정리를 코드 리뷰 항목으로 추가
+  long:
+  - 재배포·종료 시 경고 로그 건수를 배포 점검표에 기록
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  note: OOM이 아니라 이미 종료된 자원 풀에 자원을 반환하려는 시도를 무시한 경고임
+  vendor_cause: 애플리케이션이 종료된 풀에 자원을 반환하려고 함
+  vendor_action: 애플리케이션 종료 전에 모든 자원이 닫히도록 애플리케이션 동작을 확인
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 10.3.6·12.1.3·12.2.1.x·14.1.1·14.1.2 동일(EOS 된 10.3.6/12.1.3 도 동일 ID)
+- code: BEA-001131
+  severity: error
+  category: internal
+  title: 캐시 문장 닫기 실패
+  immediate:
+  - '`grep -n -A 15 "BEA-001131" <DOMAIN_HOME>/servers/<server>/logs/<server>.log | head -40` 으로 풀 이름과 동반 SQLException(ORA- 등) 확인'
+  - WLST(`java weblogic.WLST` → `connect(url='t3://<admin_host>:<port>')`, 자격증명은 프롬프트 입력) 에서 `domainRuntime()` → `cd('ServerRuntimes/<server>/JDBCServiceRuntime/<server>/JDBCDataSourceRuntimeMBeans/<ds>')` → `get('State')`·`get('ActiveConnectionsCurrentCount')` 로 풀이 Running 인지 확인
+  short:
+  - 동반 오류가 DB 연결 끊김이면 DB·네트워크 담당 확인, 드라이버 오류면 JDBC 드라이버 버전과 Statement Cache Size 설정 점검
+  mid:
+  - '(2차·승인 후, 롤백: 원래 값 기록) Statement Cache Size 축소 또는 Test Connections On Reserve 활성화로 끊긴 연결 사용 방지'
+  long:
+  - 데이터소스 State·FailedReserveRequestCount 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  note: 풀 초기 연결 실패가 아니라 캐시된 Statement를 닫는 중 예외가 발생한 오류임
+  vendor_cause: Prepared Statement 캐시의 문장을 닫는 중 오류가 발생함
+  vendor_action: 함께 출력된 오류를 확인하고 가능한 경우 해당 문제를 수정
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 10.3.6·12.1.3·12.2.1.x·14.1.1·14.1.2 동일(EOS 된 10.3.6/12.1.3 도 동일 ID)
+- code: BEA-001151
+  severity: error
+  category: internal
+  title: 데이터소스 배포 실패
+  immediate:
+  - '`grep -n -A 25 "BEA-001151" <DOMAIN_HOME>/servers/<server>/logs/<server>.log | head -50` 로 데이터소스 이름과 원인 예외(ORA-·SQLState·ClassNotFoundException) 확인'
+  - DB 도달성 `nc -zvw3 <db_host> <port>` 과 `<DOMAIN_HOME>/config/jdbc/` 의 해당 `*-jdbc.xml` 의 url·driver-name 확인(비밀번호 항목은 열람·복사 금지)
+  short:
+  - '(2차·승인 후, 롤백: 변경 전 jdbc.xml 사본) 원인(URL·계정·드라이버) 수정 뒤 데이터소스 재배포, 관리 콘솔 Test 성공 확인'
+  mid:
+  - Initial Capacity 0 과 Connection Creation Retry Frequency 설정으로 DB 미기동 시 배포 실패 완화
+  long:
+  - DB 계정 비밀번호 변경 절차에 WebLogic 데이터소스 갱신 포함, 데이터소스 State 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  note: 풀 커넥션 고갈이 아니라 데이터소스 배포 실패 메시지임
+  vendor_cause: 데이터소스(JDBC 시스템 모듈) 배포가 실패해 해당 풀을 쓸 수 없는 상태 — 원인은 함께 출력된 예외에 있으며 DB 미기동·URL·계정 오류·드라이버 클래스 누락·초기 용량 연결 실패가 흔하다.
+  vendor_action: 예외 메시지에 기술된 문제를 수정
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 10.3.6·12.1.3·12.2.1.x·14.1.1·14.1.2 동일(EOS 된 10.3.6/12.1.3 도 동일 ID)
+- code: BEA-001156
+  severity: info
+  category: internal
+  title: 관련 메시지 스택추적
+  immediate:
+  - '`grep -n -B3 -A20 "BEA-001156" <DOMAIN_HOME>/servers/<server>/logs/<server>.log | head -50` 으로 ''associated with message'' 뒤의 원 메시지 ID 확인 — 이 줄 자체는 정보, 원 메시지가 판정 대상'
+  - '원 메시지 ID(예: BEA-001129·BEA-001112)로 이 사전의 해당 항목 조치를 따르고, 스택의 Caused by 최하단 예외 기록'
+  short:
+  - 원 메시지 기준으로 원인 담당(DB·애플리케이션)에 스택 전달, 반복 빈도 집계
+  mid:
+  - 재현 시 데이터소스 Diagnostics Profile 등 추가 정보 수집 설정 검토
+  long:
+  - 원 메시지 ID 별 발생 건수 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  note: 데이터소스 배포 실패가 아니라 관련 메시지 ID의 스택 트레이스를 출력하는 정보 메시지임
+  vendor_cause: 오류 상태가 보고되어 관련 메시지의 스택 추적이 출력됨
+  vendor_action: 조치 불필요
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 10.3.6·12.1.3·12.2.1.x·14.1.1·14.1.2 동일(EOS 된 10.3.6/12.1.3 도 동일 ID)
+- code: BEA-001177
+  severity: info
+  category: internal
+  title: 데이터소스 연결풀 생성
+  immediate:
+  - "`grep -n \"BEA-001177\" <DOMAIN_HOME>/servers/<server>/logs/<server>.log | tail -10` 으로 풀 생성 시각이 서버 기동·데이터소스 redeploy 시각과 일치하는지 확인 — 일치하면 정상(Properties 에 계정이 보이면 공유 시 가림)"
+  - "RUNNING 중 반복 생성이면 같은 시각 `grep -nE \"BEA-001151|BEA-001129|BEA-149\" <DOMAIN_HOME>/servers/<server>/logs/<server>.log | tail -20` 로 배포·실패 이력 확인"
+  short:
+  - 비계획 재생성이면 배포 이력과 자동 재배포(운영 스크립트·Application Poller) 여부 확인
+  mid:
+  - 데이터소스 변경은 변경 요청과 연결해 기록, 운영 중 재배포는 승인 절차로 통제
+  long:
+  - 데이터소스 생성·재배포 이벤트 감사 로그 유지
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  note: 연결 새로고침 실패가 아니라 데이터소스 연결 풀 생성 사실을 알리는 정보 메시지임
+  vendor_cause: 명시적 또는 암시적으로 데이터소스 연결 풀 생성 요청이 발생함
+  vendor_action: 조치 불필요
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 10.3.6·12.1.3·12.2.1.x·14.1.1·14.1.2 동일(EOS 된 10.3.6/12.1.3 도 동일 ID)
+- code: BEA-001234
+  severity: error
+  category: capacity
+  title: 풀 대기 시간 초과
+  immediate:
+  - '`grep -n -A 10 "BEA-001234" <DOMAIN_HOME>/servers/<server>/logs/<server>.log | head -30` 으로 실제 메시지 문구 확인 — 풀 대기 초과면 보통 ''No resources currently available in pool'' 또는 ''Reached maximum capacity of pool'' 이 함께 나옴'
+  - WLST(`java weblogic.WLST` → `connect(url='t3://<admin_host>:<port>')`, 자격증명은 프롬프트 입력) 에서 `domainRuntime()` → `cd('ServerRuntimes/<server>/JDBCServiceRuntime/<server>/JDBCDataSourceRuntimeMBeans/<ds>')` → `get('ActiveConnectionsCurrentCount')`·`get('WaitingForConnectionCurrentCount')`·`get('CurrCapacity')` 확인 — Active=MaxCapacity·Waiting>0 이면 풀 고갈 확정
+  short:
+  - 스레드 덤프(`jcmd <PID> Thread.print`, 프로세스 유지)로 커넥션을 쥔 채 대기하는 스레드·장기 SQL 식별, DB 담당과 장기 트랜잭션 확인
+  mid:
+  - '(2차·승인 후, 롤백: 원래 값 기록) Maximum Capacity·Connection Reserve Timeout·Inactive Connection Timeout(누수 회수) 조정'
+  long:
+  - WaitingForConnectionCurrentCount>0, ActiveConnectionsCurrentCount/MaxCapacity 90% 경보
+  source: GPT 수집·공식 문서 미확인(보류)(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  verify_note: 미검증 — Oracle 10.3.6 JDBC 카탈로그는 BEA-001178 다음이 BEA-001250 이고 12.2.1.4 Error Messages 에서도 BEA-001234 를 찾지 못함, 제목의 '풀 대기 시간 초과' 의미 확인 불가
+  vendor_cause: Oracle 공식 메시지 카탈로그(10.3.6 JDBC·12.2.1.4)에서 이 ID 를 찾지 못함 — 제목 기준으로는 JDBC 풀에서 연결 예약 대기가 Connection Reserve Timeout 을 넘긴 풀 고갈 상태를 가리킨다.
+  note: 12c/14c 공식 메시지 카탈로그에서 풀 대기 시간 초과 의미의 해당 코드를 확인할 수 없음
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 10.3.6·12.1.3·12.2.1.x·14.1.1·14.1.2 동일(EOS 된 10.3.6/12.1.3 도 동일 ID)
+- code: BEA-002616
+  severity: error
+  category: connection
+  title: 채널 리슨 실패
+  immediate:
+  - '`grep -n -A 10 "BEA-002616" <DOMAIN_HOME>/servers/<server>/logs/<server>.log | tail -30` 으로 채널 이름과 accept 예외(Too many open files 등) 확인'
+  - '`ls /proc/<PID>/fd | wc -l` 와 `grep "open files" /proc/<PID>/limits` 비교, `ss -s` 로 TCP 연결·TIME_WAIT 수 확인 — FD 가 한도 근접이면 확정 (Linux)'
+  short:
+  - '(2차·승인 후, 롤백: 원래 limits.conf·sysctl 값 기록) nofile 상향과 `net.core.somaxconn` 등 accept backlog 조정, 반영은 다음 기동 시'
+  mid:
+  - 서버 Accept Backlog(서버 › 구성 › 튜닝)와 OS backlog 정합, 연결 누수(CLOSE_WAIT) 애플리케이션 수정
+  long:
+  - FD 사용률·CLOSE_WAIT 수 감시 경보
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  note: 최대 세션 수 초과가 아니라 채널에서 클라이언트 연결을 수락하는 과정이 반복 실패한 오류임
+  vendor_cause: 클라이언트 연결 accept 중 예외가 발생해 서버가 복구를 위해 backoff함
+  vendor_action: OS 파일 디스크립터 한도를 늘리고 TCP accept backlog 등 연결 수용 관련 OS 매개변수를 조정
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: HTTP 서블릿 예외 — 9.0 이후 동일
+- code: BEA-002637
+  severity: warn
+  category: connection
+  title: 연결해제 리스너 등록 실패
+  immediate:
+  - '`grep -n "BEA-002637" <DOMAIN_HOME>/servers/<server>/logs/<server>.log | tail -20` 으로 발생 시각이 서버 기동 직후(RUNNING 이전)인지 확인 — 기동 중 1회성이면 정상 범위'
+  - RUNNING 이후에도 반복되면 대상 서버의 리슨 포트 `ss -ltn | grep <port>` 와 BEA-000365 상태 확인
+  short:
+  - 운영 중 반복이면 관리 서버·관리 대상 서버 간 Listen Address·포트 설정과 방화벽 경로 대조
+  mid:
+  - 기동 순서(관리 서버 → 관리 대상 서버) 표준화, Listen Address 를 DNS 이름으로 통일
+  long:
+  - 기동 완료 이후 발생 건만 경보하도록 감시 조건 정비
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  note: 클라이언트 소켓 일반 오류가 아니라 disconnect listener 등록 실패 경고임
+  vendor_cause: 기동 중 콜백에 부적합한 연결이고 아직 listen port가 열리지 않아 등록 실패할 수 있음
+  vendor_action: 조치 불필요; 서버가 정상적으로 연결될 때까지 기다림
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 10.3.6·12.1.3·12.2.1.x·14.1.1·14.1.2 동일(EOS 된 10.3.6/12.1.3 도 동일 ID)
+- code: BEA-002903
+  severity: info
+  category: thread
+  title: Work Manager 생성
+  immediate:
+  - '`grep -n "BEA-002903" <DOMAIN_HOME>/servers/<server>/logs/<server>.log | tail -10` 으로 생성 시각이 애플리케이션 배포·기동 시각과 같은지 확인 — 같으면 정상 정보'
+  - 지연이 의심되면 WLST(`java weblogic.WLST` → `connect(url='t3://<admin_host>:<port>')`, 자격증명은 프롬프트 입력) 에서 `domainRuntime()` → `cd('ServerRuntimes/<server>/ThreadPoolRuntime/ThreadPoolRuntime')` → `ls()` 로 QueueLength·PendingUserRequestCount·HoggingThreadCount 확인
+  short:
+  - 업무 지연과 함께 보이면 애플리케이션별 Work Manager 정의(weblogic.xml·weblogic-application.xml 의 work-manager)와 제약 확인
+  mid:
+  - 업무 등급별 Work Manager·fair-share·max-threads-constraint 설계로 지연 업무 분리
+  long:
+  - Work Manager 별 대기 요청 수 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  note: HTTP 요청 처리 지연이 아니라 애플리케이션용 Work Manager 생성을 알리는 메시지임
+  vendor_cause: 애플리케이션 초기화 과정에서 WorkManager가 생성됨
+  vendor_action: 조치 불필요
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 10.3.6·12.1.3·12.2.1.x·14.1.1·14.1.2 동일(EOS 된 10.3.6/12.1.3 도 동일 ID)
+- code: BEA-090076
+  severity: warn
+  category: security
+  title: 보안 제공자 LDIF 로드 실패
+  immediate:
+  - '`grep -n -A 15 "BEA-090076" <DOMAIN_HOME>/servers/<server>/logs/<server>.log | head -30` 로 예외(IOException·No space left·Permission denied) 확인'
+  - 임시 디렉터리 공간·권한 `df -h /tmp <DOMAIN_HOME>/servers/<server>/tmp` 와 `ls -ld /tmp <DOMAIN_HOME>/servers/<server>/tmp` 확인 — 가득 참·소유자 불일치면 확정
+  short:
+  - '(2차·승인 후, 롤백: 정리 전 파일 목록 보관) 임시 공간 확보 또는 기동 계정 권한 바로잡은 뒤 다음 기동에서 보안 제공자 초기화 확인'
+  mid:
+  - '`-Djava.io.tmpdir=<path>` 로 임시 경로를 별도 FS 로 지정하고 기동 계정 권한 표준화'
+  long:
+  - 임시 FS 사용률 85% 경보
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  note: SSL 초기화 실패가 아니라 보안 제공자의 LDIF 파일 로드 실패 메시지임
+  vendor_cause: LDIF 로드 과정에서 임시 파일을 열려다 예외가 발생함
+  vendor_action: 예외 내용을 확인하고 그 원인을 수정
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 10.3.6·12.1.3·12.2.1.x·14.1.1·14.1.2 동일(EOS 된 10.3.6/12.1.3 도 동일 ID)
+- code: BEA-090482
+  severity: warn
+  category: security
+  title: 상대가 인증서 체인 거부
+  immediate:
+  - '`grep -n -B3 -A10 "BEA-090482" <DOMAIN_HOME>/servers/<server>/logs/<server>.log | tail -40` 으로 상대(peer) 주소와 거부된 인증서 체인 확인'
+  - '`openssl s_client -connect <host>:<port> -showcerts </dev/null` 로 실제 제시 체인·유효기간 확인 — 중간 CA 누락·만료면 원인 확정'
+  - '`keytool -list -v -keystore <identity_keystore> | grep -E "Alias|Owner|Issuer|Valid"` 로 서버 인증서 발급자·체인 순서 확인(비밀번호 프롬프트는 Enter — 무결성 미검증 조회)'
+  short:
+  - '상대측 신뢰 저장소의 루트·중간 CA 와 호스트명 검증 설정 확인 요청; 추가 정보가 필요하면 (2차·승인 후, 롤백: 옵션 제거) `-Dssl.debug=true -Dweblogic.StdoutDebugEnabled=true` 로 SSL 디버그 수집'
+  mid:
+  - '(2차·승인 후, 롤백: 기존 키스토어 사본) 서버 identity 키스토어에 전체 체인을 포함한 인증서 재설치'
+  long:
+  - 인증서 만료 60·30일 전 경보와 체인 구성 점검 표준
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  note: 일반 SSL 핸드셰이크 실패가 아니라 peer가 BAD_CERTIFICATE 경고로 인증서 체인을 거부한 경우임
+  vendor_cause: 전송한 인증서 체인이 유효하지 않거나 상대가 해당 인증서를 수락하도록 구성되지 않음
+  vendor_action: 상대의 신뢰 CA·호스트명 검증과 인증서 유효기간·발급자 순서를 확인하고 필요 시 SSL 디버깅 활성화
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 10.3.6·12.1.3·12.2.1.x·14.1.1·14.1.2 동일(EOS 된 10.3.6/12.1.3 도 동일 ID)
+- code: BEA-090504
+  severity: warn
+  category: security
+  title: 인증서 호스트명 검증 실패
+  immediate:
+  - '`grep -n -A 10 "BEA-090504" <DOMAIN_HOME>/servers/<server>/logs/<server>.log` 로 기대 호스트명과 상대 인증서 정보 확인'
+  - '`openssl s_client -connect <host>:<port> </dev/null 2>/dev/null | openssl x509 -noout -subject -ext subjectAltName` 로 CN·SAN 이 접속 호스트명과 일치하는지 확인 — 불일치면 확정 (OpenSSL 1.1.1+, 이전 버전은 `-text`)'
+  short:
+  - 접속 URL 호스트명을 인증서 CN·SAN 에 맞추거나 인증서 재발급 요청 — Hostname Verification 비활성화는 보안 승인 없이 금지
+  mid:
+  - '(2차·승인 후, 롤백: 원래 설정 기록) SAN 포함 인증서로 표준화, 불가피하면 승인된 커스텀 Hostname Verifier 적용'
+  long:
+  - 인증서 발급 기준에 서비스 FQDN 전부를 SAN 에 포함
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  note: 인증서 체인 검증 일반 오류가 아니라 peer 인증서의 호스트명 검증 실패임
+  vendor_cause: 상대가 제시한 인증서 체인이 호스트명 검증을 통과하지 못함
+  vendor_action: 인증서의 호스트명이 hostname verifier가 기대하는 호스트명과 일치하는지 확인
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 10.3.6·12.1.3·12.2.1.x·14.1.1·14.1.2 동일(EOS 된 10.3.6/12.1.3 도 동일 ID)
+- code: BEA-090898
+  severity: info
+  category: security
+  title: 신뢰 CA 인증서 파싱 실패
+  immediate:
+  - '`grep -n -A 5 "BEA-090898" <DOMAIN_HOME>/servers/<server>/logs/<server>.log` 로 무시된 CA 인증서 정보와 예외 확인'
+  - '`keytool -list -v -keystore <trust_keystore> | grep -E "Alias|Owner|Signature algorithm"` 로 해당 CA 의 서명 알고리즘 확인, 그 CA 로 서명된 상대와의 SSL 연결이 실패하는지 같이 확인'
+  short:
+  - 해당 CA 가 업무에 필요한지 확인 — 불필요하면 영향 없음, 필요하면 JDK·WebLogic 패치 수준의 알고리즘 지원 여부 확인
+  mid:
+  - '(2차·승인 후, 롤백: 기존 키스토어 사본) 지원되는 서명 알고리즘의 CA 인증서로 교체'
+  long:
+  - 신뢰 저장소 CA 목록 정기 정리
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  note: 보안 감사 실패가 아니라 신뢰 CA 목록 로드 중 인증서 파싱 예외로 해당 인증서를 무시한 메시지임
+  vendor_cause: 추가하려는 CA가 SSL 스택이 지원하지 않는 서명 알고리즘을 사용했을 수 있음
+  vendor_action: 해당 CA 인증서는 신뢰 CA 목록에서 무시됨
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 10.3.6·12.1.3·12.2.1.x·14.1.1·14.1.2 동일(EOS 된 10.3.6/12.1.3 도 동일 ID)
+- code: BEA-101017
+  severity: error
+  category: internal
+  title: 서블릿 실행 예외
+  immediate:
+  - '`grep -n -A 30 "BEA-101017" <DOMAIN_HOME>/servers/<server>/logs/<server>.log | head -60` 으로 웹앱 컨텍스트·Root cause 예외 확인'
+  - 발생 건수 `grep -c "BEA-101017" <DOMAIN_HOME>/servers/<server>/logs/<server>.log` 와 액세스 로그 `<DOMAIN_HOME>/servers/<server>/logs/access.log` 의 같은 시각 5xx 확인 — 특정 URI 집중이면 애플리케이션 결함
+  short:
+  - 예외 스택·URI·발생 시각을 개발 담당에 전달, DB·외부 연동 예외면 해당 계층 담당 확인
+  mid:
+  - 애플리케이션 예외 처리(오류 페이지·재시도) 보강과 회귀 시험
+  long:
+  - URI 별 5xx 비율 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  vendor_cause: Web 애플리케이션 컨테이너가 요청 처리 중 예기치 않은 예외를 포착함
+  vendor_action: 예외에서 정확한 오류 메시지를 확인
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 10.3.6·12.1.3·12.2.1.x·14.1.1·14.1.2 동일(EOS 된 10.3.6/12.1.3 도 동일 ID)
+- code: BEA-101020
+  severity: error
+  category: internal
+  title: 서블릿 예외
+  immediate:
+  - '`grep -n -A 30 "BEA-101020" <DOMAIN_HOME>/servers/<server>/logs/<server>.log | head -60` 로 웹앱 컨텍스트·예외 클래스 확인'
+  - 최근 배포 여부 `ls -lt <DOMAIN_HOME>/servers/<server>/tmp/_WL_user/ | head` 와 배포 이력 대조 — 배포 직후 시작이면 신규 버전 결함 의심
+  short:
+  - '예외 스택을 개발 담당에 전달, 배포 직후면 (2차·승인 후, 롤백: 이전 버전 아카이브 재배포) 이전 버전 복귀 검토'
+  mid:
+  - 서블릿 예외 처리·로깅 보강과 배포 전 통합 시험
+  long:
+  - 서블릿 예외 건수 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  vendor_cause: 서블릿 처리 중 예기치 않은 오류가 발생함
+  vendor_action: 예외에서 정확한 오류 메시지를 확인
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 10.3.6·12.1.3·12.2.1.x·14.1.1·14.1.2 동일(EOS 된 10.3.6/12.1.3 도 동일 ID)
+- code: BEA-101083
+  severity: error
+  category: connection
+  title: HTTP 응답 스트림 쓰기 실패
+  immediate:
+  - "`grep -n -A 15 \"BEA-101083\" <DOMAIN_HOME>/servers/<server>/logs/<server>.log | head -40` 으로 예외(Broken pipe·Connection reset)와 시각 확인"
+  - "액세스 로그 `<DOMAIN_HOME>/servers/<server>/logs/access.log` 에서 같은 시각 요청 처리 시간·응답 크기 확인, 앞단 웹서버·LB 타임아웃과 비교 — 처리 시간이 앞단 타임아웃보다 길면 앞단이 먼저 연결을 닫은 것"
+  short:
+  - 앞단(OHS·웹서버 플러그인·LB) 타임아웃과 WebLogic 응답 시간 정합, 대용량·장시간 응답 URI 식별
+  mid:
+  - 응답 지연 URI 처리 개선, 플러그인 WLIOTimeoutSecs 등 앞단 타임아웃 표준
+  long:
+  - 클라이언트 단절 건수·응답 시간 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  note: 일반 소켓 연결 문제가 아니라 응답 데이터를 연결 스트림에 쓰는 중 발생한 연결 실패임
+  vendor_cause: 스트림에 데이터를 쓰는 중 연결이 실패함
+  vendor_action: 예외에서 정확한 원인을 확인하고 해당 원인에 맞게 조치
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 10.3.6·12.1.3·12.2.1.x·14.1.1·14.1.2 동일(EOS 된 10.3.6/12.1.3 도 동일 ID)
+- code: BEA-101216
+  severity: error
+  category: internal
+  title: 서블릿 시작 전 로드 실패
+  immediate:
+  - '`grep -n -A 30 "BEA-101216" <DOMAIN_HOME>/servers/<server>/logs/<server>.log | head -60` 으로 서블릿 이름·웹앱·원인 예외(ClassNotFound·init 예외) 확인'
+  - 웹앱 배포 상태를 관리 콘솔 Deployments 화면 또는 WLST(`java weblogic.WLST` → `connect(url='t3://<admin_host>:<port>')`, 자격증명은 프롬프트 입력) 의 `listApplications()` 로 확인 — 서블릿만 실패하면 해당 기능 URI 만 영향
+  short:
+  - '원인 예외(클래스 누락·외부 자원 미기동)를 개발·배포 담당에 전달, (2차·승인 후, 롤백: 이전 아카이브) 수정본 재배포'
+  mid:
+  - init() 에서 외부 자원 의존 시 지연 초기화·재시도 처리
+  long:
+  - 배포 후 load-on-startup 서블릿 기동 결과를 점검 항목에 포함
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  note: 서블릿 컨텍스트 초기화 실패가 아니라 load-on-startup 서블릿의 preload 실패임
+  vendor_cause: load-on-startup으로 지정된 서블릿이 서버 시작 시 preload에 실패함
+  vendor_action: 예외에서 정확한 원인을 확인
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 10.3.6·12.1.3·12.2.1.x·14.1.1·14.1.2 동일(EOS 된 10.3.6/12.1.3 도 동일 ID)
+- code: BEA-101220
+  severity: error
+  category: internal
+  title: 웹앱 문서루트 설정 실패
+  immediate:
+  - '`grep -n -A 10 "BEA-101220" <DOMAIN_HOME>/servers/<server>/logs/<server>.log` 로 웹앱 이름·document root 경로·IOException 내용 확인'
+  - 해당 경로 `ls -ld <path>` 와 `df -h <DOMAIN_HOME>/servers/<server>/tmp` 로 존재·권한·공간 확인 — 없음·권한 거부·공간 부족이면 확정
+  short:
+  - '(2차·승인 후, 롤백: 이전 아카이브) 배포 아카이브 경로·권한 바로잡고 재배포'
+  mid:
+  - 배포 경로를 기동 계정 소유로 표준화, 스테이징 모드(stage·nostage) 정리
+  long:
+  - 배포 대상 FS 용량 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  note: 일반 웹앱 배포 실패가 아니라 document root 설정 오류 때문에 웹 애플리케이션 배포가 실패함
+  vendor_cause: Web 애플리케이션의 document root 설정에 실패해 배포되지 않음
+  vendor_action: IOException 메시지에서 정확한 문제 원인을 확인
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 10.3.6·12.1.3·12.2.1.x·14.1.1·14.1.2 동일(EOS 된 10.3.6/12.1.3 도 동일 ID)
+- code: BEA-110412
+  severity: critical
+  category: undo
+  title: 트랜잭션 휴리스틱 완료
+  immediate:
+  - '`grep -n -A 15 "BEA-110412" <DOMAIN_HOME>/servers/<server>/logs/<server>.log` 로 트랜잭션 ID(Xid)·heuristic 종류(HAZARD·MIXED·COMMIT·ROLLBACK)·보고한 자원 이름 확인'
+  - '같은 시각 해당 자원(DB·JMS) 장애·타임아웃 확인, DB 측 미결 분산 트랜잭션은 DB 담당이 읽기 전용 조회(Oracle: `select * from dba_2pc_pending`)'
+  short:
+  - '업무 담당과 해당 Xid 업무 데이터 정합성(부분 반영) 확인 후 (2차·승인 후, 롤백: 보정 전 데이터 백업) 데이터 보정'
+  mid:
+  - JTA ForgetHeuristics 를 false 로 두어 자원측 heuristic 정보 보존 검토, JTA Timeout 이 자원 XA 타임아웃보다 짧도록 정합
+  long:
+  - heuristic 발생 즉시 경보와 데이터 정합성 점검 절차 문서화
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  note: 일반 JTA 롤백이 아니라 참여 자원의 일방적 결정으로 트랜잭션이 heuristic하게 완료된 상태임
+  vendor_cause: 자원 관리자가 실패·시간초과·잠금 충돌로 coordinator와 다른 commit/rollback 결정을 내렸을 수 있음
+  vendor_action: 트랜잭션 참가자의 데이터 손상 가능성을 확인하고 heuristic을 보고한 자원 관리자의 상태 정보를 조사
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 10.3.6·12.1.3·12.2.1.x·14.1.1·14.1.2 동일(EOS 된 10.3.6/12.1.3 도 동일 ID)
+- code: BEA-110413
+  severity: critical
+  category: undo
+  title: 트랜잭션 복구 실패
+  immediate:
+  - '`grep -n -A 15 "BEA-110413" <DOMAIN_HOME>/servers/<server>/logs/<server>.log` 로 실제 메시지 문구 확인 — 복구 관련이면 recovery·TLOG 문구가 함께 나옴'
+  - 기본 TLOG 저장소 `ls -l <DOMAIN_HOME>/servers/<server>/data/store/default/` 와 `df -h <DOMAIN_HOME>` 로 저장소 파일 존재·공간 확인
+  short:
+  - '복구 대상 자원(DB·JMS) 가용성 확인 후 (2차·승인 후, 롤백: TLOG 저장소 파일 사본) 서버 기동으로 복구 재시도, 미완료 트랜잭션 해소 확인'
+  mid:
+  - TLOG 를 JDBC TLOG Store(12.1.2+) 또는 공유 저장소에 두어 서비스 마이그레이션 가능하게 구성
+  long:
+  - 미완료 트랜잭션 수·복구 오류 감시
+  source: GPT 수집·공식 문서 미확인(보류)(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  verify_note: 미검증 — Oracle 10.3.6 TX 카탈로그에 BEA-110413 없음, 12.2.1.4 Error Messages 에서도 확인 못함(메시지 문구·의미 미확인)
+  vendor_cause: Oracle 10.3.6 JTA(TX) 카탈로그에는 BEA-110412 다음이 BEA-110414 로 이 ID 가 없음 — 제목 기준으로는 트랜잭션 복구(TLOG 재처리) 실패 상태를 가리킨다.
+  note: 12c/14c 공식 메시지 카탈로그에서 해당 코드와 제시된 트랜잭션 복구 실패 의미를 확인할 수 없음
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 10.3.6·12.1.3·12.2.1.x·14.1.1·14.1.2 동일(EOS 된 10.3.6/12.1.3 도 동일 ID)
+- code: BEA-110486
+  severity: warn
+  category: undo
+  title: 자원 불가로 커밋 완료 대기
+  immediate:
+  - '`grep -n -A 5 "BEA-110486" <DOMAIN_HOME>/servers/<server>/logs/<server>.log` 로 Xid·자원 이름·abandon 까지 남은 초 확인'
+  - WLST(`java weblogic.WLST` → `connect(url='t3://<admin_host>:<port>')`, 자격증명은 프롬프트 입력) 에서 `domainRuntime()` → `cd('ServerRuntimes/<server>/JDBCServiceRuntime/<server>/JDBCDataSourceRuntimeMBeans/<ds>')` → `get('State')`(Running·Suspended) 확인, 자원 DB 도달성 `nc -zvw3 <db_host> <port>`
+  short:
+  - '(2차·승인 후, 롤백: 변경 전 설정 사본) 자원이 미배포면 재배포, DB 장애면 DB 복구 후 커밋 완료(BEA-110486 중단) 확인'
+  mid:
+  - JTA Abandon Timeout 과 자원 복구 소요 시간 정합
+  long:
+  - 미완료 트랜잭션·자원 상태 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  note: 단순 트랜잭션 시간 초과가 아니라 자원 불가로 commit 완료를 기다리며 이후 abandon될 수 있다는 경고임
+  vendor_cause: 자원이 undeploy됐거나 응답하지 않아 unavailable로 선언됨
+  vendor_action: 관련 서버 로그를 확인하고 자원이 undeploy됐으면 재배포; 자원 관리자 문제면 수정 후 자원을 재배포
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 10.3.6·12.1.3·12.2.1.x·14.1.1·14.1.2 동일(EOS 된 10.3.6/12.1.3 도 동일 ID)
+- code: BEA-141021
+  severity: warn
+  category: internal
+  title: 비클러스터 서버 속성 무시
+  immediate:
+  - '`grep -n "BEA-141021" <DOMAIN_HOME>/servers/<server>/logs/<server>.log` 로 무시된 클러스터 속성 이름 확인 — 서버는 계속 기동되므로 영향 낮음'
+  - 기동 인수 `ps -ef | grep "weblogic.Name=<server>" | grep -v grep` 와 기동 스크립트에서 클러스터 관련 -D 속성 존재 확인
+  short:
+  - '의도가 클러스터 구성이면 config.xml 의 서버 cluster 지정 확인, 아니면 (2차·승인 후, 롤백: 스크립트 사본) 기동 인수에서 해당 속성 제거'
+  mid:
+  - 서버별 기동 인수를 Node Manager Server Start 설정으로 일원화
+  long:
+  - 서버별 기동 인수를 형상 관리(변경 이력·승인)하고 기동 로그 경고 점검
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  note: 관리 서버 인증 실패가 아니라 서버가 클러스터에 속하지 않아 cluster 속성을 무시한 경고임
+  vendor_cause: 클러스터에 속하지 않은 서버 시작 시 적용 불가능한 클러스터 속성이 지정됨
+  vendor_action: 서버를 클러스터 멤버로 올바르게 구성하거나 시작 명령에서 해당 클러스터 속성을 제거
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 10.3.6·12.1.3·12.2.1.x·14.1.1·14.1.2 동일(EOS 된 10.3.6/12.1.3 도 동일 ID)
+- code: BEA-141151
+  severity: critical
+  category: connection
+  title: 관리 서버 접속 실패
+  immediate:
+  - '`grep -n "BEA-141151" <DOMAIN_HOME>/servers/<server>/logs/<server>.log | tail -5` 로 지정된 관리 서버 URL 확인'
+  - '`nc -zvw3 <admin_host> <port>` 와 관리 서버 로그 `<DOMAIN_HOME>/servers/AdminServer/logs/AdminServer.log` 의 최근 BEA-000365 확인 — 포트 불통·관리 서버 비가동이면 확정'
+  short:
+  - '(2차·승인 후, 롤백: 원래 URL 기록) 관리 서버 기동 또는 URL(protocol://host:port) 수정, 관리 서버 없이 기동해야 하면 MSI(Managed Server Independence) 사용 판단'
+  mid:
+  - 관리 서버 가용 절차와 MSI 활성 상태 정비, 관리 서버 주소를 DNS 이름으로 고정
+  long:
+  - 관리 서버 가용성 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  vendor_cause: Admin Server가 지정 URL에서 실행 중이지 않거나 URL 형식이 잘못됨
+  vendor_action: 지정 host·port에서 Admin Server 실행 여부를 확인하고 protocol://host:port 형식의 URL을 사용
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 10.3.6·12.1.3·12.2.1.x·14.1.1·14.1.2 동일(EOS 된 10.3.6/12.1.3 도 동일 ID)
+- code: BEA-141297
+  severity: info
+  category: lock
+  title: 서버 파일 잠금 획득 대기
+  immediate:
+  - '`grep -n "BEA-141297" <DOMAIN_HOME>/servers/<server>/logs/<server>.log | tail -5` 확인 후 같은 서버 이름 프로세스 `ps -ef | grep "weblogic.Name=<server>" | grep -v grep` 확인 — 2개 이상이면 중복 기동'
+  - 잠금 파일 `ls -l <DOMAIN_HOME>/servers/<server>/tmp/<server>.lok` 의 시각 확인(정리는 2차)
+  short:
+  - '(2차·승인 후, 롤백: .lok 사본 보관) 기존 프로세스가 없음을 확인한 경우에만 남은 .lok 파일 정리 후 기동, 중복 프로세스면 하나만 남기도록 정리'
+  mid:
+  - 기동 스크립트에 같은 서버 프로세스 존재 검사 추가, NFS 공유 도메인이면 파일 잠금 동작 점검
+  long:
+  - 서버별 프로세스 수 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  note: 도메인 구성 로드 실패가 아니라 서버 파일 잠금을 얻지 못해 재시도하는 상태 메시지임
+  vendor_cause: 다른 서버가 실행 중이며 서버 파일 잠금을 아직 보유하고 있음
+  vendor_action: 다른 서버가 실행 중인지 확인
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 10.3.6·12.1.3·12.2.1.x·14.1.1·14.1.2 동일(EOS 된 10.3.6/12.1.3 도 동일 ID)
+- code: BEA-149205
+  severity: error
+  category: internal
+  title: 애플리케이션 초기화 실패
+  immediate:
+  - '`grep -n -A 30 "BEA-149205" <DOMAIN_HOME>/servers/<server>/logs/<server>.log | head -60` 으로 애플리케이션 이름·원인 예외 확인'
+  - 배포 상태를 관리 콘솔 Deployments 또는 WLST(`java weblogic.WLST` → `connect(url='t3://<admin_host>:<port>')`, 자격증명은 프롬프트 입력) 의 `listApplications()` 로 확인, 직전 배포·공유 라이브러리 변경 이력 대조
+  short:
+  - '(2차·승인 후, 롤백: 이전 아카이브 재배포) 원인(디스크립터·라이브러리·데이터소스 JNDI) 수정 후 재배포, 상태 Active 확인'
+  mid:
+  - 배포 전 스테이징 검증과 공유 라이브러리 버전 관리
+  long:
+  - 배포 결과(Active·Failed) 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  note: 활성화 단계로 한정되지 않고 애플리케이션 초기화 실패 메시지임
+  vendor_cause: 애플리케이션 또는 해당 애플리케이션 유형의 하위시스템에 문제가 있을 가능성이 높음
+  vendor_action: 예외를 검토해 애플리케이션 수준 문제를 수정한 뒤 배포 요청을 다시 실행
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 10.3.6·12.1.3·12.2.1.x·14.1.1·14.1.2 동일(EOS 된 10.3.6/12.1.3 도 동일 ID)
+- code: BEA-149265
+  severity: error
+  category: internal
+  title: 배포 작업 실패
+  immediate:
+  - '`grep -n -A 20 "BEA-149265" <DOMAIN_HOME>/servers/<server>/logs/<server>.log | head -40` 으로 작업 ID·대상 서버·기본 오류 확인'
+  - 대상 서버 상태 WLST(`java weblogic.WLST` → `connect(url='t3://<admin_host>:<port>')`, 자격증명은 프롬프트 입력) 의 `state('<server>')` 와 관리 서버 로그의 같은 작업 메시지 확인 — 대상 서버 비가동이면 그 원인부터
+  short:
+  - '(2차·승인 후, 롤백: 이전 버전 배포) 기본 오류 해소 후 배포 재시도, 남은 편집 잠금(Lock & Edit) 세션 확인'
+  mid:
+  - 배포 절차(대상·순서·검증) 문서화
+  long:
+  - 배포 작업 실패(BEA-149265) 발생 시 즉시 경보 등록
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  vendor_cause: 실패 원인은 메시지 본문에 보고된 기본 오류에 있음
+  vendor_action: 애플리케이션을 시작
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 10.3.6·12.1.3·12.2.1.x·14.1.1·14.1.2 동일(EOS 된 10.3.6/12.1.3 도 동일 ID)
+- code: BEA-160197
+  severity: error
+  category: internal
+  title: 모듈 디스크립터 로드 실패
+  immediate:
+  - '`grep -n -A 20 "BEA-160197" <DOMAIN_HOME>/servers/<server>/logs/<server>.log | head -40` 으로 모듈·디스크립터 파일 이름과 파싱 오류 위치(줄·요소) 확인'
+  - 아카이브 안 디스크립터를 읽기 전용으로 확인 `unzip -p <path>/<app>.war WEB-INF/weblogic.xml | head -50` — 스키마 버전·요소 이름 오류 식별
+  short:
+  - '(2차·승인 후, 롤백: 이전 아카이브) 디스크립터 수정본으로 재배포'
+  mid:
+  - 빌드 단계에서 `weblogic.appc` 로 디스크립터 검증 적용
+  long:
+  - 배포 전 디스크립터 검증(weblogic.appc)을 빌드 파이프라인에 자동화
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  note: 단순 검증 경고가 아니라 모듈의 잘못된 descriptor를 로드하지 못한 오류임
+  vendor_cause: 모듈의 descriptor가 유효하지 않음
+  vendor_action: descriptor를 수정
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 10.3.6·12.1.3·12.2.1.x·14.1.1·14.1.2 동일(EOS 된 10.3.6/12.1.3 도 동일 ID)
+- code: BEA-170011
+  severity: warn
+  category: upstream
+  title: 관리서버 로그 전송 실패
+  immediate:
+  - '`grep -n -A 10 "BEA-170011" <DOMAIN_HOME>/servers/<server>/logs/<server>.log | tail -20` 로 예외와 대상 관리 서버 확인'
+  - 관리 서버 가동 확인 `nc -zvw3 <admin_host> <port>` 와 관리 서버 로그의 BEA-000365 — 관리 서버 비가동이면 도메인 로그 전송만 누락(관리 대상 서버 업무는 계속)
+  short:
+  - '(2차·승인 후, 롤백: 해당 없음) 관리 서버 기동·네트워크 복구 후 도메인 로그(<domain>.log) 수신 재개 확인'
+  mid:
+  - Domain log broadcaster 의 심각도 필터·버퍼 크기(Log 설정) 조정으로 전송량 감소
+  long:
+  - 관리 서버 가용성 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  note: 로그 파일 순환이 아니라 LogBroadcaster가 Admin Server로 로그 메시지를 전송하지 못한 경고임
+  vendor_cause: Managed Server가 Admin Server에 도달하지 못하며 Admin Server가 종료됐을 수도 있음
+  vendor_action: 예외 스택을 확인·수정하고 Admin Server가 종료됐으면 재시작해 도메인 로그 전송을 복구
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 10.3.6·12.1.3·12.2.1.x·14.1.1·14.1.2 동일(EOS 된 10.3.6/12.1.3 도 동일 ID)
+- code: BEA-171520
+  severity: warn
+  category: lock
+  title: Embedded LDAP 잠금 대기
+  immediate:
+  - '`grep -n "BEA-171520" <DOMAIN_HOME>/servers/<server>/logs/<server>.log | tail -5` 확인 후 같은 서버 이름 프로세스 `ps -ef | grep "weblogic.Name=<server>" | grep -v grep` 로 중복 기동 여부 확인'
+  - 잠금 파일 `ls -l <DOMAIN_HOME>/servers/<server>/data/ldap/ldapfiles/EmbeddedLDAP.lok` 시각 확인 — 기동이 결국 완료되면 무시 가능(정리는 2차)
+  short:
+  - '(2차·승인 후, 롤백: ldap 디렉터리 tar 사본) 기존 프로세스가 완전히 종료된 것을 확인한 뒤에만 남은 EmbeddedLDAP.lok 정리 후 기동'
+  mid:
+  - 같은 도메인 디렉터리를 두 호스트에서 동시에 기동하지 않도록 기동 절차·NFS 공유 정책 정비
+  long:
+  - 기동 실패·잠금 대기 메시지 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  note: 영구 저장소 오류가 아니라 Embedded LDAP 디렉터리의 exclusive lock을 얻지 못해 대기·재시도하는 경고임
+  vendor_cause: 다른 WebLogic Server가 동일 Embedded LDAP 디렉터리를 사용해 exclusive lock 획득에 실패함
+  vendor_action: 서버가 결국 기동되면 무시; 실패하면 기존 서버가 완전히 종료됐는지 확인한 뒤 다시 시작
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 10.3.6·12.1.3·12.2.1.x·14.1.1·14.1.2 동일(EOS 된 10.3.6/12.1.3 도 동일 ID)
+- code: BEA-280061
+  severity: error
+  category: storage
+  title: 영구 저장소 배포 실패
+  immediate:
+  - '`grep -n -A 20 "BEA-280061" <DOMAIN_HOME>/servers/<server>/logs/<server>.log | head -40` 로 저장소 이름과 상세 원인(파일 잠금·I/O 오류·JDBC 오류) 확인'
+  - 파일 저장소면 `ls -l <DOMAIN_HOME>/servers/<server>/data/store/<store>/` 와 `df -h <DOMAIN_HOME>` 로 존재·권한·공간 확인, JDBC 저장소면 `nc -zvw3 <db_host> <port>`
+  short:
+  - '(2차·승인 후, 롤백: 저장소 파일 사본) 중복 사용·권한·공간 원인 해소 후 서버 기동, 저장소 오류 재발 없음 확인'
+  mid:
+  - 저장소 디렉터리를 서버별로 분리, Synchronous Write Policy·저장소 위치 표준
+  long:
+  - 저장소 FS 사용률 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  note: 저장소 열기 실패로 한정되지 않고 persistent store 자체의 배포 실패 오류임
+  vendor_cause: Persistent Store 배포 실패의 원인은 상세 메시지에 표시됨
+  vendor_action: 상세 메시지에 제시된 조치를 따름
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 10.3.6·12.1.3·12.2.1.x·14.1.1·14.1.2 동일(EOS 된 10.3.6/12.1.3 도 동일 ID)
+- code: BEA-280071
+  severity: info
+  category: storage
+  title: JDBC 저장소 테이블 열림
+  immediate:
+  - '`grep -n "BEA-280071" <DOMAIN_HOME>/servers/<server>/logs/<server>.log | tail -5` 로 저장소·테이블·로드 레코드 수 확인 — 기동 시 1회면 정상'
+  - 로드 레코드 수가 평소보다 크게 늘었으면 미처리 메시지 적체 의심 — WLST(`java weblogic.WLST` → `connect(url='t3://<admin_host>:<port>')`, 자격증명은 프롬프트 입력) 에서 `domainRuntime()` → `cd('ServerRuntimes/<server>')` → `ls('JMSRuntime')` 이하 JMS 서버·목적지의 MessagesCurrentCount 확인
+  short:
+  - 레코드 급증이면 소비자(MDB) 처리 상태와 적체 목적지 담당 확인
+  mid:
+  - JDBC 저장소 테이블 크기·DB 공간 정기 점검
+  long:
+  - 저장소 레코드 수 추세 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  note: JDBC 저장소 실패가 아니라 JDBC Store가 테이블을 열고 레코드를 로드했음을 알리는 정보 메시지임
+  vendor_cause: JDBC Store가 정상적으로 부팅됨
+  vendor_action: 조치 불필요
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 10.3.6·12.1.3·12.2.1.x·14.1.1·14.1.2 동일(EOS 된 10.3.6/12.1.3 도 동일 ID)
+- code: BEA-310002
+  severity: info
+  category: memory
+  title: 서버 여유 메모리 비율
+  immediate:
+  - '`grep -n "BEA-310002" <DOMAIN_HOME>/servers/<server>/logs/<server>.log | tail -10` 으로 여유 메모리 비율 추세 확인 — 연속 하락·10% 미만이면 BEA-310003 동반 여부 확인'
+  - '`jstat -gcutil <PID> 5000 5` 로 Old 영역 사용률·Full GC 증가 확인(HotSpot JDK) — Old 90% 이상 유지면 메모리 부족 진행'
+  short:
+  - '하락 추세면 (2차·승인 후, 롤백: 해당 없음 — 덤프 중 일시 정지·디스크 사용) `jcmd <PID> GC.heap_dump <path>/heap.hprof` 로 힙 덤프 확보 후 점유 객체 분석'
+  mid:
+  - 힙 크기(-Xms·-Xmx)·GC 정책 조정과 누수 코드 수정
+  long:
+  - 힙 사용률·Full GC 빈도 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  note: 메모리 상태 경고가 아니라 서버의 전체 메모리 중 사용 가능한 비율을 알리는 정보 메시지임
+  vendor_cause: 서버의 사용 가능한 메모리 비율이 변경됨
+  vendor_action: 조치 불필요
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: WLDF(진단 프레임워크) 는 9.0 이후
+- code: BEA-320054
+  severity: error
+  category: upstream
+  title: SNMP 알림 전송 실패
+  immediate:
+  - '`grep -n -A 10 "BEA-320054" <DOMAIN_HOME>/servers/<server>/logs/<server>.log` 로 trap 대상과 예외 확인 — 감시 알림만 누락되는 것으로 업무 영향은 없음'
+  - trap 대상 수신기 상태를 감시 담당과 확인하고 `nc -zvu <trap_host> 162` 로 경로 확인(UDP 는 결과가 불확실하므로 수신측 로그로 판정)
+  short:
+  - SNMP Agent 의 Trap Destination(호스트·포트·커뮤니티) 설정을 관리 콘솔에서 확인
+  mid:
+  - '(2차·승인 후, 롤백: 원래 설정 기록) trap 대상 주소 수정 또는 이중화'
+  long:
+  - 감시 연동 정상 여부 정기 시험
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  note: JMS 연결 실패가 아니라 Diagnostics/SNMP 알림 또는 trap 전송 실패 오류임
+  vendor_cause: SNMP Agent가 구성된 trap 대상에 알림을 보내는 중 예외를 발생시킴
+  vendor_action: trap 대상 구성을 확인하고 예외 메시지에 따라 적절히 조치
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 10.3.6·12.1.3·12.2.1.x·14.1.1·14.1.2 동일(EOS 된 10.3.6/12.1.3 도 동일 ID)
+- code: BEA-040123
+  severity: error
+  category: internal
+  title: JMS 서버 시작 실패
+  immediate:
+  - '`grep -n -A 25 "BEA-040123" <DOMAIN_HOME>/servers/<server>/logs/<server>.log | head -50` 으로 JMS 서버 이름과 원인 예외(JNDI 이름 충돌·저장소 오류·목적지 시작 실패) 확인'
+  - 같은 시각 `grep -nE "BEA-280|BEA-050" <DOMAIN_HOME>/servers/<server>/logs/<server>.log | tail -20` 로 영구 저장소·JNDI 오류 동반 여부 확인
+  short:
+  - '(2차·승인 후, 롤백: 변경 전 JMS 모듈 xml 사본) 원인(저장소·JNDI 이름·대상 지정) 수정 후 서버 기동으로 JMS 서버 시작 확인'
+  mid:
+  - JMS 서버·저장소·대상 매핑 표준(서버당 전용 저장소)
+  long:
+  - JMS 서버 Health 상태 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html)
+  note: JMS 메시지 quota 초과가 아니라 JMS Server 시작 실패 메시지임
+  vendor_cause: JNDI 실패 또는 destination·server session pool·connection consumer 시작 실패가 발생함
+  vendor_action: 구성을 수정하고 서버를 재시작한 뒤 시스템을 재부팅
+  vendor_url: https://docs.oracle.com/en/middleware/fusion-middleware/12.2.1.4/fmerr/bea-000001-bea-2194843.html
+  versions:
+  - WebLogic 10.3.6
+  - WebLogic 12.1.3
+  - WebLogic 12.2.1.x
+  - WebLogic 14.1.1
+  - WebLogic 14.1.2
+  version_note: BEA-xxxxxx 메시지 카탈로그 ID 는 9.x 이후 유지 — 10.3.6·12.1.3·12.2.1.x·14.1.1·14.1.2 동일(EOS 된 10.3.6/12.1.3 도 동일 ID)

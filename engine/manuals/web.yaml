@@ -1,0 +1,9 @@
+product: web-common
+title: "WEB 공통 운영 참고 (Nginx·Apache·IIS)"
+sections:
+  - heading: "로그 위치"
+    body: "Nginx: /var/log/nginx/error.log, access.log · Apache: /var/log/httpd/error_log (또는 /etc/httpd/logs) · IIS: C:\\inetpub\\logs\\LogFiles\\W3SVC<사이트ID>\\ (W3C 형식, #Fields 헤더)"
+  - heading: "대표 장애 신호"
+    body: "upstream timed out 백엔드 응답 초과(504) · no live upstreams / connect() failed 백엔드 다운(502) · worker_connections not enough 커넥션 한도 · MaxRequestWorkers 워커 한도 · AH01102/AH01110 프록시 오류 · IIS 503 앱풀 중단"
+  - heading: "1차 확인 명령"
+    body: "설정 검증: nginx -t / apachectl configtest · 프로세스: systemctl status nginx(httpd) · 백엔드 포트: curl -sv http://백엔드:포트/헬스 · IIS: 앱풀 상태(IIS 관리자), HTTPERR 로그 C:\\Windows\\System32\\LogFiles\\HTTPERR"

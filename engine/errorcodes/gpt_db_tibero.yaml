@@ -1,0 +1,242 @@
+product: tibero
+layer: db
+note: GPT 협업 수집분 — 벤더 공식 문서와 대조 후 확정
+codes:
+- code: TBR-21004
+  severity: error
+  category: storage
+  title: 테이블스페이스 익스텐트 부족
+  immediate:
+  - "tbsql 로 DBA 접속 후 `select tablespace_name, round(sum(bytes)/1024/1024) free_mb from dba_free_space where tablespace_name='<TS>' group by tablespace_name;` — 여유가 거의 없으면 확정"
+  - "`select file_name, round(bytes/1024/1024) mb, autoextensible, round(maxbytes/1024/1024) max_mb from dba_data_files where tablespace_name='<TS>';` 와 `df -h <datafile 경로>` — AUTOEXTEND NO·MAXBYTES 도달·디스크 여유 없음 구분"
+  short:
+  - "(2차·승인 후, 롤백: 추가 파일은 줄일 수 없어 용량 계획 반영) `alter tablespace <TS> add datafile '<path>' size 4G autoextend on maxsize 32G;` 로 공간 확보"
+  - datafile 추가 또는 확장 가능 여부와 증가 원인을 점검
+  mid:
+  - 업무 증가율에 맞게 tablespace 용량을 재산정
+  long:
+  - tablespace 예측증설과 임계치 경보를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tibero.com/tibero-manuals)
+  note: 해당 공간 할당 작업 실패이며 단독으로 서비스 전체 중단을 뜻하지 않음
+  vendor_cause: 이 테이블에 추가 익스텐트를 생성할 수 없음.
+  vendor_action: 테이블스페이스 공간을 확보하고 데이터 파일에 AUTOEXTEND를 지정하십시오.
+  vendor_url: https://docs.tibero.com/tibero-manuals_en/7.2.5.manuals_en/tibero-error-reference-guide/chapter-21000.tx.error
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR-nnnnn 코드 체계는 4~7 공통으로 수집(5→6→7 번호 재편 근거 없음 — GPT B). 6/7 sys.log 는 [ISO시각] [COM-nnn] [I/W/E] 형식(파서 대응), 6 EOS 2025-03-31·Extended 2028-03-31
+- code: TBR-24031
+  severity: error
+  category: capacity
+  title: 데이터파일 추가 한도 초과
+  immediate:
+  - "현재 파일 수: tbsql `select count(*) from dba_data_files;` 와 `select name, value from v$parameters where name like '%FILE%';` 로 한도 파라미터 확인"
+  - "테이블스페이스별 파일 수: `select tablespace_name, count(*) from dba_data_files group by tablespace_name order by 2 desc;` — 추가 작업은 2차 판단 전 보류"
+  short:
+  - 불필요한 파일 분할과 tablespace 구조를 점검
+  mid:
+  - 벤더 제한 내에서 파일 통합과 tablespace 재설계를 수행
+  long:
+  - 데이터파일 수와 용량을 함께 관리하는 설계 기준을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tibero.com/tibero-manuals)
+  note: 데이터파일 추가 작업 실패로 단독 코드만으로 서비스 전체 중단을 뜻하지 않음
+  vendor_cause: 더 이상 데이터 파일을 생성할 수 없음.
+  vendor_action: MAXDATAFILES 값을 확인하고 필요하면 수정하십시오.
+  vendor_url: https://docs.tibero.com/tibero-manuals_en/7.2.5.manuals_en/tibero-error-reference-guide/chapter-24000.tccf.error
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR-nnnnn 코드 체계는 4~7 공통으로 수집(5→6→7 번호 재편 근거 없음 — GPT B). 6/7 sys.log 는 [ISO시각] [COM-nnn] [I/W/E] 형식(파서 대응), 6 EOS 2025-03-31·Extended 2028-03-31
+- code: TBR-18004
+  severity: critical
+  category: disk
+  title: 디스크 가득참 쓰기 실패
+  immediate:
+  - "공간: `df -h $TB_HOME <archive_dir> <data_dir>` — 100% 인 경로 확인"
+  - "큰 디렉터리: `du -sh $TB_HOME/instance/$TB_SID/log/* | sort -h | tail` · `ls -lt <archive_dir> | head`"
+  - "대상 파일: `grep -h \"TBR-18004\" $TB_HOME/instance/$TB_SID/log/slog/* | tail -10` (Tibero 6/7)"
+  short:
+  - "(2차·승인 후, 롤백: 이관·정리 대상 목록과 사본 위치 기록) 백업 완료 아카이브·오래된 slog/dlog 를 다른 볼륨으로 이관, 부족하면 볼륨 증설"
+  mid:
+  - 볼륨을 증설하고 데이터 및 로그 보존정책을 조정
+  long:
+  - 디스크 증가율 예측과 사전 증설 임계치를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tibero.com/tibero-manuals)
+  vendor_cause: "OS 쓰기 시스템 호출이 실패함 — 대부분 파일시스템 공간 부족이며 아카이브·로그·데이터 디렉터리가 가득 찬 경우. 리두·아카이브 경로면 DB 가 멈출 수 있음."
+  vendor_action: 디스크가 정상 동작하는지 확인하고, 가득 찼으면 디스크 공간을 확보하십시오.
+  vendor_url: https://docs.tibero.com/tibero-manuals_en/7.2.5.manuals_en/tibero-error-reference-guide/chapter-18000.syscall.error
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR-nnnnn 코드 체계는 4~7 공통으로 수집(5→6→7 번호 재편 근거 없음 — GPT B). 6/7 sys.log 는 [ISO시각] [COM-nnn] [I/W/E] 형식(파서 대응), 6 EOS 2025-03-31·Extended 2028-03-31
+- code: TBR-28012
+  severity: error
+  category: internal
+  title: 인덱스 사용불가
+  immediate:
+  - "인덱스 상태: tbsql `select owner, index_name, status from dba_indexes where index_name=upper('<index>');` — UNUSABLE 여부"
+  - "오류 SQL·시각과 같은 시각 DDL(이동·대량 적재) 작업 기록 대조"
+  short:
+  - "(2차·승인 후, 롤백: 해당 없음) 업무 외 시간에 `alter index <owner>.<index> rebuild;` 후 상태 VALID 확인"
+  mid:
+  - 정상 절차로 인덱스를 재구성하고 데이터 정합성을 검증
+  long:
+  - 인덱스 상태 점검과 변경 후 검증을 배포 절차에 포함
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tibero.com/tibero-manuals)
+  vendor_cause: 사용 불가능한 인덱스에서 DML 문을 실행할 수 없음.
+  vendor_action: 인덱스 상태를 변경하십시오.
+  vendor_url: https://docs.tibero.com/tibero-manuals/7.2.6.manuals/error-reference-guide/chapter-28000.opt.error
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR-nnnnn 코드 체계는 4~7 공통으로 수집(5→6→7 번호 재편 근거 없음 — GPT B). 6/7 sys.log 는 [ISO시각] [COM-nnn] [I/W/E] 형식(파서 대응), 6 EOS 2025-03-31·Extended 2028-03-31
+- code: TBR-12003
+  severity: critical
+  category: capacity
+  title: 세션 열기 실패
+  immediate:
+  - "세션 수와 한도: tbsql `select count(*) from v$session;` 와 `select name, value from v$parameters where name like '%SESSION_COUNT%';`"
+  - "출처 편중: `select status, count(*) from v$session group by status;` 와 WAS 풀 설정 대조"
+  short:
+  - "(2차·승인 후, 롤백: tip 백업본 복원 후 재기동) 누수 풀 회수 후 필요 시 tip 의 MAX_SESSION_COUNT 상향(재기동 필요)"
+  mid:
+  - 피크 동시접속 기준으로 워커와 세션 용량을 재산정
+  long:
+  - 접속용량 예측과 세션 임계치 경보를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tibero.com/tibero-manuals)
+  vendor_cause: 세션의 최대 개수가 이미 열려 있음.
+  vendor_action: 다른 세션을 닫거나 서버 종료 후 최대 세션 수를 늘리고 서버를 재시작하십시오.
+  vendor_url: https://docs.tibero.com/tibero-manuals/tibero_7.2.5./7.2.5.manuals/tibero-error-reference-guide/chapter-12000.frame.error
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR-nnnnn 코드 체계는 4~7 공통으로 수집(5→6→7 번호 재편 근거 없음 — GPT B). 6/7 sys.log 는 [ISO시각] [COM-nnn] [I/W/E] 형식(파서 대응), 6 EOS 2025-03-31·Extended 2028-03-31
+- code: TBR-12033
+  severity: error
+  category: lock
+  title: NOWAIT 잠금 실패
+  immediate:
+  - "실패한 문장·객체부터: `grep -n -B5 -A2 -E 'TBR-12033|ec=-12033|LOCKFAIL_IN_NOWAIT' $(ls -tr $TB_HOME/instance/$TB_SID/log/slog/* | tail -5) | tail -80` (sys.log 포함 회전 파일 — GTS 사례상 slog 에는 `ec=-12033` 또는 `ERROR_LOCKFAIL_IN_NOWAIT` 로 찍혀 TBR-12033 문자열만으로는 놓친다) — 장애 시각에 실패한 문장이 DDL(ALTER TABLE·테이블 제거·CREATE INDEX 등)인지 SELECT … FOR UPDATE NOWAIT 인지와 소유자.객체 이름 기록(GTS 사례상 대부분 DDL 이 사용 중인 객체의 잠금을 못 얻은 경우)"
+  - "그 객체의 DDL 객체 잠금만: tbsql `select object_id, owner, object_name from dba_objects where owner = '<OWNER>' and object_name = '<OBJECT>';` 뒤 `select * from v$lock where type = 'WLOCK_DD_OBJ' and id2 = <object_id>;`(TAC 는 gv$lock — INST_ID·SESS_ID 를 짝으로 기록해 gv$session 과 맞춘다) — GTS 사례상 DDL 객체 잠금은 TYPE 'WLOCK_DD_OBJ', ID1 = 소유자 ID, ID2 = 객체 ID(또는 이름 해시)이며 `id1 = X or id2 = X` 꼴은 무관한 잠금까지 잡으므로 쓰지 않는다. 나온 SESS_ID 가 상대 트랜잭션 후보 — 보유/요청(LMODE·REQUESTED)은 결과 머리글로 확인하고 단정하지 않는다, 0행이면 이미 끝났거나 ID2 가 이름 해시인 경우라 `select * from v$lock where type = 'WLOCK_DD_OBJ';`(TAC 는 `select * from gv$lock where type = 'WLOCK_DD_OBJ';` — 다른 노드 잠금을 놓치지 않게) 로 넓히되 넓힌 결과는 보유자가 아니다 — 그 행의 ID1(소유자)·ID2 와 세션의 SQL·접속 시각이 실패한 DDL 의 객체·발생 시각과 맞는 것만 후보로 적고, 맞는 것이 없으면 '보유자 미확인'으로 남긴다. 권한 관련 DDL(GRANT·REVOKE 등)은 다른 WLOCK 유형일 수 있어 이 조회 0행이 잠금 없음을 뜻하지 않는다(GTS 사례·교차 검토 전달, 원문 직접 대조 못 함)"
+  - "상대 세션 식별: `select * from v$session where sid = <sess_id>;`·`select * from v$sql where sql_id = '<sql_id>';`(TAC 는 `select * from gv$session where inst_id = <INST_ID> and sid = <SESS_ID>;`·gv$sql)로 업무 확인 — 행이 없으면 지금 조회로는 보유자를 확인할 수 없는 상태다(트랜잭션 종료일 수도, 조회 권한·범위나 TAC 인스턴스 불일치일 수도 있다 — 셋을 구분해 적고, 직접 보유 증거가 없으면 '보유자 미확인'으로 남긴다. NOWAIT 은 기다리지 않고 즉시 실패하므로 조회 시점에 이미 상황이 바뀌었을 수 있다). COMMIT/ROLLBACK 은 업무 담당이, DDL 은 업무 트랜잭션이 없는 시간대로 재일정"
+  short:
+  - "(2차·승인 후, 롤백: 해당 없음) 업무 확인 후 상대 트랜잭션 종료 요청 또는 DDL 재일정, NOWAIT 사용 로직은 재시도 간격 추가"
+  mid:
+  - DDL과 DML의 동시 수행정책과 잠금 순서를 조정
+  long:
+  - 온라인 변경 절차와 잠금 사전점검을 표준화
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tibero.com/tibero-manuals)
+  vendor_cause: NOWAIT 모드에서 락 획득에 실패함 — 기다리지 않는 잠금 요청이 다른 세션이 쓰고 있는 자원 때문에 바로 실패한 상태. Tibero GTS 사례상 대부분은 트랜잭션이 사용 중인 객체에 DDL(ALTER/DROP TABLE·CREATE INDEX 등)이 객체 잠금을 얻지 못한 경우이며, SELECT … FOR UPDATE NOWAIT 같은 명시적 NOWAIT 요청도 원인 후보이나 그 사례 문서로는 직접 입증되지 않았다(미검증 후보 — DDL 원인과 구별해 기록). 상대가 사용자 세션이 아니라 DB 내부 작업(internal task)의 잠금일 수도 있다(교차 검토 전달, 미검증 후보 — 세션 조회로 사용자 세션이 안 나오면 이 가능성도 적는다).
+  verify_note: "미검증 — GTS 사례 'ERROR 12033_LOCKFAIL_IN_NOWAIT 해결방안 (TMOTS014, 6FS07)'(2차 교차 검토 전달) 기준, 원문 직접 대조 못 함(docs.tmaxsoft.com/GTS 접속 불가 — 3차 교차 검토자는 원문을 직접 확인했다고 전함, 우리는 대조 못 함·문서 적용 판 6FS07 과 설치 판 차이는 따로 확인): SELECT … FOR UPDATE NOWAIT 가 이 코드의 원인이라는 점(사례로 직접 입증 안 됨), 내부 작업(internal task)과의 잠금 경합 가능성, slog 의 ec=-12033·ERROR_LOCKFAIL_IN_NOWAIT 표기, DDL 객체 잠금 TYPE 'WLOCK_DD_OBJ'·ID1 = 소유자 ID·ID2 = 객체 ID(또는 이름 해시), DDL 위주라는 점, LMODE·REQUESTED·SESS_ID 의미(교차 검토자는 그 문서에 정의돼 있다고 전함 — 보유/요청은 결과 머리글로 확인하고 단정하지 않는다). V$SESSION 세션 번호 컬럼(SID 로 가정)·GV$ 뷰의 INST_ID 칸·DBA_OBJECTS.OBJECT_ID 도 Tibero 공식 참조 안내서로 확인하지 못함"
+  vendor_action: 잠시 기다린 후 다시 시도하십시오.
+  vendor_url: https://docs.tibero.com/tibero-manuals/tibero_7.2.5./7.2.5.manuals/tibero-error-reference-guide/chapter-12000.frame.error
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR-nnnnn 코드 체계는 4~7 공통으로 수집(5→6→7 번호 재편 근거 없음 — GPT B). 6/7 sys.log 는 [ISO시각] [COM-nnn] [I/W/E] 형식(파서 대응), 6 EOS 2025-03-31·Extended 2028-03-31
+- code: TBR-12034
+  severity: error
+  category: lock
+  title: WAIT 잠금 시간초과
+  immediate:
+  - "tbsql 로 DBA 접속 후 `select sess_id, type, id1, id2, lmode, requested, ctime from v$lock order by ctime desc;` — 같은 ID1 에 LMODE 보유 세션과 REQUESTED 대기 세션이 함께 보이면 보유 세션이 원인 (Tibero V$LOCK 은 SESS_ID·REQUESTED 컬럼)"
+  - "보유 세션: `select sid, serial#, username, status, sql_id, wait_event, logon_time, prog_name from v$session where sid=<보유 SESS_ID>;` — 유휴(미커밋) 세션이 오래 보유 중이면 확정"
+  short:
+  - "(2차·승인 후, 롤백: 해당 없음 — 종료 세션의 미커밋 변경은 취소됨) 업무 담당 확인 뒤 보유 세션에 커밋/롤백 요청, 응답이 없으면 SYS 가 해당 세션 종료(구문은 Tibero SQL Reference 의 ALTER SYSTEM KILL SESSION)"
+  - 장기 트랜잭션과 lock wait 설정을 점검
+  mid:
+  - 트랜잭션 범위와 배치 동시성을 개선
+  long:
+  - 잠금 대기 모니터링과 타임아웃 기준을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tibero.com/tibero-manuals)
+  vendor_cause: 최대 대기 시간이 만료된 후 락 획득에 실패함.
+  vendor_action: 잠시 기다린 후 다시 시도하십시오.
+  vendor_url: https://docs.tibero.com/tibero-manuals/tibero_7.2.5./7.2.5.manuals/tibero-error-reference-guide/chapter-12000.frame.error
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR-nnnnn 코드 체계는 4~7 공통으로 수집(5→6→7 번호 재편 근거 없음 — GPT B). 6/7 sys.log 는 [ISO시각] [COM-nnn] [I/W/E] 형식(파서 대응), 6 EOS 2025-03-31·Extended 2028-03-31
+- code: TBR-1024
+  severity: critical
+  category: storage
+  title: 미디어 복구 필요
+  immediate:
+  - "대상 파일: MOUNT 상태에서 tbsql `select * from v$recover_file;`"
+  - "파일 존재·스토리지: `ls -l <datafile>` · `dmesg -T | grep -i \"i/o error\" | tail`"
+  - "필요 아카이브: `ls -lt <archive_dir> | head -20` — 정상 OPEN 강행은 하지 않음(2차 판단)"
+  short:
+  - "(2차·승인 후, 롤백: 복구 전 데이터파일·컨트롤파일 사본 보관) MOUNT 기동 후 `alter database recover automatic database;` 로 미디어 복구, V$RECOVER_FILE 0건 확인 후 정상 기동"
+  mid:
+  - 검증된 백업으로 media recovery 후 정합성을 확인
+  long:
+  - 백업 복구훈련과 복구 가능성 검증을 정례화
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tibero.com/technical-guides/topics/administration/backup-and-recovery)
+  vendor_cause: "데이터파일에 미디어 복구가 필요해 정상 기동할 수 없음 — 백업본 복원 후 미복구, 데이터파일 손상·오프라인이 원인(관리자 안내서 예: 기동 시 TBR-1024 → V$RECOVER_FILE 로 대상 확인)."
+  vendor_action: 미디어 복구를 수행하십시오.
+  vendor_url: https://docs.tibero.com/tibero-manuals/7.2.6.manuals/error-reference-guide/chapter-1000.cache.error
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR-nnnnn 코드 체계는 4~7 공통으로 수집(5→6→7 번호 재편 근거 없음 — GPT B). 6/7 sys.log 는 [ISO시각] [COM-nnn] [I/W/E] 형식(파서 대응), 6 EOS 2025-03-31·Extended 2028-03-31
+- code: TBR-1042
+  severity: critical
+  category: storage
+  title: 리두로그 읽기 실패
+  immediate:
+  - "대상 그룹·멤버: `grep -h \"TBR-1042\" $TB_HOME/instance/$TB_SID/log/slog/* | tail -10` (Tibero 6/7)"
+  - "구성: tbsql `select group#, member from v$logfile;` · `ls -l <member>` · `dmesg -T | grep -i \"i/o error\" | tail`"
+  short:
+  - "(2차·승인 후, 롤백: 해당 없음 — 조치 후 백업) 정상 멤버 기준으로 손상 멤버 재구성, 정상 멤버가 없으면 백업·아카이브로 복구 판단"
+  mid:
+  - 벤더 절차에 따라 redo 복구 또는 재구성을 수행
+  long:
+  - redo 다중화와 저장장치 장애 감시를 강화
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tibero.com/tibero-manuals)
+  vendor_cause: "리두 로그 멤버 파일 읽기에 실패함 — 멤버 손상·I/O 오류·권한 문제이며 다른 멤버가 정상이면 그 멤버로 진행 가능."
+  vendor_action: 유효하지 않은 로그 파일 멤버를 복구하십시오.
+  vendor_url: https://docs.tibero.com/tibero-manuals/7.2.6.manuals/error-reference-guide/chapter-1000.cache.error
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR-nnnnn 코드 체계는 4~7 공통으로 수집(5→6→7 번호 재편 근거 없음 — GPT B). 6/7 sys.log 는 [ISO시각] [COM-nnn] [I/W/E] 형식(파서 대응), 6 EOS 2025-03-31·Extended 2028-03-31
+- code: TBR-24003
+  severity: critical
+  category: storage
+  title: 컨트롤파일 읽기 실패
+  immediate:
+  - "지정 경로: `grep -i \"CONTROL_FILES\" $TB_HOME/config/$TB_SID.tip` 후 각 경로 `ls -l <ctl>` · `df -h <mount>`"
+  - "OS I/O 오류: `dmesg -T | grep -i \"i/o error\" | tail` 와 `grep -h \"TBR-24003\" $TB_HOME/instance/$TB_SID/log/slog/* | tail`"
+  short:
+  - "(2차·승인 후, 롤백: 손상 파일·tip 사본 보관) 정상 다중화본으로 교체하거나 tip 에서 손상 경로 제외 후 기동"
+  mid:
+  - 정상 백업으로 control file을 복구 또는 재생성 후 기동 검증
+  long:
+  - control file 다중화와 백업 자동검증을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://support.tibero.com/hc/en-us/articles/13803684550671-Control-File-Related-Errors-When-Starting-DB)
+  vendor_cause: "컨트롤파일을 읽을 수 없음 — 파일 손상·I/O 오류·권한·미마운트가 원인이며 MOUNT 단계 기동이 실패함."
+  vendor_action: 파일 경로와 권한을 확인한 후 다시 시도하십시오.
+  vendor_url: https://docs.tibero.com/tibero-manuals_en/7.2.5.manuals_en/tibero-error-reference-guide/chapter-24000.tccf.error
+  versions:
+  - Tibero 4
+  - Tibero 5/5 SP1
+  - Tibero 6
+  - Tibero 7
+  version_note: TBR-nnnnn 코드 체계는 4~7 공통으로 수집(5→6→7 번호 재편 근거 없음 — GPT B). 6/7 sys.log 는 [ISO시각] [COM-nnn] [I/W/E] 형식(파서 대응), 6 EOS 2025-03-31·Extended 2028-03-31

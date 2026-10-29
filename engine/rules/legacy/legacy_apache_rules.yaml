@@ -1,0 +1,166 @@
+# 기존 'AI 로그분석기 v2.2' 내장 룰에서 변환 반입(tools/import_legacy_rules.py) — 중복(코드·패턴) 제외
+# 심각도 CRITICAL→critical HIGH→error MEDIUM→warn LOW→info · immediate_actions→즉시 · root_actions→중기 · negative_patterns→exclude
+rules:
+- id: LEG-AH-503
+  layer: web
+  product:
+  - apache
+  match:
+    regex: '(?:AH01079:.*failed to make connection)|(?:proxy:.*failed to connect)|(?:AH00898:.*Error.*proxy.*backend)|(?:proxy: HTTP:.*Connection refused)|(?:AH01114:.*ap_content_length_filter)|(?:AH01144:.*No
+      IMO between frontend and backend)|(?:503 Service Unavailable)|(?:proxy:.*error.*backend)|(?:mod_proxy.*Connection refused)'
+  severity: error
+  category: upstream
+  verdict: Backend 연결 실패 HTTP 503 — mod_proxy 백엔드 WAS 응답 없음
+  immediate:
+  - '`grep -n "AH01079\|AH00898\|AH01114\|failed to connect" <error_log> | tail -20` 로 백엔드 주소·시각 확인'
+  - '`curl -s -o /dev/null -w "%{http_code} %{time_total}\n" http://<backend_ip>:<port>/` 로 백엔드 직접 응답 확인(조회 요청만)'
+  - '백엔드 WAS(JEUS/Tomcat) 프로세스 기동 여부를 WAS 담당과 확인'
+  short:
+  - '(2차) 사용자 503 발생 중 — WAS 복구를 담당에 요청하고, 장애 멤버 제외(balancer-manager)는 승인 후(롤백: 재투입)'
+  mid:
+  - 'ProxyTimeout·retry 정비, 백엔드 자동 기동 감시, 로드밸런서 헬스체크 설정'
+  long:
+  - '백엔드 연결 실패율 경보와 WAS 이중화 구성'
+  source_note: 'legacy-analyzer-v2.2 apache_rules.json AH-503 (원 출처: builtin)'
+  versions:
+  - Apache 2.0~2.2 (메시지 별칭)
+  - Apache 2.4
+  version_note: 'AH01079/AH00898(2.4) + ''proxy: failed to connect''(2.2)'
+- id: LEG-AH-MAXWORKERS
+  layer: web
+  product:
+  - apache
+  match:
+    regex: (?:server reached MaxRequestWorkers)|(?:MaxClients.*setting.*\d+)|(?:AH00161:.*server.*MaxRequestWorkers)|(?:all.*worker.*busy)|(?:AH00162:.*worker.*limit)|(?:no idle.*worker)
+  severity: error
+  category: capacity
+  verdict: 최대 연결 수 초과 — 동시 접속이 MaxRequestWorkers 초과
+  immediate:
+  - '`curl -s "http://localhost/server-status?auto" | egrep "BusyWorkers|IdleWorkers"` 로 워커 사용량 확인(mod_status 허용 시)'
+  - '`grep -c "AH00161\|MaxClients" <error_log>` 와 접근 로그 IP 상위로 폭주 출처·백엔드 지연 여부 확인'
+  short:
+  - '(2차·승인 후, 롤백: 설정 원복) 신규 접속 거부 중 — 원인이 백엔드 지연이 아니면 MaxRequestWorkers 상향 후 `apachectl -t` 성공 시 `apachectl -k graceful`'
+  mid:
+  - 'MaxRequestWorkers 재산정, MPM event 전환, KeepAliveTimeout 단축'
+  long:
+  - 'BusyWorkers/MaxRequestWorkers 80% 경보와 WEB 계층 증설 계획'
+  source_note: 'legacy-analyzer-v2.2 apache_rules.json AH-MAXWORKERS (원 출처: builtin)'
+  versions:
+  - Apache 2.0~2.2 (메시지 별칭)
+  - Apache 2.4
+  version_note: 2.4 AH00161 + 2.2 MaxClients
+- id: LEG-AH-403
+  layer: web
+  product:
+  - apache
+  match:
+    regex: (?:AH01630:.*client denied by server configuration)|(?:AH01797:.*client.*denied)|(?:403 Forbidden)|(?:Permission denied.*httpd)|(?:forbidden.*access.*\[client)
+  severity: warn
+  defer_to_code: true   # 룰 학습 3차: 'Permission denied …/httpd/' 가 로그 파일 열기 실패(AH00086)까지 403 으로 판정 — 사전에 있는 AH 코드 줄은 사전이(AH01630·AH01797 도 사전에 같은 뜻)
+  category: security
+  verdict: 접근 권한 거부 403 — Require 지시자 또는 파일 권한으로 접근 차단
+  immediate:
+  - '`grep -n "AH01630\|AH01797" <error_log> | tail -20` 로 거부된 경로·client IP 확인'
+  - '`grep -rn "Require\|Allow from\|Deny from" /etc/httpd/conf*` 로 해당 Directory 접근 규칙 확인(Debian 계열은 /etc/apache2), `ls -laZ <경로>` 로 파일 권한·SELinux 확인'
+  short:
+  - '(2차·승인 후, 롤백: 설정 원복) 정상 사용자면 Require 규칙·권한 정정 — 특정 경로 접근 불가 상태'
+  mid:
+  - 'Require 방식 일원화·SELinux 컨텍스트 표준'
+  long:
+  - '403 건수·출처 감시'
+  source_note: 'legacy-analyzer-v2.2 apache_rules.json AH-403 (원 출처: builtin)'
+  versions:
+  - Apache 2.4
+  version_note: AH01630/AH01797 — 2.4 (2.2 는 별칭 AH01630 으로 코드 판정)
+- id: LEG-AH-SSL
+  layer: web
+  product:
+  - apache
+  match:
+    regex: (?:AH02032:.*SSL.*certificate.*expired)|(?:AH02565:.*certificate.*verify.*failed)|(?:SSL_accept.*SSL_ERROR)|(?:AH02577:.*Failed to configure certificate)|(?:certificate.*has expired)|(?:SSL handshake.*failed)|(?:unable
+      to verify.*certificate)|(?:certificate.*unknown.*CA)
+  severity: error
+  category: security
+  verdict: SSL/TLS 인증서 오류 — SSL 인증서 만료, 설정 오류, 체인 불완전
+  immediate:
+  - '`openssl x509 -enddate -noout -in <SSLCertificateFile>` 로 만료일 확인'
+  - '`openssl s_client -connect <host>:443 -servername <host> -showcerts </dev/null` 로 제공 체인 확인, `apachectl -t` 로 구문 시험'
+  short:
+  - '(2차·승인 후, 롤백: 이전 인증서 복원) HTTPS 접속 불가 상태 — 인증서·체인 교체 후 `apachectl -t` 성공 시 `apachectl -k graceful`'
+  mid:
+  - '중간 인증서 체인 포함 기준과 인증서 갱신 절차 표준화'
+  long:
+  - '인증서 만료 60/30/7일 전 경보'
+  source_note: 'legacy-analyzer-v2.2 apache_rules.json AH-SSL (원 출처: builtin)'
+  versions:
+  - Apache 2.4
+  version_note: AH02032/AH02565 — 2.4
+- id: LEG-AH-START
+  layer: web
+  product:
+  - apache
+  match:
+    regex: (?:httpd.*failed to start)|(?:AH00072:.*httpd)|(?:AH00526:.*Syntax error)|(?:syntax error.*httpd\.conf)|(?:apache.*could not bind.*port)|(?:AH00015:.*Unable to open logs)
+  severity: critical
+  category: internal
+  verdict: Apache 기동 실패 — 설정 파일 문법 오류 또는 포트 충돌
+  immediate:
+  - '`apachectl -t` 로 구문 시험(파일·줄번호 확인)'
+  - '`ss -ltnp | grep -E ":(80|443) "` 로 포트 점유 확인, `journalctl -u httpd --since "-1h" | tail -30` 로 기동 오류 확인'
+  short:
+  - '(2차·승인 후, 롤백: 백업 설정 복원) 웹 서비스 전체 중단 상태 — 설정 오류 수정 또는 포트 점유 프로세스 정리 협의 후 기동'
+  mid:
+  - '설정 변경 전 `apachectl -t` 의무화와 포트 사용 대장 관리'
+  long:
+  - 'httpd 기동 실패 즉시 경보'
+  source_note: 'legacy-analyzer-v2.2 apache_rules.json AH-START (원 출처: builtin)'
+  versions:
+  - Apache 2.0~2.2 (메시지 별칭)
+  - Apache 2.4
+  version_note: AH00072/AH00526(2.4) + 'syntax error'·'failed to start'(2.2)
+- id: LEG-AH-PROXY-TIMEOUT
+  layer: web
+  product:
+  - apache
+  match:
+    regex: (?:AH01102:.*error reading status line from remote server)|(?:proxy:.*request failed)|(?:Gateway Timeout.*apache)|(?:504 Gateway Timeout)|(?:ProxyTimeout.*exceeded)
+  severity: warn
+  category: capacity
+  verdict: Proxy 타임아웃 — 백엔드 WAS 처리 시간 초과
+  immediate:
+  - '`grep -n "AH01102\|request failed" <error_log> | tail -20` 로 지연 백엔드·URL 확인'
+  - '백엔드 WAS 처리 시간과 DB 슬로우 쿼리 여부를 WAS·DB 담당에 확인 요청'
+  short:
+  - '(2차) 사용자 504 발생 중 — 백엔드 지연 원인 해소가 우선, ProxyTimeout·Timeout 상향은 해당 경로 한정으로 승인 후(롤백: 설정 원복)'
+  mid:
+  - '백엔드 WAS 성능 개선과 타임아웃 계층(LB·httpd·WAS·DB) 정렬'
+  long:
+  - '프록시 응답 시간·504 비율 감시'
+  source_note: 'legacy-analyzer-v2.2 apache_rules.json AH-PROXY-TIMEOUT (원 출처: builtin)'
+  versions:
+  - Apache 2.0~2.2 (메시지 별칭)
+  - Apache 2.4
+  version_note: 'AH01102(2.4) + ''proxy: request failed''(2.2)'
+- id: LEG-AH-SELINUX
+  layer: web
+  product:
+  - apache
+  match:
+    regex: (?:AVC.*denied.*httpd)|(?:SELinux.*preventing.*httpd)|(?:httpd.*SELinux.*denied)
+  severity: warn
+  category: internal
+  verdict: Apache SELinux 차단 — SELinux가 Apache httpd의 파일/네트워크 접근 차단
+  immediate:
+  - '`ausearch -m AVC -ts recent | grep httpd` 로 거부된 대상·권한 확인(root, recent = 최근 10분)'
+  - '`ls -Z <대상경로>` 와 `getenforce` 로 컨텍스트·모드 확인 — Enforcing 이고 대상 타입이 httpd_sys_content_t 류가 아니면 컨텍스트 문제'
+  short:
+  - '(2차·승인 후, 롤백: 변경 전 컨텍스트 기록 후 restorecon 원복) 올바른 타입으로 `semanage fcontext` 등록 후 `restorecon`, 정책 생성(audit2allow)은 보안 검토 후'
+  mid:
+  - 'httpd 관련 SELinux boolean·파일 컨텍스트 표준'
+  long:
+  - 'AVC 거부 건수 감시'
+  source_note: 'legacy-analyzer-v2.2 apache_rules.json AH-SELINUX (원 출처: builtin)'
+  versions:
+  - Apache 2.0~2.2 (메시지 별칭)
+  - Apache 2.4
+  version_note: SELinux 문구 — 버전 무관

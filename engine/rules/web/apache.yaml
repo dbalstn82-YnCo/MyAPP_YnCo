@@ -1,0 +1,47 @@
+# WEB — Apache 시그니처
+rules:
+- id: WEB-APA-001
+  layer: web
+  product:
+  - apache
+  match:
+    regex: MaxRequestWorkers|server reached .*MaxClients
+  severity: critical
+  category: capacity
+  verdict: 워커 한도 도달 (MaxRequestWorkers)
+  immediate:
+  - '`curl -s "http://127.0.0.1/server-status?auto" | grep -E "BusyWorkers|IdleWorkers"` 로 워커 사용 확인 — IdleWorkers 0 지속이면 포화 (mod_status 활성·로컬 허용 필요, 2.2/2.4)'
+  - '`tail -50000 <access_log> | awk ''{print $1}'' | sort | uniq -c | sort -rn | head` 로 출처 쏠림 확인 — 소수 IP 집중이면 폭주·공격, 고르게 늘었으면 정상 증가'
+  - '`ps -ef | grep -c "[h]ttpd"` 와 `grep -rnE "MaxRequestWorkers|MaxClients|ServerLimit" <설정 디렉터리>` 로 현재 프로세스 수와 한도 비교 (2.2 는 MaxClients)'
+  short:
+  - '(2차·승인 후, 롤백: 설정 원복) MaxRequestWorkers·KeepAlive 조정 후 `apachectl -t` 확인 뒤 graceful 적용'
+  mid:
+  - MPM 설정 최적화
+  long:
+  - WEB 계층 스케일아웃
+  versions:
+  - Apache 2.0~2.2 (메시지 별칭)
+  - Apache 2.4
+  version_note: MaxRequestWorkers(2.4)·MaxClients(2.2) 문구 모두
+- id: WEB-APA-002
+  layer: web
+  product:
+  - apache
+  match:
+    regex: 'proxy: error reading|failed to make connection to backend|AH01102|AH01110'
+  severity: error
+  category: upstream
+  verdict: 백엔드(WAS) 프록시 오류
+  immediate:
+  - '`grep -n "AH01102\|AH01110\|failed to make connection" <error_log> | tail -20` 로 백엔드 주소·URL 확인 (<error_log> 는 `apachectl -S` 의 Main ErrorLog)'
+  - '`nc -zvw3 <backend_ip> <port>` 와 `curl -s -o /dev/null -w "%{http_code} %{time_total}\n" http://<backend_ip>:<port>/` 로 WAS 도달·응답 시간 확인'
+  short:
+  - '(2차) WAS 담당에 장애·지연 통보, ProxyTimeout 은 실제 응답 시간과 비교 후 승인 받아 조정(롤백: 설정 원복)'
+  mid:
+  - '밸런서 멤버 헬스체크·retry·connectiontimeout 구성 점검'
+  long:
+  - 'WAS 이중화와 프록시 오류율 감시'
+  versions:
+  - Apache 2.0~2.2 (메시지 별칭)
+  - Apache 2.4
+  version_note: proxy 문구(2.2)·AH01102/AH01110(2.4)

@@ -1,0 +1,157 @@
+# 7차(2026-10-16) WEB·SW 묶음 '이 판정 전용' 연결 재검토 — 판정 제목 핵심어가 절차에 하나도 없던 연결(kw7/D_websw.json 67건)을 사람이 다시 본 결과.
+# 판정 기준: 그 절차의 1차(읽기 전용) 확인이 이 판정의 원인을 실제로 가려내는가(낱말 겹침이 아니라 진단 내용으로 판단).
+#  - fit_reviewed: true  = 기존 연결이 맞음(사유는 reviewed) — 연결 감사 '적합성 낮음' 대기열에서 뺀다
+#  - primary: true       = 더 맞는 기존 절차를 1순위로 지정(같은 ID 를 가진 다른 절차보다 앞선다)
+#  - 맞는 기존 절차가 없는 것은 r7_websw_procedures.yaml 의 전용 절차(scope: id)로 옮겼다(NGX/WTB/JAVA/IIS/MESIM-PROC-R7-*).
+links:
+# ── (a) 기존 연결 적합 — IIS ──
+- procedure: IIS-PROC-R5-CONNECTION
+  match: [IIS-HTTPERR-TIMER-MINBYTESPERSECOND]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — 1차 2단계가 Timer_MinBytesPerSecond 출처 IP 편중(저속 공격 대 회선 품질)을 가르고, 2차가 webLimits minBytesPerSecond 조정(0 금지)이라 '최소 전송 속도 미달'에 그대로 맞음"
+- procedure: IIS-PROC-R5-DISK
+  match: [IIS-HTTPERR-LOGGING-FAIL]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — ErrorLoggingDir·드라이브 여유·HTTPERR 폴더 권한·HttpEvent 기록 실패 이벤트 확인이 HTTPERR 로그 쓰기 실패의 세 원인(공간·경로·권한)을 그대로 가림"
+- procedure: IIS-PROC-R5-SECURITY
+  match: ['403.4', '404.8']
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — 1차 하위 상태 집계와 security/access(sslFlags)·requestFiltering(hiddenSegments) 조회가 SSL 필요(403.4)·숨겨진 네임스페이스(404.8)의 설정 원인과 탐색 공격 여부를 가림"
+- procedure: IIS-PROC-R6-APPERROR
+  match: ['500.0']
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — 500.0 전용으로 만든 절차: ASP.NET 1309/1310 이벤트·500 집중 URL·FREB 로 실패 모듈 특정이 '모듈 또는 ISAPI 오류'에 맞음"
+- procedure: IIS-PROC-INTERNAL
+  match: [IIS-WAS-5002, '503.0', IIS-HTTPERR-APPOFFLINE]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — 앱 풀 State·WAS 5002/5009/5011 원인 이벤트 확인과 원인 기록 후 앱 풀 시작·빠른 실패 보호 조정이 앱 풀 자동 비활성화(5002)·앱풀 사용 불가(503.0)·HTTPERR AppOffline 에 그대로 맞음"
+- procedure: IIS-PROC-R6-BADREQ
+  match: [IIS-HTTPERR-HOSTNAME]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — HTTPERR Hostname 집계와 사이트 바인딩(appcmd list site) 대조, 정상 업무 장비일 때만 바인딩 추가가 '호스트 이름 미매칭'에 맞음"
+- procedure: IIS-PROC-R6-RECYCLE
+  match: ['500.11']
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — 재활용 설정·WAS 재활용 이벤트와 500.11 발생 구간 대조, 재활용 야간 예약이 '웹 서버에서 앱 종료 중'에 맞음"
+- procedure: IIS-PROC-CAPACITY
+  match: ['500.13']
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — HTTP.sys CurrentQueueSize·현재 연결 수·queueLength 확인과 유입 제한·큐 조정(원인 확인 뒤)이 '웹 서버 과부하'(500.13)에 맞음"
+# ── (a) 기존 연결 적합 — nginx ──
+- procedure: NGX-PROC-R5-CONNECTION
+  match: [NGX-UPSTREAM-HOST-NOT-FOUND]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — 1차가 'host not found in upstream' 집계·nginx -t·resolver 설정과 dig 해석 시험을 하므로 업스트림 호스트 미해석(DNS·hosts·오타)을 그대로 가림"
+- procedure: NGX-PROC-R5-INTERNAL
+  match: [NGX-TOO-MANY-REDIRECTS]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — 1차가 'redirection cycle' 줄과 최근 설정 변경을 찾고 2차가 rewrite/try_files 정정 후 nginx -t·reload 라 리다이렉트 루프(내부 재지정 순환)에 맞음"
+- procedure: NGX-PROC-R5-SECURITY
+  match: [NGX-SSL-PROTOCOL-ERROR]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — SSL_*() failed 유형 집계·ssl_protocols 확인·업무 장비 출처 판단이 SSL 프로토콜 오류(구형 TLS·평문 요청)에 맞음"
+- procedure: NGX-PROC-UPSTREAM
+  match: [NGX-UPSTREAM-TIMEOUT, NGX-NO-LIVE-UPSTREAMS, NGX-UPSTREAM-NEXT-TRIES]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — upstream timed out·no live upstreams 확인과 백엔드 포트 도달 시험, max_fails/fail_timeout·proxy 타임아웃 조정이 업스트림 응답 시간초과·가용 업스트림 없음·재시도 소진(일시 제외)에 맞음"
+- procedure: NGX-PROC-R6-SIZE
+  match: [NGX-UPSTREAM-BIG-HEADER]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — 'too big header' 집계와 proxy_buffer_size 현재 값 확인, location 한정 상향이 업스트림 헤더 과대(502)에 그대로 맞음"
+# ── (a) 기존 연결 적합 — Apache ──
+- procedure: APA-PROC-SECURITY
+  match: [AH02032, AH02311]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — 1차가 AH02032 줄(SNI·Host 값)과 인증서 만료를 함께 보며(별칭이 2.2 'certificate expired' 문구도 AH02032 로 잇는 점 포함), 키/인증서 쌍 대조·ssl.conf 정정이 mod_ssl 초기화 실패(AH02311)에 맞음 — SNI 불일치 정정(ServerAlias)은 코드 사전 short 에 있음"
+- procedure: APA-PROC-INTERNAL
+  match: [AH00072]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — 1차가 AH00072 를 직접 찾고 ss -ltnp 로 포트 점유 PID 를 확인, 2차가 잔존 httpd 정리·Listen 정정 후 기동이라 리스닝 주소 바인드 실패에 맞음"
+- procedure: APA-PROC-R6-CONFWARN
+  match: [AH01144]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — AH01144 전용으로 만든 절차: apachectl -M 의 proxy_<스킴>_module 과 ProxyPass 스킴 대조, LoadModule 추가 후 graceful 이 URL 프로토콜 핸들러 없음에 맞음"
+# ── (a) 기존 연결 적합 — WebtoB ──
+- procedure: WTB-PROC-CAPACITY
+  match: [WEBTOB-SVR-QUEUE-FULL]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — st -s 의 qcount 와 MaxQCount 비교·'max q for svr' 확인, 백엔드 지연 확인 뒤 MaxProc·MaxQCount 조정이 서버 큐 가득참에 맞음"
+- procedure: WTB-PROC-R5-CONNECTION
+  match: [WEBTOB-NODE-DOWN, CONN_2]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — wsadmin si(서버·노드 상태)·ci(클라이언트 접속)·포트 LISTEN 과 끊김·timeout 빈도 확인이 노드 다운과 HTTP 요청 대기 시간초과(CONN_2, 정보성 판단 포함)를 가림"
+# ── (a) 기존 연결 적합 — Java ──
+- procedure: JAVA-PROC-R5-INTERNAL
+  match: [JAVA.SQL.SQLEXCEPTION]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — Caused by·SQLState·ORA-/vendorCode 추출이 일반 JDBC 데이터베이스 접근 오류의 실제 DB 원인을 가르는 첫 단계와 같음"
+- procedure: JAVA-PROC-CONNECTION
+  match: [JAVA.SQL.SQLRECOVERABLEEXCEPTION, ORG.SPRINGFRAMEWORK.DAO.DATAACCESSRESOURCEFAILUREEXCEPTION]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — DB 호스트·포트 도달(nc -zvw3)·연결 예외 문구·JDBC 풀 상태 확인이 복구 후 재시도 가능한 DB 오류(연결 단절)·데이터 접근 자원 실패(DB 연결 실패)에 맞음"
+- procedure: JAVA-PROC-R5-LOCK
+  match: [ORG.SPRINGFRAMEWORK.DAO.DEADLOCKLOSERDATAACCESSEXCEPTION]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — DeadlockLoser 빈도·대상 확인과 DB 잠금 대기 조회 의뢰가 교착상태 희생 거래 롤백에 그대로 맞음"
+- procedure: JAVA-PROC-SECURITY
+  match: [JAVAX.NET.SSL.SSLEXCEPTION]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — openssl s_client 로 상대 프로토콜·cipher·인증서와 handshake 오류 문구 확인이 SSL 통신 오류(상위 예외)의 하위 원인을 가림"
+# ── (a) 기존 연결 적합 — MESIM ──
+- procedure: MESIM-PROC-R6-SECURITY
+  match: [APIG-APIKEY-INVALID]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — API KEY ACCESS FAIL·invalid/expired 집계, 콘솔 키 등록·만료·활성 조회가 인증키 오류에 그대로 맞음"
+- procedure: MESIM-PROC-INTERNAL
+  match: [APIG-FORMAT-CONVERT-FAIL, APIG-GATEWAY-DOWN, APIG-OPENAPI-PROCESS-FAIL, APIG-EVENT-ALERT]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — 프로세스·리슨 포트 확인(게이트웨이 장애)과 JsonParse/SAXParse/Transform·HTTP INVOKE 예외 추출(포맷변환 실패·API 처리 실패), 매핑 정정 배포가 맞음 · API 이벤트는 증상 알림이라 같은 시각 프로세스·내부 예외 확인이 원인 판별 출발점"
+- procedure: MESIM-PROC-CAPACITY
+  match: [APIG-TRAFFIC-SPIKE, APIG-QOS-DEGRADE]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — 유량 제한(429)·큐 포화·RejectedExecution 건수와 Jetty/Camel 스레드·연결 수 확인이 트래픽 급증이 용량을 넘었는지, 품질 저하가 게이트웨이 자원 포화인지를 가림(백엔드 지연이면 MESIM-PROC-UPSTREAM)"
+- procedure: MESIM-PROC-R6-FAULT
+  match: [ESB-WEBSERVICE-FAIL]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — SOAPFault·faultcode/faultstring 추출과 WSDL 응답 대조가 웹서비스 호출 실패(상대 오류·계약 불일치)를 가림"
+# ── (b) 더 맞는 기존 절차를 1순위로 ──
+- procedure: IIS-PROC-R6-BADREQ
+  match: [IIS-HTTPERR-HEADER, IIS-HTTPERR-VERB]
+  primary: true
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — HTTPERR Header·Verb 는 HTTP.sys 단계 400 거부라 W3C 401/403 하위 상태를 세는 IIS-PROC-R5-SECURITY 로는 안 잡힘 · 이 절차 1차 2단계가 HTTPERR '(BadRequest|Hostname|Internal|Header|Verb)' 사유별 집계·HttpEvent 를 보고, 스캐너면 조치 없이 보안 통보·정상 장비면 요청 형식 확인으로 가름"
+- procedure: IIS-PROC-R6-APPPOOLID
+  match: [IIS-WAS-5057]
+  primary: true
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — 5057(잘못된 ID 로 앱 풀 비활성화)은 앱 풀 ID 계정 문제라, identityType·userName·WAS 5021/5057·net user 계정 상태·SeBatchLogonRight 를 차례로 보는 이 절차가 W3C 403 집계부터 하는 IIS-PROC-R5-SECURITY 보다 맞음"
+- procedure: IIS-PROC-R5-THREAD
+  match: ['503.3']
+  primary: true
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — ASP.NET 큐 포화(503.3)는 워커가 장시간 요청에 묶인 결과라 appcmd list requests 장시간 요청·w3wp 확인과 행 덤프 후 재활용이 맞음 · 기존 IIS-PROC-INTERNAL 은 앱 풀 Stopped·5002 확인이라 진단 대상이 다름"
+- procedure: APA-PROC-R6-CONFWARN
+  match: [AH00558]
+  primary: true
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — ServerName 미설정은 서비스가 도는 설정 경고라 apachectl -t·-S 로 경고와 가상호스트 확인, ServerName 추가 후 graceful 하는 이 절차가 기동 실패·restart 위주의 APA-PROC-INTERNAL 보다 맞음"
+- procedure: APA-PROC-R5-DISK
+  match: [AH00015, AH00104]
+  primary: true
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — 로그 파일 열기 실패(AH00015)·파이프 로그 프로그램 시작 실패(AH00104)는 ErrorLog/CustomLog 경로·공간·권한·파이프(|) 대상 프로그램 확인이 원인 판별이라 이 절차가 맞음 · APA-PROC-INTERNAL 1차(configtest·80/443 포트·AH00072 등 grep)로는 로그 경로·파이프 프로그램을 보지 않음(r6_web_proclinks 의 AH00104→APA-PROC-INTERNAL 판단을 대체)"
+- procedure: NGX-PROC-CAPACITY
+  match: [NGX-EPOLL-FAIL]
+  primary: true
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — epoll 오류의 흔한 원인은 FD 한도 소진이라 워커별 /proc limits·ss -s 확인과 worker_rlimit_nofile·LimitNOFILE 상향이 코드 사전 조치와 같은 방향 · NGX-PROC-R5-INTERNAL 1차(nginx -t·워커 종료 시그널)는 FD 를 보지 않음"
+- procedure: SWC-PROC-R5-PERFORMANCE
+  match: [ORG.SPRINGFRAMEWORK.TRANSACTION.UNEXPECTEDROLLBACKEXCEPTION]
+  primary: true
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — 커밋 시 예상치 못한 롤백은 앞서 삼켜진 예외(rollback-only)가 원인이라 grep -B 로 예외 직전을 보는 이 절차가 맞음 · JAVA-PROC-R5-INTERNAL 은 -A 로 SQLState·FD 를 보아 원인을 놓침"
+- procedure: JAVA-PROC-R5-APP
+  match: [JAVA.LANG.ARRAYINDEXOUTOFBOUNDSEXCEPTION, JAVA.LANG.CLASSCASTEXCEPTION, JAVA.LANG.ILLEGALARGUMENTEXCEPTION, JAVA.LANG.UNSUPPORTEDOPERATIONEXCEPTION, JAVA.UTIL.NOSUCHELEMENTEXCEPTION, JAVA.NIO.CHANNELS.CLOSEDCHANNELEXCEPTION, ORG.SPRINGFRAMEWORK.WEB.HTTPREQUESTMETHODNOTSUPPORTEDEXCEPTION, ORG.HIBERNATE.LAZYINITIALIZATIONEXCEPTION]
+  primary: true
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — 배열 범위 초과·형 변환·인자·지원 안 하는 연산·요소 없음·닫힌 채널 재사용·지원 안 하는 HTTP 메서드·세션 종료 후 지연 로딩은 소스·배포 결함이라 최초 애플리케이션 프레임·빈도·직전 배포(WEB-INF/lib)를 보고 수정 배포·직전 판 원복하는 이 절차가 맞음 · JAVA-PROC-R5-INTERNAL 1차(SQLState·FD 한도)와 2차(nofile 상향·재기동)는 이 예외들의 원인을 가리지 못함"

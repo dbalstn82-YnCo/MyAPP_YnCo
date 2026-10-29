@@ -1,0 +1,44 @@
+product: cubrid
+layer: db
+note: 룰 학습 5차(2026-10-15) — 서버 .err NOTIFICATION 'CODE = -11xx'(ERROR 없이). 성능 저하 '가능성' 진단용 — 오류 확정 아님
+codes:
+- code: '-1125'
+  severity: warn
+  category: performance
+  title: Overflow key 파일 생성
+  immediate:
+  - "`grep -n -A2 -w \"CODE = -1125\" $CUBRID/log/server/<db>_*.err | tail -20` 으로 대상 인덱스·클래스와 시각 확인 (9.x~11.x)"
+  - "`grep -c -w \"CODE = -1125\" $CUBRID/log/server/<db>_*.err` 로 파일별 빈도 확인 — 특정 시간대 급증이면 대량 적재·긴 키 입력과 연관, `cubrid spacedb -s <db>` 로 볼륨 여유 페이지 감소 여부 확인"
+  short:
+  - 인덱스 키 길이·구조 점검(2차)
+  mid:
+  - 긴 키 인덱스 재설계 검토
+  long:
+  - 스키마 설계 기준
+  source: 룰 학습 5차(2026-10-15) — GPT 14차 벤더 문서 대조 + 원문 재확인
+  vendor_cause: 인덱스 키가 커서 overflow key 파일을 만듦 — 성능 저하 가능
+  vendor_action: ''
+  vendor_url: https://www.cubrid.org/manual/ko/10.2/admin/troubleshoot.html
+  versions:
+  - CUBRID 9.x~11.x
+  version_note: NOTIFICATION, CODE = -1125
+- code: '-1126'
+  severity: warn
+  category: performance
+  title: 새 Overflow page 생성
+  immediate:
+  - "`grep -n -A2 -w \"CODE = -1126\" $CUBRID/log/server/<db>_*.err | tail -20` 으로 대상 테이블과 시각 확인 (9.x~11.x)"
+  - "`grep -c -w \"CODE = -1126\" $CUBRID/log/server/<db>_*.err` 로 파일별 빈도 확인 — 특정 시간대 급증이면 큰 레코드(긴 가변 칼럼) 적재와 연관, `cubrid spacedb -s <db>` 로 데이터 볼륨 여유 감소 여부 확인"
+  short:
+  - 큰 레코드·가변 칼럼 사용 점검(2차)
+  mid:
+  - 테이블 구조 재설계 검토
+  long:
+  - 스키마 설계 기준
+  source: 룰 학습 5차(2026-10-15) — GPT 14차 벤더 문서 대조 + 원문 재확인
+  vendor_cause: 레코드가 커서 overflow page 를 새로 만듦 — 성능 저하 가능
+  vendor_action: ''
+  vendor_url: https://www.cubrid.org/manual/ko/10.2/admin/troubleshoot.html
+  versions:
+  - CUBRID 9.x~11.x
+  version_note: NOTIFICATION, CODE = -1126. -1127(빈 페이지 제거)은 장애 코드 아님

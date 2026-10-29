@@ -1,0 +1,396 @@
+# 기존 'AI 로그분석기 v2.2' 내장 룰에서 변환 반입(tools/import_legacy_rules.py) — 중복(코드·패턴) 제외
+# 심각도 CRITICAL→critical HIGH→error MEDIUM→warn LOW→info · immediate_actions→즉시 · root_actions→중기 · negative_patterns→exclude
+rules:
+- id: LEG-STOR-DISK-FAIL
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:disk.*failed.*storage)|(?:drive.*failure.*array)|(?:disk.*fault.*EMC)|(?:disk.*error.*NetApp)|(?:physical.*disk.*failed)|(?:drive.*slot.*fault)|(?:harddisk.*error)
+  severity: critical
+  category: disk
+  verdict: 스토리지 디스크 장애 — 스토리지 어레이 내 물리 디스크 장애
+  immediate:
+  - "스토리지 관리 콘솔(제조사 GUI)에서 장애 디스크 위치(인클로저·슬롯)와 핫스페어 대체 여부 확인 — 제조사 CLI 는 show/list 계열 조회만 사용"
+  - "서버 측 경로 영향(읽기): Linux `multipath -ll | grep -iE 'failed|faulty'` / AIX `lspath | grep -v Enabled` / ESXi `esxcli storage core path list | grep -c 'State: dead'` — 0 이 아니면 서버 I/O 경로까지 영향"
+  - "리빌드(Rebuild) 진행 상태와 완료 예상 시각을 콘솔에서 기록"
+  short:
+  - '(2차·승인 후, 롤백: 교체 전 RAID 그룹 상태·백업 확인) 제조사 인증 디스크로 Hot-swap 교체, 재구성 중 대량 I/O 작업 연기'
+  - '영향: RAID 성능 저하 모드 진입. 추가 장애 시 데이터 손실.'
+  mid:
+  - 인증된 교체 디스크로 Hot-swap 교체
+  - RAID 재구성 완료 모니터링
+  - 재구성 중 I/O 부하 최소화
+  long:
+  - 스토리지 디스크 장애 이벤트(콜홈·SNMP) 알림 연동과 핫스페어 수 기준 유지
+  source_note: 'legacy-analyzer-v2.2 storage_hw_rules.json STOR-DISK-FAIL (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-STOR-LUN-OFFLINE
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:LUN.*offline)|(?:LUN.*unavailable)|(?:lun.*not accessible)|(?:volume.*offline)|(?:storage.*LUN.*error)|(?:LUN.*failed)
+  severity: critical
+  category: disk
+  verdict: LUN 오프라인 — 스토리지 LUN 접근 불가. 디스크 장애, 컨트롤러 오류, 경로 문제
+  immediate:
+  - 스토리지 콘솔에서 LUN 상태·소유 컨트롤러·호스트 매핑 확인
+  - '서버 경로 상태(읽기): Linux `multipath -ll` / AIX `lspath -l hdisk<N>` / Windows `mpclaim -s -d`'
+  - 'OS 오류: Linux `dmesg -T | grep -iE ''offline|I/O error'' | tail -20` / AIX `errpt | head -20`'
+  short:
+  - '(2차·승인 후, 롤백: 재스캔 전 `multipath -ll` 출력 보관) 스토리지 측 원인 해소 후 경로 재스캔(Linux `rescan-scsi-bus.sh`, AIX `cfgmgr`)과 파일시스템 점검'
+  - '영향: LUN 사용 서버 파일시스템 접근 불가, 서비스 중단.'
+  mid:
+  - 스토리지 컨트롤러 장애 확인 및 페일오버
+  - FC 스위치 존닝 확인
+  - LUN 복구 또는 백업에서 복원
+  long:
+  - LUN 경로 수·상태 감시와 이중 컨트롤러·이중 패브릭 구성 점검
+  source_note: 'legacy-analyzer-v2.2 storage_hw_rules.json STOR-LUN-OFFLINE (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-STOR-CONTROLLER-FAIL
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:controller.*failure)|(?:storage.*controller.*error)|(?:array.*controller.*failed)|(?:SP.*failed)|(?:controller.*offline)|(?:storage.*head.*failed)
+  severity: critical
+  category: storage
+  verdict: 스토리지 컨트롤러 장애 — 스토리지 어레이 컨트롤러(SP) 장애. 이중화 컨트롤러 중 하나 장애
+  immediate:
+  - 스토리지 콘솔에서 컨트롤러(SP·노드) 상태와 LUN 소유권 이전(Trespass·Takeover) 여부 확인
+  - '서버 측 경로 감소(읽기): Linux `multipath -ll | grep -c ''active ready''` / AIX `lspath | grep -c Enabled` — 평시 경로 수와 비교'
+  - 제조사 긴급 지원 케이스 접수 여부(콜홈 자동 접수) 확인
+  short:
+  - (2차·승인 후) 제조사 엔지니어 주도로 컨트롤러 교체, 교체 후 LUN 소유권 원복(Failback)·경로 수 복구 확인
+  - '영향: 이중화 소실. 단일 컨트롤러 운영으로 성능 저하 및 추가 장애 시 중단.'
+  mid:
+  - 장애 컨트롤러 교체 (벤더 지원 필요)
+  - LUN 로드 밸런싱 재설정
+  - 스토리지 펌웨어 업데이트
+  long:
+  - 컨트롤러 상태·경로 수 감시와 펌웨어 판을 제조사 호환표 기준으로 유지
+  source_note: 'legacy-analyzer-v2.2 storage_hw_rules.json STOR-CONTROLLER-FAIL (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-STOR-CACHE-FAIL
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:cache.*failure.*storage)|(?:storage.*cache.*error)|(?:cache.*battery.*storage)|(?:write.*cache.*failed)|(?:dirty.*cache)|(?:cache.*module.*fault)
+  severity: error
+  category: storage
+  verdict: 스토리지 캐시 장애 — 스토리지 캐시 모듈 또는 캐시 배터리 장애
+  immediate:
+  - 스토리지 콘솔에서 캐시 상태(Write Cache 사용 여부)·캐시 배터리·미러 상태 확인
+  - '성능 영향(읽기): Linux `iostat -xz 1 5` / AIX `iostat -D 1 5` — 쓰기 대기시간 증가 여부'
+  - 제조사 지원 케이스 접수 여부(콜홈) 확인
+  short:
+  - (2차·승인 후) 제조사가 캐시 모듈·배터리 교체, 그동안 Write-Through 운영으로 대량 쓰기 작업 연기
+  - '영향: Write Cache 비활성화로 I/O 성능 급저하.'
+  mid:
+  - 캐시 배터리 또는 캐시 모듈 교체
+  - 캐시 장애 중 Write-Through 모드 운영
+  - 스토리지 벤더 지원 연락
+  long:
+  - 캐시 상태 변화 이벤트 알림과 배터리 교체 주기 관리
+  source_note: 'legacy-analyzer-v2.2 storage_hw_rules.json STOR-CACHE-FAIL (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-STOR-POOL-FULL
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:storage.*pool.*full)|(?:thin.*pool.*warning)|(?:pool.*capacity.*critical)|(?:storage.*pool.*threshold)|(?:datastore.*full)|(?:aggregate.*full.*NetApp)
+  severity: error
+  category: storage
+  verdict: 스토리지 풀 용량 고갈 — 스토리지 풀 또는 애그리게이트 용량 임계값 초과
+  immediate:
+  - 스토리지 콘솔에서 풀·애그리게이트 사용률과 Thin 초과 할당 비율 확인 — 90% 이상이면 쓰기 실패 임박
+  - '증가 원인 조회: 최근 스냅샷 사용량·신규 볼륨 생성 이력(읽기)'
+  - VMware 데이터스토어면 `esxcli storage filesystem list` 로 Free 확인
+  short:
+  - '(2차·승인 후, 롤백: 불가 — 삭제 전 보존 정책·업무 담당 확인) 불필요 스냅샷 삭제 또는 볼륨 이동으로 여유 확보'
+  - '영향: 신규 볼륨 생성 불가, Thin Provisioning 환경에서 VM/LUN 쓰기 실패.'
+  mid:
+  - 디스크 추가로 스토리지 풀 확장
+  - 스냅샷 보존 정책 검토 및 단축
+  - Thin Provisioning 과다 할당 재검토
+  long:
+  - 풀 사용률 80%/90% 감시 임계와 Thin 초과 할당 비율 상한 정책
+  source_note: 'legacy-analyzer-v2.2 storage_hw_rules.json STOR-POOL-FULL (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-STOR-REPL-FAIL
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:replication.*failed)|(?:mirror.*broken.*storage)|(?:snap.*replication.*error)|(?:SnapMirror.*failed)|(?:storage.*sync.*error)|(?:remote.*replication.*fail)
+  severity: error
+  category: storage
+  verdict: 스토리지 복제 실패 — 스토리지 복제(SnapMirror/SRDF 등) 실패. 네트워크 오류 또는 스토리지 장애
+  immediate:
+  - 복제 관리 화면(SnapMirror·SRDF·Remote Copy 등)에서 오류 메시지·마지막 성공 시각·지연량 확인
+  - '복제 링크 도달(읽기): `ping -c 5 <replication_ip>` — FC 복제면 스위치 포트 상태 확인 요청'
+  - 소스·대상 스토리지 상태(용량·컨트롤러) 확인
+  short:
+  - '(2차·승인 후, 롤백: 재동기화 전 대상 측 스냅샷 확보) 복제 링크 복구 후 재동기화(Resync) 수행'
+  - '영향: DR(재해복구) 데이터 동기화 중단. RPO 목표 미달.'
+  mid:
+  - 복제 네트워크 복구 후 재동기화
+  - 스토리지 복제 스케줄 재설정
+  - DR 테스트 주기 단축
+  long:
+  - 복제 지연(RPO) 감시 임계 등록과 DR 전환 훈련 정례화
+  source_note: 'legacy-analyzer-v2.2 storage_hw_rules.json STOR-REPL-FAIL (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-STOR-SNAPSHOT-FAIL
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:snapshot.*failed)|(?:snap.*error.*storage)|(?:snapshot.*space.*full)|(?:snap.*creation.*failed)|(?:volume.*snapshot.*error)
+  severity: warn
+  category: storage
+  verdict: 스냅샷 생성 실패 — 스냅샷 생성 실패. 스냅샷 공간 부족 또는 스토리지 오류
+  immediate:
+  - "스냅샷 예약 공간·볼륨 여유(읽기): 스토리지 콘솔 또는 NetApp ONTAP `volume show-space -volume <vol>` 와 `volume snapshot show -volume <vol>` — 예약 공간 100% 면 생성 실패 원인"
+  - "서버 LVM 스냅샷이면 Linux `lvs -o lv_name,origin,data_percent,lv_size` — data_percent 100 이면 스냅샷 가득참(무효)"
+  - "실패 작업 이름·시각·오류 문구를 스케줄 작업 이력에서 확인하고 같은 시각 백업 소프트웨어 작업과 겹치는지 대조"
+  short:
+  - '(2차·승인 후, 롤백: 불가 — 대상 보존 정책 확인) 만료 스냅샷 정리 또는 예약 공간 확장 후 수동 스냅샷 재시도'
+  - '영향: 데이터 보호 정책 미달. 스냅샷 기반 복구 불가.'
+  mid:
+  - 스냅샷 전용 공간 확장
+  - 스냅샷 보존 정책 최적화
+  - 스냅샷 스케줄을 백업 작업과 겹치지 않게 재설정
+  long:
+  - 스냅샷 성공률·예약 공간 사용률 감시 등록
+  verify_note: "미검증 — NetApp ONTAP 명령·필드 이름은 제조사 문서(docs.netapp.com — 허용 도메인 밖)로 대조하지 못함. 다른 제조사 어레이는 콘솔 화면 기준"
+  source_note: 'legacy-analyzer-v2.2 storage_hw_rules.json STOR-SNAPSHOT-FAIL (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-STOR-FIBER-CHANNEL
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:HBA.*error)|(?:fiber channel.*error)|(?:FC.*link.*down)|(?:HBA.*port.*failed)|(?:qla.*error)|(?:lpfc.*error)|(?:FC.*timeout)
+  severity: error
+  category: hardware
+  verdict: FC HBA 오류 — Fiber Channel HBA 포트 오류 또는 링크 다운
+  immediate:
+  - 'HBA 포트 상태(읽기): Linux `cat /sys/class/fc_host/host*/port_state` 또는 `systool -c fc_host -v` / AIX `fcstat fcs<N>` / Windows `Get-InitiatorPort`'
+  - '경로 상태: Linux `multipath -ll | grep -iE ''failed|faulty''` / AIX `lspath | grep -v Enabled`'
+  - 'FC 스위치 포트 오류(Brocade 예: `porterrshow`) 확인을 스위치 담당에 요청'
+  short:
+  - '(2차·승인 후, 롤백: 교체 전 WWPN·조닝 기록) 케이블·SFP 교체, 반복 시 HBA 교체(새 WWPN 이면 조닝·LUN 마스킹 갱신)'
+  - '영향: 스토리지 연결 경로 감소. 단일 경로 운영으로 성능 저하.'
+  mid:
+  - HBA 드라이버 업데이트
+  - FC 케이블 및 SFP 트랜시버 점검/교체
+  - HBA 카드 교체 (반복 오류 시)
+  long:
+  - FC 포트 오류 카운터 감시와 HBA 드라이버·펌웨어 호환표 기준 관리
+  source_note: 'legacy-analyzer-v2.2 storage_hw_rules.json STOR-FIBER-CHANNEL (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-STOR-ISCSI-FAIL
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:iSCSI.*error)|(?:iSCSI.*session.*lost)|(?:iscsi.*connection.*failed)|(?:iscsiadm.*error)|(?:iscsi.*target.*unreachable)|(?:iSCSI.*timeout)
+  severity: error
+  category: connection
+  verdict: iSCSI 세션 오류 — iSCSI 세션 연결 실패 또는 끊김
+  immediate:
+  - 'iSCSI 세션 상세(읽기): Linux `iscsiadm -m session -P 1` / Windows `Get-IscsiSession`'
+  - '대상 포털 도달: `nc -zvw3 <target_ip> 3260` (iSCSI 기본 포트) / Windows `Test-NetConnection <target_ip> -Port 3260`'
+  - '커널 메시지: `dmesg -T | grep -i iscsi | tail -20` — 연결 오류 반복 여부'
+  short:
+  - '(2차·승인 후, 롤백: 재로그인 전 세션 목록 보관) 네트워크 복구 후 `iscsiadm -m node -T <target_iqn> -p <target_ip> --login` 으로 재연결'
+  - '영향: iSCSI LUN 접근 불가.'
+  mid:
+  - iSCSI 세션 재연결 후 multipath 경로 복구 확인
+  - iSCSI 네트워크(전용 VLAN) 확인
+  - CHAP 인증 설정 확인
+  long:
+  - iSCSI 전용 VLAN·MTU 일관성 점검과 세션 수 감시
+  source_note: 'legacy-analyzer-v2.2 storage_hw_rules.json STOR-ISCSI-FAIL (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-STOR-NFS-SERVER
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:nfs server.*error)|(?:NFS.*export.*fail)|(?:nfsd.*error)|(?:mountd.*error)|(?:NFS.*share.*unavailable)|(?:rpc.*server.*unavailable)
+  severity: error
+  category: internal
+  verdict: NFS 서버 오류 — NFS 서버 서비스 오류 또는 익스포트 실패
+  immediate:
+  - 'NFS 서버 서비스(읽기): Linux `systemctl status nfs-server` / AIX `lssrc -g nfs`'
+  - '익스포트·RPC 등록: `exportfs -v` 와 `rpcinfo -p | grep -E ''nfs|mountd''` — nfs·mountd 미등록이면 서비스 이상'
+  - '오류 로그: `journalctl -u nfs-server --since ''-1 hour'' | tail -30` (RHEL 7+, 그 외 /var/log/messages)'
+  short:
+  - '(2차·승인 후, 롤백: /etc/exports 백업) 서비스 재기동 또는 익스포트 설정 수정 후 `exportfs -ra` 적용'
+  - '영향: NFS 클라이언트 마운트 불가.'
+  mid:
+  - (2차·승인 후) `systemctl restart nfs-server` 는 클라이언트 영향 공지 후
+  - /etc/exports 설정 검토
+  - 방화벽 NFS 포트 허용 확인
+  long:
+  - NFS 서비스·익스포트 감시와 NFS 서버 이중화(HA) 검토
+  source_note: 'legacy-analyzer-v2.2 storage_hw_rules.json STOR-NFS-SERVER (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-STOR-DEDUP-FAIL
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:deduplication.*error)|(?:dedup.*failed)|(?:dedupe.*warning)|(?:deduplicate.*error)
+  severity: warn
+  category: storage
+  verdict: 중복제거 오류 — 스토리지 중복제거(Deduplication) 프로세스 오류
+  immediate:
+  - "중복제거 작업 상태·마지막 성공 시각·오류 문구(읽기): 스토리지 콘솔 또는 NetApp ONTAP `volume efficiency show -volume <vol> -instance`"
+  - "볼륨·애그리거트 여유(읽기): ONTAP `volume show -volume <vol> -fields percent-used` 와 `storage aggregate show-space` — 가득 차 있으면 중복제거 메타데이터 공간 부족이 흔한 원인"
+  short:
+  - (2차·승인 후) 중복제거 스케줄을 업무 외 시간으로 재설정하고 공간 확보 후 수동 재실행
+  - '영향: 중복제거 공간 절약 효과 감소.'
+  mid:
+  - 스토리지 펌웨어 업데이트
+  - 공간 확보 후 중복제거 재실행 결과 확인
+  - 스토리지 벤더 지원 연락
+  long:
+  - 중복제거 절감률·작업 성공 여부 감시 등록
+  verify_note: "미검증 — NetApp ONTAP 명령·필드 이름은 제조사 문서(docs.netapp.com — 허용 도메인 밖)로 대조하지 못함. 다른 제조사 어레이는 콘솔 화면 기준"
+  source_note: 'legacy-analyzer-v2.2 storage_hw_rules.json STOR-DEDUP-FAIL (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-STOR-COMPRESS-WARN
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:compression.*warning)|(?:compress.*error.*storage)|(?:inline.*compression.*fail)
+  severity: info
+  category: storage
+  verdict: 스토리지 압축 경고 — 스토리지 인라인 압축 경고
+  immediate:
+  - "압축 설정·작업 상태(읽기): 스토리지 콘솔 또는 NetApp ONTAP `volume efficiency show -volume <vol> -instance` — 압축·인라인 압축 사용 여부와 마지막 작업 오류 기록"
+  - "같은 시각 컨트롤러 CPU 사용률을 콘솔 성능 화면에서 확인 — 압축 지연이 컨트롤러 부하와 동시면 부하 원인, 아니면 압축 작업 오류"
+  - "압축 대상 데이터 유형 확인 — 이미 압축된 파일·암호화 데이터면 압축 효과 없음(정상 동작)"
+  short:
+  - (2차·승인 후) 압축 효과 없는 볼륨은 압축 정책 제외 검토, 컨트롤러 부하 시간대의 압축 작업 조정
+  - '영향: 압축 성능 저하 또는 공간 절약 감소.'
+  mid:
+  - 스토리지 펌웨어 업데이트
+  - 볼륨 유형별 압축 정책 재설정
+  long:
+  - 압축률·컨트롤러 CPU 감시를 용량 계획에 반영
+  verify_note: "미검증 — NetApp ONTAP 명령·필드 이름은 제조사 문서(docs.netapp.com — 허용 도메인 밖)로 대조하지 못함. 다른 제조사 어레이는 콘솔 화면 기준"
+  source_note: 'legacy-analyzer-v2.2 storage_hw_rules.json STOR-COMPRESS-WARN (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-STOR-TIERING
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:tiering.*error)|(?:auto.*tiering.*fail)|(?:FAST.*error)|(?:storage.*tier.*warning)|(?:data.*movement.*failed)
+  severity: warn
+  category: storage
+  verdict: 스토리지 자동 계층화 오류 — 스토리지 자동 계층화(Auto-tiering) 오류
+  immediate:
+  - "NetApp ONTAP(FabricPool, 읽기): `volume show -volume <vol> -fields tiering-policy` 로 정책, `storage aggregate object-store show` 로 클라우드 계층 연결 상태, `storage aggregate object-store show-space` 로 object-store 에 올라간 사용량(전체 계층 사용률이 아님 — 로컬 계층은 따로) 확인 · 스캐너 상태·마지막 실행 결과(aborted 사유)는 `volume object-store tiering show` 인데 advanced 권한 명령이라 클러스터 관리자 역할이 필요하고 읽기 전용 계정은 못 쓸 수 있다 — `set -privilege advanced`(확인 질문에 y) → 조회 → 실패해도 반드시 `set -privilege admin` 으로 되돌린다(권한이 없으면 스토리지 담당에게 결과 요청)"
+  - "다른 제조사 어레이(읽기): 스토리지 관리 콘솔의 계층화 작업(Job) 상태·실패 사유·계층별 사용률 화면 확인 — 실패 사유 문구를 그대로 기록(계층 공간 부족·작업 시간대 초과·대상 계층 장치 오류 등은 후보일 뿐)"
+  - "계층화 작업 이력(콘솔 작업 목록·이벤트 로그)에서 실패 볼륨·시작/종료 시각·실패 사유 문구를 그대로 기록"
+  short:
+  - (2차·승인 후) 계층별 여유 확보 또는 계층화 정책(이동 시간대·우선순위) 조정
+  - '영향: 데이터 이동 실패로 최적 계층 배치 불가.'
+  mid:
+  - 계층화 정책(이동 시간대·계층 비율) 재설정
+  - 스토리지 펌웨어 업데이트
+  - 반복 실패 시 제조사 지원 케이스 접수
+  long:
+  - 계층별 사용률·이동 실패 감시와 분기별 계층 용량 재산정
+  verify_note: "미검증 — NetApp ONTAP 명령 이름 넷(volume show -fields tiering-policy·storage aggregate object-store show·show-space·volume object-store tiering show)은 공식 CLI 문서로 확인(2차 교차 검토), 남은 것: ONTAP 판별 매개변수(-volume 등)·출력 필드 이름·aborted 사유 문구는 판별 CLI 참조로 확인. 다른 제조사 어레이는 콘솔 화면 기준"
+  source_note: 'legacy-analyzer-v2.2 storage_hw_rules.json STOR-TIERING (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-STOR-MULTIPATH
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:multipath.*error)|(?:multipathd.*warning)|(?:path.*priority.*fail)|(?:mpath.*degraded)|(?:path.*offline)|(?:multipath.*lost.*path)
+  severity: error
+  category: storage
+  verdict: 스토리지 다중 경로 오류 — 스토리지 다중 경로 일부 또는 전체 장애
+  immediate:
+  - "경로 전체 상태(읽기): Linux `multipath -ll` — failed/faulty 경로 수 / AIX `lspath | grep -v Enabled` / Windows `mpclaim -s -d` / ESXi `esxcli storage core path list` — State: dead 경로 수"
+  - "실패 경로의 장치·HBA 식별: Linux `multipathd show paths` (RHEL 7+, 이전 판 `multipathd -k'show paths'`)"
+  - "HBA 포트 상태(Linux): `cat /sys/class/fc_host/host*/port_state` — Linkdown 이면 케이블·SAN 스위치 구간 문제"
+  short:
+  - '(2차·승인 후, 롤백: 변경 전 `multipath -ll` 출력 보관) 물리 경로 복구 후 `multipathd reconfigure` 또는 `multipath -r` 로 경로 재적재'
+  - '영향: I/O 성능 저하 또는 스토리지 접근 불가.'
+  mid:
+  - 경로 복구 후 multipath -r 로 재스캔
+  - multipathd reconfigure
+  - HBA·스위치 이중 패브릭으로 이중화 경로 추가
+  long:
+  - 경로 수 감소 감시(multipathd 이벤트)와 multipath.conf 표준화
+  source_note: 'legacy-analyzer-v2.2 storage_hw_rules.json STOR-MULTIPATH (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-STOR-FIRMWARE
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:storage.*firmware.*error)|(?:array.*firmware.*mismatch)|(?:controller.*firmware.*critical)|(?:firmware.*version.*mismatch)
+  severity: error
+  category: storage
+  verdict: 스토리지 펌웨어 오류 — 스토리지 컨트롤러 펌웨어 오류 또는 버전 불일치
+  immediate:
+  - "컨트롤러별 펌웨어 판(읽기): 스토리지 콘솔 또는 NetApp ONTAP `system node image show` — 컨트롤러(노드) 간 판이 다르면 업그레이드 중단 상태 의심"
+  - "서버 쪽 HBA 펌웨어·드라이버 판(Linux): `cat /sys/class/fc_host/host*/symbolic_name` — 제조사 호환표의 권고 판과 비교"
+  - "최근 펌웨어 작업 이력과 제조사 권고 판·호환표를 대조"
+  short:
+  - '(2차·승인 후, 롤백: 제조사 원복 절차 확인·사전 백업) 제조사 지원 하에 판 불일치 해소(업그레이드 완료 또는 원복)'
+  - '영향: 스토리지 기능 이상 또는 성능 저하.'
+  mid:
+  - 벤더 권장 절차에 따라 펌웨어 업데이트
+  - 업데이트 전 데이터 백업 필수
+  - 업데이트 후 기능 검증
+  long:
+  - 펌웨어 판 정기 점검(반기)과 제조사 권고 판 유지 정책
+  verify_note: "미검증 — NetApp ONTAP 명령·필드 이름은 제조사 문서(docs.netapp.com — 허용 도메인 밖)로 대조하지 못함. 다른 제조사 어레이는 콘솔 화면 기준"
+  source_note: 'legacy-analyzer-v2.2 storage_hw_rules.json STOR-FIRMWARE (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관

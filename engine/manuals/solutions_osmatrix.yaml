@@ -1,0 +1,395 @@
+# OS × 제품 해법 표(12차 · 2026-10-20 마스터: "장애 로그 예시가 없더라도 각 제품의 에러코드마다 해법을 OS 와 제품의 조합으로 명령어와 함께")
+# 코드 조회에서 [제품 → 코드 → OS] 를 고르면: 제조사 원인·조치 → 1차(제품 명령 + 이 OS 의 확인 명령) → 2차(승인 후 조치 + 이 OS 의 재기동)
+#   → 3차(제조사 의뢰 수집 자료) 로 엮는다(logtriage/os_solution.py). 1차는 읽기 전용만, 2차는 승인·롤백 계획 뒤에만.
+# 자리표시자: <PID> <SID> <PORT> <HOST> <USER> <SERVICE> <LOG> 등 — 현장 값으로 바꿔 넣는다(legend 참고). {code} 는 조회한 코드로 자동 치환.
+# 이 파일은 지식이다 — 지식 출시·룰팩으로 배포되고 세대 기록(지문)에 포함된다.
+version: 1
+legend:
+  "<PID>": 대상 프로세스 번호(위 프로세스 확인 결과의 PID)
+  "<SID>": DB 인스턴스 이름
+  "<PORT>": 제품 수신 포트(아래 기본값과 다르면 현장 설정값)
+  "<HOST>": 상대 서버 이름·IP
+  "<USER>": 대상 계정
+  "<SERVICE>": 서비스·데몬 이름(현장 등록명)
+  "경로·포트·서비스 이름": 기본값·예시 — 현장 설정 파일·실행 옵션·Get-Service 등으로 실제 값을 먼저 확인
+  "빈 출력·명령 없음": 정상의 증거가 아니다 — 명령이 없거나 권한이 없으면 '미확인'으로 남긴다
+  "비밀번호": 명령줄에 넣지 않는다 — 모든 관리 명령은 프롬프트 입력 형태(프로세스 인자·감사 기록 노출 방지)
+os:
+  linux: {label: "Linux (RHEL·Rocky·Oracle Linux·Ubuntu)", family: unix}
+  aix: {label: "IBM AIX", family: unix}
+  hpux: {label: "HP-UX 11i", family: unix}
+  solaris: {label: "Oracle Solaris", family: unix}
+  windows: {label: "Windows Server", family: windows}
+
+# ── OS 확인 묶음(1차 · 읽기 전용) ─────────────────────────────────────────
+checks:
+  proc:
+    title: 제품 프로세스 생존·자원
+    linux: "ps -eo pid,ppid,user,etime,%cpu,%mem,rss,args | grep -i -E '<PROC>' | grep -v grep"
+    aix: "ps -eo pid,ppid,user,etime,pcpu,pmem,rssize,args | grep -i -E '<PROC>' | grep -v grep"
+    hpux: "UNIX95=1 ps -eo pid,ppid,user,etime,pcpu,vsz,args | grep -i -E '<PROC>' | grep -v grep"
+    solaris: "ps -eo pid,ppid,user,etime,pcpu,pmem,rss,args | grep -i -E '<PROC>' | grep -v grep"
+    windows: "Get-Process | Where-Object { $_.ProcessName -match '<PROC_WIN>' } | Select-Object Id,ProcessName,CPU,WorkingSet64,StartTime"
+  mem:
+    title: 메모리·스왑
+    linux: "free -m; vmstat 1 5; grep -E 'MemAvailable|SwapFree|Committed_AS' /proc/meminfo"
+    aix: "svmon -G -O unit=MB; lsps -a; vmstat 1 5"
+    hpux: "swapinfo -tam; vmstat 1 5"
+    solaris: "vmstat 1 5; swap -sh"
+    windows: "Get-CimInstance Win32_OperatingSystem | Select-Object @{n='FreeMB';e={[int]($_.FreePhysicalMemory/1KB)}},@{n='TotalMB';e={[int]($_.TotalVisibleMemorySize/1KB)}},@{n='FreeVirtMB';e={[int]($_.FreeVirtualMemory/1KB)}}; Get-CimInstance Win32_PageFileUsage | Select-Object Name,CurrentUsage,AllocatedBaseSize   # 성능 카운터 이름은 한글 Windows 에서 현지화돼 실패 — CIM 사용(GPT 85차)"
+  cpu:
+    title: CPU·부하 상위 프로세스
+    linux: "uptime; top -b -n 1 | head -25"
+    aix: "uptime; vmstat 1 5; ps aux | sort -rn -k3 | head -15"
+    hpux: "uptime; sar -u 1 5; UNIX95=1 ps -eo pid,pcpu,args | sort -rn -k2 | head -15"
+    solaris: "uptime; prstat -s cpu -n 15 1 1"
+    windows: "Get-CimInstance Win32_Processor | Select-Object Name,LoadPercentage; Get-Process | Sort-Object CPU -Descending | Select-Object -First 15 Id,ProcessName,CPU"
+  fs:
+    title: 파일시스템 용량·inode
+    linux: "df -hT; df -i"
+    aix: "df -g"
+    hpux: "bdf; bdf -i"
+    solaris: "df -h; zfs list 2>/dev/null"
+    windows: "Get-PSDrive -PSProvider FileSystem | Select-Object Name,@{n='UsedGB';e={[int]($_.Used/1GB)}},@{n='FreeGB';e={[int]($_.Free/1GB)}}"
+  io:
+    title: 디스크 I/O·장치 오류
+    linux: "iostat -x 1 3; dmesg -T | grep -i -E 'error|fail|i/o' | tail -50"
+    aix: "iostat 1 3; errpt -d H | head -30; lspv"
+    hpux: "sar -d 1 3; ioscan -fnC disk; tail -100 /var/adm/syslog/syslog.log"
+    solaris: "iostat -xn 1 3; iostat -En | grep -i errors; fmadm faulty"
+    windows: "Get-WinEvent -FilterHashtable @{LogName='System';StartTime=(Get-Date).AddHours(-24)} | Where-Object { $_.ProviderName -match 'disk|Ntfs|storport|stornvme' } | Select-Object -First 50 TimeCreated,ProviderName,Id,Message"
+  port:
+    title: 수신 포트·상대 연결
+    linux: "ss -lntp | grep ':<PORT>'; ss -tan state established '( sport = :<PORT> )' | wc -l"
+    aix: "netstat -an | grep '\\.<PORT> '"
+    hpux: "netstat -an | grep '\\.<PORT> '"
+    solaris: "netstat -an | grep '\\.<PORT> '"
+    windows: "Get-NetTCPConnection -LocalPort <PORT> | Group-Object State | Select-Object Name,Count"
+  conn:
+    title: TCP 상태별 연결 수
+    linux: "ss -tan | awk 'NR>1{print $1}' | sort | uniq -c"
+    aix: "netstat -an | awk '/^tcp/{print $NF}' | sort | uniq -c"
+    hpux: "netstat -an | awk '/^tcp/{print $NF}' | sort | uniq -c"
+    solaris: "netstat -an -P tcp | awk 'NF>=7{print $NF}' | sort | uniq -c"
+    windows: "Get-NetTCPConnection | Group-Object State | Select-Object Name,Count"
+  reach:
+    title: 상대 서버 도달성
+    active: true   # GPT 85차: 대상과 통신하는 능동 진단 — 1차 읽기 전용과 분리(선택·대상 승인·1회·짧은 시한, 자동 실행 안 함)
+    linux: "ping -c 3 -W 2 <HOST>; timeout 3 bash -c '</dev/tcp/<HOST>/<PORT>' && echo open"
+    aix: "ping -c 3 <HOST>   # TCP 포트: telnet <HOST> <PORT> 후 Ctrl+] quit 로 수동 종료"
+    hpux: "ping <HOST> -n 3   # HP-UX 는 호스트 뒤에 -n 횟수 · TCP 포트: telnet <HOST> <PORT> 후 수동 종료"
+    solaris: "ping -s <HOST> 56 3   # TCP 포트: telnet <HOST> <PORT> 후 수동 종료"
+    windows: "Test-NetConnection <HOST> -Port <PORT> -InformationLevel Quiet"
+  log:
+    title: 제품 로그 최근 오류
+    unix: "tail -n 200 \"<LOG>\"; grep -n -i -E 'error|fail|fatal|severe|{code}' \"<LOG>\" | tail -50"
+    windows: "Get-Content -Tail 200 \"<LOG>\"; Select-String -Path \"<LOG>\" -Pattern 'error|fail|fatal|{code}' | Select-Object -Last 50"
+    unix_dir: "ls -lt \"<LOG>\" | head -5; f=$(ls -t \"<LOG>\"* | head -1); tail -n 200 \"$f\"; grep -n -i -E 'error|fail|fatal|severe|{code}' \"$f\" | tail -50"
+    windows_dir: "$f = Get-ChildItem \"<LOG>\" -File | Sort-Object LastWriteTime -Descending | Select-Object -First 1; Get-Content -Tail 200 $f.FullName; Select-String -Path $f.FullName -Pattern 'error|fail|fatal|{code}' | Select-Object -Last 50"
+  limits:
+    title: 프로세스 한도(파일·스레드)
+    linux: "cat /proc/<PID>/limits; ls /proc/<PID>/fd | wc -l; ps -o nlwp= -p <PID>"
+    aix: "procfiles <PID> | head -5; ps -o thcount= -p <PID>; lsattr -El sys0 -a maxuproc   # ulimit -a 는 현재 셸 한도라 대상 프로세스 한도가 아니다(GPT 85차)"
+    hpux: "kctune maxfiles maxfiles_lim nproc max_thread_proc   # 시스템 상한 — 대상 프로세스 사용량은 pfiles <PID> 또는 lsof -p <PID>(설치 시)"
+    solaris: "pfiles <PID> | tail -5; prctl -n process.max-file-descriptor -i process <PID>; ps -o nlwp= -p <PID>"
+    windows: "Get-Process -Id <PID> | Select-Object Id,HandleCount,@{n='Threads';e={$_.Threads.Count}}"
+  osevent:
+    title: OS 오류 기록(최근)
+    linux: "journalctl -p err --since '-1h' --no-pager | tail -100 || tail -200 /var/log/messages"
+    aix: "errpt | head -30; errpt -a | head -120"
+    hpux: "tail -200 /var/adm/syslog/syslog.log"
+    solaris: "tail -200 /var/adm/messages; svcs -xv; fmadm faulty"
+    windows: "Get-WinEvent -FilterHashtable @{LogName='System','Application';Level=1,2;StartTime=(Get-Date).AddHours(-1)} -MaxEvents 50 | Select-Object TimeCreated,ProviderName,Id,Message"
+  auth:
+    title: 인증 실패·계정 잠김
+    linux: "lastb | head -20; faillock --user <USER>; journalctl -u sshd --since '-1h' --no-pager | tail -50"
+    aix: "lsuser -a unsuccessful_login_count account_locked <USER>; who -a /etc/security/failedlogin | tail -20"
+    hpux: "lastb | head -20"
+    solaris: "last | head -20; grep -i fail /var/adm/authlog 2>/dev/null | tail -20"
+    windows: "Get-WinEvent -FilterHashtable @{LogName='Security';Id=4625,4740;StartTime=(Get-Date).AddHours(-1)} -MaxEvents 50 | Select-Object TimeCreated,Id,Message"
+
+# 유형(category) → 볼 확인 묶음(순서대로)
+category_checks:
+  internal: [proc, log, osevent]
+  connection: [proc, port, conn, reach, log]
+  storage: [fs, io, log]
+  security: [auth, log]
+  capacity: [proc, mem, fs, limits, conn]
+  upstream: [port, conn, reach, log]
+  disk: [fs, io]
+  memory: [mem, proc, limits]
+  lock: [proc, log]
+  thread: [cpu, limits, proc]
+  hardware: [io, osevent]
+  undo: [fs, log]
+  performance: [cpu, mem, io]
+  app: [proc, log]
+  etc: [proc, log]
+
+# OS 공통 2차(승인 후) 재기동 틀 — 제품 프로필에 재기동이 없을 때 이 OS 의 서비스 관리 명령으로
+os_restart:
+  linux: "systemctl restart <SERVICE>; systemctl status <SERVICE> --no-pager"
+  aix: "stopsrc -s <SERVICE>; startsrc -s <SERVICE>; lssrc -s <SERVICE>"
+  hpux: "/sbin/init.d/<SERVICE> stop; /sbin/init.d/<SERVICE> start"
+  solaris: "svcadm restart <SERVICE>; svcs -l <SERVICE>"
+  windows: "Restart-Service -Name '<SERVICE>'; Get-Service -Name '<SERVICE>'"
+# OS 3차 — 제조사(OS 벤더) 의뢰 자료 수집
+os_collect:
+  linux: "sos report --batch --tmp-dir /var/tmp   # 구버전 RHEL: sosreport --batch"
+  aix: "snap -ac   # 결과: /tmp/ibmsupt/snap.pax.Z"
+  hpux: "tar cvf /var/tmp/hpux-diag.tar /var/adm/syslog/syslog.log /var/adm/syslog/OLDsyslog.log; swlist > /var/tmp/swlist.txt; ioscan -fn > /var/tmp/ioscan.txt"
+  solaris: "explorer   # Oracle Services Tools Bundle 설치 시, 없으면: fmdump -eV > /var/tmp/fmdump.txt; tar cvf /var/tmp/sol-diag.tar /var/adm/messages*"
+  windows: "msinfo32 /nfo C:\\diag\\msinfo.nfo; wevtutil epl System C:\\diag\\System.evtx; wevtutil epl Application C:\\diag\\Application.evtx"
+
+# ── 지원 상태(GPT 85차): 제품 × OS 를 먼저 판정 — 지원 / 조건부(판·구성에 따라) / 레거시(지원 종료·기존 설치만) / 미확인(근거 확보 전)
+# 여기 없는 조합은 products.os 에 있으면 '지원'. 미확인·레거시 조합은 해법 위에 상태 띠, 제품 전용 명령은 '미검증' 표시.
+support:
+  altibase:
+    solaris: {status: 레거시, note: "Altibase 7.1 부터 Solaris 서버 패키지 미지원(제조사 FAQ) — 6.x 이하 기존 설치만"}
+  mysql:
+    solaris: {status: 레거시, note: "MySQL 은 2026-09-29 부터 Solaris 용 신규 바이너리·패치 제공 중단(공식 공지) — 기존 설치만"}
+  postgresql:
+    aix: {status: 조건부, note: "PostgreSQL 15 이하 지원 목록 · 18 은 현재 지원 목록이 아닌 역사적 지원 — 판 확인"}
+  jeus:
+    hpux: {status: 미확인, note: "JEUS 9.1 문서의 지원 OS 에 HP-UX 미기재 — 구버전(JEUS 6~8) 여부는 판 매뉴얼 확인"}
+  jboss:
+    solaris: {status: 조건부, note: "EAP 버전별 지원표가 다름 — EAP 8 은 Solaris 미지원, 7.x 일부만"}
+  nginx:
+    windows: {status: 조건부, note: "공식 Windows 판은 베타 성격·성능/확장성 제약 — 운영 권장 아님"}
+  goldilocks:
+    linux: {status: 미확인, note: "제조사 설치 안내서·CLI 참조 확보 전 — 제품 전용 명령은 미검증"}
+    aix: {status: 미확인, note: "제조사 지원표 확보 전"}
+    hpux: {status: 미확인, note: "제조사 지원표 확보 전"}
+    solaris: {status: 미확인, note: "제조사 지원표 확보 전"}
+  bizmaster-app:
+    linux: {status: 미확인, note: "제조사 설치 안내서 확보 전 — 자바 공통 진단만 검증됨"}
+    aix: {status: 미확인, note: "제조사 설치 안내서 확보 전"}
+    windows: {status: 미확인, note: "제조사 설치 안내서 확보 전"}
+  mesim-apig:
+    linux: {status: 미확인, note: "제조사 설치 안내서 확보 전 — 자바 공통 진단만 검증됨"}
+    aix: {status: 미확인, note: "제조사 설치 안내서 확보 전"}
+    windows: {status: 미확인, note: "제조사 설치 안내서 확보 전"}
+  mesim-esb:
+    linux: {status: 미확인, note: "제조사 설치 안내서 확보 전 — 자바 공통 진단만 검증됨"}
+    aix: {status: 미확인, note: "제조사 설치 안내서 확보 전"}
+    windows: {status: 미확인, note: "제조사 설치 안내서 확보 전"}
+
+# ── 제품 프로필 ───────────────────────────────────────────────────────────
+# os: 이 제품이 도는 OS(제조사 지원 기준) · proc/proc_win: 프로세스 확인 패턴 · port: 기본 포트 · log: 로그 위치(unix/windows)
+# status: 제품 자체 상태 확인(1차) · restart: 2차(승인 후) · collect: 3차 제조사 의뢰 자료 · code_cmd: 코드별 OS 명령({code} 치환)
+products:
+  oracle:
+    os: [linux, aix, hpux, solaris, windows]
+    proc: "ora_pmon_|ora_smon_|tnslsnr"
+    proc_win: "oracle|TNSLSNR"
+    port: 1521
+    log: {unix: "$ORACLE_BASE/diag/rdbms/<db_name>/<SID>/trace/alert_<SID>.log", windows: "%ORACLE_BASE%\\diag\\rdbms\\<db_name>\\<SID>\\trace\\alert_<SID>.log"}
+    status: {unix: "lsnrctl status; echo 'select instance_name,status,database_status from v$instance;' | sqlplus -s / as sysdba", windows: "lsnrctl status; Get-Service OracleService*,Oracle*TNSListener | Select-Object Name,Status"}
+    restart: {unix: "printf 'shutdown immediate;\\nstartup;\\n' | sqlplus -s / as sysdba   # DBA 승인·업무 중단 공지 후, 롤백: 이전 spfile 로 startup", windows: "Restart-Service -Name 'OracleService<SID>'   # DBA 승인 후"}
+    restart_note: "인스턴스 전체 재기동 — 모든 세션이 끊기고 진행 중 트랜잭션은 롤백된다. 원인(세션 누수·자원 고갈 등)을 먼저 해소하고, 성공 기준: v$instance status=OPEN·리스너 서비스 READY·업무 접속 확인"
+    collect: {unix: "adrci exec=\"show incident\"; adrci exec=\"ips pack incident <INCIDENT_ID> in /tmp\"", windows: "adrci exec=\"show incident\"; adrci exec=\"ips pack incident <INCIDENT_ID> in C:\\diag\""}
+    code_cmd:
+      "^TNS-": {unix: "lsnrctl status; lsnrctl services; tnsping <TNS_ALIAS>", windows: "lsnrctl status; lsnrctl services; tnsping <TNS_ALIAS>"}
+      "^ORA-12541": {unix: "lsnrctl status; ps -ef | grep tnslsnr | grep -v grep", windows: "lsnrctl status; Get-Service Oracle*TNSListener"}
+  mssql:
+    os: [windows, linux]
+    proc: "sqlservr"
+    proc_win: "sqlservr"
+    port: 1433
+    log: {unix: "/var/opt/mssql/log/errorlog", windows: "C:\\Program Files\\Microsoft SQL Server\\MSSQL<NN>.MSSQLSERVER\\MSSQL\\Log\\ERRORLOG"}
+    status: {unix: "systemctl status mssql-server --no-pager; sqlcmd -S localhost -U sa -Q \"select @@servername, @@version\"", windows: "Get-Service MSSQLSERVER,SQLSERVERAGENT | Select-Object Name,Status; sqlcmd -S localhost -E -Q \"EXEC xp_readerrorlog 0, 1, N'{code}'\""}
+    restart: {unix: "systemctl restart mssql-server   # DBA 승인 후", windows: "Restart-Service -Name MSSQLSERVER -Force   # DBA 승인 후(에이전트도 함께 재기동됨)"}
+    collect: {unix: "tar czf /tmp/mssql-log.tgz /var/opt/mssql/log", windows: "SQLDiag.exe /O C:\\diag\\sqldiag   # SQL Server 설치 폴더 Binn"}
+  mysql:
+    os: [linux, windows, solaris]
+    proc: "mysqld"
+    proc_win: "mysqld"
+    port: 3306
+    log: {unix: "<log_error 경로>", windows: "<log_error 경로>"}
+    log_note: "오류 로그 위치: mysql -u root -p -e \"select @@log_error\" 결과"
+    status: {unix: "mysqladmin -u root -p status; mysql -u root -p -e \"show global status like 'Threads_connected'; show variables like 'max_connections';\"", windows: "mysqladmin -u root -p status; Get-Service MySQL* | Select-Object Name,Status"}
+    restart: {unix: "systemctl restart mysqld   # Ubuntu: mysql · Solaris: svcadm restart mysql · DBA 승인 후", windows: "Restart-Service -Name 'MySQL80'   # 현장 서비스 이름 · DBA 승인 후"}
+    collect: {unix: "mysqladmin -u root -p extended-status variables > /tmp/mysql-status.txt; tar czf /tmp/mysql-err.tgz <log_error 경로>", windows: "mysqladmin -u root -p extended-status variables > C:\\diag\\mysql-status.txt"}
+  postgresql:
+    os: [linux, windows, aix, solaris]
+    proc: "postgres"
+    proc_win: "postgres"
+    port: 5432
+    log: {unix: "<PGDATA>/log/", windows: "<PGDATA>\\log\\"}
+    log_note: "log_directory 설정값(기본 PGDATA/log) — psql -c 'show log_directory'"
+    status: {unix: "pg_isready -p 5432; pg_ctl status -D <PGDATA>; psql -c \"select count(*), state from pg_stat_activity group by state;\"", windows: "pg_isready -p 5432; Get-Service postgresql* | Select-Object Name,Status"}
+    restart: {unix: "pg_ctl restart -D <PGDATA> -m fast   # systemd: systemctl restart postgresql-<ver> · DBA 승인 후", windows: "Restart-Service -Name 'postgresql-x64-<ver>'   # DBA 승인 후"}
+    collect: {unix: "psql -c 'select version();' > /tmp/pg-version.txt; tar czf /tmp/pg-log.tgz <PGDATA>/log", windows: "psql -c \"select version();\" > C:\\diag\\pg-version.txt"}
+  tibero:
+    os: [linux, aix, hpux, solaris, windows]
+    proc: "tbsvr"
+    proc_win: "tbsvr"
+    port: 8629
+    log: {unix: "$TB_HOME/instance/$TB_SID/log/slog/sys.log", windows: "%TB_HOME%\\instance\\%TB_SID%\\log\\slog\\sys.log"}
+    status: {unix: "ps -ef | grep tbsvr | grep -v grep; tbsql sys   # 비밀번호 프롬프트 입력 뒤: select instance_name,status from v$instance;", windows: "Get-Service *Tibero* | Select-Object Name,Status"}
+    restart: {unix: "tbdown immediate; tbboot   # DBA 승인 후", windows: "tbdown immediate; tbboot   # DBA 승인 후"}
+    restart_note: "인스턴스 전체 재기동 — 세션 단절·트랜잭션 롤백. 성공 기준: v$instance status NORMAL·업무 접속 확인"
+    collect: {unix: "tar czf /tmp/tibero-log.tgz $TB_HOME/instance/$TB_SID/log", windows: "Compress-Archive -Path \"$env:TB_HOME\\instance\\$env:TB_SID\\log\" -DestinationPath C:\\diag\\tibero-log.zip"}
+  cubrid:
+    os: [linux, windows]
+    proc: "cub_server|cub_broker|cub_cas|cub_master"
+    proc_win: "cub_server|cub_broker|cub_cas|cub_master"
+    port: 33000
+    port_note: "33000 은 브로커(broker1) 예시 포트 — 실제 값은 cubrid_broker.conf 의 BROKER_PORT"
+    log: {unix: "$CUBRID/log/server/<db>_<날짜>.err", windows: "%CUBRID%\\log\\server\\<db>_<날짜>.err"}
+    status: {unix: "cubrid service status; cubrid broker status -b", windows: "cubrid service status; cubrid broker status -b"}
+    restart: {unix: "cubrid server restart <db>   # 브로커만: cubrid broker restart · DBA 승인 후", windows: "cubrid server restart <db>   # DBA 승인 후"}
+    collect: {unix: "tar czf /tmp/cubrid-log.tgz $CUBRID/log", windows: "Compress-Archive -Path \"$env:CUBRID\\log\" -DestinationPath C:\\diag\\cubrid-log.zip"}
+  altibase:
+    os: [linux, aix, hpux, solaris]
+    proc: "altibase"
+    port: 20300
+    log: {unix: "$ALTIBASE_HOME/trc/altibase_boot.log"}
+    log_note: "오류는 같은 폴더의 altibase_error.log"
+    status: {unix: "ps -ef | grep altibase | grep -v grep; is -u sys   # 비밀번호 프롬프트 입력 뒤: select * from v$instance;"}
+    restart: {unix: "server stop; server start   # DBA 승인 후"}
+    restart_note: "server stop 은 연결 세션을 끊고 진행 중 트랜잭션을 롤백한다(제조사 문서). 성공 기준: v$instance·업무 접속 확인"
+    collect: {unix: "tar czf /tmp/altibase-trc.tgz $ALTIBASE_HOME/trc"}
+  goldilocks:
+    os: [linux, aix, hpux, solaris]
+    proc: "gmaster|gserver|gdispatcher|glsnr"
+    port: 22581
+    log: {unix: "$GOLDILOCKS_DATA/trc/system.trc"}
+    status: {unix: "ps -ef | grep -E 'gmaster|gserver|glsnr' | grep -v grep; glsnr --status"}
+    restart: {unix: "# 제조사 매뉴얼의 정지·기동 절차(gsql 로 SHUTDOWN / STARTUP) — DBA 승인 후"}
+    collect: {unix: "tar czf /tmp/goldilocks-trc.tgz $GOLDILOCKS_DATA/trc"}
+  linux:
+    os: [linux]
+    status: {unix: "uptime; systemctl --failed --no-pager; journalctl -p err -b --no-pager | tail -50"}
+  aix:
+    os: [aix]
+    status: {unix: "errpt | head -20; lssrc -a | grep -v active | head -30"}
+    code_cmd:
+      ".": {unix: "errpt -a -j {code} | head -80; errpt -j {code} | head -20"}
+  hpux:
+    os: [hpux]
+    status: {unix: "uptime; tail -100 /var/adm/syslog/syslog.log"}
+  solaris:
+    os: [solaris]
+    status: {unix: "uptime; svcs -xv; fmadm faulty"}
+    code_cmd:
+      "SMF": {unix: "svcs -xv; svcs -a | grep -E 'maintenance|degraded'; svcs -l <FMRI>"}
+      "FMA": {unix: "fmadm faulty; fmdump -v | tail -50; fmdump -eV | tail -100"}
+  windows:
+    os: [windows]
+    status: {windows: "Get-WinEvent -FilterHashtable @{LogName='System';Level=1,2;StartTime=(Get-Date).AddHours(-24)} -MaxEvents 30 | Select-Object TimeCreated,ProviderName,Id"}
+    code_cmd:
+      ".": {windows: "Get-WinEvent -FilterHashtable @{LogName='System','Application';Id=<EVENT_ID>;StartTime=(Get-Date).AddDays(-1)} -MaxEvents 20 | Format-List TimeCreated,ProviderName,Message   # {code} 의 이벤트 ID"}
+  java:
+    os: [linux, aix, hpux, solaris, windows]
+    proc: "java"
+    proc_win: "java"
+    log: {unix: "<애플리케이션 로그·GC 로그 경로>", windows: "<애플리케이션 로그·GC 로그 경로>"}
+    status: {unix: "jcmd -l; jcmd <PID> GC.heap_info; jstat -gcutil <PID> 1000 5", windows: "jcmd -l; jcmd <PID> GC.heap_info; jstat -gcutil <PID> 1000 5"}
+    collect: {unix: "jcmd <PID> Thread.print > /tmp/thread_<PID>_$(date +%H%M%S).txt; jcmd <PID> VM.flags   # GC.class_histogram 은 고부하(STW) — 승인 뒤에만", windows: "jcmd <PID> Thread.print > C:\\diag\\thread_<PID>.txt; jcmd <PID> VM.flags"}
+  bizmaster-app:
+    os: [linux, aix, windows]
+    proc: "java"
+    proc_win: "java"
+    log: {unix: "<BizMaster 설치 경로>/logs/", windows: "<BizMaster 설치 경로>\\logs\\"}
+    status: {unix: "ps -ef | grep -i bizmaster | grep -v grep", windows: "Get-CimInstance Win32_Process -Filter \"Name='java.exe'\" | Where-Object { $_.CommandLine -match 'bizmaster' } | Select-Object ProcessId,CommandLine"}
+    collect: {unix: "jcmd <PID> Thread.print > /tmp/bizmaster_thread_<PID>.txt; tar czf /tmp/bizmaster-log.tgz <BizMaster 설치 경로>/logs", windows: "jcmd <PID> Thread.print > C:\\diag\\bizmaster_thread_<PID>.txt"}
+  mesim-apig:
+    os: [linux, aix, windows]
+    proc: "java"
+    proc_win: "java"
+    log: {unix: "<MESIM APIG 설치 경로>/logs/", windows: "<MESIM APIG 설치 경로>\\logs\\"}
+    status: {unix: "ps -ef | grep -i -E 'apig|mesim' | grep -v grep", windows: "Get-CimInstance Win32_Process -Filter \"Name='java.exe'\" | Where-Object { $_.CommandLine -match 'apig|mesim' } | Select-Object ProcessId,CommandLine"}
+    collect: {unix: "jcmd <PID> Thread.print > /tmp/apig_thread_<PID>.txt; tar czf /tmp/apig-log.tgz <MESIM APIG 설치 경로>/logs", windows: "jcmd <PID> Thread.print > C:\\diag\\apig_thread_<PID>.txt"}
+  mesim-esb:
+    os: [linux, aix, windows]
+    proc: "java"
+    proc_win: "java"
+    log: {unix: "<MESIM ESB 설치 경로>/logs/", windows: "<MESIM ESB 설치 경로>\\logs\\"}
+    status: {unix: "ps -ef | grep -i -E 'esb|mesim' | grep -v grep", windows: "Get-CimInstance Win32_Process -Filter \"Name='java.exe'\" | Where-Object { $_.CommandLine -match 'esb|mesim' } | Select-Object ProcessId,CommandLine"}
+    collect: {unix: "jcmd <PID> Thread.print > /tmp/esb_thread_<PID>.txt; tar czf /tmp/esb-log.tgz <MESIM ESB 설치 경로>/logs", windows: "jcmd <PID> Thread.print > C:\\diag\\esb_thread_<PID>.txt"}
+  jboss:
+    os: [linux, windows, solaris]
+    proc: "jboss-modules.jar"
+    proc_win: "java"
+    port: 8080
+    log: {unix: "$JBOSS_HOME/standalone/log/server.log", windows: "%JBOSS_HOME%\\standalone\\log\\server.log"}
+    status: {unix: "$JBOSS_HOME/bin/jboss-cli.sh --connect --command=':read-attribute(name=server-state)'", windows: "& \"$env:JBOSS_HOME\\bin\\jboss-cli.bat\" --connect --command=':read-attribute(name=server-state)'"}
+    restart: {unix: "$JBOSS_HOME/bin/jboss-cli.sh --connect --command=':shutdown(restart=true)'   # 승인 후", windows: "& \"$env:JBOSS_HOME\\bin\\jboss-cli.bat\" --connect --command=':shutdown(restart=true)'   # 승인 후"}
+    collect: {unix: "jcmd <PID> Thread.print > /tmp/jboss_thread_<PID>.txt; tar czf /tmp/jboss-log.tgz $JBOSS_HOME/standalone/log", windows: "jcmd <PID> Thread.print > C:\\diag\\jboss_thread_<PID>.txt"}
+  jeus:
+    os: [linux, aix, hpux, solaris, windows]
+    proc: "jeus"
+    proc_win: "java"
+    port: 9736
+    port_note: "9736 은 JEUS 관리(base) 포트 — 응용 서비스 포트(HTTP 리스너)와 다르다"
+    log: {unix: "$JEUS_HOME/domains/<domain>/servers/<server>/logs/JeusServer.log", windows: "%JEUS_HOME%\\domains\\<domain>\\servers\\<server>\\logs\\JeusServer.log"}
+    status: {unix: "jeusadmin -host localhost:9736 -u administrator   # 비밀번호 프롬프트 입력 뒤: si", windows: "jeusadmin -host localhost:9736 -u administrator   # 비밀번호 프롬프트 입력 뒤: si"}
+    restart: {unix: "jeusadmin -host localhost:9736 -u administrator   # 프롬프트 입력 뒤: stop-server <server> (기본은 강제 종료 — 판 매뉴얼의 graceful 시한 옵션 확인) → start-server <server>", windows: "jeusadmin -host localhost:9736 -u administrator   # 프롬프트 입력 뒤: stop-server <server> (기본은 강제 종료 — graceful 시한 옵션 확인) → start-server <server>"}
+    restart_note: "stop-server 기본 동작은 강제 종료 — 진행 중 요청이 끊긴다. 판 매뉴얼의 graceful 종료(시한) 옵션을 확인하고 승인 받은 시한으로"
+    collect: {unix: "jcmd <PID> Thread.print > /tmp/jeus_thread_<PID>.txt; tar czf /tmp/jeus-log.tgz $JEUS_HOME/domains/<domain>/servers/<server>/logs", windows: "jcmd <PID> Thread.print > C:\\diag\\jeus_thread_<PID>.txt"}
+  tomcat:
+    os: [linux, aix, hpux, solaris, windows]
+    proc: "org.apache.catalina.startup.Bootstrap"
+    proc_win: "tomcat|java"
+    port: 8080
+    log: {unix: "$CATALINA_BASE/logs/catalina.out", windows: "%CATALINA_BASE%\\logs\\catalina.<yyyy-mm-dd>.log"}
+    status: {unix: "curl -s -o /dev/null -w '%{http_code}\\n' http://localhost:8080/", windows: "Get-Service Tomcat* | Select-Object Name,Status; Invoke-WebRequest -UseBasicParsing http://localhost:8080/ | Select-Object StatusCode"}
+    restart: {unix: "$CATALINA_HOME/bin/shutdown.sh; sleep 15; ps -ef | grep Bootstrap | grep -v grep; $CATALINA_HOME/bin/startup.sh   # 승인 후(남은 프로세스는 jcmd 덤프 뒤 kill)", windows: "Restart-Service -Name 'Tomcat<N>'   # 승인 후"}
+    collect: {unix: "jcmd <PID> Thread.print > /tmp/tomcat_thread_<PID>.txt; tar czf /tmp/tomcat-log.tgz $CATALINA_BASE/logs", windows: "jcmd <PID> Thread.print > C:\\diag\\tomcat_thread_<PID>.txt"}
+  weblogic:
+    os: [linux, aix, hpux, solaris, windows]
+    proc: "weblogic.Server"
+    proc_win: "java"
+    port: 7001
+    log: {unix: "$DOMAIN_HOME/servers/<server>/logs/<server>.log", windows: "%DOMAIN_HOME%\\servers\\<server>\\logs\\<server>.log"}
+    status: {unix: "curl -s -o /dev/null -w '%{http_code}\\n' http://localhost:7001/console/login/LoginForm.jsp", windows: "Invoke-WebRequest -UseBasicParsing http://localhost:7001/console/login/LoginForm.jsp | Select-Object StatusCode"}
+    restart: {unix: "$DOMAIN_HOME/bin/stopManagedWebLogic.sh <server> t3://<admin_host>:7001; $DOMAIN_HOME/bin/startManagedWebLogic.sh <server> t3://<admin_host>:7001   # 승인 후", windows: "& \"$env:DOMAIN_HOME\\bin\\stopManagedWebLogic.cmd\" <server> t3://<admin_host>:7001; & \"$env:DOMAIN_HOME\\bin\\startManagedWebLogic.cmd\" <server> t3://<admin_host>:7001   # 승인 후"}
+    collect: {unix: "jcmd <PID> Thread.print > /tmp/wls_thread_<PID>.txt; tar czf /tmp/wls-log.tgz $DOMAIN_HOME/servers/<server>/logs", windows: "jcmd <PID> Thread.print > C:\\diag\\wls_thread_<PID>.txt"}
+  websphere:
+    os: [linux, aix, hpux, solaris, windows]
+    proc: "com.ibm.ws.runtime.WsServer"
+    proc_win: "java"
+    port: 9080
+    log: {unix: "<PROFILE_ROOT>/logs/<server>/SystemOut.log", windows: "<PROFILE_ROOT>\\logs\\<server>\\SystemOut.log"}
+    status: {unix: "<PROFILE_ROOT>/bin/serverStatus.sh -all", windows: "& '<PROFILE_ROOT>\\bin\\serverStatus.bat' -all"}
+    restart: {unix: "<PROFILE_ROOT>/bin/stopServer.sh <server>; <PROFILE_ROOT>/bin/startServer.sh <server>   # 승인 후", windows: "& '<PROFILE_ROOT>\\bin\\stopServer.bat' <server>; & '<PROFILE_ROOT>\\bin\\startServer.bat' <server>   # 승인 후"}
+    collect: {unix: "kill -3 <PID>   # javacore 가 <PROFILE_ROOT> 아래 생성 · 이어서: <PROFILE_ROOT>/bin/collector.sh", windows: "& '<PROFILE_ROOT>\\bin\\collector.bat'"}
+  apache:
+    os: [linux, aix, hpux, solaris, windows]
+    proc: "httpd|apache2"
+    proc_win: "httpd"
+    port: 80
+    log: {unix: "/var/log/httpd/error_log", windows: "<Apache 설치 경로>\\logs\\error.log"}
+    log_note: "RHEL 패키지 기준 — Ubuntu: /var/log/apache2/error.log · 소스 설치: $APACHE_HOME/logs/error_log · 실제는 httpd.conf 의 ErrorLog"
+    status: {unix: "apachectl configtest; apachectl -S; curl -s -o /dev/null -w '%{http_code}\\n' http://localhost/", windows: "httpd.exe -t; Get-Service Apache* | Select-Object Name,Status"}
+    restart: {unix: "apachectl configtest && apachectl -k graceful   # 승인 후 — 설정 재적재(graceful). 프로세스 재시작은 별도 작업: apachectl -k restart", windows: "httpd.exe -t; Restart-Service -Name 'Apache2.4'   # 승인 후 · 서비스 이름은 Get-Service Apache* 로 확인"}
+    collect: {unix: "apachectl -V > /tmp/apache-V.txt; tar czf /tmp/apache-log.tgz /var/log/httpd", windows: "httpd.exe -V > C:\\diag\\apache-V.txt"}
+  iis:
+    os: [windows]
+    proc_win: "w3wp|inetinfo"
+    port: 80
+    log: {windows: "%SystemDrive%\\inetpub\\logs\\LogFiles\\W3SVC<N>\\"}
+    log_note: "HTTP.sys 오류는 C:\\Windows\\System32\\LogFiles\\HTTPERR\\ · 사이트 번호 N 은 Get-Website 의 ID"
+    status: {windows: "Import-Module WebAdministration; Get-Website | Select-Object Name,State; Get-ChildItem IIS:\\AppPools | Select-Object Name,State; & \"$env:windir\\system32\\inetsrv\\appcmd.exe\" list wp"}
+    restart: {windows: "Restart-WebAppPool -Name '<POOL>'   # 승인 후 — 해당 응용 프로그램 풀만(iisreset 전체 재시작은 권하지 않음)"}
+    collect: {windows: "Get-ChildItem C:\\Windows\\System32\\LogFiles\\HTTPERR | Sort-Object LastWriteTime -Descending | Select-Object -First 3; Compress-Archive -Path C:\\inetpub\\logs\\LogFiles -DestinationPath C:\\diag\\iis-logs.zip"}
+  nginx:
+    os: [linux, solaris, windows]
+    proc: "nginx"
+    proc_win: "nginx"
+    port: 80
+    log: {unix: "/var/log/nginx/error.log", windows: "<nginx 설치 경로>\\logs\\error.log"}
+    status: {unix: "nginx -t; systemctl status nginx --no-pager", windows: "nginx.exe -t"}
+    restart: {unix: "nginx -t && nginx -s reload   # 승인 후 — 설정 재적재(reload). 프로세스 재시작은 별도 작업: systemctl restart nginx", windows: "nginx.exe -t; nginx.exe -s reload   # 승인 후 — 설정 재적재"}
+    collect: {unix: "nginx -V 2> /tmp/nginx-V.txt; tar czf /tmp/nginx-log.tgz /var/log/nginx", windows: "nginx.exe -V 2> C:\\diag\\nginx-V.txt"}
+  webtob:
+    os: [linux, aix, hpux, solaris, windows]
+    proc: "wsm|htl|hth"
+    proc_win: "wsm|htl|hth"
+    port: 8080
+    log: {unix: "$WEBTOBDIR/log/", windows: "%WEBTOBDIR%\\log\\"}
+    status: {unix: "wsadmin -C 'si'; wsadmin -C 'ci'", windows: "wsadmin -C \"si\"; wsadmin -C \"ci\""}
+    restart: {unix: "wsdown -i; wsboot   # 승인 후", windows: "wsdown -i; wsboot   # 승인 후"}
+    restart_note: "WebtoB 전체 정지·기동 — 처리 중 요청이 끊긴다. 특정 서버(프로세스)만이면 판 매뉴얼의 개별 재기동 명령 우선"
+    collect: {unix: "tar czf /tmp/webtob-log.tgz $WEBTOBDIR/log; wsadmin -C 'si' > /tmp/webtob-si.txt", windows: "Compress-Archive -Path \"$env:WEBTOBDIR\\log\" -DestinationPath C:\\diag\\webtob-log.zip"}

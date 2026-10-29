@@ -1,0 +1,117 @@
+# r7 연결 검토 (2026-10-16) — DB 묶음 B·C(SQL Server · MySQL · PostgreSQL · CUBRID · GOLDILOCKS) 작업 목록 kw7/B_dbbc.json 68건.
+# '이 판정 전용'인데 판정 제목 핵심어가 절차에 없던 연결을 사람이 하나씩 1차 단계 기준으로 다시 봤다.
+#   (a) 맞음 — fit_reviewed: true + 무엇을 진단하는지 reviewed 에 적음(절차는 그대로)
+#   (b) 더 맞는 기존 절차 — primary: true 로 1순위 지정(+ fit_reviewed)
+#   (c) 새 전용 절차 — r7_dbbc_procedures.yaml (scope: id 라 여기 따로 잇지 않는다)
+# 절차 파일은 고치지 않는다.
+links:
+# ── (b) 더 맞는 기존 절차 ──
+- procedure: MS-PROC-R6-RECOVERY
+  match: [MSSQL-9001]
+  primary: true
+  fit_reviewed: true
+  reviewed: "2026-10-16 r7 — 9001(DB 로그 사용 불가)은 다른 문제(I/O·경로 단절·파일 없음)가 로그 파일을 못 쓰게 만든 결과라, 붙어 있던 MS-PROC-STORAGE(로그 가득참·log_reuse_wait) 1차로는 원인을 못 찾음. R6-RECOVERY 1차의 ONLINE 아닌 DB 확인·'첫 원인 오류'(9001 앞의 823/824·OS error 2/3/5)·파일 존재·볼륨 확인이 그대로 맞음"
+- procedure: PG-PROC-R6-CONNREJECT
+  match: ["08001"]
+  primary: true
+  fit_reviewed: true
+  reviewed: "2026-10-16 r7 — 08001(클라이언트가 연결을 수립하지 못함)은 미기동·listen_addresses·pg_hba 거부가 주 원인인데 붙어 있던 PG-PROC-CONNECTION 은 슬롯 고갈(53300)만 봄. CONNREJECT 1차의 FATAL(no pg_hba.conf entry·SSL) 로그 확인, pg_hba_file_rules, pg_isready, nc -zvw3 가 08001 진단과 맞음"
+- procedure: PG-PROC-R6-DISCONNECT
+  match: ["08006"]
+  primary: true
+  fit_reviewed: true
+  reviewed: "2026-10-16 r7 — 08006(기존 연결 실패)은 서버 종료·네트워크 reset·keepalive 문제인데 PG-PROC-CONNECTION(슬롯 고갈)과 맞지 않음. DISCONNECT 1차의 'terminating connection·could not receive data from client' 로그, pg_postmaster_start_time, tcp_keepalives_* 확인이 코드 즉시 조치와 같은 진단"
+
+# ── (a) 지금 연결이 맞음 — SQL Server ──
+- procedure: MS-PROC-R5-CONNECTION
+  match: [MSSQL-233]
+  fit_reviewed: true
+  reviewed: "2026-10-16 r7 — 233(파이프 상대 프로세스 없음)은 로그인 실패(18456)가 233 으로 보이는 경우가 가장 흔하고 다음이 프로토콜 미수신. 절차 1차의 ERRORLOG 'Login failed'·'Server is listening on' 수신 프로토콜·서비스/포트 확인이 그 진단(인증 모드·user connections 는 코드 즉시 조치에 있음)"
+- procedure: MS-PROC-R5-INTERNAL
+  match: [MSSQL-5901]
+  fit_reviewed: true
+  reviewed: "2026-10-16 r7 — 5901(체크포인트 실패)은 앞선 공간·I/O 오류의 결과. 절차 1차 1단계 ERRORLOG 'Error:' 조회와 판단 기준 '5901 직전 오류를 기록'·덤프 보존이 맞음(볼륨 여유 조회는 코드 즉시 조치)"
+- procedure: MS-PROC-R5-INTERNAL
+  match: [MSSQL-17053]
+  fit_reviewed: true
+  reviewed: "2026-10-16 r7 — 17053(운영체제 오류)은 줄 안의 OS 오류 번호가 원인. 절차 1차 1단계 ERRORLOG 오류 조회와 판단 기준 '17053 OS 오류 번호 기록'이 맞음(net helpmsg 해석은 코드 즉시 조치)"
+- procedure: MS-PROC-R5-INTERNAL
+  match: [MSSQL-35262, MSSQL-41145, MSSQL-35264]
+  fit_reviewed: true
+  reviewed: "2026-10-16 r7 — 35262(AG DB 기본 시작 건너뜀)·41145(이미 AG 가입)·35264(데이터 이동 중단)는 절차 1차 2단계 'AG 메시지면 복제본·DB 상태 확인'(dm_hadr_availability_replica_states·dm_hadr_database_replica_states 의 is_suspended·suspend_reason_desc)과 판단 기준(35264=is_suspended, 35262·41145 는 HEALTHY 면 정보 메시지)이 그대로 진단"
+- procedure: MS-PROC-MEMORY
+  match: [MSSQL-17300]
+  fit_reviewed: true
+  reviewed: "2026-10-16 r7 — 17300(새 시스템 작업 실행 불가)은 메모리 부족 또는 세션 수 한도. 절차 1차의 dm_os_sys_memory·memory_clerks·process_physical_memory_low 가 주 원인(메모리)을 진단(세션 수·user connections 비교는 코드 즉시 조치)"
+- procedure: MS-PROC-R5-THREAD
+  match: [MSSQL-17884]
+  fit_reviewed: true
+  reviewed: "2026-10-16 r7 — 절차 제목에 17884 가 있고 1차의 dm_os_schedulers work_queue_count·THREADPOOL 대기·블로킹 체인(DAC)·덤프 보존이 17884(스케줄러 진행 없음) 진단 그 자체. 제목 낱말(작업자·지연)만 달라 걸린 것"
+- procedure: MS-PROC-R5-DISK
+  match: [MSSQL-833]
+  fit_reviewed: true
+  reviewed: "2026-10-16 r7 — 절차 제목에 833(I/O 15초 초과)이 있고 1차의 dm_io_virtual_file_stats 파일별 평균 지연·볼륨 여유 확인이 833 진단 그 자체"
+- procedure: MS-PROC-R5-HARDWARE
+  match: [MSSQL-824]
+  fit_reviewed: true
+  reviewed: "2026-10-16 r7 — 824(체크섬·torn page 논리 I/O 오류)는 823/825 와 같은 저장 경로 결함 계열. 1차의 suspect_pages·ERRORLOG 'Error: 82'·System 이벤트 디스크 오류·마지막 백업 확인이 맞음(r6_dbb_proclinks 검토와 같은 판단)"
+- procedure: MS-PROC-R6-RECOVERY
+  match: [MSSQL-9003]
+  fit_reviewed: true
+  reviewed: "2026-10-16 r7 — 절차 제목·match 에 9003 이 있고 1차 2단계 판단 기준이 '9001/9003(로그 손상·LSN 불일치)'과 'mdf/ldf 를 따로 교체·복사한 뒤 흔함'을 직접 다룸"
+
+# ── (a) MySQL ──
+- procedure: MY-PROC-R5-INTERNAL
+  match: [MY-1146]
+  fit_reviewed: true
+  reviewed: "2026-10-16 r7 — 1차 3단계 information_schema.TABLES 존재 확인과 2단계 lower_case_table_names 가 1146(테이블 없음·대소문자) 진단 그 자체(판단 기준에 '테이블이 없거나 대소문자가 다르면 1146')"
+- procedure: MY-PROC-R5-INTERNAL
+  match: [MY-1881]
+  fit_reviewed: true
+  reviewed: "2026-10-16 r7 — 1차 2단계 @@innodb_force_recovery 조회와 판단 기준 'innodb_force_recovery>0 이면 1881'이 강제 복구 모드 진단 그 자체"
+- procedure: MY-PROC-R5-INTERNAL
+  match: [MY-1105]
+  fit_reviewed: true
+  reviewed: "2026-10-16 r7 — 1105(알 수 없는 오류)는 실제 원인이 error log 동반 메시지에 있음. 1차 1단계 log_error 경로 확인·[ERROR] 줄 조회가 코드 즉시 조치와 같은 진단"
+- procedure: MY-PROC-R5-UPSTREAM
+  match: [MY-1236]
+  fit_reviewed: true
+  reviewed: "2026-10-16 r7 — 절차 제목·match 가 1236 이고 1차의 SHOW REPLICA STATUS Last_IO_Error·원본 SHOW BINARY LOGS·gtid_purged 확인이 1236 진단 그 자체(제목 낱말 '바이너리 로그'를 'binlog'로 적어 걸린 것)"
+
+# ── (a) PostgreSQL ──
+- procedure: PG-PROC-R5-INTERNAL
+  match: ["42P01"]
+  fit_reviewed: true
+  reviewed: "2026-10-16 r7 — 1차 3단계 SHOW search_path·pg_tables 객체 위치 조회가 42P01(테이블 없음·다른 스키마·search_path) 진단 그 자체"
+- procedure: PG-PROC-R5-INTERNAL
+  match: ["25006", "57P04"]
+  fit_reviewed: true
+  reviewed: "2026-10-16 r7 — 25006(읽기 전용 트랜잭션에서 쓰기)·57P04(DB 삭제됨 — 대기 서버에서는 원본 DB 제거가 복구 충돌로 세션을 끊음)는 1차 2단계 pg_is_in_recovery() 와 판단 기준 'true 면 대기 서버(25006·57P04)', 1단계 로그 조회로 진단됨"
+- procedure: PG-PROC-R5-INTERNAL
+  match: ["55000"]
+  fit_reviewed: true
+  reviewed: "2026-10-16 r7 — 55000(객체 상태 부적합)은 원문 메시지(예: currval … not yet defined)가 곧 원인. 1차 1단계 로그 오류 줄과 2단계 활성 세션(pg_stat_activity) 조회가 코드 즉시 조치와 같은 진단"
+
+# ── (a) CUBRID ──
+- procedure: CUB-PROC-R5-INTERNAL
+  match: ["-4", "-68", "-131", "-963", "-19"]
+  fit_reviewed: true
+  reviewed: "2026-10-16 r7 — 1차 1단계 grep 이 CODE = -(4|68|131|963|19) 를 직접 찾고, 2단계 tranlist·브로커 sql_log·broker status 로 실패 질의·클라이언트를 특정함. -4(인터럽트)는 판단 기준 '다수 동시면 일괄 취소·timeout', -963(질의 시간 초과)은 LONG-Q·sql_log, -68·-131·-19 는 같은 SQL·클라이언트 반복 여부 — 코드 즉시 조치와 같은 진단"
+- procedure: CUB-PROC-R6-CORRUPT
+  match: ["-411"]
+  fit_reviewed: true
+  reviewed: "2026-10-16 r7 — 절차 match·grep 에 -411 이 있고 제목에 '인덱스 손상'. 1차의 오류 위치(테이블·OID) 반복 여부, -13/-14 I/O 선행 여부, spacedb·dmesg 확인이 B-tree 키 타입 오류(인덱스 불일치·손상) 진단과 맞음"
+- procedure: CUB-PROC-LOCK
+  match: ["-966", "-967", "-968"]
+  fit_reviewed: true
+  reviewed: "2026-10-16 r7 — -966·-967·-968(교착으로 객체·클래스·인스턴스 잠금 시간 초과)은 잠금 대기 진단이 핵심. 1차의 cubrid lockdb 'Blocked by' 관계·tranlist 장시간 트랜잭션·lock_timeout 확인이 맞음(코드별 grep·DEADLOCK 이벤트 로그는 코드 즉시 조치)"
+- procedure: CUB-PROC-R6-HALOG
+  match: ["-10"]
+  fit_reviewed: true
+  reviewed: "2026-10-16 r7 — 절차 match 에 -10 이 있고 1차 판단 기준 '경로가 없거나 실행 계정 소유가 아니면 -10 확정'·copylogdb .err 확인이 HA 복제 로그 마운트 실패 진단 그 자체"
+
+# ── (a) GOLDILOCKS ──
+- procedure: GD-PROC-R5-CONNECTION
+  match: [ERR-11080, ERR-13042]
+  fit_reviewed: true
+  reviewed: "2026-10-16 r7 — 11080(통신 컨텍스트 연결 실패)은 대상 프로세스 정지·네트워크·포트 차단, 13042(서버가 연결 거부 — 종료·신호 수신 중 접속)는 서버 프로세스 상태·trc 기록이 핵심. 1차의 ping·nc -zvw3·프로세스 확인·system.trc tail·클러스터 연결 뷰가 맞음(V$SESSION 상태 조회는 코드 즉시 조치)"

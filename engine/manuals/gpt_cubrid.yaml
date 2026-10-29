@@ -1,0 +1,15 @@
+product: cubrid
+title: CUBRID 운영 참고 (GPT 수집 — 벤더 문서 대조 필요)
+sections:
+- heading: 로그 위치
+  body: DB 서버 오류 로그는 $CUBRID/log/server/<db>_<yyyymmdd>_<hhmi>.err, 이벤트 로그는 같은 경로의
+    .event 파일이다. Broker 오류는 $CUBRID/log/broker/error_log, SQL 로그는 log/broker/sql_log이다.
+- heading: 장애 시 수집 방법
+  body: DB .err/.event, broker .err, SQL·slow log와 cubrid.conf, cubrid_broker.conf를
+    수집하고 cubrid service status, cubrid broker status 결과를 함께 보존한다.
+- heading: 대표 장애 신호
+  body: 서버 .event의 DEADLOCK, LOCK_TIMEOUT, SLOW_QUERY, MANY_IOREADS, TEMP_VOLUME_EXPAND와
+    broker CAS 오류, 가용 CAS 부족, 서버 연결 단절 및 메모리 오류를 우선 본다.
+- heading: 1차 확인 명령
+  body: cubrid service status, cubrid server status, cubrid broker status를 실행하고 $CUBRID/log/server와
+    $CUBRID/log/broker/error_log의 최신 오류를 확인한다.

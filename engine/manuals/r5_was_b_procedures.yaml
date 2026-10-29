@@ -1,0 +1,455 @@
+# 근거 매뉴얼·작성 기준 — G7b(WAS: WebLogic·WebSphere) 5차 지식 보강 (2026-10-16, knowledge_spec 5차·GPT 45차 관문)
+# WebLogic: Oracle Fusion Middleware Error Messages 12c(12.2.1.4) 'BEA-000001 to BEA-2194843', WebLogic 10.3.6 Error Messages Reference(e14397: T3Srvr·Socket·RJVM·JDBC·TX·Store·LogMgmt·EmbeddedLDAP·Diagnostics),
+#           WLST Command Reference(connect·serverRuntime·domainRuntime·state·threadDump), Administering Server Environments(Node Manager·서버 잠금 파일).
+#           적용: 10.3.6 / 12.1.3 / 12.2.1.x / 14.1.x. 10.3.6 은 weblogic.Admin THREAD_DUMP, 12c+ 는 jcmd(HotSpot JDK 7+).
+# WebSphere: IBM WAS traditional 8.5.5·9.0.5 메시지 참조(WTRN·ADMR·HMGR·DCSV·CWSIS·PMGR), 'Transaction service settings', 'backupConfig/restoreConfig command', 'wsadmin scripting(AdminControl·AdminConfig·Help)'.
+#           적용: tWAS 8.5.5 / 9.0.5 (Liberty 제외). javacore 는 wsadmin dumpThreads 또는 kill -3(스레드 덤프, 프로세스 유지).
+# 단계 기준: 1차 = 읽기 전용(재기동·정지·삭제·설정 변경·명령줄 비밀번호 없음) / 2차 = note 에 사전조건·영향·승인·백업/롤백 + check 에 성공/실패 / 3차 = 민감정보 마스킹·전달 승인
+# WLST 1차 접속은 userConfigFile(키 파일)로 — 비밀번호를 명령·history 에 남기지 않는다. wsadmin 은 soap.client.props 또는 프롬프트 입력.
+procedures:
+- id: WLS-PROC-R5-UPSTREAM
+  products: [weblogic]
+  category: upstream
+  match: [BEA-170011, BEA-320054, BEA-000573, BEA-000574]
+  title: 관리 서버·원격 서버·SNMP 수신기 연동 실패 (WebLogic)
+  source: "Oracle FMW Error Messages 12c(12.2.1.4) BEA-170011·BEA-320054·BEA-000573·BEA-000574 / WLST Command Reference(state, domainRuntime) / Administering Node Manager"
+  stages:
+  - stage: 1
+    steps:
+    - do: 연동 실패 메시지·대상 확인 (읽기 전용)
+      cmd: |
+        grep -nE "BEA-170011|BEA-320054|BEA-000573|BEA-000574" $DOMAIN_HOME/servers/<server>/logs/<server>.log | tail -30
+        grep -n -A 10 "BEA-000574" $DOMAIN_HOME/servers/<server>/logs/<server>.log | tail -20
+      check: "이상: 같은 대상(관리 서버 URL·원격 서버·trap 호스트)으로 반복 실패. 1회성·기동 직후만이면 일시 현상. BEA-170011 은 도메인 로그 전송만 누락(업무 영향 없음), BEA-000573/000574 는 원격 호출 실패로 업무 영향 가능"
+      note: "적용: 10.3.6/12c/14c 공통 · 권한: 로그 읽기(WebLogic 실행 계정 또는 로그 그룹)"
+    - do: 대상 도달성·상태 확인 (읽기 전용)
+      cmd: |
+        nc -zvw3 <admin_host> <port> ; nc -zvw3 <host> <port>
+        . $DOMAIN_HOME/bin/setDomainEnv.sh ; java weblogic.WLST <<'EOF'
+        connect(userConfigFile='<path>/wls.ucf', userKeyFile='<path>/wls.key', url='t3://<admin_host>:<port>')
+        print state('<server>')
+        exit()
+        EOF
+      check: "정상: 포트 succeeded·state RUNNING. 이상: 관리 서버 포트 불통(BEA-170011 원인), 원격 서버 SHUTDOWN/FAILED(BEA-000574), RUNNING 인데 응답 지연이면 원격 서버의 STUCK·GC 정지 확인(BEA-000573)"
+      note: "적용: 10.3.6/12c/14c · 권한: Monitor 역할 이상 WLST 키 파일 · SNMP trap 대상(UDP 162)은 nc 결과가 불확실하므로 수신기 담당에게 수신 여부 확인"
+  - stage: 2
+    steps:
+    - do: 관리 서버·원격 서버 기동 (비가동일 때)
+      cmd: |
+        . $DOMAIN_HOME/bin/setDomainEnv.sh ; java weblogic.WLST <<'EOF'
+        nmConnect(userConfigFile='<path>/nm.ucf', userKeyFile='<path>/nm.key', host='<host>', port='5556', domainName='<domain>', domainDir='<DOMAIN_HOME>')
+        nmStart('<server>')
+        exit()
+        EOF
+      check: "성공: 대상 서버 로그에 BEA-000365 RUNNING, 관리 대상 서버 로그의 BEA-170011 중단·원격 호출 정상. 실패: nmStart 오류 → <server>.out·nodemanager.log 의 첫 오류 확인 후 해당 코드 조치"
+      note: "사전조건: 1차에서 대상 서버가 실제 비가동(프로세스 없음)인지 확인, 중복 기동 금지 · 영향: 관리 서버 기동 중 콘솔·배포 불가, 원격 서버 기동 시 클러스터 재합류 · 승인: WAS 운영 담당 · 백업/롤백: 기동 전 config.xml 사본 보관, 기동 실패 시 이전 상태(비가동) 유지하고 원인 조치 · 적용: Node Manager 구성 도메인(10.3.6/12c/14c, 포트 5556 은 기본값 예시)"
+    - do: SNMP trap 대상·원격 응답 타임아웃 설정 정비
+      config:
+        file: 관리 콘솔 › Diagnostics › SNMP › <agent> › Trap Destinations / 클라이언트 기동 인수
+        snippet: |
+          Trap Destination: Host <trap_host>, Port 162, Community(보안 등급에 맞게)
+          원격 응답 시간초과(BEA-000573): 원격 처리 지연 원인 해소가 우선, 필요 시 -Dweblogic.jndi.responseReadTimeout=<ms> 검토
+        note: "Oracle 문서의 BEA-000573 조치: weblogic.jndi.responseReadTimeout 값 증가 고려"
+      check: "성공: BEA-320054·BEA-000573 재발 없음, 감시 수신기에서 trap 수신 확인. 실패: 같은 오류 지속 → 대상 주소·네트워크 경로 재확인, 설정 원복"
+      note: "사전조건: 대상 수신기·원격 서버 정상 확인 · 영향: trap 설정은 즉시 반영, 기동 인수 변경은 다음 기동 시 반영(재기동 필요) · 승인: WAS 운영·감시 담당 · 백업/롤백: 변경 전 값 기록·config.xml 사본, 롤백은 원래 값으로 되돌림 · 적용: 10.3.6/12c/14c"
+  - stage: 3
+    steps:
+    - do: My Oracle Support 의뢰 자료
+      cmd: |
+        tar czf wls_upstream_$(date +%Y%m%d).tgz $DOMAIN_HOME/servers/<server>/logs/<server>.log* $DOMAIN_HOME/servers/AdminServer/logs/AdminServer.log*
+        java weblogic.version
+      check: "관리 서버·관리 대상 서버 로그(실패 시각 전후), WebLogic 버전·PSU, 네트워크 구성도(대상 주소)"
+      note: "민감정보 마스킹: 호스트명·IP·사용자명·SNMP community 문자열 가림 후 전달 · 전달 승인: 보안 담당"
+
+- id: WLS-PROC-R5-LOCK
+  products: [weblogic]
+  category: lock
+  match: [BEA-171520, BEA-000394, BEA-141297]
+  title: 잠금 파일 대기(Embedded LDAP·서버 잠금) · 스레드 교착 (WebLogic)
+  source: "Oracle FMW Error Messages 12c(12.2.1.4) BEA-171520·BEA-000394·BEA-141297 / WebLogic 10.3.6 Error Messages(T3Srvr: BEA-000394 DEADLOCK DETECTED) / WLST threadDump"
+  stages:
+  - stage: 1
+    steps:
+    - do: 중복 기동·잠금 파일 확인 (읽기 전용)
+      cmd: |
+        grep -nE "BEA-171520|BEA-141297|BEA-000394" $DOMAIN_HOME/servers/<server>/logs/<server>.log | tail -20
+        ps -ef | grep "weblogic.Name=<server>" | grep -v grep
+        ls -l $DOMAIN_HOME/servers/<server>/tmp/<server>.lok $DOMAIN_HOME/servers/<server>/data/ldap/ldapfiles/EmbeddedLDAP.lok
+      check: "이상: 같은 서버 이름 프로세스 2개 이상(중복 기동) 또는 프로세스가 없는데 .lok 가 남음(비정상 종료 잔여). 정상: 프로세스 1개, 결국 기동 완료(BEA-000365 RUNNING)면 BEA-171520·141297 은 무시 가능"
+      note: "적용: 10.3.6/12c/14c · 권한: WebLogic 실행 계정 · NFS 공유 도메인이면 다른 호스트의 프로세스도 확인"
+    - do: 교착 스레드 덤프 확보 (BEA-000394, 프로세스 유지)
+      cmd: |
+        grep -n -A 40 "BEA-000394" $DOMAIN_HOME/servers/<server>/logs/<server>.log | head -80
+        for i in 1 2 3; do jcmd <PID> Thread.print > $DOMAIN_HOME/servers/<server>/logs/td_$(date +%H%M%S)_$i.txt; sleep 10; done
+        # 10.3.6(JDK 6): kill -3 <PID> (스레드 덤프, 프로세스는 유지 — <server>.out 에 기록)
+      check: "교착 스레드·잠금 객체(monitor)·스택 기록. 스택에 애플리케이션 클래스가 있으면 애플리케이션 결함, weblogic.* 만이면 제품 결함 의심"
+      note: "적용: jcmd 는 HotSpot JDK 7+ (10.3.6+JDK 6 은 kill -3) · 권한: WebLogic 실행 OS 계정"
+  - stage: 2
+    steps:
+    - do: 남은 잠금 파일 정리 후 기동 (프로세스가 없음이 확인된 경우만)
+      cmd: |
+        cp -p $DOMAIN_HOME/servers/<server>/tmp/<server>.lok /tmp/<server>.lok.bak
+        tar czf /tmp/ldap_bak_$(date +%Y%m%d%H%M).tgz -C $DOMAIN_HOME/servers/<server>/data ldap
+        rm $DOMAIN_HOME/servers/<server>/tmp/<server>.lok
+        rm $DOMAIN_HOME/servers/<server>/data/ldap/ldapfiles/EmbeddedLDAP.lok
+        $DOMAIN_HOME/bin/startManagedWebLogic.sh <server> t3://<admin_host>:<port>
+      check: "성공: 로그에 BEA-171520·BEA-141297 재발 없이 BEA-000365 RUNNING. 실패: 같은 잠금 대기 지속 → 다른 호스트·컨테이너에서 같은 도메인 디렉터리를 쓰는 프로세스 재확인, Embedded LDAP 손상 오류면 백업 tar 로 복원"
+      note: "사전조건: 1차에서 같은 서버 프로세스가 어디에도 없음을 확인(실행 중 .lok 삭제 금지) · 영향: 기동 동안 해당 서버 서비스 불가 · 승인: WAS 운영 담당 · 백업/롤백: .lok 사본·ldap 디렉터리 tar 보관, 문제 시 tar 로 원복 · 적용: 10.3.6/12c/14c (관리 서버는 startWebLogic.sh)"
+    - do: 교착으로 업무가 멈춘 서버 재기동 (덤프 확보 후)
+      cmd: |
+        . $DOMAIN_HOME/bin/setDomainEnv.sh ; java weblogic.WLST <<'EOF'
+        connect(userConfigFile='<path>/wls.ucf', userKeyFile='<path>/wls.key', url='t3://<admin_host>:<port>')
+        shutdown('<server>', 'Server')
+        start('<server>', 'Server')
+        exit()
+        EOF
+      check: "성공: BEA-000365 RUNNING·BEA-000394 재발 없음·업무 응답 정상. 실패: 교착 스레드 때문에 정상 종료가 끝나지 않음 → 운영 담당 판단으로 강제 종료(force), 재발 시 덤프와 함께 3차 의뢰"
+      note: "사전조건: 1차 스레드 덤프 3회 확보 완료 · 영향: 재기동 동안 서비스 중단·세션 유실(클러스터면 다른 멤버로 전환) · 승인: 서비스 담당·WAS 운영 담당 · 백업/롤백: 덤프·로그 보관(재기동은 되돌릴 수 없어 시점 협의), 애플리케이션 결함이면 이전 버전 재배포로 롤백 · 적용: 10.3.6/12c/14c (start 는 Node Manager 구성 필요)"
+  - stage: 3
+    steps:
+    - do: My Oracle Support 의뢰 자료
+      cmd: |
+        tar czf wls_lock_$(date +%Y%m%d).tgz $DOMAIN_HOME/servers/<server>/logs/<server>.log* $DOMAIN_HOME/servers/<server>/logs/td_*.txt $DOMAIN_HOME/servers/<server>/logs/<server>.out*
+        java weblogic.version
+      check: "BEA-000394 덤프 전문·연속 스레드 덤프 3회·서버 로그·버전/PSU (교착이 weblogic.* 내부 코드일 때만 제조사 의뢰)"
+      note: "민감정보 마스킹: 덤프 안의 요청 URL 파라미터·사용자 ID·호스트명·IP 가림 후 전달 · 전달 승인: 보안 담당"
+
+- id: WLS-PROC-R5-STORAGE
+  products: [weblogic]
+  category: storage
+  match: [BEA-280061, BEA-280071]
+  title: 영구 저장소(파일·JDBC Store) 배포 실패·적체 (WebLogic)
+  source: "WebLogic 10.3.6 Error Messages(Store: BEA-280061·BEA-280071·BEA-280060) / Oracle FMW Error Messages 12c(12.2.1.4) / Administering the WebLogic Persistent Store"
+  stages:
+  - stage: 1
+    steps:
+    - do: 저장소 오류·공간·권한 확인 (읽기 전용)
+      cmd: |
+        grep -nE "BEA-2800|BEA-2801" $DOMAIN_HOME/servers/<server>/logs/<server>.log | tail -30
+        ls -l $DOMAIN_HOME/servers/<server>/data/store/*/
+        df -h $DOMAIN_HOME/servers/<server>/data/store
+      check: "이상: BEA-280061 상세 메시지에 파일 잠금·I/O 오류·JDBC 오류, FS 사용률 95% 이상, .DAT 파일 소유자가 실행 계정과 다름. BEA-280071 은 정상 기동 정보(로드 레코드 수가 평소보다 크게 늘었으면 미처리 적체)"
+      note: "적용: 10.3.6/12c/14c · 권한: WebLogic 실행 계정 · 기본 저장소 파일: data/store/default/_WLS_<SERVER>000000.DAT"
+    - do: 저장소·JMS 런타임 확인 (WLST 읽기 전용)
+      cmd: |
+        . $DOMAIN_HOME/bin/setDomainEnv.sh ; java weblogic.WLST <<'EOF'
+        connect(userConfigFile='<path>/wls.ucf', userKeyFile='<path>/wls.key', url='t3://<server_host>:<server_port>')   # 대상 서버 주소로 접속 — 관리 서버로 접속하면 serverRuntime() 은 관리 서버 자신 값(그때는 domainRuntime() → cd('ServerRuntimes/<server>'))
+        serverRuntime(); ls('PersistentStoreRuntimes'); ls('JMSRuntime')
+        exit()
+        EOF
+        nc -zvw3 <db_host> <port>
+      check: "정상: 대상 저장소가 PersistentStoreRuntimes 에 보임, JDBC 저장소면 DB 포트 succeeded. 이상: 저장소 없음(배포 실패)·DB 불통"
+      note: "적용: 10.3.6/12c/14c · 권한: Monitor 역할 WLST 키 파일 · 접속 URL 은 해당 관리 대상 서버"
+  - stage: 2
+    steps:
+    - do: 공간·권한·중복 사용 원인 해소 후 기동
+      cmd: |
+        tar czf /tmp/store_bak_$(date +%Y%m%d%H%M).tgz -C $DOMAIN_HOME/servers/<server>/data store
+        chown -R <user>:<group> $DOMAIN_HOME/servers/<server>/data/store
+        $DOMAIN_HOME/bin/startManagedWebLogic.sh <server> t3://<admin_host>:<port>
+      check: "성공: BEA-280061 재발 없음, 저장소 정상 열림(파일 저장소 열림 메시지·JDBC 저장소면 BEA-280071), JMS 목적지 정상. 실패: 같은 오류 지속 → 상세 메시지의 원인(다른 서버의 같은 디렉터리 사용·DB 권한) 재확인, tar 로 원복"
+      note: "사전조건: 서버가 내려간 상태에서 저장소 파일 백업, 다른 서버가 같은 저장소 디렉터리를 쓰지 않음 확인 · 영향: 기동 동안 JMS·트랜잭션 서비스 불가, 저장소 파일 손실 시 미처리 메시지 유실 · 승인: WAS 운영 담당·JMS 업무 담당 · 백업/롤백: store 디렉터리 tar 보관, 문제 시 tar 로 원복 · 적용: 10.3.6/12c/14c"
+    - do: 저장소 공간 확보·위치 분리
+      config:
+        file: 관리 콘솔 › Services › Persistent Stores › <store> › Directory / config.xml
+        snippet: |
+          <file-store><name><store></name><directory><path>/store/<server></directory><synchronous-write-policy>Direct-Write</synchronous-write-policy><target><server></target></file-store>
+        note: "디렉터리 변경 시 기존 .DAT 파일을 새 위치로 옮겨야 미처리 메시지가 유지된다"
+      check: "성공: 다음 기동에서 새 위치의 저장소가 열리고 메시지 수 유지. 실패: 저장소 열기 오류 → 이전 directory 값으로 되돌리고 원래 .DAT 사용"
+      note: "사전조건: 새 FS 용량·권한 준비 · 영향: 재기동 필요(서비스 중단) · 승인: WAS 운영 담당 · 백업/롤백: config.xml·.DAT 사본, 롤백은 이전 directory 값 복원 · 적용: 10.3.6/12c/14c"
+  - stage: 3
+    steps:
+    - do: My Oracle Support 의뢰 자료
+      cmd: |
+        tar czf wls_store_$(date +%Y%m%d).tgz $DOMAIN_HOME/servers/<server>/logs/<server>.log* $DOMAIN_HOME/config/config.xml
+        ls -l $DOMAIN_HOME/servers/<server>/data/store/*/ > store_ls.txt ; df -h > df.txt
+      check: "서버 로그(BEA-280061 상세)·config.xml·저장소 파일 목록·FS 사용률·버전"
+      note: "민감정보 마스킹: config.xml 의 암호화된 비밀번호 항목({AES} 값)·호스트명·IP 가림 후 전달 · 전달 승인: 보안 담당"
+
+- id: WLS-PROC-R5-CAPACITY
+  products: [weblogic]
+  category: capacity
+  match: [BEA-000401, BEA-000415]
+  title: 소켓 큐 포화·파일 디스크립터 한도 (WebLogic)
+  source: "WebLogic 10.3.6 Error Messages(Socket: BEA-000401·BEA-000415) / Oracle FMW Error Messages 12c(12.2.1.4) / Tuning Performance of Oracle WebLogic Server(Accept Backlog, OS 파일 디스크립터)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 포화 시각·FD 한도·연결 수 확인 (읽기 전용)
+      cmd: |
+        grep -nE "BEA-000401|BEA-000415|BEA-002616|BEA-000337" $DOMAIN_HOME/servers/<server>/logs/<server>.log | tail -30
+        grep "open files" /proc/<PID>/limits ; ls /proc/<PID>/fd | wc -l
+        ss -s
+      check: "이상: FD 사용이 soft 한도의 80% 이상, BEA-000401 과 STUCK(BEA-000337)·accept 실패(BEA-002616) 동반. 정상: BEA-000415 는 기동 시 한도 정보(soft 4096 미만이면 상향 대상)"
+      note: "적용: Linux(/proc) — AIX 는 procfiles <PID>, Solaris 는 pfiles <PID> · 권한: WebLogic 실행 계정 또는 root(읽기)"
+    - do: 실행 스레드·큐 상태 확인 (WLST 읽기 전용)
+      cmd: |
+        . $DOMAIN_HOME/bin/setDomainEnv.sh ; java weblogic.WLST <<'EOF'
+        connect(userConfigFile='<path>/wls.ucf', userKeyFile='<path>/wls.key', url='t3://<server_host>:<server_port>')   # 대상 서버 주소로 접속 — 관리 서버로 접속하면 serverRuntime() 은 관리 서버 자신 값(그때는 domainRuntime() → cd('ServerRuntimes/<server>'))
+        serverRuntime(); cd('ThreadPoolRuntime/ThreadPoolRuntime'); ls()
+        exit()
+        EOF
+      check: "이상: QueueLength 계속 증가·HoggingThreadCount 증가·ExecuteThreadIdleCount 0. 정상: 큐가 평소 수준으로 감소"
+      note: "적용: 10.3.6/12c/14c · 권한: Monitor 역할 WLST 키 파일"
+  - stage: 2
+    steps:
+    - do: 앞단 LB 에서 해당 서버 유입 축소 (포화 지속 시)
+      config:
+        file: 앞단 LB·웹서버 플러그인 설정(가중치·대상 서버 목록)
+        snippet: |
+          해당 WebLogic 서버의 가중치를 낮추거나 신규 연결 대상에서 일시 제외(기존 세션 유지)
+        note: "클러스터 다른 멤버 여유 용량 확인 후 적용"
+      check: "성공: BEA-000401 재발 없음·QueueLength 감소·다른 멤버 응답 정상. 실패: 다른 멤버도 포화 → 유입 제한·업무 우선순위 조정 협의"
+      note: "사전조건: 다른 멤버 여유 용량 확인 · 영향: 해당 서버 처리량 감소, 다른 멤버 부하 증가 · 승인: 서비스 담당·네트워크(LB) 담당 · 백업/롤백: 변경 전 LB 설정 기록, 원인 해소 후 가중치 원복 · 적용: LB 제품별 절차"
+    - do: nofile 한도·accept backlog 상향
+      config:
+        file: /etc/security/limits.conf · /etc/sysctl.conf · 관리 콘솔 › Servers › <server> › Configuration › Tuning(Accept Backlog)
+        snippet: |
+          <user>  soft  nofile  65536
+          <user>  hard  nofile  65536
+          net.core.somaxconn = 1024
+          Accept Backlog: 300
+        note: "limits.conf 는 다음 로그인·기동부터 반영. sysctl 은 sysctl -p 로 즉시 반영"
+      cmd: |
+        cp -p /etc/security/limits.conf /etc/security/limits.conf.bak.$(date +%Y%m%d)
+        cp -p /etc/sysctl.conf /etc/sysctl.conf.bak.$(date +%Y%m%d)
+        sysctl -p
+      check: "성공: 다음 기동 로그 BEA-000415 의 soft/hard 가 새 값, BEA-000401·BEA-002616 재발 없음. 실패: 값 미반영 → 기동 경로(systemd 서비스면 LimitNOFILE)에서 한도 설정 확인, 사본으로 원복"
+      note: "사전조건: 현재 FD 사용 추세·한도 기록 · 영향: sysctl 은 즉시 OS 전체 반영, nofile·Accept Backlog 는 서버 재기동 필요 · 승인: 시스템 담당·WAS 운영 담당 · 백업/롤백: limits.conf·sysctl.conf 사본, 롤백은 사본 복원 후 sysctl -p · 적용: Linux, WebLogic 10.3.6/12c/14c"
+  - stage: 3
+    steps:
+    - do: My Oracle Support 의뢰 자료 (BEA-000401 은 제조사 조치가 '지원 문의')
+      cmd: |
+        tar czf wls_capacity_$(date +%Y%m%d).tgz $DOMAIN_HOME/servers/<server>/logs/<server>.log* $DOMAIN_HOME/servers/<server>/logs/td_*.txt
+        cat /proc/<PID>/limits > limits.txt ; ss -s > ss.txt ; java weblogic.version
+      check: "서버 로그(BEA-000401 전후)·스레드 덤프·FD 한도·연결 요약·버전/PSU"
+      note: "민감정보 마스킹: 호스트명·IP·사용자명·요청 URL 파라미터 가림 후 전달 · 전달 승인: 보안 담당"
+
+- id: WSP-PROC-R5-UNDO
+  products: [websphere]
+  category: undo
+  match: [WTRN0006W, WTRN0037W, WTRN0075W]
+  title: 트랜잭션 시간초과·XA 복구 오류·heuristic 결과 (WebSphere)
+  source: "IBM WAS traditional 8.5.5/9.0.5 메시지 참조 'WTRN' (WTRN0006W·WTRN0037W·WTRN0075W) / 'Transaction service settings'(Total transaction lifetime timeout, Maximum transaction timeout) / wsadmin AdminControl·Help"
+  stages:
+  - stage: 1
+    steps:
+    - do: 트랜잭션 메시지·동반 행 스레드 확인 (읽기 전용)
+      cmd: |
+        grep -nE "WTRN0006W|WTRN0037W|WTRN0075W|WSVR0605W" <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -30
+        ls -l <PROFILE_ROOT>/tranlog/<cell>/<node>/<server>/transaction/tranlog/
+      check: "이상: WTRN0006W 와 WSVR0605W(행 스레드) 동반 → 트랜잭션이 DB·외부 호출에서 대기. WTRN0037W 반복 → XA 복구 실패(권한·DB 불통). WTRN0075W → heuristic, 데이터 불일치 가능(즉시 업무 담당 통보)"
+      note: "적용: tWAS 8.5.5/9.0.5 · 권한: WAS 실행 계정(로그·tranlog 읽기) · tranlog 경로는 기본값(트랜잭션 서비스 설정에서 바뀌었을 수 있음)"
+    - do: javacore·트랜잭션 서비스 런타임 확인 (프로세스 유지)
+      cmd: |
+        <PROFILE_ROOT>/bin/wsadmin.sh -lang jython -c "AdminControl.invoke(AdminControl.completeObjectName('type=JVM,process=<server>,*'), 'dumpThreads')"
+        # 또는 kill -3 <PID> (스레드 덤프, 프로세스는 유지 — <PROFILE_ROOT>/javacore.*.txt)
+        <PROFILE_ROOT>/bin/wsadmin.sh -lang jython -c "ts=AdminControl.queryNames('type=TransactionService,process=<server>,*'); print ts; print Help.operations(ts)"
+      check: "javacore 의 트랜잭션 스레드 대기 지점(JDBC·소켓 read·락) 기록. TransactionService MBean 의 list 계열 조회 연산으로 미완료·heuristic 트랜잭션 확인(commit·rollback 등 변경 연산은 실행 금지)"
+      note: "적용: tWAS 8.5.5/9.0.5 · 권한: wsadmin monitor 역할 이상(자격증명은 soap.client.props 또는 프롬프트)"
+  - stage: 2
+    steps:
+    - do: 트랜잭션 타임아웃 값 조정 (원인 해소가 우선, 업무 처리 시간이 정상적으로 긴 경우만)
+      cmd: |
+        <PROFILE_ROOT>/bin/backupConfig.sh /tmp/was_cfg_$(date +%Y%m%d%H%M).zip -nostop
+        <PROFILE_ROOT>/bin/wsadmin.sh -lang jython <<'EOF'
+        ts=AdminConfig.list('TransactionService', AdminConfig.getid('/Server:<server>/'))
+        print AdminConfig.showAttribute(ts,'totalTranLifetimeTimeout')
+        AdminConfig.modify(ts,[['totalTranLifetimeTimeout','<초>']])
+        AdminConfig.save()
+        EOF
+      check: "성공: 서버 재기동 후 WTRN0006W 감소·업무 정상. 실패: 롤백 지속 → 타임아웃이 아니라 대기 지점(DB 락·외부 응답) 문제이므로 원래 값 복원 후 원인 담당 조치"
+      note: "사전조건: 1차 javacore 로 대기 지점 확인, 변경 전 값 기록 · 영향: 타임아웃을 늘리면 행 트랜잭션이 자원을 더 오래 점유, 반영은 재기동 필요 · 승인: WAS 운영 담당·업무 담당 · 백업/롤백: backupConfig zip, 롤백은 원래 값 modify·save 또는 restoreConfig · 적용: tWAS 8.5.5/9.0.5 (ND 는 동기화 후 반영)"
+    - do: heuristic·미완료 트랜잭션 처리 (데이터 정합 확인 후)
+      config:
+        file: 관리 콘솔 › Servers › Server Types › WebSphere application servers › <server> › Container Services › Transaction service › Runtime
+        snippet: |
+          heuristic 결과·수동 완료 필요 트랜잭션 목록 확인 → 업무 담당과 각 자원 반영 상태 대조 → 승인된 건만 완료(finish/commit/rollback) 처리
+        note: "자원(DB) 측 미결 트랜잭션은 DB 담당이 함께 확인"
+      check: "성공: 목록에서 해당 트랜잭션 사라짐, WTRN0037W·WTRN0075W 재발 없음, 업무 데이터 정합 확인. 실패: 처리 오류 → 자원 측 상태 재확인 후 IBM 지원 의뢰"
+      note: "사전조건: 업무 담당이 영향 데이터 범위 확정 · 영향: 잘못 처리하면 데이터 불일치 확정 · 승인: 업무 책임자·DB 담당·WAS 운영 담당 · 백업/롤백: 처리 전 tranlog 디렉터리 tar 와 영향 업무 데이터 백업(트랜잭션 처리 자체는 되돌릴 수 없음) · 적용: tWAS 8.5.5/9.0.5"
+  - stage: 3
+    steps:
+    - do: IBM Support 의뢰 자료 (MustGather — 트랜잭션)
+      cmd: |
+        tar czf was_tx_$(date +%Y%m%d).tgz <PROFILE_ROOT>/logs/<server>/ <PROFILE_ROOT>/logs/ffdc/ <PROFILE_ROOT>/javacore.*.txt
+        <WAS_HOME>/bin/versionInfo.sh | head -20
+      check: "SystemOut/SystemErr/ffdc·javacore·버전(Fix Pack)·tranlog 디렉터리 목록(ls -lR)"
+      note: "민감정보 마스킹: 호스트명·IP·사용자 ID·SQL 안의 업무 데이터 가림 후 전달 · 전달 승인: 보안 담당"
+
+- id: WSP-PROC-R5-DISK
+  products: [websphere]
+  category: disk
+  match: [ADMR0104E]
+  title: 구성 저장소(config) 문서 읽기 실패·권한·공간 (WebSphere)
+  source: "IBM WAS traditional 8.5.5/9.0.5 메시지 참조 'ADMR' / 'backupConfig command'·'restoreConfig command'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 읽지 못한 문서와 권한·공간 확인 (읽기 전용)
+      cmd: |
+        grep -n -A 10 "ADMR0104E" <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -30
+        df -h <PROFILE_ROOT>
+        find <PROFILE_ROOT>/config -xdev ! -user <user> -ls | head -20
+      check: "이상: ADMR0104E 의 문서가 다른 소유자(root 등)·읽기 권한 없음, 또는 FS 100%. 정상: 모든 config 파일이 WAS 실행 계정 소유·공간 여유"
+      note: "적용: tWAS 8.5.5/9.0.5 · 권한: WAS 실행 계정 또는 root(읽기) · <user> = WAS 실행 계정"
+    - do: 구성 임시 영역 확인 (읽기 전용)
+      cmd: |
+        du -sh <PROFILE_ROOT>/wstemp <PROFILE_ROOT>/temp
+        ls -lt <PROFILE_ROOT>/config/cells/<cell>/ | head
+      check: "wstemp·temp 가 비정상적으로 크면 공간 부족 원인, 최근 변경 시각이 오류 시각과 맞으면 그 변경이 계기"
+      note: "적용: tWAS 8.5.5/9.0.5 · 권한: WAS 실행 계정"
+  - stage: 2
+    steps:
+    - do: 구성 백업 후 권한 바로잡기
+      cmd: |
+        <PROFILE_ROOT>/bin/backupConfig.sh /tmp/was_cfg_$(date +%Y%m%d%H%M).zip -nostop
+        chown -R <user>:<group> <PROFILE_ROOT>/config
+      check: "성공: 관리 작업·기동에서 ADMR0104E 재발 없음. 실패: 같은 오류 → 파일 손상 여부 확인 후 백업 zip 으로 restoreConfig"
+      note: "사전조건: 1차에서 다른 소유자 파일 목록 기록 · 영향: 권한 변경은 즉시 반영, 서비스 중단 없음 · 승인: WAS 운영 담당·시스템 담당 · 백업/롤백: backupConfig zip, 손상 시 restoreConfig.sh <zip> (서버 정지 필요) · 적용: tWAS 8.5.5/9.0.5"
+    - do: 손상 문서 복원 (권한 조치로 해결되지 않을 때)
+      cmd: |
+        <PROFILE_ROOT>/bin/restoreConfig.sh /tmp/was_cfg_<시각>.zip
+      check: "성공: 서버 기동 시 ADMR0104E 없음·WSVR0001I. 실패: 복원 오류 → 이전 백업 zip 사용, IBM 지원 의뢰"
+      note: "사전조건: 정상 시점 백업 zip 존재 확인 · 영향: restoreConfig 는 서버를 정지시키고 백업 이후의 구성 변경을 잃음 · 승인: WAS 운영 담당·변경 관리 · 백업/롤백: 복원 직전 backupConfig 로 현재 상태 zip 추가 보관 · 적용: tWAS 8.5.5/9.0.5"
+  - stage: 3
+    steps:
+    - do: IBM Support 의뢰 자료
+      cmd: |
+        tar czf was_cfg_issue_$(date +%Y%m%d).tgz <PROFILE_ROOT>/logs/<server>/ <PROFILE_ROOT>/logs/ffdc/
+        ls -lR <PROFILE_ROOT>/config > config_ls.txt ; <WAS_HOME>/bin/versionInfo.sh | head -20
+      check: "SystemOut·ffdc·config 파일 목록(권한)·버전"
+      note: "민감정보 마스킹: 셀·노드·호스트명·IP·사용자명 가림, security.xml 등 구성 파일 원본은 보내지 않음 · 전달 승인: 보안 담당"
+
+- id: WSP-PROC-R5-PERFORMANCE
+  products: [websphere]
+  category: performance
+  match: [HMGR0152W, DCSV0004W]
+  title: CPU 기아·스레드 스케줄 지연 (HA 관리자·DCS) (WebSphere)
+  source: "IBM WAS traditional 8.5.5/9.0.5 메시지 참조 'HMGR'(HMGR0152W)·'DCSV'(DCSV0004W) / 'Tuning the IBM virtual machine for Java'(verbose GC, 힙 크기)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 지연 시간·CPU·페이징 확인 (읽기 전용)
+      cmd: |
+        grep -nE "HMGR0152W|DCSV0004W" <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -20
+        vmstat 5 5
+        top -b -n 1 | head -20
+      check: "이상: vmstat 의 r(실행 대기) 가 CPU 수보다 큼·id 0 근처·si/so(swap) 발생, HMGR0152W 의 지연 초가 수 초 이상. 정상: CPU 여유·swap 없음이면 GC 정지 쪽 확인"
+      note: "적용: Linux(top -b), AIX 는 vmstat·topas, tWAS 8.5.5/9.0.5 · 권한: 일반 사용자"
+    - do: GC 정지·javacore 확인 (프로세스 유지)
+      cmd: |
+        tail -200 <PROFILE_ROOT>/logs/<server>/native_stderr.log | grep -iE "exclusive|gc|pause" | tail -30
+        <PROFILE_ROOT>/bin/wsadmin.sh -lang jython -c "AdminControl.invoke(AdminControl.completeObjectName('type=JVM,process=<server>,*'), 'dumpThreads')"
+      check: "이상: HMGR0152W 시각과 같은 시각 긴 GC 정지(수 초). javacore 에서 CPU 과점유 스레드 확인"
+      note: "적용: IBM JDK verbose GC 활성 시(기본 출력 native_stderr.log 또는 지정 파일) · 권한: WAS 실행 계정·wsadmin monitor 역할"
+  - stage: 2
+    steps:
+    - do: 힙·GC 정책 조정
+      cmd: |
+        <PROFILE_ROOT>/bin/backupConfig.sh /tmp/was_cfg_$(date +%Y%m%d%H%M).zip -nostop
+        <PROFILE_ROOT>/bin/wsadmin.sh -lang jython <<'EOF'
+        jvm=AdminConfig.list('JavaVirtualMachine', AdminConfig.getid('/Server:<server>/'))
+        print AdminConfig.showAttribute(jvm,'maximumHeapSize'), AdminConfig.showAttribute(jvm,'genericJvmArguments')
+        AdminConfig.modify(jvm,[['initialHeapSize','<MB>'],['maximumHeapSize','<MB>']])
+        AdminConfig.save()
+        EOF
+      check: "성공: 재기동 후 GC 정지 단축·HMGR0152W·DCSV0004W 재발 없음. 실패: 기동 실패(메모리 부족)·지연 지속 → 원래 값 복원, CPU 원인(다른 프로세스) 재확인"
+      note: "사전조건: 물리 메모리 여유(힙 합계 < 물리 메모리) 확인, 변경 전 값 기록 · 영향: 재기동 필요(서비스 중단), 힙 과대 시 페이징 악화 · 승인: WAS 운영 담당·시스템 담당 · 백업/롤백: backupConfig zip, 롤백은 원래 값 modify·save 또는 restoreConfig · 적용: tWAS 8.5.5/9.0.5"
+    - do: 같은 호스트 부하 분산 (CPU 포화가 원인일 때)
+      config:
+        file: 배치 일정·서버 배치 계획
+        snippet: |
+          CPU 과점유 배치·다른 JVM 실행 시간 조정, 한 호스트의 WAS JVM 수(통합 밀도) 축소
+        note: "코어 그룹 멤버가 CPU 기아로 실패 판정(DCSV8104W)되기 전에 조치"
+      check: "성공: vmstat r 값이 CPU 수 이하로 유지, HMGR0152W 미발생. 실패: 포화 지속 → 증설 요청"
+      note: "사전조건: 부하 원인 프로세스 확인 · 영향: 배치 시간 변경은 업무 일정에 영향 · 승인: 업무 담당·시스템 담당 · 백업/롤백: 변경 전 일정 기록, 원래 일정으로 원복 가능 · 적용: 공통"
+  - stage: 3
+    steps:
+    - do: IBM Support 의뢰 자료 (MustGather — 성능·행)
+      cmd: |
+        tar czf was_perf_$(date +%Y%m%d).tgz <PROFILE_ROOT>/logs/<server>/ <PROFILE_ROOT>/javacore.*.txt
+        vmstat 5 12 > vmstat.txt ; <WAS_HOME>/bin/versionInfo.sh | head -20
+      check: "SystemOut·native_stderr(verbose GC)·javacore 3회·vmstat·버전"
+      note: "민감정보 마스킹: 호스트명·IP·사용자명·javacore 의 명령행 비밀번호 인수 가림 후 전달 · 전달 승인: 보안 담당"
+
+- id: WSP-PROC-R5-LOCK
+  products: [websphere]
+  category: lock
+  match: [CWSIS1546I]
+  title: 메시징 엔진 데이터 저장소 잠금 상실·획득 실패 (WebSphere SIB)
+  source: "IBM WAS traditional 9.0.5 'Messaging engine troubleshooting tips'·메시지 참조 'CWSIS' / 'Configuring high availability and workload sharing of service integration'(core group policy)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 잠금 메시지·메시징 엔진 상태 전이 확인 (읽기 전용)
+      cmd: |
+        grep -nE "CWSIS15|CWSID" <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -30
+        nc -zvw3 <db_host> <port>
+      check: "이상: 잠금 상실 직후 메시징 엔진이 중지·재시작 반복, DB 포트 불통. 정상: DB 정상이고 엔진이 한 서버에서만 활성"
+      note: "적용: tWAS 8.5.5/9.0.5 (SIB 데이터 저장소 사용 시) · 권한: WAS 실행 계정"
+    - do: 같은 엔진이 여러 서버에서 활성인지 확인 (읽기 전용)
+      cmd: |
+        <PROFILE_ROOT>/bin/wsadmin.sh -lang jython -c "print AdminControl.queryNames('type=SIBMessagingEngine,*')"
+      check: "이상: 같은 메시징 엔진 이름이 두 프로세스에서 조회됨(중복 시작) 또는 어느 서버에도 없음. 정상: 엔진당 한 프로세스"
+      note: "적용: tWAS 8.5.5/9.0.5 · 권한: wsadmin monitor 역할(배포 관리자에 연결하면 셀 전체 조회)"
+  - stage: 2
+    steps:
+    - do: DB 복구 또는 HA 정책 정비 후 해당 서버 재기동
+      cmd: |
+        <PROFILE_ROOT>/bin/backupConfig.sh /tmp/was_cfg_$(date +%Y%m%d%H%M).zip -nostop
+        <PROFILE_ROOT>/bin/stopServer.sh <server>
+        <PROFILE_ROOT>/bin/startServer.sh <server>
+      check: "성공: SystemOut 에 메시징 엔진 시작 완료·CWSIS1546I 재발 없음, 큐 메시지 송수신 정상. 실패: 잠금 획득 실패 지속 → 다른 서버의 같은 엔진 활성 여부·DB 잠금 테이블 상태를 DB 담당과 확인"
+      note: "사전조건: DB 정상 확인, 중복 시작이면 코어 그룹 정책(One of N)·match criteria 확인 · 영향: 재기동 동안 메시징 서비스 중단, HA 구성이면 다른 서버로 엔진 이동 · 승인: WAS 운영 담당·메시징 업무 담당 · 백업/롤백: backupConfig zip, 정책 변경 시 변경 전 값 기록 후 원복 가능 · 적용: tWAS 8.5.5/9.0.5"
+  - stage: 3
+    steps:
+    - do: IBM Support 의뢰 자료
+      cmd: |
+        tar czf was_sib_$(date +%Y%m%d).tgz <PROFILE_ROOT>/logs/<server>/ <PROFILE_ROOT>/logs/ffdc/
+        <WAS_HOME>/bin/versionInfo.sh | head -20
+      check: "엔진이 있는 모든 서버의 SystemOut·ffdc·버전, 데이터 저장소 DB 오류 로그"
+      note: "민감정보 마스킹: 호스트명·IP·DB 스키마·사용자명 가림 후 전달 · 전달 승인: 보안 담당"
+
+- id: WSP-PROC-R5-UPSTREAM
+  products: [websphere]
+  category: upstream
+  match: [PMGR6022E]
+  title: 리소스 어댑터 Interaction 오류 (EJB 영속성·백엔드 연동) (WebSphere)
+  source: "IBM WAS traditional 9.0.5 메시지 참조 'PMGR'(PMGR6022E) / 'J2C connection factory settings' / wsadmin AdminConfig"
+  stages:
+  - stage: 1
+    steps:
+    - do: 오류 Bean·리소스 어댑터·백엔드 확인 (읽기 전용)
+      cmd: |
+        grep -n -A 20 "PMGR6022E" <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -40
+        grep -nE "J2CA|DSRA" <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -20
+        nc -zvw3 <host> <port>
+      check: "이상: getInteraction·Interaction 실행 예외와 J2CA·DSRA 연결 오류 동반, 백엔드 포트 불통. 정상: 백엔드 정상인데 특정 Bean 만 실패면 구성 문제"
+      note: "적용: tWAS 8.5.5/9.0.5 (EJB 2.x CMP·리소스 어댑터 사용 시) · 권한: WAS 실행 계정"
+    - do: 연결 팩토리 구성 확인 (읽기 전용)
+      cmd: |
+        <PROFILE_ROOT>/bin/wsadmin.sh -lang jython -c "print AdminConfig.list('J2CConnectionFactory')"
+      check: "Bean 이 참조하는 연결 팩토리 JNDI 가 목록에 있고 대상 범위(셀·노드·서버)가 맞는지 확인"
+      note: "적용: tWAS 8.5.5/9.0.5 · 권한: wsadmin monitor 역할"
+  - stage: 2
+    steps:
+    - do: 연결 팩토리·리소스 어댑터 구성 수정
+      cmd: |
+        <PROFILE_ROOT>/bin/backupConfig.sh /tmp/was_cfg_$(date +%Y%m%d%H%M).zip -nostop
+        <PROFILE_ROOT>/bin/wsadmin.sh -lang jython <<'EOF'
+        cf=AdminConfig.getid('/J2CConnectionFactory:<cf_name>/')
+        print AdminConfig.show(cf)
+        AdminConfig.modify(cf,[['<attribute>','<value>']])
+        AdminConfig.save()
+        EOF
+      check: "성공: 재기동(또는 애플리케이션 재시작) 후 PMGR6022E 재발 없음, 업무 호출 정상. 실패: 같은 오류 → 원래 값 복원, 백엔드(EIS) 측 오류 담당 확인"
+      note: "사전조건: 백엔드 정상 확인, 변경 전 show 결과 저장 · 영향: 반영 시 애플리케이션 또는 서버 재시작 필요 · 승인: WAS 운영 담당·연동 업무 담당 · 백업/롤백: backupConfig zip, 롤백은 원래 값 modify·save 또는 restoreConfig · 적용: tWAS 8.5.5/9.0.5"
+  - stage: 3
+    steps:
+    - do: IBM Support 의뢰 자료
+      cmd: |
+        tar czf was_pmgr_$(date +%Y%m%d).tgz <PROFILE_ROOT>/logs/<server>/ <PROFILE_ROOT>/logs/ffdc/
+        <WAS_HOME>/bin/versionInfo.sh | head -20
+      check: "SystemOut·SystemErr·ffdc·버전·리소스 어댑터 버전"
+      note: "민감정보 마스킹: 호스트명·IP·사용자 ID·백엔드 접속 정보 가림 후 전달 · 전달 승인: 보안 담당"

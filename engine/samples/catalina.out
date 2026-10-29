@@ -1,0 +1,7 @@
+2026-09-02 13:58:12,041 INFO  [http-nio-8080-exec-3] c.o.order.OrderController - order #99231 accepted
+2026-09-02 14:02:48,120 ERROR [http-nio-8080-exec-7] c.z.h.pool.HikariPool - HikariPool-1 - connection is not available, request timed out after 30001ms.
+java.sql.SQLTransientConnectionException: HikariPool-1 - Connection is not available, request timed out after 30001ms.
+	at com.zaxxer.hikari.pool.HikariPool.createTimeoutException(HikariPool.java:696)
+	at com.zaxxer.hikari.pool.HikariPool.getConnection(HikariPool.java:181)
+2026-09-02 14:02:52,338 ERROR [http-nio-8080-exec-9] c.z.h.pool.HikariPool - HikariPool-1 - connection is not available, request timed out after 30002ms.
+2026-09-02 14:04:01,215 INFO  [http-nio-8080-exec-2] c.o.order.HealthCheck - datasource degraded

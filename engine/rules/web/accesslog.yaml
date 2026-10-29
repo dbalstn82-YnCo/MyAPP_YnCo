@@ -1,0 +1,87 @@
+# WEB — 액세스 로그(CLF/Combined) 5xx 시그니처 (Apache·Nginx·WebtoB 공통)
+rules:
+- id: WEB-ACC-001
+  layer: web
+  product:
+  - accesslog
+  match:
+    regex: 'HTTP 50[23] '
+  severity: critical
+  category: upstream
+  verdict: 백엔드 불가/과부하 응답 (502/503)
+  immediate:
+  - '`awk ''$9 ~ /^50[23]$/ {print $7}'' <access_log> | sort | uniq -c | sort -rn | head` 로 502/503 URL 상위 확인 — 특정 경로에 몰리면 해당 백엔드, 전체면 WAS 전반 (common/combined: $9 상태·$7 URL·$1 IP, IIS W3C 는 열 위치 다름)'
+  - '`curl -s -o /dev/null -w "%{http_code} %{time_total}" --max-time 5 http://<backend>:<port>/` 로 웹 서버에서 WAS 직접 응답 확인 — 000 이면 연결 불가(502 원인), 503 이면 백엔드 과부하'
+  - '(IIS) `Get-WebAppPoolState -Name ''<앱풀>''` 로 앱풀 상태 확인 — 503 과 Stopped 가 겹치면 503.0 판정 참조'
+  short:
+  - 해당 시간대 WAS 로그(스레드·풀·OOM) 대조
+  mid:
+  - 헬스체크·자동 격리 구성
+  long:
+  - 백엔드 이중화·용량 계획
+  versions:
+  - Apache/nginx/IIS/WebtoB 접근 로그 (CLF·W3C 공통)
+  version_note: 접근 로그 상태 코드 502/503 — 형식 공통
+- id: WEB-ACC-002
+  layer: web
+  product:
+  - accesslog
+  match:
+    regex: 'HTTP 504 '
+  severity: error
+  category: upstream
+  verdict: 백엔드 응답 시간 초과 (504)
+  immediate:
+  - '`awk ''$9 == 504 {print $7}'' <access_log> | sort | uniq -c | sort -rn | head` 로 504 URL 상위 확인 — 특정 API 에 몰리면 그 API 의 DB 대기·외부 연동 지연 (common/combined: $9 상태·$7 URL·$1 IP, IIS W3C 는 열 위치 다름)'
+  - '같은 시각 WAS 로그에서 해당 URL 처리 시간 확인 후 프록시 타임아웃(Apache `grep -rn "ProxyTimeout" <설정 디렉터리>`, nginx `nginx -T 2>/dev/null | grep proxy_read_timeout`) 값과 비교'
+  short:
+  - 프록시 타임아웃과 실제 응답 시간 비교
+  mid:
+  - 지연 API 개선
+  long:
+  - 응답 시간 SLO 관리
+  versions:
+  - Apache/nginx/IIS/WebtoB 접근 로그 (CLF·W3C 공통)
+  version_note: '504'
+- id: WEB-ACC-003
+  layer: web
+  product:
+  - accesslog
+  match:
+    regex: 'HTTP 500 '
+  severity: error
+  category: internal
+  verdict: 애플리케이션 내부 오류 (500)
+  immediate:
+  - '`awk ''$9 == 500 {print $4, $7}'' <access_log> | tail -20` 로 발생 시각·URL 확인 (common/combined: $9 상태·$7 URL·$1 IP, IIS W3C 는 열 위치 다름)'
+  - '같은 시각 WAS 애플리케이션 로그를 `grep -n -A5 "Exception" <WAS 로그> | tail -40` 로 확인 — 같은 URL·같은 예외 반복이면 애플리케이션 결함'
+  short:
+  - 오류 URL·호출처 패턴 분석
+  mid:
+  - 앱 오류 수정 배포
+  long:
+  - 오류율 감시 기준 수립
+  versions:
+  - Apache/nginx/IIS/WebtoB 접근 로그 (CLF·W3C 공통)
+  version_note: '500'
+- id: WEB-ACC-004
+  layer: web
+  product:
+  - accesslog
+  match:
+    regex: 'HTTP 429 '
+  severity: warn
+  category: capacity
+  verdict: 유량 제한 응답 (429)
+  immediate:
+  - '`awk ''$9 == 429 {print $1}'' <access_log> | sort | uniq -c | sort -rn | head` 로 초과 호출처 IP 상위 확인 — 한두 IP 가 대부분이면 이상 호출, 고르게 퍼져 있으면 정상 급증 (common/combined: $9 상태·$7 URL·$1 IP, IIS W3C 는 열 위치 다름)'
+  - '`awk ''$1 == "<IP>" {print $7}'' <access_log> | sort | uniq -c | sort -rn | head` 로 그 IP 의 호출 URL 확인 — 연계 시스템이면 담당 통보'
+  short:
+  - 유량 정책과 실사용량 비교
+  mid:
+  - 정책 재산정
+  long:
+  - 용량 계획
+  versions:
+  - Apache/nginx/IIS/WebtoB 접근 로그 (CLF·W3C 공통)
+  version_note: '429'

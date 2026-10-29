@@ -1,0 +1,1240 @@
+# 근거 매뉴얼·작성 기준 (2026-10-16, 아이디어 3 — '같은 제품·유형'으로만 붙던 Unix 판정을 전용 절차로 승격)
+# - 기존 AIX-PROC-STORAGE·HPUX-PROC-STORAGE·SOL-PROC-STORAGE 는 '공간 부족' 절차라 LVM·JFS2·SAN 경로·ZFS 무결성 판정에 맞지 않았다.
+#   AIX-PROC-HARDWARE·HPUX-PROC-HARDWARE 는 디스크·경로·메모리 위주라 CPU 격리·온도/전원·테이프·예약 충돌에는 맞지 않았다.
+# - AIX: IBM AIX 7.x 문서(Logical Volume Manager: lsvg/lspv/varyonvg/chpv/syncvg/replacepv, JFS2: fsck/logform/chfs/snapshot,
+#        MPIO: lspath/chpath/lsmpio, fcstat, Error logging: errpt, CPU Guard: sys0 cpuguard, bindprocessor, devrsrv, diag Hot Plug Task),
+#        IBM 지원 문서 'Resolving missing or removed disks in AIX LVM'·'Increasing the Size of a JFS/JFS2 Log Device'·
+#        'Data Collection for JFS/JFS2 Filesystem Corruption', SDDPCM User's Guide(pcmpath), PowerVM VIOS 명령(lsmap, errlog, ioslevel, updateios, alt_root_vg),
+#        HMC 명령(lssvcevents, chhwres).
+# - HP-UX: HP-UX 11i v3 System Administration·LVM(vgdisplay/vgchange/vgsync/lvsync/vgcfgrestore/pvchange), fcmsutil(1M), ioscan(1M), scsimgr(1M),
+#        fsck_vxfs(1M), Veritas Volume Manager Administrator's Guide(vxdisk/vxprint/vxreattach/vxrecover/vxdiskadm), EMS/SFM(event.log, evweb), machinfo(1).
+# - Solaris: Oracle Solaris 10/11 관리 문서(ZFS 문제 해결: zpool status/clear/online/replace/scrub/clear -F, SAN·다중 경로: fcinfo/mpathadm/cfgadm/luxadm,
+#        Solaris Volume Manager: metastat/metadb/metareplace, FMA: fmadm/fmdump/fmstat, 장치 관리: cfgadm usb/rmformat), FMA 메시지 FMD-8000-2K.
+# - OS-UNX-001/002/003 은 aix·hpux·solaris 공통 룰이다. match 는 제품을 가리지 않으므로 제품별 절차에 넣으면 다른 OS 판정에 엉뚱한 OS 절차가
+#   먼저 붙는다 — 그래서 세 OS 를 한 절차(UNX-PROC-R6-*)에 OS 별 단계로 나눠 담았다(제품별 절차는 '같은 제품·유형'으로 두 번째에 함께 보인다).
+# - 공통 기준: knowledge_spec.md 5차(GPT 45차 관문) — 1차 읽기 전용, 2차 사전조건·영향·승인·백업/롤백 + 성공/실패 판단, 3차 민감정보 마스킹·전달 승인.
+#   원문을 대조하지 못한 명령·수치는 note 에 '미검증 — …' 으로 남겼다.
+procedures:
+# ── AIX ──
+- id: AIX-PROC-R6-LVM
+  scope: id
+  products: [aix]
+  category: storage
+  match: ['26120107', 5BEAD71B, AIX-LVM-IO-FAIL, AIX-LVM-STALE, AIX-VG-QUORUM-LOST, E86653C3, EAA3D429, F7DDA124, OS-AIX-ERRPT-002, LEG-AIX-LVM]
+  title: PV 누락·VG 쿼럼 상실·LVM I/O 오류·미러 stale (AIX LVM)
+  source: "IBM AIX 7.x 문서 — Logical Volume Manager(lsvg, lspv, varyonvg, chpv, syncvg, replacepv, lquerypv), MPIO(lspath), Error logging(errpt) · IBM 지원 'Resolving missing or removed disks in AIX LVM'"
+  stages:
+  - stage: 1
+    steps:
+    - do: "VG 활성·쿼럼·PV 상태 확인 (읽기 전용)"
+      cmd: |
+        lsvg -o ; lsvg
+        lsvg <vg> | grep -i -E "VG STATE|QUORUM|STALE|ACTIVE PVs|TOTAL PVs"
+        lsvg -p <vg>
+      check: "lsvg 에는 있는데 lsvg -o 에 없는 VG 는 비활성(쿼럼 상실로 닫혔을 수 있음) · PV STATE 가 missing/removed 인 PV 와 ACTIVE PVs < TOTAL PVs 면 PV 누락 확정 · 정상: 모든 PV active, STALE PVs·STALE PPs 0"
+      note: "적용: AIX 5.3~7.3 · 권한: 일반 사용자 조회 가능(비활성 VG 상세는 root)"
+    - do: "stale LV·PP 와 하위 디스크·경로 확인 (읽기 전용)"
+      cmd: |
+        lsvg -l <vg> | grep -i stale
+        lspv hdisk<N> | grep -i -E "PV STATE|STALE"
+        lsdev -Cc disk ; lspath -l hdisk<N>
+        lquerypv -h /dev/hdisk<N> 80 10
+      check: "stale LV 가 있으면 미러 불일치 · hdisk 가 Defined 이거나 그 hdisk 의 모든 경로가 Failed 면 디스크·SAN 측 문제(LVM 조치보다 장치 복구가 먼저) · lquerypv 출력(오프셋 80)의 PVID 가 lspv 의 PVID 와 같아야 같은 디스크"
+      note: "적용: AIX 5.3~7.3 · 권한: lquerypv 는 root(디스크 머리 영역을 읽기만 하고 쓰지 않음)"
+    - do: "같은 시각 errpt 로 원인 순서 확인 (읽기 전용)"
+      cmd: |
+        errpt | head -40
+        errpt -a -j <IDENTIFIER> | head -80
+      check: "SC_DISK_ERR*·FCP_ERR*·PATH 오류가 LVM 항목보다 먼저 찍혔으면 하위 디스크·경로가 원인 · LVM_SA_QUORCLOSE 면 쿼럼 상실로 VG 가 닫힘 · LVM_QUORUMNOQUORUM 이면 쿼럼 없이 강제 활성화된 VG(누락 디스크 복구 후 동기화 필요)"
+      note: "적용: AIX 5.3~7.3 · 권한: errpt 는 일반 사용자 가능 · errclear 는 증거 삭제이므로 금지"
+  - stage: 2
+    steps:
+    - do: "(2차·승인 후) 디스크·경로 복구 뒤 VG 재활성화·PV 복귀"
+      cmd: |
+        lsvg -p <vg> > /tmp/lsvg_p_<vg>_before.txt ; lspv > /tmp/lspv_before.txt
+        varyonvg <vg>
+        chpv -va hdisk<N>      # PV STATE 가 removed 인 PV 에만
+      check: "성공: lsvg -p <vg> 의 모든 PV active, lsvg -o 에 VG 표시 · 실패: varyonvg 가 0516 계열 오류로 실패하거나 PV 가 missing 으로 남음 → 장치·경로 복구부터 다시 확인, 강제 활성화(varyonvg -f)는 하지 말고 IBM 지원과 협의"
+      note: "사전조건: 하위 hdisk Available·경로 Enabled, lquerypv PVID 일치, 쿼럼 상실 VG 는 응용이 멈춘 상태 확인, PowerHA 공유 VG 는 클러스터 도구(C-SPOC)로 · 영향: 활성화되면 stale PP 동기화가 자동으로 시작되어 I/O 부하가 생김 · 승인: 시스템 담당·스토리지 담당(변경 관리) · 백업/롤백: 실행 전 lsvg/lspv 출력 보관, varyonvg 자체는 데이터를 바꾸지 않지만 강제(-f) 활성화는 되돌릴 수단이 없어 최신 백업(savevg/mksysb) 확인 · 적용: AIX 5.3~7.3"
+    - do: "(2차·승인 후, 업무 부하 낮은 시간) 미러 재동기화"
+      cmd: |
+        lsvg <vg> | grep -i stale
+        syncvg -v <vg>          # LV 하나만: syncvg -l <lv>
+      check: "성공: lsvg <vg> 의 STALE PPs 0, lsvg -l <vg> 에 stale 없음 · 실패: 동기화 중 errpt 에 새 I/O 오류 → 해당 PV 교체(아래 단계) 검토 후 3차"
+      note: "사전조건: 모든 경로·PV 정상과 신규 I/O 오류 중단 확인, stale PP 가 실제 있을 때만 · 영향: 동기화 동안 디스크 I/O 부하·응답 지연 · 승인: 시스템 담당 · 백업/롤백: 정상 사본을 stale 사본으로 복사만 하므로 되돌릴 대상은 없음, 정상 사본 판단이 틀리면 손상 위험이 있어 사전 백업 확인 · 적용: AIX 5.3~7.3"
+    - do: "(2차·승인 후) 결함 PV 교체"
+      cmd: |
+        lspv | grep hdisk<new>
+        replacepv hdisk<old> hdisk<new>
+      check: "성공: lsvg -p <vg> 에 새 PV active, STALE PPs 0 · 실패: replacepv 오류 → 미러 해제(unmirrorvg)·reducevg 절차를 IBM 지원과 협의"
+      note: "사전조건: 새 디스크 크기 ≥ 기존, 새 디스크가 다른 VG 에 속하지 않음(lspv 의 VG 열 None), 최신 백업 · 영향: 데이터 이동 중 I/O 부하 · 승인: 시스템 담당·스토리지 담당·HW 업체 · 백업/롤백: savevg/mksysb 백업이 유일한 롤백 · 적용: AIX 5.3~7.3"
+  - stage: 3
+    steps:
+    - do: "IBM 지원 의뢰 자료"
+      cmd: |
+        snap -gc
+        errpt -a > errpt_$(date +%Y%m%d).txt ; lsvg -p <vg> > lsvg_p_<vg>.txt ; lspv > lspv.txt
+      check: "snap(/tmp/ibmsupt/snap.pax.Z)·errpt -a·lsvg -p·lspv 출력"
+      note: "민감정보 마스킹: 호스트명·IP·사용자 계정을 가린 뒤 전달(디스크 시리얼·위치 코드·PVID 는 분석에 필요하므로 유지) · 전달 승인: 시스템 담당 확인 후 보안 담당 승인"
+
+- id: AIX-PROC-R6-JFS2
+  scope: id
+  products: [aix]
+  category: storage
+  match: [4B97B439, 78ABDDEB, AIX-JFS2-ERROR, B6DB68E0, AIX-FS-MOUNT-FAIL]
+  title: JFS2 메타데이터 손상·fsck 필요·마운트 실패 (AIX)
+  source: "IBM AIX 7.x 문서 — JFS2(fsck, mount, lsfs), /etc/filesystems, LVM(lsvg, varyonvg), Error logging(errpt) · IBM 지원 'Data Collection for JFS/JFS2 Filesystem Corruption'"
+  stages:
+  - stage: 1
+    steps:
+    - do: "오류 종류·대상 장치·선행 디스크 오류 확인 (읽기 전용)"
+      cmd: |
+        errpt | head -40
+        errpt -a -j <IDENTIFIER> | head -80
+        errpt -a | grep -E "^LABEL:" | grep -i -E "J2_|JFS" | sort | uniq -c
+      check: "J2_METADATA_CORRUPT·J2_FSCK_REQUIRED 등 LABEL 과 대상 장치(LV)·시각 기록 · 같은 시각 SC_DISK_ERR*·LVM_IO_FAIL 이 먼저면 하위 디스크 원인(AIX-PROC-R6-LVM 으로 장치 복구가 먼저) · 정상: 새 J2 항목 없음"
+      note: "적용: AIX 5.3~7.3 · 권한: errpt 는 일반 사용자 가능"
+    - do: "마운트 상태·구성 확인 (읽기 전용)"
+      cmd: |
+        mount | grep <mount>
+        lsfs <mount>
+        grep -p <mount> /etc/filesystems
+        lsvg -o ; lsvg -l <vg>
+        df -g <mount>
+      check: "mount 목록에 없거나 ro 로 바뀌었으면 영향 확정 · /etc/filesystems 의 dev·log·vfs 가 lsvg -l 의 LV·jfs2log 와 맞는지 · VG 가 lsvg -o 에 없으면 VG 비활성(먼저 VG 활성화) · LV STATE 가 stale 이면 디스크 문제"
+      note: "적용: AIX 5.3~7.3 (grep -p 는 AIX 의 스탠자 단위 출력) · 권한: 일반 사용자 가능"
+    - do: "복구 준비 — 사용 중 프로세스·백업 시각 확인 (읽기 전용)"
+      cmd: |
+        fuser -cu <mount>
+      check: "umount 가 필요한 2차 작업 때 멈춰야 할 프로세스·사용자 목록을 업무 담당과 공유, 최근 백업 시각 확인 — 백업이 없으면 2차 전에 보고"
+      note: "적용: AIX 5.3~7.3 · 권한: root(다른 사용자 프로세스 표시)"
+  - stage: 2
+    steps:
+    - do: "(2차·승인 후) 수정 전 진단 자료 확보"
+      cmd: |
+        snap -gc
+        errpt -a > /tmp/errpt_before_$(date +%Y%m%d).txt
+      check: "성공: /tmp/ibmsupt/snap.pax.Z 생성 · 실패: /tmp 공간 부족 → snap -d <다른 경로> 로 출력 위치 지정"
+      note: "사전조건: /tmp 여유 공간 확인 · 영향: 수집 중 CPU·디스크 부하 · 승인: 시스템 담당 · 백업/롤백: 수집만 하므로 롤백 불필요 — fsck 뒤에는 손상 흔적이 사라지므로 수정 전에 수집"
+    - do: "(2차·승인 후, 업무 중단 창) umount → fsck → mount"
+      cmd: |
+        umount <mount>
+        fsck -y /dev/<lv>
+        mount <mount>
+      check: "성공: fsck 가 오류 없이 끝나거나 수정 완료 후 mount 성공, errpt 에 새 J2 항목 없음 · 실패: fsck 가 치명 오류·반복 수정 → 백업 복원 결정(3차), umount 'Device busy' → 1차 fuser 목록 프로세스를 업무 담당 승인 하에 정지"
+      note: "사전조건: 하위 디스크·경로 정상(errpt 신규 디스크 오류 없음), 최근 백업, 수정 전 자료 수집 완료 · 영향: 마운트 해제 동안 해당 파일시스템 서비스 중단, fsck 가 손상 파일을 lost+found 로 옮기거나 지울 수 있음 · 승인: 시스템 담당·업무 담당(변경 관리) · 백업/롤백: fsck 수정은 되돌릴 수 없음 — 백업 복원이 유일한 롤백 · 적용: AIX 5.3~7.3 JFS2 (/·/usr·/var 등 rootvg 파일시스템은 서비스 모드 부팅이 필요해 IBM 지원과 진행)"
+    - do: "(2차·승인 후) 마운트 실패 원인별 조치 — VG 활성화·구성 수정"
+      cmd: |
+        cp -p /etc/filesystems /etc/filesystems.$(date +%Y%m%d)
+        varyonvg <vg>
+        mount <mount>
+      check: "성공: mount 목록에 표시·df -g 정상 · 실패: 로그 장치 오류 → /etc/filesystems 의 log 값과 lsvg -l 의 jfs2log LV 대조 후 수정, dirty 오류 → 위 fsck 단계"
+      note: "사전조건: 그 VG 를 다른 노드(PowerHA)가 쓰고 있지 않은지 확인 · 영향: VG 활성화·마운트로 해당 파일시스템 서비스 재개 · 승인: 시스템 담당 · 백업/롤백: /etc/filesystems 날짜 백업본으로 원복, VG 는 varyoffvg <vg> 로 되돌림 · 적용: AIX 5.3~7.3"
+  - stage: 3
+    steps:
+    - do: "IBM 지원 의뢰 자료"
+      cmd: |
+        ls -l /tmp/ibmsupt/snap.pax.Z
+        errpt -a > errpt_$(date +%Y%m%d).txt ; lsvg -l <vg> > lsvg_l_<vg>.txt
+      check: "수정 전 snap·errpt -a(J2 Detail Data 포함)·fsck 출력·lsvg -l"
+      note: "민감정보 마스킹: 호스트명·IP·사용자 계정과 손상 파일 경로(업무명)를 가린 뒤 전달 · 전달 승인: 시스템 담당 확인 후 보안 담당 승인"
+
+- id: AIX-PROC-R6-J2LOG
+  scope: id
+  products: [aix]
+  category: storage
+  match: [CF71B5B3]
+  title: JFS2 로그 장치 대기 J2_LOG_WAIT (AIX)
+  source: "IBM AIX 7.x 문서 — JFS2 log(logform, chfs -a log, mklv -t jfs2log, extendlv, lslv), Error logging(errpt) · IBM 지원 'Increasing the Size of a JFS/JFS2 Log Device'"
+  stages:
+  - stage: 1
+    steps:
+    - do: "로그 대기가 난 로그 장치 확인 (읽기 전용)"
+      cmd: |
+        errpt -a -j CF71B5B3 | head -40
+        errpt -a -j 061675CF | head -20
+        lsvg -l <vg> | grep -i jfs2log
+      check: "Detail Data 의 Major/Minor 번호(16진)를 10진으로 바꿔 ls -l /dev 에서 같은 번호의 장치(로그 LV)를 찾는다 · J2_LOG_WRAP(061675CF)이 함께 있으면 로그 장치가 작다는 근거"
+      note: "적용: AIX 6.1~7.3 · 권한: errpt 는 일반 사용자 가능"
+    - do: "로그 크기·공유 파일시스템·디스크 부하 확인 (읽기 전용)"
+      cmd: |
+        lslv <loglv> | grep -i -E "LPs|PP SIZE"
+        lslv -l <loglv>
+        grep -p <loglv> /etc/filesystems
+        iostat -D hdisk<N> 2 3
+      check: "그 로그를 쓰는 파일시스템 수·합계 크기에 비해 로그 LV 가 작거나, 로그 LV 가 있는 hdisk 의 평균 서비스 시간이 크면 원인 후보 · 정상: J2_LOG_WAIT 재발 없음"
+      note: "적용: AIX 6.1~7.3 · 권한: root · 미검증 — 파일시스템 크기 대비 로그 크기 권장 비율은 IBM 원문 수치를 대조하지 못함(IBM 문서 기준으로 판단)"
+  - stage: 2
+    steps:
+    - do: "(2차·승인 후, 작업 창) 로그 LV 증설 — 그 로그를 쓰는 파일시스템을 모두 umount 한 뒤"
+      cmd: |
+        umount <mount>          # 그 로그를 쓰는 모든 파일시스템
+        extendlv <loglv> <추가LP수>
+        logform /dev/<loglv>
+        mount <mount>
+      check: "성공: lslv <loglv> 의 LPs 증가, 모든 파일시스템 mount 성공, 이후 J2_LOG_WAIT 감소 · 실패: mount 오류 → /etc/filesystems 의 log 값 확인 후 IBM 지원"
+      note: "사전조건: 그 로그를 쓰는 파일시스템 목록 확정(1차), 모두 내릴 수 있는 작업 창, 최근 백업 · 영향: 작업 동안 해당 파일시스템 전부 서비스 중단, logform 은 로그 내용을 초기화하므로 반드시 umount 상태에서만 · 승인: 시스템 담당·업무 담당(변경 관리) · 백업/롤백: LV 는 축소할 수 없어 크기 원복 불가 — 문제 시 IBM 지원, /etc/filesystems 는 미리 날짜 백업 · 적용: AIX 6.1~7.3"
+    - do: "(2차·승인 후, 작업 창) 전용 로그 LV 를 새로 만들어 분리"
+      cmd: |
+        cp -p /etc/filesystems /etc/filesystems.$(date +%Y%m%d)
+        mklv -t jfs2log -y <newlog> <vg> <LP수> hdisk<N>
+        logform /dev/<newlog>
+        chfs -a log=/dev/<newlog> <mount>      # umount 상태에서 바꾼 뒤 mount
+      check: "성공: grep -p <mount> /etc/filesystems 에 새 log, mount 성공 · 실패: mount 오류 → chfs -a log=/dev/<oldlog> <mount> 로 원복 후 mount"
+      note: "사전조건: VG 여유 PP, 부하 낮은 hdisk 선택 · 영향: 해당 파일시스템 umount 동안 서비스 중단 · 승인: 시스템 담당(변경 관리) · 백업/롤백: /etc/filesystems 날짜 백업, 원복은 chfs -a log=/dev/<oldlog> <mount> · 적용: AIX 6.1~7.3"
+  - stage: 3
+    steps:
+    - do: "IBM 지원 의뢰 자료"
+      cmd: |
+        snap -gc
+        errpt -a > errpt_$(date +%Y%m%d).txt ; iostat -D 2 10 > iostat_D_$(date +%Y%m%d).txt
+      check: "snap·errpt -a·iostat -D·로그 LV 구성(lslv)"
+      note: "민감정보 마스킹: 호스트명·IP·사용자 계정을 가린 뒤 전달 · 전달 승인: 시스템 담당 확인 후 보안 담당 승인"
+
+- id: AIX-PROC-R6-J2SNAP
+  scope: id
+  products: [aix]
+  category: storage
+  match: [9C110A13]
+  title: JFS2 스냅숏 쓰기 불가 J2_SNAP_EIO (AIX)
+  source: "IBM AIX 6.1/7.1 문서 — JFS2 snapshot(snapshot -q, snapshot -o snapfrom, snapshot -d), LVM(lsvg -l), Error logging(errpt)"
+  stages:
+  - stage: 1
+    steps:
+    - do: "무효가 된 스냅숏과 원인 확인 (읽기 전용)"
+      cmd: |
+        errpt -a -j 9C110A13 | head -60
+        snapshot -q <mount>
+        lsvg -l <vg>
+        errpt | head -40
+      check: "snapshot -q 의 스냅숏 장치가 lsvg -l 에 없으면 rmlv 로 지운 경우 · 같은 시각 SC_DISK_ERR*·LVM_IO_FAIL 이 있으면 스냅숏 LV I/O 오류 · 이 오류 뒤 그 파일시스템의 스냅숏은 모두 무효이므로 스냅숏 기반 백업 성공 여부를 백업 담당과 확인"
+      note: "적용: AIX 6.1~7.x 외부(external) 스냅숏 · 권한: root"
+  - stage: 2
+    steps:
+    - do: "(2차·승인 후) 디스크 원인 해소 뒤 무효 스냅숏 정리·새 스냅숏 생성"
+      cmd: |
+        snapshot -d /dev/<snaplv>
+        snapshot -o snapfrom=<mount> -o size=<크기>M
+      check: "성공: snapshot -q <mount> 에 새 스냅숏만 표시, errpt 에 새 J2_SNAP_EIO 없음 · 실패: snapshot -d 오류 → 아래 rmlv 경우 단계"
+      note: "사전조건: 하위 디스크 I/O 오류 해소, VG 여유 PP 확인 · 영향: 새 스냅숏은 원본 쓰기마다 복사(COW) 부하 · 승인: 시스템 담당·백업 담당 · 백업/롤백: 무효 스냅숏은 복구 대상이 아니라 정리해도 잃는 것 없음, 새 스냅숏은 snapshot -d 로 제거 · 적용: AIX 6.1~7.x"
+    - do: "(2차·승인 후, 작업 창) 스냅숏 LV 를 rmlv 로 지운 경우 — 원본 umount → fsck → mount"
+      cmd: |
+        umount <mount>
+        fsck -y /dev/<lv>
+        mount <mount>
+      check: "성공: mount 성공, errpt 재발 없음 · 실패: fsck 오류 → AIX-PROC-R6-JFS2 절차·IBM 지원"
+      note: "사전조건: 최근 백업, 사용 프로세스 정지 합의 · 영향: umount 동안 서비스 중단 · 승인: 시스템 담당·업무 담당(변경 관리) · 백업/롤백: fsck 수정은 되돌릴 수 없음 — 백업 복원이 롤백 · 적용: AIX 6.1~7.x"
+  - stage: 3
+    steps:
+    - do: "IBM 지원 의뢰 자료"
+      cmd: |
+        snap -gc
+        errpt -a > errpt_$(date +%Y%m%d).txt
+      check: "snap·errpt -a·snapshot -q 출력"
+      note: "민감정보 마스킹: 호스트명·IP·사용자 계정을 가린 뒤 전달 · 전달 승인: 시스템 담당 확인 후 보안 담당 승인"
+
+- id: AIX-PROC-R6-SANPATH
+  scope: id
+  products: [aix]
+  category: storage
+  match: [AIX-FC-LINK-DOWN, AIX-MPIO-PATH-FAIL, AIX-VIOS-PATH-FAIL, A19337FA, 0502F666]
+  title: FC·SCSI 어댑터 링크, MPIO·SDDPCM·VIOS 경로, 스토리지 서브시스템 장애 (AIX)
+  source: "IBM AIX 7.x 문서 — MPIO(lspath, chpath, lsmpio), fcstat, lsslot, Error logging(errpt), diag(Hot Plug Task) · IBM SDDPCM User's Guide(pcmpath query/set) · PowerVM VIOS 명령(lsmap, errlog)"
+  stages:
+  - stage: 1
+    steps:
+    - do: "어댑터·링크 상태 확인 (읽기 전용)"
+      cmd: |
+        errpt | head -30
+        errpt -a -N fcs<N> | head -60 ; errpt -a -N fscsi<N> | head -40
+        lsdev -Cc adapter | grep -v Available
+        fcstat fcs<N> | head -40
+      check: "fcstat 의 Port Speed (running) 가 비거나 Link Failure·Loss of Sync·Loss of Signal 카운터가 늘면 링크 문제 · SCSI_ERR*·FCS_ERR* 가 같은 어댑터에 반복되면 어댑터·케이블 결함 · 정상: 모든 어댑터 Available"
+      note: "적용: AIX 5.3~7.3 (fcstat 은 FC 어댑터만, 병렬 SCSI 어댑터는 errpt -a -N scsi<N>) · 권한: root"
+    - do: "디스크 경로 상태 확인 (읽기 전용)"
+      cmd: |
+        lspath | grep -v Enabled
+        lspath -H -l hdisk<N> -F "status name parent connection"
+        lsmpio -l hdisk<N>
+        pcmpath query adapter ; pcmpath query device <N>
+      check: "Failed/Missing 경로가 있으면 이중화 상실 — 같은 parent(fscsi/vscsi)로 몰리면 그 어댑터·VIOS·스위치 쪽 · 한 hdisk 의 모든 경로가 Failed 면 I/O 정지(긴급) · SDDPCM 은 DEAD·CLOSE_DEAD·Errors 증가 경로 · A19337FA 는 경로가 아니라 스토리지 배열 내부 부품(디스크 매체·전원·팬) 문제이므로 스토리지 담당에 배열 상태 확인 요청"
+      note: "적용: lsmpio 는 이 명령이 있는 판에서만(없으면 lspath 로 충분), pcmpath 는 SDDPCM 설치 시만 · 권한: root"
+    - do: "VIOS 측 매핑·오류 확인 (가상 SCSI/FC 일 때, 읽기 전용)"
+      cmd: |
+        lsmap -all | head -60
+        lsmap -all -npiv | head -60
+        errlog | head -20
+      check: "클라이언트의 vfchost 매핑 Status 가 LOGGED_IN 이 아니거나 VIOS errlog 에 같은 시각 물리 FC 오류가 있으면 VIOS·물리 경로 원인 · 이중 VIOS 의 다른 쪽 경로가 살아 있으면 I/O 는 유지"
+      note: "적용: PowerVM VIOS 2.x/3.x · 권한: padmin(제한 셸)"
+  - stage: 2
+    steps:
+    - do: "(2차·승인 후) SAN·VIOS 원인 해결 뒤 경로 활성화"
+      cmd: |
+        lspath > /tmp/lspath_before.txt
+        chpath -l hdisk<N> -p <fscsi|vscsi><N> -s enable
+        pcmpath set device <N> path <M> online      # SDDPCM 일 때
+      check: "성공: lspath 모두 Enabled(SDDPCM 은 OPEN·NORMAL), errpt 에 새 경로 오류 없음 · 실패: 곧 다시 Failed → SAN 원인 미해결, chpath -s disable 로 되돌리고 3차"
+      note: "사전조건: SAN·스토리지·VIOS 담당이 복구 완료 확인, health check(hcheck_interval)로 자동 복귀되지 않은 경로만 · 영향: 불안정 경로를 살리면 I/O 재시도·지연이 반복될 수 있음 · 승인: 시스템 담당·스토리지 담당 · 백업/롤백: 실행 전 lspath 출력 보관, 롤백은 chpath -l hdisk<N> -p <parent> -s disable(마지막 남은 경로는 비활성화 금지) · 적용: AIX MPIO 5.3~7.3, SDDPCM"
+    - do: "(2차·승인 후) 결함 어댑터 교체 — IBM CE"
+      cmd: |
+        lsslot -c pci
+        lsattr -El fcs<N> > /tmp/fcs<N>_attr_before.txt
+        diag            # Task Selection → Hot Plug Task (IBM CE 진행)
+        cfgmgr ; lspath | grep -v Enabled
+      check: "성공: 새 어댑터 Available, 모든 경로 Enabled · 실패: 교체 후에도 링크 다운 → 케이블·SFP·스위치 포트 점검, 새 WWPN 의 zoning·호스트 매핑 확인"
+      note: "사전조건: 그 어댑터를 지나는 모든 hdisk 에 다른 경로가 있는지 확인(없으면 업무 중단 일정), 교체 부품·IBM CE 일정 · 영향: 교체 동안 그 어댑터 경로 전부 단절 · 승인: 시스템 담당·스토리지 담당(변경 관리)·IBM CE · 백업/롤백: 교체 전 lspath·어댑터 속성 보관, 부품 교체는 되돌리지 않음 — 새 어댑터 WWPN 이 바뀌면 SAN zoning·스토리지 호스트 매핑 갱신 필요 · 적용: 핫 플러그 지원 슬롯(아니면 LPAR 정지 창)"
+  - stage: 3
+    steps:
+    - do: "IBM·스토리지 벤더 의뢰 자료"
+      cmd: |
+        snap -gc
+        fcstat fcs<N> > fcstat_fcs<N>_$(date +%Y%m%d).txt ; lspath > lspath_$(date +%Y%m%d).txt
+      check: "snap·fcstat·lspath·pcmpath query 출력, VIOS 는 padmin 의 snap 결과"
+      note: "민감정보 마스킹: 호스트명·IP·사용자 계정을 가린 뒤 전달(WWPN·LUN ID 는 SAN 분석에 필요해 유지하되 외부 반출 범위는 보안 담당과 협의) · 전달 승인: 시스템 담당 확인 후 보안 담당 승인"
+
+- id: AIX-PROC-R6-RESERVE
+  scope: id
+  products: [aix]
+  category: storage
+  match: [65DE6DE3]
+  title: 디스크 예약(reservation) 충돌 SC_DISK_ERR10 (AIX)
+  source: "IBM AIX 7.x 문서 — MPIO 디스크 속성 reserve_policy(lsattr, chdev), devrsrv, Error logging(errpt) · PowerHA SystemMirror 공유 디스크 구성"
+  stages:
+  - stage: 1
+    steps:
+    - do: "예약 충돌 여부와 노드별 정책 비교 (읽기 전용)"
+      cmd: |
+        errpt -a -j 65DE6DE3 | head -80
+        lsattr -El hdisk<N> -a reserve_policy
+        lspv | grep hdisk<N>
+      check: "SENSE DATA 의 0118 은 다른 initiator 의 예약 충돌 · 같은 PVID 디스크를 쓰는 모든 노드에서 reserve_policy 를 비교 — 클러스터(PowerHA·GPFS·Oracle RAC) 공유 디스크는 설계값이 보통 no_reserve, 노드마다 다르면 원인"
+      note: "적용: AIX MPIO 5.3~7.3 · 권한: 일반 사용자 조회 가능 · 다른 노드는 같은 PVID 로 hdisk 번호를 찾는다(노드마다 번호가 다를 수 있음)"
+    - do: "예약을 잡은 쪽 확인 (읽기 전용)"
+      cmd: |
+        devrsrv -c query -l hdisk<N>
+        lsvg -o
+      check: "devrsrv 출력의 예약 상태·키로 어느 노드가 예약을 잡았는지 확인 · VG 를 활성화한 노드가 하나뿐인지 확인(동시 활성 VG 제외)"
+      note: "적용: devrsrv 가 있는 판 — 미검증: 지원 시작 TL 을 IBM 원문으로 대조 못 함, 명령이 없으면 생략 · 권한: root"
+  - stage: 2
+    steps:
+    - do: "(2차·승인 후) 예약 정책을 설계값으로 통일"
+      cmd: |
+        lsattr -El hdisk<N> > /tmp/hdisk<N>_attr_before.txt
+        chdev -l hdisk<N> -a reserve_policy=no_reserve -P
+      check: "성공: lsattr -El hdisk<N> -a reserve_policy 가 모든 노드에서 설계값, 다음 재구성·재부팅 후 SC_DISK_ERR10 재발 없음 · 실패: chdev 오류 → 디스크가 열려 있음, -P 로 다음 재부팅 반영 또는 디스크를 닫는 작업 창 확보"
+      note: "사전조건: 클러스터·DB 설계서의 정책값 확인(단독 사용 디스크에 no_reserve 를 주면 다른 호스트의 동시 쓰기를 막지 못함) · 영향: -P 는 ODM 만 바꾸고 재부팅·재구성 때 반영 · 승인: 시스템 담당·클러스터/DB 담당(변경 관리) · 백업/롤백: 변경 전 lsattr 출력 보관, 원복은 chdev -l hdisk<N> -a reserve_policy=<이전값> -P · 적용: AIX MPIO 5.3~7.3"
+    - do: "(2차·승인 후, 클러스터 담당·IBM 지원 동석) 남은 예약 강제 해제"
+      cmd: |
+        devrsrv -f -l hdisk<N>
+      check: "성공: devrsrv -c query 에 예약 없음, 정상 노드에서 I/O 성공 · 실패: 해제되지 않으면 스토리지 측 예약 해제(스토리지 관리 도구) 요청"
+      note: "미검증 — devrsrv -f 의 정확한 동작을 IBM 원문으로 대조 못 함(IBM 지원 지시대로 실행) · 사전조건: 예약을 잡은 노드가 그 디스크를 실제로 쓰지 않음을 확인 · 영향: 잘못 해제하면 두 노드 동시 쓰기로 데이터 손상 · 승인: 시스템 담당·클러스터 담당(변경 관리) · 백업/롤백: 해제는 되돌릴 수 없음 — 원래 노드에서 VG 를 다시 활성화하면 예약이 다시 잡힘, 사전 백업 확인"
+  - stage: 3
+    steps:
+    - do: "IBM 지원 의뢰 자료"
+      cmd: |
+        snap -gc
+        errpt -a -j 65DE6DE3 > errpt_65DE6DE3_$(date +%Y%m%d).txt ; lsattr -El hdisk<N> > hdisk<N>_attr.txt
+      check: "노드별 snap·errpt 상세(SENSE DATA)·hdisk 속성·클러스터 구성"
+      note: "민감정보 마스킹: 호스트명·IP·사용자 계정을 가린 뒤 전달 · 전달 승인: 시스템 담당 확인 후 보안 담당 승인"
+
+- id: AIX-PROC-R6-NVME
+  scope: id
+  products: [aix]
+  category: storage
+  match: [891A3632]
+  title: NVMe 소프트웨어 오류 NVME_ERR4 (AIX)
+  source: "IBM AIX 7.x 문서 — Error logging(errpt), lsdev, oslevel, instfix, emgr, alt_disk_copy · IBM 지원 사례(4K 섹터 NVMe 장치와 CIO 정렬)"
+  stages:
+  - stage: 1
+    steps:
+    - do: "오류 장치·동반 오류·CIO 사용 확인 (읽기 전용)"
+      cmd: |
+        errpt -a -j 891A3632 | head -60
+        errpt -a -J LVM_IO_FAIL | head -40
+        lsdev -C | grep -i nvme ; lsdev -Cc disk
+        mount | grep -i cio
+        oslevel -s
+      check: "NVME_ERR4 와 LVM_IO_FAIL 이 같은 시각·같은 장치면 IBM 사례 유형(4K 섹터 장치에 정렬되지 않은 버퍼로 CIO I/O) 의심 · cio 로 마운트된 파일시스템·raw 장치를 쓰는 DB 를 기록 · TL/SP 수준 기록(수정 APAR 대조용)"
+      note: "적용: NVMe 장치가 있는 AIX 7.2~7.3 · 권한: root · 미검증 — NVME_ERR4 의 IBM 원문 설명을 대조하지 못함(사례 기반)"
+  - stage: 2
+    steps:
+    - do: "(2차·승인 후) IBM 지원이 확정한 수정(APAR·TL/SP) 적용"
+      cmd: |
+        instfix -ik <APAR>
+        emgr -l
+        alt_disk_copy -d hdisk<N>
+        smitty update_all      # IBM 이 제시한 TL/SP 적용, iFix 는 emgr -e <iFix 파일>
+      check: "성공: instfix 에 'All filesets for <APAR> were found', 적용 후 NVME_ERR4 재발 없음 · 실패: 재발 → IBM 지원에 snap 전달"
+      note: "사전조건: IBM 지원이 원인·APAR 확정, mksysb 백업, alt_disk_copy 로 rootvg 복제본 확보 · 영향: TL/SP 갱신은 재부팅 필요 · 승인: 시스템 담당·DB 담당(변경 관리) · 백업/롤백: alt_disk 복제본으로 부팅해 원복(bootlist), iFix 는 emgr -r -L <label> 로 제거 · 적용: AIX 7.2~7.3"
+    - do: "(2차·승인 후) 수정 전까지 CIO 사용 조건 조정 — DB 담당 협의"
+      cmd: |
+        lsfs <mount> > /tmp/lsfs_<mount>_before.txt
+        chfs -a options=rw <mount>      # cio 옵션 제거 후 umount/mount 로 반영
+      check: "성공: mount 목록에 cio 없음, NVME_ERR4 재발 없음 · 실패: 응용 성능 저하가 크면 원복하고 수정 적용을 앞당김"
+      note: "사전조건: DB·응용이 CIO 를 요구하는지 확인(DB 설정에서 직접 I/O 를 여는 경우 효과 없음) · 영향: 반영하려면 umount/mount 동안 서비스 중단, 캐시 사용으로 성능 특성 변화 · 승인: DB 담당·시스템 담당(변경 관리) · 백업/롤백: 변경 전 lsfs 출력 보관, 원복은 chfs -a options=<이전값> <mount> 후 재마운트"
+  - stage: 3
+    steps:
+    - do: "IBM 지원 의뢰 자료"
+      cmd: |
+        snap -gc
+        errpt -a > errpt_$(date +%Y%m%d).txt ; oslevel -s > oslevel.txt
+      check: "snap·errpt -a·oslevel -s·응용의 I/O 방식(CIO·raw) 설명"
+      note: "민감정보 마스킹: 호스트명·IP·사용자 계정을 가린 뒤 전달 · 전달 승인: 시스템 담당 확인 후 보안 담당 승인"
+
+- id: AIX-PROC-R6-CPUMEM
+  scope: id
+  products: [aix]
+  category: hardware
+  match: [1655419A, 804E987A, 8470267F, AIX-CPU-ERROR, AIX-MEMORY-ERROR]
+  title: CPU 장애 예측·격리(성공/실패)·메모리 하드웨어 오류 (AIX)
+  source: "IBM AIX 7.x 문서 — Error logging(errpt), CPU Guard(sys0 cpuguard), bindprocessor, lparstat, lsattr mem0 · HMC 명령(lssvcevents, chhwres)"
+  stages:
+  - stage: 1
+    steps:
+    - do: "하드웨어 오류 항목·위치 코드 확인 (읽기 전용)"
+      cmd: |
+        errpt -d H | head -20
+        errpt -a -j <IDENTIFIER> | head -60
+        lssvcevents -t hardware | tail -20      # HMC 에서
+      check: "CPU_FAIL_PREDICTED 다음에 CPU_DEALLOC_SUCCESS 면 격리 완료, CPU_DEALLOC_ABORTED 면 격리 실패(바인딩 확인) · 메모리는 H 클래스 PERM 항목과 Location·FRU 기록 · HMC 서비스 이벤트의 FRU 와 같으면 확정"
+      note: "적용: AIX 5.3~7.3, HMC 관리 서버 · 권한: errpt 는 일반 사용자 가능, lssvcevents 는 HMC 조회 권한"
+    - do: "남은 CPU·메모리와 부하 확인 (읽기 전용)"
+      cmd: |
+        lsattr -El sys0 -a cpuguard
+        bindprocessor -q
+        lparstat -i | grep -i -E "Online Virtual CPUs|Entitled Capacity|Online Memory"
+        lsattr -El mem0
+        vmstat 2 5
+      check: "cpuguard 가 disable 이면 장애 예측 CPU 가 자동 격리되지 않음 · 논리 CPU 가 설계보다 줄었고 vmstat us+sy 80% 이상 지속이면 업무 영향 · mem0 의 goodsize 가 size 보다 작으면 메모리 일부가 사용 제외된 상태"
+      note: "적용: AIX 5.3~7.3 · 권한: 일반 사용자 조회 가능"
+    - do: "격리 실패 시 CPU 에 묶인 스레드 확인 (읽기 전용)"
+      cmd: |
+        ps -emo THREAD | head -60
+      check: "BND 열이 '-' 가 아닌 스레드는 특정 CPU 에 묶여 있음 — 격리 대상 CPU 에 묶였으면 격리 실패 원인 후보(커널 확장이면 IBM 지원)"
+      note: "적용: AIX 5.3~7.3 · 권한: 일반 사용자 가능"
+  - stage: 2
+    steps:
+    - do: "(2차·승인 후) CPU Guard 활성화"
+      cmd: |
+        lsattr -El sys0 -a cpuguard > /tmp/cpuguard_before.txt
+        chdev -l sys0 -a cpuguard=enable
+      check: "성공: lsattr -El sys0 -a cpuguard 가 enable · 실패: chdev 오류 → IBM 지원"
+      note: "사전조건: 설계상 cpuguard 를 끈 이유(CPU 수 기반 라이선스·바인딩 응용) 확인 · 영향: 이후 장애 예측 CPU 가 동적으로 격리되어 CPU 수가 줄 수 있음 · 승인: 시스템 담당(변경 관리) · 백업/롤백: 원복은 chdev -l sys0 -a cpuguard=disable · 적용: AIX 5.3~7.3"
+    - do: "(2차·승인 후) 격리를 막는 프로세스 바인딩 해제"
+      cmd: |
+        bindprocessor -u <PID>
+      check: "성공: 이후 격리 시도에서 CPU_DEALLOC_SUCCESS 기록(재시도 방법은 IBM 지시) · 실패: 커널 확장·드라이버 바인딩이면 IBM 지원"
+      note: "사전조건: 응용 담당이 바인딩 의도(성능 고정) 확인 · 영향: 해당 프로세스의 CPU 친화성이 풀려 성능 특성 변화 · 승인: 업무 담당·시스템 담당 · 백업/롤백: 1차의 BND 값 보관, 원복은 bindprocessor <PID> <원래 CPU 번호>"
+    - do: "(2차·승인 후) 줄어든 CPU 보충과 FRU 교체 일정"
+      cmd: |
+        chhwres -m <managed-system> -r proc -o a -p <lpar> --procs 1      # HMC 에서, 공유 프로세서는 --procunits 도 지정
+      check: "성공: lparstat -i 의 Online Virtual CPUs 증가 · 실패: 관리 시스템 여유 CPU 없음·프로파일 최대값 초과 → 교체 일정 앞당김·부하 이동"
+      note: "사전조건: 관리 시스템 여유 프로세서·LPAR 프로파일 최대값 확인, IBM CE 의 FRU 교체 일정(대개 정지 필요) · 영향: DLPAR 추가는 무중단, FRU 교체는 정지 창 · 승인: 시스템 담당(변경 관리)·IBM CE · 백업/롤백: DLPAR 추가는 chhwres ... -o r 로 제거, 교체 전 mksysb 백업 · 적용: HMC 관리 LPAR"
+  - stage: 3
+    steps:
+    - do: "IBM HW 지원 의뢰 자료"
+      cmd: |
+        snap -gc
+        errpt -a > errpt_$(date +%Y%m%d).txt ; lsmcode -A > lsmcode_$(date +%Y%m%d).txt
+      check: "snap·errpt -a·펌웨어 수준(lsmcode -A)·HMC 서비스 이벤트 상세"
+      note: "민감정보 마스킹: 호스트명·IP·사용자 계정을 가린 뒤 전달(위치 코드·시리얼은 FRU 판정에 필요해 유지) · 전달 승인: 시스템 담당 확인 후 보안 담당 승인"
+
+- id: AIX-PROC-R6-ENVPOWER
+  scope: id
+  products: [aix]
+  category: hardware
+  match: [AIX-ENV-TEMP, AIX-POWER-FAIL]
+  title: 환경 온도·전원(EPOW) 경고 (AIX·Power 서버)
+  source: "IBM AIX 7.x 문서 — Error logging(errpt, EPOW 항목) · HMC Serviceable Events(lssvcevents) · IBM Power 서버 Repair and Verify 절차"
+  stages:
+  - stage: 1
+    steps:
+    - do: "환경·전원 경고 종류·위치 확인 (읽기 전용)"
+      cmd: |
+        errpt -d H | head -20
+        errpt -a | grep -E "^LABEL:" | grep -i -E "epow|temp|power|fan" | sort | uniq -c
+        errpt -a -J <LABEL> | head -60
+      check: "같은 위치 코드(팬·전원 공급 장치)가 반복되면 해당 FRU 결함 · 이중 전원 중 한쪽 상실이면 서비스는 유지되지만 이중화 상실(긴급 교체 대상) · 정상: 새 EPOW·환경 항목 없음"
+      note: "적용: AIX 5.3~7.3 · 권한: errpt 는 일반 사용자 가능"
+    - do: "HMC 이벤트·시설 상태 대조 (읽기 전용)"
+      cmd: |
+        lssvcevents -t hardware | tail -20      # HMC 에서
+      check: "HMC 서비스 이벤트의 FRU·참조 코드를 기록하고 랙 PDU·UPS 경보와 전산실 온도(항온항습기)를 확인 — 같은 열의 여러 서버가 함께 경고면 시설 원인"
+      note: "적용: HMC 관리 Power 서버 · 권한: HMC 조회 권한"
+  - stage: 2
+    steps:
+    - do: "(2차·승인 후) 팬·전원 공급 장치 FRU 교체 — IBM CE"
+      cmd: |
+        errpt -a > /tmp/errpt_before_$(date +%Y%m%d).txt
+        # FRU 교체는 IBM CE 가 HMC 의 서비스 이벤트 Repair 절차로 진행(핫 스왑 부품)
+      check: "성공: 교체 후 HMC 이벤트 closed, errpt 에 새 EPOW·환경 항목 없음 · 실패: 재발 → 백플레인·입력 전원 계통 점검을 IBM·시설 담당에 요청"
+      note: "사전조건: 남은 전원·팬으로 운영 가능한지(이중화) IBM CE 확인 · 영향: 핫 스왑 부품은 무중단, 아니면 정지 창 필요 · 승인: 시스템 담당(변경 관리)·IBM CE · 백업/롤백: 교체 전 mksysb·errpt 보관, 부품 교체는 되돌리지 않음(불량이면 재교체)"
+    - do: "(2차·승인 후) 온도 임계·전원 상실이 임박하면 계획 정지"
+      cmd: |
+        shutdown -h +5
+      check: "성공: 응용·DB 정상 종료 후 정지, 시설 복구 뒤 HMC 에서 LPAR 기동 · 실패: 정지가 늦어지면 응용 담당과 강제 종료 여부 결정"
+      note: "사전조건: 업무 책임자 결정, 클러스터 전환(PowerHA)·DB 정상 종료 먼저 · 영향: 해당 LPAR 의 모든 서비스 중단 · 승인: 업무 책임자·시스템 담당 · 백업/롤백: 시설 복구 후 기동이 원복, 최신 백업 확인 · 적용: AIX 5.3~7.3 — EPOW 임계 시 펌웨어가 먼저 보호 정지할 수 있음"
+  - stage: 3
+    steps:
+    - do: "IBM HW 지원 의뢰 자료"
+      cmd: |
+        snap -gc
+        errpt -a > errpt_$(date +%Y%m%d).txt
+      check: "snap·errpt -a·HMC 서비스 이벤트 상세·전산실 온도/전원 기록"
+      note: "민감정보 마스킹: 호스트명·IP·사용자 계정을 가린 뒤 전달 · 전달 승인: 시스템 담당 확인 후 보안 담당 승인"
+
+- id: AIX-PROC-R6-TAPE
+  scope: id
+  products: [aix]
+  category: hardware
+  match: [AIX-TAPE-ERROR]
+  title: 테이프 장치 오류 (AIX)
+  source: "IBM AIX 7.x 문서 — Error logging(errpt -N), lsdev/lsattr/chdev(rmt), tctl, rmdev/mkdev"
+  stages:
+  - stage: 1
+    steps:
+    - do: "오류 장치·시각·설정 확인 (읽기 전용 — 장치는 건드리지 않음)"
+      cmd: |
+        errpt -a -N rmt<N> | head -60
+        lsdev -Cc tape
+        lsattr -El rmt<N>
+        tail -50 <백업 작업 로그>
+      check: "LABEL·sense data·시각을 백업 실패 시각과 대조 · 같은 매체에서만 실패하면 매체, 여러 매체에서 실패하면 드라이브 · Defined 상태면 장치 인식(경로) 문제"
+      note: "적용: AIX 5.3~7.3 · 권한: 일반 사용자 조회 가능 · 백업 중에는 장치 상태 명령(tctl)도 쓰지 않는다(2차)"
+  - stage: 2
+    steps:
+    - do: "(2차·승인 후, 백업 작업 없는 시간) 드라이브 상태·클리닝·다른 매체 시험"
+      cmd: |
+        tctl -f /dev/rmt<N> status
+        # 클리닝 카트리지 투입 후 다른 매체로 시험 백업
+      check: "성공: status 정상, 다른 매체로 시험 백업 성공 → 원래 매체 폐기 · 실패: 클리닝 후에도 같은 오류 → 드라이브 교체 의뢰"
+      note: "사전조건: 진행 중인 백업 없음 확인 · 영향: 장치 점유 · 승인: 백업 담당 · 백업/롤백: 매체 내용을 바꾸지 않으므로 롤백 불필요"
+    - do: "(2차·승인 후) 장치 재구성·설정 조정"
+      cmd: |
+        lsattr -El rmt<N> > /tmp/rmt<N>_before.txt
+        rmdev -l rmt<N> ; mkdev -l rmt<N>
+        chdev -l rmt<N> -a block_size=<값>
+      check: "성공: lsdev -Cc tape 에 Available, 시험 백업 성공 · 실패: mkdev 오류 → 경로·드라이브 점검"
+      note: "사전조건: 백업 소프트웨어가 장치를 쓰지 않음, 백업 소프트웨어가 요구하는 block_size 확인 · 영향: 재구성 동안 장치 사용 불가 · 승인: 백업 담당·시스템 담당 · 백업/롤백: 이전 속성 파일 값으로 chdev 원복"
+  - stage: 3
+    steps:
+    - do: "IBM·테이프 장비 업체 의뢰 자료"
+      cmd: |
+        errpt -a -N rmt<N> > errpt_rmt<N>_$(date +%Y%m%d).txt
+        snap -gc
+      check: "errpt 상세(sense data)·snap·테이프 라이브러리 자체 로그"
+      note: "민감정보 마스킹: 호스트명·IP·백업 대상 경로(업무명)를 가린 뒤 전달 · 전달 승인: 시스템 담당 확인 후 보안 담당 승인"
+
+- id: AIX-PROC-R6-VFCMQ
+  scope: id
+  products: [aix]
+  category: hardware
+  match: [FADE02F2]
+  title: 가상 FC 다중 큐 미지원 VFC4_ERR18 (AIX·VIOS)
+  source: "IBM AIX 7.x 문서 — Error logging(errpt), oslevel, lsmcode · PowerVM VIOS 명령(ioslevel, lsmap -npiv, errlog, updateios, alt_root_vg)"
+  stages:
+  - stage: 1
+    steps:
+    - do: "보고한 가상 FC 어댑터와 클라이언트 수준 확인 (읽기 전용)"
+      cmd: |
+        errpt -a -j FADE02F2 | head -40
+        oslevel -s ; lsmcode -c
+        lsattr -El fcs<N> | head -40
+      check: "보고한 가상 FC 어댑터·Detail Data·AIX TL/SP·시스템 펌웨어 수준 기록"
+      note: "적용: AIX 7.2~7.3 NPIV 클라이언트 · 권한: 일반 사용자 조회 가능"
+    - do: "VIOS 수준·매핑 확인 (padmin, 읽기 전용)"
+      cmd: |
+        ioslevel
+        lsmap -all -npiv | head -60
+        errlog | head -20
+      check: "IBM 문서의 NPIV Multiple Queue 요구 수준(AIX TL·VIOS·시스템 펌웨어·물리 FC 어댑터)과 비교 — 하나라도 낮으면 원인 확정 · 경로가 LOGGED_IN 이면 I/O 는 계속됨"
+      note: "적용: PowerVM VIOS 3.x · 권한: padmin · 미검증 — 요구 수준 표와 이 상태에서 단일 큐로 계속 동작하는지를 IBM 원문으로 대조 못 함"
+  - stage: 2
+    steps:
+    - do: "(2차·승인 후) VIOS 갱신 — 이중 VIOS 를 한 대씩"
+      cmd: |
+        alt_root_vg -target hdisk<N>
+        updateios -dev <갱신 파일 경로> -accept -install
+      check: "성공: ioslevel 이 요구 수준, 클라이언트 errpt 에 FADE02F2 재발 없음 · 실패: VIOS 기동 이상 → alt_root_vg 복제 디스크로 부팅"
+      note: "사전조건: 다른 VIOS 가 모든 클라이언트 경로를 받는지 클라이언트 lspath 로 확인, 시스템 펌웨어·물리 어댑터 펌웨어 요구 수준 확인 · 영향: 갱신하는 VIOS 재기동 동안 그 VIOS 경로 단절 · 승인: 시스템 담당(변경 관리) · 백업/롤백: alt_root_vg 복제본으로 부팅해 원복 · 적용: PowerVM VIOS 3.x(padmin)"
+  - stage: 3
+    steps:
+    - do: "IBM 지원 의뢰 자료"
+      cmd: |
+        snap -gc
+        errpt -a -j FADE02F2 > errpt_FADE02F2_$(date +%Y%m%d).txt
+      check: "클라이언트 snap·VIOS snap(padmin)·ioslevel·lsmcode 출력"
+      note: "민감정보 마스킹: 호스트명·IP·사용자 계정을 가린 뒤 전달 · 전달 승인: 시스템 담당 확인 후 보안 담당 승인"
+
+# ── HP-UX ──
+- id: HPUX-PROC-R6-LVM
+  scope: id
+  products: [hpux]
+  category: storage
+  match: [HPUX-LVM-LOST-QUORUM, HPUX-LVM-PV-MISSING, HPUX-LVM-STALE, HPUX-FS-MOUNT-FAIL]
+  title: VG 쿼럼 상실·PV 누락·미러 stale·마운트 실패 (HP-UX LVM)
+  source: "HP-UX 11i v3 System Administration·Logical Volume Management(vgdisplay, vgchange, vgsync, lvsync, vgcfgrestore) · fsck_vxfs(1M) · ioscan(1M) · HPE 'When Good Disks Go Bad: Dealing with Disk Failures Under LVM'"
+  stages:
+  - stage: 1
+    steps:
+    - do: "VG·PV·stale 상태 확인 (읽기 전용)"
+      cmd: |
+        vgdisplay -v /dev/<vg> | head -60
+        vgdisplay -v /dev/<vg> | grep -e "VG Status" -e "Cur PV" -e "Act PV" -e "PV Name" -e "PV Status"
+        lvdisplay -v /dev/<vg>/<lv> | grep -c stale
+      check: "Act PV < Cur PV 면 PV 누락, unavailable PV 기록 · Act PV 가 Cur PV 과반 미만이면 쿼럼 상실 · stale 수가 0 보다 크면 미러 불일치 · 정상: 모든 PV available, stale 0"
+      note: "적용: HP-UX 11i v1~v3 (HP-UX grep 은 -e 반복으로 여러 낱말) · 권한: root"
+    - do: "장치·경로와 syslog 확인 (읽기 전용)"
+      cmd: |
+        ioscan -fnC disk          # 11i v1/v2
+        ioscan -fnNC disk         # 11i v3 영구 장치 파일
+        grep -i -e quorum -e lvm -e "I/O error" /var/adm/syslog/syslog.log | tail -30
+      check: "S/W State 가 NO_HW·UNCLAIMED 면 장치·경로 측 원인(먼저 복구) · syslog 의 첫 오류 시각과 장치 기록"
+      note: "적용: HP-UX 11i v1~v3 · 권한: root"
+    - do: "마운트 실패 시 구성 확인 (읽기 전용)"
+      cmd: |
+        grep <mount> /etc/fstab
+        fstyp /dev/<vg>/<lv>
+        bdf | grep <mount>
+      check: "fstab 의 장치·유형이 fstyp 결과와 같은지 · VG Status 가 available 이 아니면 VG 미활성(먼저 VG 활성화) · 장치 파일이 없으면 LV·VG 구성 문제"
+      note: "적용: HP-UX 11i v1~v3 · 권한: 일반 사용자 가능(fstyp 는 root)"
+  - stage: 2
+    steps:
+    - do: "(2차·승인 후) 장치 복구 뒤 VG 재활성화로 PV 재연결"
+      cmd: |
+        vgdisplay -v /dev/<vg> > /tmp/vgdisplay_<vg>_before.txt
+        vgchange -a y /dev/<vg>
+      check: "성공: Act PV = Cur PV, 모든 PV available · 실패: 쿼럼 없음 오류 → 장치 복구 재확인, 쿼럼 무시 활성화(vgchange -a y -q n)는 정합성 위험이 있어 HPE 지원과 협의 후에만"
+      note: "사전조건: 장치 CLAIMED·경로 정상, Serviceguard 공유 VG 는 패키지 소유 노드에서만(cmviewcl 확인) · 영향: 활성화되면 stale extent 자동 동기화로 I/O 부하 · 승인: 시스템 담당·스토리지 담당(변경 관리) · 백업/롤백: vgdisplay 출력과 /etc/lvmconf/<vg>.conf 구성 백업 확인, 원복은 vgchange -a n /dev/<vg>(사용 중 LV 없을 때) · 적용: HP-UX 11i v1~v3"
+    - do: "(2차·승인 후, 부하 낮은 시간) 미러 재동기화"
+      cmd: |
+        vgsync /dev/<vg>          # LV 하나만: lvsync /dev/<vg>/<lv>
+      check: "성공: lvdisplay -v 의 stale 0 · 실패: 동기화 중 I/O error → 해당 PV 교체(아래 단계)"
+      note: "사전조건: MirrorDisk/UX 미러, 장애 PV 복구 확인 · 영향: 동기화 동안 I/O 부하 · 승인: 시스템 담당 · 백업/롤백: 정상 사본을 복사만 하므로 되돌릴 대상 없음, 사전 백업 확인 · 적용: HP-UX 11i v1~v3"
+    - do: "(2차·승인 후) 결함 디스크 교체 뒤 LVM 구성 복원"
+      cmd: |
+        vgcfgrestore -n /dev/<vg> /dev/rdisk/disk<N>      # 11i v1/v2 는 /dev/rdsk/c#t#d#
+        vgchange -a y /dev/<vg> ; vgsync /dev/<vg>
+      check: "성공: vgdisplay -v 의 PV Status available, stale 0 · 실패: vgcfgrestore 오류 → HPE 지원과 절차 협의"
+      note: "사전조건: 미러 구성·최신 백업, 11i v3 는 HPE 'When Good Disks Go Bad' 절차(교체 디스크 인식 단계 포함)를 따른다 — 미검증: 11i v3 교체 세부 순서는 원문 대조 못 함 · 영향: 동기화 중 I/O 부하 · 승인: 시스템 담당·HPE · 백업/롤백: /etc/lvmconf/<vg>.conf 구성 백업이 복원 원본, 실패 시 백업에서 복원"
+    - do: "(2차·승인 후, 작업 창) 파일시스템 점검·마운트"
+      cmd: |
+        cp -p /etc/fstab /etc/fstab.$(date +%Y%m%d)
+        fsck -F vxfs -y /dev/<vg>/r<lv>          # 인텐트 로그 재생, 실패 시 -o full
+        mount <mount>
+      check: "성공: mount 성공, bdf 에 표시 · 실패: -o full 점검도 실패 → 백업 복원 결정(3차)"
+      note: "사전조건: 해당 파일시스템 미마운트 상태, 최근 백업 · 영향: 점검 동안 서비스 불가, full 점검은 손상 파일을 lost+found 로 옮길 수 있음 · 승인: 시스템 담당·업무 담당(변경 관리) · 백업/롤백: fstab 은 날짜 백업본으로 원복, fsck 수정은 되돌릴 수 없어 백업 복원이 롤백 · 적용: HP-UX 11i v1~v3 VxFS"
+  - stage: 3
+    steps:
+    - do: "HPE 지원 의뢰 자료"
+      cmd: |
+        vgdisplay -v > vgdisplay_$(date +%Y%m%d).txt ; ioscan -fn > ioscan_$(date +%Y%m%d).txt
+        tail -500 /var/adm/syslog/syslog.log > syslog_tail.txt
+      check: "vgdisplay -v·ioscan·syslog·/etc/lvmconf 구성 백업 목록"
+      note: "민감정보 마스킹: 호스트명·IP·사용자 계정을 가린 뒤 전달 · 전달 승인: 시스템 담당 확인 후 보안 담당 승인"
+
+- id: HPUX-PROC-R6-SANPATH
+  scope: id
+  products: [hpux]
+  category: storage
+  match: [HPUX-FC-LINK-DOWN, HPUX-PVLINK-FAILED]
+  title: FC 링크 다운·PVLinks 경로 실패 (HP-UX)
+  source: "HP-UX fcmsutil(1M)·ioscan(1M)·pvchange(1M)·scsimgr(1M, 11i v3 Native Multi-Pathing)·olrad(1M) · LVM PVLinks(11i v1/v2)"
+  stages:
+  - stage: 1
+    steps:
+    - do: "FC HBA 링크 상태 확인 (읽기 전용)"
+      cmd: |
+        ioscan -fnC fc
+        fcmsutil /dev/fcd<N>
+        fcmsutil /dev/fcd<N> stat | head -40
+      check: "Driver state 가 ONLINE 이 아니면 링크 단절, Topology·Link Speed 기록 · S/W State 가 NO_HW·ERROR 면 HBA·케이블 측 · 정상: ONLINE, 오류 카운터 증가 없음"
+      note: "적용: fcd 드라이버 HBA(11i v2/v3, 구형 td 드라이버는 /dev/td<N>) · 권한: root"
+    - do: "PV 경로·LUN 경로 상태 확인 (읽기 전용)"
+      cmd: |
+        vgdisplay -v /dev/<vg> | grep -e "PV Name" -e "PV Status" -e "Alternate Link"
+        grep -i -e PVLink -e Failed -e switch /var/adm/syslog/syslog.log | tail -30
+        ioscan -m lun /dev/disk/disk<N>          # 11i v3
+      check: "PV 가 available 이고 대체 링크가 남아 있으면 I/O 유지(이중화만 상실) · 한 PV 의 모든 링크가 실패면 I/O 정지(긴급) · 11i v3 는 lunpath 별 상태로 실패 경로 식별"
+      note: "적용: PVLinks 는 11i v1/v2, ioscan -m lun 은 11i v3 · 권한: root"
+  - stage: 2
+    steps:
+    - do: "(2차·승인 후) SAN 복구 뒤 경로 재연결"
+      cmd: |
+        vgdisplay -v /dev/<vg> > /tmp/vgdisplay_<vg>_before.txt
+        pvchange -a y /dev/dsk/<cXtYdZ>          # 11i v1/v2 PVLinks
+        scsimgr enable -H <lunpath hw_path>      # 11i v3
+      check: "성공: vgdisplay 의 경로 정상·syslog 에 경로 복구 기록, 11i v3 는 lunpath online · 실패: 곧 다시 실패 → 경로 분리(pvchange -a n 또는 scsimgr disable)로 되돌리고 3차"
+      note: "사전조건: SAN·스토리지 담당이 스위치 포트·zoning 복구 확인 · 영향: 불안정 경로를 살리면 경로 전환이 반복될 수 있음 · 승인: 시스템 담당·스토리지 담당 · 백업/롤백: vgdisplay 출력 보관, 원복은 pvchange -a n /dev/dsk/<cXtYdZ> 또는 scsimgr disable -H <lunpath hw_path>(마지막 남은 경로는 분리 금지)"
+    - do: "(2차·승인 후) 결함 HBA 교체 — HPE CE"
+      cmd: |
+        olrad -q
+        ioscan -fnC fc > /tmp/ioscan_fc_before.txt
+      check: "성공: 교체 후 fcmsutil Driver state ONLINE, 모든 경로 정상 · 실패: 링크 다운 지속 → 케이블·SFP·스위치 포트 점검, 새 WWPN 의 zoning·호스트 매핑 확인"
+      note: "사전조건: 그 HBA 를 지나는 모든 LUN 에 다른 경로가 있는지 확인(없으면 정지 창), 슬롯의 온라인 교체(OL*) 지원 여부 · 영향: 교체 동안 그 HBA 경로 전부 단절 · 승인: 시스템 담당·스토리지 담당(변경 관리)·HPE CE · 백업/롤백: 교체 전 ioscan·vgdisplay 출력 보관, 부품 교체는 되돌리지 않음 · 미검증 — olrad 의 교체 세부 옵션은 HPE CE 절차를 따른다"
+  - stage: 3
+    steps:
+    - do: "HPE·스토리지 벤더 의뢰 자료"
+      cmd: |
+        fcmsutil /dev/fcd<N> stat > fcmsutil_stat_$(date +%Y%m%d).txt
+        tail -500 /var/adm/syslog/syslog.log > syslog_tail.txt ; vgdisplay -v > vgdisplay.txt
+      check: "fcmsutil stat·syslog·vgdisplay -v·ioscan 출력"
+      note: "민감정보 마스킹: 호스트명·IP·사용자 계정을 가린 뒤 전달(WWPN 은 SAN 분석에 필요해 유지하되 반출 범위는 보안 담당과 협의) · 전달 승인: 시스템 담당 확인 후 보안 담당 승인"
+
+- id: HPUX-PROC-R6-VXVM
+  scope: id
+  products: [hpux]
+  category: storage
+  match: [HPUX-VXVM-FAIL]
+  title: VxVM 디스크·플렉스·볼륨 장애 (HP-UX)
+  source: "Veritas Volume Manager Administrator's Guide (HP-UX) — vxdisk, vxprint, vxdg, vxdmpadm, vxreattach, vxrecover, vxdiskadm, vxconfigbackup"
+  stages:
+  - stage: 1
+    steps:
+    - do: "장애 디스크·영향 볼륨 확인 (읽기 전용)"
+      cmd: |
+        vxdisk -o alldgs list
+        vxprint -ht | grep -i -e DISABLED -e DETACHED -e NODEVICE -e IOFAIL
+        vxdg list
+      check: "failed·error 디스크와 DISABLED/DETACHED 플렉스·볼륨 목록 기록 · 미러 볼륨의 다른 플렉스가 ENABLED ACTIVE 면 서비스 유지 · 정상: 모든 디스크 online, 플렉스 ENABLED ACTIVE"
+      note: "적용: HP-UX 11i v1~v3 + VxVM 4.x/5.x · 권한: root"
+    - do: "경로·시각 확인 (읽기 전용)"
+      cmd: |
+        vxdmpadm listctlr all
+        grep -i -e vxvm -e vxio -e vxdmp /var/adm/syslog/syslog.log | tail -30
+      check: "컨트롤러가 DISABLED 면 경로 측 원인(먼저 복구) · syslog 의 첫 오류 시각·장치 기록"
+      note: "적용: VxVM DMP 사용 시 · 권한: root"
+  - stage: 2
+    steps:
+    - do: "(2차·승인 후) 디스크·경로 복구 뒤 재연결·플렉스 복구"
+      cmd: |
+        vxprint -ht -g <dg> > /tmp/vxprint_<dg>_before.txt
+        vxreattach
+        vxrecover -b -g <dg>
+      check: "성공: vxdisk list 에 online, vxprint 의 플렉스 ENABLED ACTIVE · 실패: 디스크가 failed 로 남음 → 아래 교체 단계"
+      note: "사전조건: 디스크·경로 CLAIMED·정상 확인 · 영향: 플렉스 재동기화 동안 I/O 부하 · 승인: 시스템 담당·스토리지 담당 · 백업/롤백: vxprint 출력과 디스크 그룹 구성 백업(VxVM 5.0+ 는 vxconfigbackup <dg>) 보관, 재동기화는 되돌릴 대상 없음"
+    - do: "(2차·승인 후) 결함 디스크 교체"
+      cmd: |
+        vxdiskadm          # 'Remove a disk for replacement' → 'Replace a failed or removed disk'
+      check: "성공: 새 디스크 online, 플렉스 재동기화 완료 후 ENABLED ACTIVE · 실패: 메뉴 오류 → 지원 의뢰"
+      note: "사전조건: 미러 구성 확인, 최신 백업, 교체 디스크 크기 ≥ 기존 · 영향: 재동기화 중 I/O 부하 · 승인: 시스템 담당·HW 업체(변경 관리) · 백업/롤백: 디스크 그룹 구성 백업과 데이터 백업이 롤백 수단"
+  - stage: 3
+    steps:
+    - do: "Veritas·HPE 지원 의뢰 자료"
+      cmd: |
+        vxprint -ht > vxprint_$(date +%Y%m%d).txt ; vxdisk -o alldgs list > vxdisk_$(date +%Y%m%d).txt
+        tail -500 /var/adm/syslog/syslog.log > syslog_tail.txt
+      check: "vxprint -ht·vxdisk list·syslog·구성 백업"
+      note: "민감정보 마스킹: 호스트명·IP·볼륨 이름의 업무명을 가린 뒤 전달 · 전달 승인: 시스템 담당 확인 후 보안 담당 승인"
+
+- id: HPUX-PROC-R6-CPU
+  scope: id
+  products: [hpux]
+  category: hardware
+  match: [HPUX-CPU-DEALLOC]
+  title: CPU 할당 해제(구성 제외) (HP-UX)
+  source: "HP-UX 11i machinfo(1)·ioscan(1M)·sar(1M) · EMS Hardware Monitors(event.log)·SFM(evweb) · Serviceguard(cmviewcl, cmhaltpkg, cmrunpkg)"
+  stages:
+  - stage: 1
+    steps:
+    - do: "제외된 CPU·이벤트 확인 (읽기 전용)"
+      cmd: |
+        grep -i -e deconfig -e dealloc -e processor /var/adm/syslog/syslog.log | tail -20
+        tail -50 /var/opt/resmon/log/event.log
+        evweb eventviewer -L | head -30          # 11i v3 SFM
+      check: "대상 CPU·시각과 EMS/SFM 이벤트의 FRU 위치 기록 · 같은 CPU 이벤트가 반복되면 교체 대상"
+      note: "적용: HP-UX 11i v1~v3 (evweb 은 11i v3 SFM) · 권한: root"
+    - do: "남은 CPU 와 부하 확인 (읽기 전용)"
+      cmd: |
+        ioscan -kfnC processor
+        machinfo | head -30
+        sar -u 2 5 ; vmstat 2 5
+      check: "활성 CPU 수가 장비 사양보다 적으면 확정 · %usr+%sys 80% 이상 지속이면 업무 영향(부하 이동 검토)"
+      note: "적용: machinfo 는 11i v2+ · 권한: 일반 사용자 가능"
+  - stage: 2
+    steps:
+    - do: "(2차·승인 후) 부하 이동 — Serviceguard 패키지 전환"
+      cmd: |
+        cmviewcl -v > /tmp/cmviewcl_before.txt
+        cmhaltpkg <pkg> ; cmrunpkg -n <다른 노드> <pkg>
+      check: "성공: cmviewcl 에서 패키지가 다른 노드에서 up · 실패: 기동 실패 → 원래 노드에서 cmrunpkg -n <원래 노드> <pkg>"
+      note: "사전조건: 다른 노드 자원 여유·업무 합의 · 영향: 전환 동안 해당 패키지 서비스 중단 · 승인: 업무 담당·시스템 담당 · 백업/롤백: cmviewcl 출력 보관, 원복은 cmrunpkg -n <원래 노드> <pkg> · 적용: Serviceguard 구성 시에만"
+    - do: "(2차·승인 후, 정지 창) CPU 모듈 교체 — HPE CE"
+      cmd: |
+        shutdown -h -y 0
+      check: "성공: 교체 후 machinfo 의 CPU 수 정상, event.log 재발 없음 · 실패: 기동 시 CPU 미인식 → HPE CE 재점검"
+      note: "사전조건: 패키지 전환·DB 정상 종료, HPE CE 와 부품 확보 · 영향: 서버 전체 중단 · 승인: 업무 책임자·시스템 담당(변경 관리) · 백업/롤백: 최신 Ignite 복구 이미지(make_tape_recovery/make_net_recovery) 확인, 부품 교체는 되돌리지 않음"
+  - stage: 3
+    steps:
+    - do: "HPE 지원 의뢰 자료"
+      cmd: |
+        machinfo > machinfo_$(date +%Y%m%d).txt ; cp /var/opt/resmon/log/event.log event_$(date +%Y%m%d).log
+        tail -500 /var/adm/syslog/syslog.log > syslog_tail.txt
+      check: "machinfo·EMS event.log·syslog·SFM 이벤트"
+      note: "민감정보 마스킹: 호스트명·IP·사용자 계정을 가린 뒤 전달(하드웨어 경로·시리얼은 유지) · 전달 승인: 시스템 담당 확인 후 보안 담당 승인"
+
+- id: HPUX-PROC-R6-TAPE
+  scope: id
+  products: [hpux]
+  category: hardware
+  match: [HPUX-TAPE-ERROR]
+  title: 테이프 장치 오류 (HP-UX)
+  source: "HP-UX ioscan(1M)·insf(1M)·mt(1) · EMS Hardware Monitors(event.log)"
+  stages:
+  - stage: 1
+    steps:
+    - do: "오류 장치·시각·인식 상태 확인 (읽기 전용 — 장치는 건드리지 않음)"
+      cmd: |
+        grep -i -e tape -e stape -e rmt /var/adm/syslog/syslog.log | tail -20
+        ioscan -kfnC tape          # 11i v1/v2
+        ioscan -kfnNC tape         # 11i v3
+        tail -50 /var/opt/resmon/log/event.log
+      check: "오류 장치·시각을 백업 실패 시각과 대조 · CLAIMED 가 아니면 장치 인식(경로) 문제 · 같은 매체에서만 실패하면 매체, 여러 매체에서 실패하면 드라이브"
+      note: "적용: HP-UX 11i v1~v3 · 권한: root · 백업 중에는 mt 명령도 쓰지 않는다(2차)"
+  - stage: 2
+    steps:
+    - do: "(2차·승인 후, 백업 작업 없는 시간) 드라이브 상태·클리닝·다른 매체 시험"
+      cmd: |
+        mt -f /dev/rmt/<N>mn status
+        # 클리닝 카트리지 투입 후 다른 매체로 시험 백업
+      check: "성공: status 정상, 다른 매체로 시험 백업 성공 · 실패: 클리닝 후에도 같은 오류 → 드라이브 교체 의뢰"
+      note: "사전조건: 진행 중인 백업 없음 확인 · 영향: 장치 점유 · 승인: 백업 담당 · 백업/롤백: 매체 내용을 바꾸지 않으므로 롤백 불필요"
+    - do: "(2차·승인 후) 장치 파일 재생성"
+      cmd: |
+        ls -l /dev/rmt/ > /tmp/rmt_before.txt
+        insf -e -C tape
+      check: "성공: ioscan 에 CLAIMED·장치 파일 존재, 시험 백업 성공 · 실패: 장치 미인식 → 경로·드라이브 점검"
+      note: "사전조건: 백업 소프트웨어가 장치를 쓰지 않음 · 영향: 장치 파일 재생성 동안 짧은 부하 · 승인: 백업 담당·시스템 담당 · 백업/롤백: 기존 장치 파일 목록 보관, 새 파일 생성만 하므로 롤백 불필요"
+  - stage: 3
+    steps:
+    - do: "HPE·테이프 장비 업체 의뢰 자료"
+      cmd: |
+        ioscan -kfnC tape > ioscan_tape_$(date +%Y%m%d).txt
+        tail -500 /var/adm/syslog/syslog.log > syslog_tail.txt
+      check: "ioscan·syslog·EMS event.log·테이프 라이브러리 자체 로그"
+      note: "민감정보 마스킹: 호스트명·IP·백업 대상 경로(업무명)를 가린 뒤 전달 · 전달 승인: 시스템 담당 확인 후 보안 담당 승인"
+
+# ── Solaris ──
+- id: SOL-PROC-R6-ZFSHEALTH
+  scope: id
+  products: [solaris]
+  category: storage
+  match: [SOL-ZFS-CHECKSUM, SOL-ZFS-FAULT, SOL-ZPOOL-FAULTED]
+  title: ZFS 체크섬 오류·풀 DEGRADED/FAULTED (Solaris)
+  source: "Oracle Solaris 11.4 'Managing ZFS File Systems' 문제 해결(zpool status -v, zpool online, zpool clear, zpool replace, zpool scrub, zpool clear -F) · fmadm/fmdump · iostat -En"
+  stages:
+  - stage: 1
+    steps:
+    - do: "풀 상태·오류 열·영구 오류 파일 확인 (읽기 전용)"
+      cmd: |
+        zpool status -x
+        zpool status -v <pool>
+      check: "state 가 DEGRADED 면 중복성 감소, FAULTED/UNAVAIL 이면 사용 불가 · READ/WRITE/CKSUM 열이 0 이 아닌 장치 기록 · 'Permanent errors' 목록이 있으면 복구 불가 손상(그 파일은 백업에서 복원) · 정상: all pools are healthy"
+      note: "적용: Solaris 10 6/06+·11.x · 권한: 일반 사용자 조회 가능"
+    - do: "FMA 진단과 디스크 오류 대조 (읽기 전용)"
+      cmd: |
+        fmadm faulty
+        fmdump -e | tail -30
+        iostat -En | grep -i "Hard Errors"
+      check: "같은 장치가 fmadm·zpool·iostat 에 겹치면 교체 대상 · 같은 컨트롤러의 여러 장치가 함께 오류면 경로·HBA·스토리지 단절 의심(디스크 교체보다 경로 복구가 먼저)"
+      note: "적용: Solaris 10/11 · 권한: fmadm·fmdump 는 root"
+  - stage: 2
+    steps:
+    - do: "(2차·승인 후) 장치·경로 복구 뒤 장치 복귀·오류 계수 정리"
+      cmd: |
+        zpool status -v <pool> > /tmp/zpool_<pool>_before.txt
+        zpool online <pool> <device>
+        zpool clear <pool>
+      check: "성공: zpool status 에 ONLINE, 오류 열 0 · 실패: clear 직후 다시 오류 → 장치 결함 확정(교체 단계)"
+      note: "사전조건: 원인 장치·경로 복구 확인 · 영향: 장치 복귀 시 resilver 로 I/O 부하 · 승인: 시스템 담당 · 백업/롤백: 실행 전 zpool status 출력 보관, clear 는 오류 계수만 지움(FMA 기록은 남음)"
+    - do: "(2차·승인 후, 부하 낮은 시간) scrub 으로 전체 검증"
+      cmd: |
+        zpool scrub <pool>
+        zpool status <pool>
+      check: "성공: scrub 완료, 'errors: No known data errors' · 실패: 새 CKSUM 오류 → 해당 장치 교체, 영구 오류 파일은 백업 복원"
+      note: "사전조건: 업무 부하 낮은 시간 · 영향: scrub 동안 I/O 부하 · 승인: 시스템 담당 · 백업/롤백: 데이터를 바꾸지 않음(중복 사본으로 자동 복구만), 부하가 크면 zpool scrub -s <pool> 로 중지"
+    - do: "(2차·승인 후) 결함 디스크 교체"
+      cmd: |
+        zpool replace <pool> <old-device> <new-device>
+        zpool status <pool>
+      check: "성공: resilver 완료 후 ONLINE · 실패: replace 오류 → 새 디스크 크기·경로 확인 후 3차"
+      note: "사전조건: 풀이 중복(mirror/raidz) 구성인지, 새 디스크 크기 ≥ 기존, 중요 데이터 백업 · 영향: resilver 중 I/O 부하·성능 저하 · 승인: 시스템 담당(변경 관리)·Oracle/HW CE · 백업/롤백: replace 는 되돌릴 수 없음 — 백업이 유일한 롤백"
+    - do: "(2차·승인 후, Oracle 지원 협의) FAULTED 풀 회복 모드"
+      cmd: |
+        zpool clear -nF <pool>
+        zpool clear -F <pool>
+      check: "성공: 풀 ONLINE, 마지막 몇 초의 트랜잭션만 버려짐 · 실패: 회복 불가 → 백업에서 풀 재생성·복원"
+      note: "사전조건: 장치·경로를 먼저 모두 복구, -n 으로 버려질 범위 미리 확인, Oracle 지원 동의 · 영향: 최근 트랜잭션 일부 손실 · 승인: 시스템 담당·업무 책임자(변경 관리) · 백업/롤백: 버린 트랜잭션은 되돌릴 수 없음 — 백업 복원이 롤백 · 미검증 — 가져오지 못한 풀은 zpool import -F <pool> 형식, 판별 차이는 원문 대조 못 함"
+  - stage: 3
+    steps:
+    - do: "Oracle SR 자료"
+      cmd: |
+        zpool status -v > zpool_status_$(date +%Y%m%d).txt ; fmdump -eV > fmdump_eV_$(date +%Y%m%d).txt
+        iostat -En > iostat_En_$(date +%Y%m%d).txt
+      check: "zpool status -v·fmdump -eV·iostat -En·messages"
+      note: "민감정보 마스킹: 호스트명·IP·zpool status -v 의 손상 파일 경로(업무명·사용자명)를 가린 뒤 전달 · 전달 승인: 시스템 담당 확인 후 보안 담당 승인"
+
+- id: SOL-PROC-R6-SANPATH
+  scope: id
+  products: [solaris]
+  category: storage
+  match: [SOL-FIBRE-OFFLINE, SOL-MPXIO-PATH-OFFLINE]
+  title: FC 링크 오프라인·MPxIO 경로 오프라인 (Solaris)
+  source: "Oracle Solaris 11 'Managing SAN Devices and Multipathing'(fcinfo, mpathadm, cfgadm -o show_FCP_dev, luxadm) · Solaris 10 'Solaris SAN Configuration and Multipathing Guide'"
+  stages:
+  - stage: 1
+    steps:
+    - do: "HBA 포트·원격 포트 상태 확인 (읽기 전용)"
+      cmd: |
+        fcinfo hba-port | grep -i -e "Port WWN" -e "State" -e "Current Speed"
+        fcinfo remote-port -p <HBA포트WWN> | head -40
+        luxadm -e port
+      check: "State 가 offline 이거나 luxadm 에 NOT CONNECTED 면 그 포트 링크 단절 · 원격 포트(스토리지)가 안 보이면 zoning·스토리지 포트 쪽 · 정상: 모든 포트 online·CONNECTED"
+      note: "적용: fcinfo 는 Solaris 10+ · 권한: root"
+    - do: "LU 별 경로 수와 메시지 확인 (읽기 전용)"
+      cmd: |
+        mpathadm list lu
+        mpathadm show lu <장치> | head -40
+        grep -i -e fctl -e qlc -e emlxs -e scsi_vhci /var/adm/messages | tail -20
+      check: "Total Path Count 와 Operational Path Count 가 다르면 경로 손실(이중화 상실) · Operational 0 이면 I/O 정지(긴급) · messages 의 첫 오류 시각 기록"
+      note: "적용: MPxIO(scsi_vhci) 사용 시 · 권한: root"
+  - stage: 2
+    steps:
+    - do: "(2차·승인 후) SAN 복구 뒤 FC 장치 재구성"
+      cmd: |
+        cfgadm -al -o show_FCP_dev > /tmp/cfgadm_fcp_before.txt
+        cfgadm -c configure c<N>
+        mpathadm list lu
+      check: "성공: Operational Path Count = Total Path Count · 실패: 경로가 돌아오지 않음 → 아래 LIP 단계 또는 SAN 재점검"
+      note: "사전조건: SAN·스토리지 담당이 포트·zoning 복구 확인 · 영향: 장치 재탐색으로 짧은 부하 · 승인: 시스템 담당·스토리지 담당 · 백업/롤백: 실행 전 cfgadm 출력 보관, 원복은 cfgadm -c unconfigure c<N>::<원격포트WWN>(사용 중 장치 없을 때)"
+    - do: "(2차·승인 후) 포트 링크 재초기화(LIP)"
+      cmd: |
+        luxadm -e forcelip /dev/cfg/c<N>
+      check: "성공: fcinfo hba-port State online, 경로 복귀 · 실패: 링크 다운 지속 → 케이블·SFP·HBA 교체"
+      note: "사전조건: 그 포트를 쓰는 모든 LU 에 다른 Operational 경로가 있음을 mpathadm 으로 확인 · 영향: 그 포트 I/O 가 잠시 끊김 · 승인: 시스템 담당·스토리지 담당 · 백업/롤백: 되돌릴 설정 변경은 없음, 실패 시 포트를 그대로 두고 3차"
+  - stage: 3
+    steps:
+    - do: "Oracle·스토리지 벤더 의뢰 자료"
+      cmd: |
+        fcinfo hba-port > fcinfo_$(date +%Y%m%d).txt ; mpathadm list lu > mpath_$(date +%Y%m%d).txt
+        grep -i -e fctl -e qlc -e emlxs -e scsi_vhci /var/adm/messages > messages_fc_$(date +%Y%m%d).txt
+      check: "fcinfo·mpathadm·cfgadm·messages(FC 관련)"
+      note: "민감정보 마스킹: 호스트명·IP 를 가린 뒤 전달(WWN 은 SAN 분석에 필요해 유지하되 반출 범위는 보안 담당과 협의) · 전달 승인: 시스템 담당 확인 후 보안 담당 승인"
+
+- id: SOL-PROC-R6-SVM
+  scope: id
+  products: [solaris]
+  category: storage
+  match: [SOL-SVM-METADEVICE-FAIL]
+  title: SVM 메타디바이스 Maintenance·상태 DB 복제본 오류 (Solaris)
+  source: "Oracle Solaris 10 'Solaris Volume Manager Administration Guide'(metastat, metadb, metareplace) · prtvtoc/fmthard"
+  stages:
+  - stage: 1
+    steps:
+    - do: "문제 메타디바이스·상태 DB 확인 (읽기 전용)"
+      cmd: |
+        metastat | grep -i -e maint -e needs -e "last erred"
+        metastat -p
+        metadb -i
+      check: "Needs maintenance 구성 요소와 Last Erred 구성 요소 구분 — 복구는 Maintenance 먼저, Last Erred 는 나중 · metadb 의 대문자 플래그는 오류 복제본, 정상 복제본이 과반 미만이면 재부팅 시 다중 사용자 모드로 못 올라올 수 있음 · 정상: 모두 Okay"
+      note: "적용: Solaris 8~10(11 은 SVM 유지 지원) · 권한: root"
+    - do: "하부 디스크 오류 확인 (읽기 전용)"
+      cmd: |
+        iostat -En <디스크>
+        grep -i -e error -e retry /var/adm/messages | tail -20
+      check: "Hard Errors 증가·같은 디스크 반복 오류면 교체 대상, 일시 오류였으면 재동기화로 복구 가능"
+      note: "적용: Solaris 8~11 · 권한: 일반 사용자 가능(messages 는 root)"
+  - stage: 2
+    steps:
+    - do: "(2차·승인 후) 디스크 정상 확인 뒤 구성 요소 재동기화"
+      cmd: |
+        metastat -p > /tmp/metastat_p_before.txt ; cp -p /etc/lvm/md.tab /etc/lvm/md.tab.$(date +%Y%m%d)
+        metareplace -e <mirror> <slice>
+      check: "성공: metastat 에 Resyncing 후 Okay · 실패: 다시 Maintenance → 디스크 교체 단계"
+      note: "사전조건: 하부 디스크 오류 해소, 다른 서브미러 Okay 확인 · 영향: 재동기화 동안 I/O 부하 · 승인: 시스템 담당 · 백업/롤백: metastat -p·md.tab 보관, 재동기화는 정상 사본 복사라 되돌릴 대상 없음"
+    - do: "(2차·승인 후) 디스크 교체 뒤 상태 DB 복제본 재생성·재동기화"
+      cmd: |
+        metadb -d c<N>t<N>d<N>s7
+        prtvtoc /dev/rdsk/<정상디스크>s2 | fmthard -s - /dev/rdsk/<새디스크>s2
+        metadb -a -c 2 c<N>t<N>d<N>s7
+        metareplace -e <mirror> c<N>t<N>d<N>s<M>
+      check: "성공: metadb -i 에 오류 플래그 없음, metastat Okay · 실패: fmthard 오류(크기 다름) → 디스크 확인 후 Oracle 지원"
+      note: "사전조건: 교체 디스크 크기 ≥ 기존, 남은 정상 복제본이 과반 유지, 최신 백업 · 영향: 재동기화 동안 I/O 부하 · 승인: 시스템 담당·HW 업체(변경 관리) · 백업/롤백: metastat -p·md.tab·prtvtoc 출력 보관, 실패 시 백업 복원 · 적용: Solaris 8~10 (복제본 슬라이스 번호는 현장 구성에 맞춤)"
+  - stage: 3
+    steps:
+    - do: "Oracle SR 자료"
+      cmd: |
+        metastat > metastat_$(date +%Y%m%d).txt ; metadb -i > metadb_$(date +%Y%m%d).txt
+        iostat -En > iostat_En_$(date +%Y%m%d).txt
+      check: "metastat·metadb -i·iostat -En·messages"
+      note: "민감정보 마스킹: 호스트명·IP 를 가린 뒤 전달 · 전달 승인: 시스템 담당 확인 후 보안 담당 승인"
+
+- id: SOL-PROC-R6-USB
+  scope: id
+  products: [solaris]
+  category: hardware
+  match: [SOL-USB-ERROR]
+  title: USB 장치 오류·미승인 저장장치 (Solaris)
+  source: "Oracle Solaris 10/11 장치 관리 문서 — cfgadm(USB 연결점), rmformat, /var/adm/messages"
+  stages:
+  - stage: 1
+    steps:
+    - do: "오류 장치·포트와 저장장치 여부 확인 (읽기 전용)"
+      cmd: |
+        grep -i usb /var/adm/messages | tail -20
+        cfgadm -al | grep -i usb
+        rmformat -l
+      check: "오류 포트·장치 종류 기록 · rmformat -l 에 USB 저장장치가 보이고 승인 목록에 없으면 보안 담당 즉시 통보(장치 분리 전 증거 보존 지시 받기) · 키보드·KVM 오류는 업무 영향 작음"
+      note: "적용: Solaris 10/11 · 권한: cfgadm 은 일반 사용자 조회 가능, messages 는 root"
+  - stage: 2
+    steps:
+    - do: "(2차·승인 후) 장치 분리·재연결 시험"
+      cmd: |
+        cfgadm -al | grep -i usb > /tmp/cfgadm_usb_before.txt
+        cfgadm -c unconfigure <usb ap_id>
+      check: "성공: 분리 후 오류 중단, 필요한 장치는 다른 포트에 연결해 오류 없음 · 실패: 오류 반복 → 장치·포트 교체"
+      note: "사전조건: 그 USB 장치를 쓰는 업무(콘솔 키보드·라이선스 동글 등) 없음 확인, 보안 사고 의심이면 보안 담당 지시 먼저 · 영향: 해당 USB 장치 사용 불가 · 승인: 시스템 담당(보안 사고면 보안 담당) · 백업/롤백: 연결점 목록 보관, 원복은 cfgadm -c configure <usb ap_id>"
+  - stage: 3
+    steps:
+    - do: "Oracle·보안 보고 자료"
+      cmd: |
+        grep -i usb /var/adm/messages > messages_usb_$(date +%Y%m%d).txt
+        cfgadm -al > cfgadm_$(date +%Y%m%d).txt
+      check: "messages(USB)·cfgadm·rmformat -l 출력"
+      note: "민감정보 마스킹: 호스트명·IP 를 가린 뒤 전달, 미승인 저장장치 건은 보안 담당 지시에 따라 · 전달 승인: 보안 담당"
+
+- id: SOL-PROC-R6-FMDMODULE
+  scope: id
+  products: [solaris]
+  category: internal
+  match: [FMD-8000-2K]
+  title: FMA 진단 모듈 비활성화 FMD-8000-2K (Solaris)
+  source: "Oracle Solaris FMA 메시지 FMD-8000-2K(defect.sunos.fmd.module) · 'Managing Faults, Defects and Alerts'(fmadm config, fmadm reset, fmstat, fmdump) · SMF(svcs, svcadm)"
+  stages:
+  - stage: 1
+    steps:
+    - do: "비활성 모듈과 fmd 서비스 상태 확인 (읽기 전용)"
+      cmd: |
+        fmadm faulty
+        fmadm config | head -40
+        svcs -l svc:/system/fmd:default
+      check: "Affects 의 fmd:///module/<module> 이 꺼진 모듈 · fmadm config 에서 그 모듈 상태 확인 · fmd 서비스가 online 이 아니면 FMA 전체가 멈춘 상태(긴급) · cpumem-diagnosis 등 진단 모듈이 꺼졌으면 그 대상 결함은 자동 격리되지 않음"
+      note: "적용: Solaris 10/11 · 권한: root"
+    - do: "모듈 실패 직전 이벤트 확인 (읽기 전용)"
+      cmd: |
+        fmdump -v -u <EVENT-ID>
+        fmstat | head -40
+        fmdump -e | tail -30
+      check: "모듈 실패 직전 ereport 를 기록 — 같은 이벤트로 모듈이 반복 실패하면 알려진 결함(제품 노트·SRU) 대조 대상"
+      note: "적용: Solaris 10/11 · 권한: root"
+  - stage: 2
+    steps:
+    - do: "(2차·승인 후) 모듈 초기화"
+      cmd: |
+        fmadm config > /tmp/fmadm_config_before.txt
+        fmadm reset <module>
+      check: "성공: fmadm config 에서 그 모듈 active, fmadm faulty 에서 해당 defect 해소 · 실패: 곧 다시 비활성 → 실패 원인 이벤트를 Oracle 지원에 전달"
+      note: "사전조건: 1차 이벤트 기록 보존 · 영향: 그 모듈의 누적 통계·진단 상태가 초기화됨(다른 모듈 영향 없음) · 승인: 시스템 담당 · 백업/롤백: 초기화는 되돌릴 수 없음 — 실행 전 fmadm config·fmdump 출력 보관"
+    - do: "(2차·승인 후) fmd 서비스가 maintenance 일 때"
+      cmd: |
+        svcs -xv svc:/system/fmd:default > /tmp/fmd_svcs_before.txt
+        svcadm clear svc:/system/fmd:default
+      check: "성공: svcs 에 online, fmadm config 정상 · 실패: 다시 maintenance → svcs -xv 의 로그 원인 확인 후 Oracle 지원"
+      note: "사전조건: svcs -xv 로그에서 원인 확인 · 영향: fmd 재시작 동안 결함 진단 일시 중단 · 승인: 시스템 담당 · 백업/롤백: 설정 변경이 없어 롤백 불필요, 실행 전 상태 출력 보관"
+  - stage: 3
+    steps:
+    - do: "Oracle SR 자료"
+      cmd: |
+        fmdump -eV > fmdump_eV_$(date +%Y%m%d).txt ; fmdump -V > fmdump_V_$(date +%Y%m%d).txt
+        fmadm config > fmadm_config_$(date +%Y%m%d).txt
+      check: "fmdump -eV·fmdump -V·fmadm config·OS SRU 수준"
+      note: "민감정보 마스킹: 호스트명·IP 를 가린 뒤 전달(하드웨어 FRU·시리얼은 유지) · 전달 승인: 시스템 담당 확인 후 보안 담당 승인"
+
+# ── AIX·HP-UX·Solaris 공통 룰(OS-UNX-001/002/003) ──
+- id: UNX-PROC-R6-SWAP
+  scope: id
+  products: [aix, hpux, solaris]
+  category: memory
+  match: [OS-UNX-001]
+  title: 스왑(페이징) 공간 고갈 — AIX·HP-UX·Solaris 공통 룰
+  source: "IBM AIX 7.x(lsps, svmon, chps) · HP-UX 11i v3(swapinfo, swapon, lvcreate) · Oracle Solaris 10/11(swap -s/-l/-a, prstat, zfs create -V)"
+  stages:
+  - stage: 1
+    steps:
+    - do: "AIX — 페이징 사용률·상위 프로세스 확인 (읽기 전용)"
+      cmd: |
+        lsps -a ; lsps -s
+        svmon -G | head -10
+        ps -eo pid,vsz,user,args | sort -k2 -rn | head -10
+      check: "lsps -s 70% 이상 경고·90% 이상 위험 · 특정 프로세스 vsz 가 계속 늘면 누수 의심 · errpt 에 PGSP 항목이 있으면 이미 프로세스 강제 종료 발생"
+      note: "적용: AIX 5.3~7.3 · 권한: svmon 은 root · ps 의 args 열에 비밀번호 인자가 보일 수 있어 화면 공유 주의"
+    - do: "HP-UX — 스왑 사용률·상위 프로세스 확인 (읽기 전용)"
+      cmd: |
+        swapinfo -tam
+        UNIX95= ps -eo pid,vsz,sz,user,comm | sort -k2 -rn | head -10
+      check: "swapinfo 의 total PCT USED 90% 이상이면 고갈 · 특정 프로세스 vsz 가 계속 늘면 누수 의심"
+      note: "적용: HP-UX 11i v1~v3 · 권한: 일반 사용자 가능"
+    - do: "Solaris — 가상 메모리·상위 프로세스 확인 (읽기 전용)"
+      cmd: |
+        swap -s ; swap -l
+        prstat -s rss -n 10 5 1
+        df -h /tmp
+      check: "swap -s 의 available 이 거의 없으면 고갈 · /tmp(tmpfs) 사용이 크면 원인 후보 · 상위 rss 프로세스 기록"
+      note: "적용: Solaris 10/11 · 권한: 일반 사용자 가능"
+    - do: "공통 — 메모리 압박 정도 확인 (읽기 전용)"
+      cmd: |
+        vmstat 2 5
+      check: "AIX pi/po, HP-UX po 가 계속 0 보다 크거나 Solaris sr(scan rate)이 계속 높으면 물리 메모리 부족이 근본 원인 · 정상: 스왑 사용률 70% 미만, 페이지 아웃 0 근처"
+      note: "적용: AIX·HP-UX·Solaris 전 판 · 권한: 일반 사용자 가능"
+  - stage: 2
+    steps:
+    - do: "(2차·승인 후) AIX — 페이징 공간 확장"
+      cmd: |
+        lsps -a > /tmp/lsps_before.txt
+        chps -s <LP수> hd6
+      check: "성공: lsps -s 사용률 하락 · 실패: rootvg 여유 PP 부족 → 다른 VG 에 mkps 로 추가"
+      note: "사전조건: rootvg 여유 PP 확인(lsvg rootvg) · 영향: 운영 중 수행 가능, rootvg 공간 감소 · 승인: 시스템 담당 · 백업/롤백: lsps 출력 보관, 축소는 chps -d <LP수> hd6(사용 중 페이지가 없을 때만 성공) · 적용: AIX 5.3~7.3"
+    - do: "(2차·승인 후) HP-UX — 장치 스왑 추가"
+      cmd: |
+        swapinfo -tam > /tmp/swapinfo_before.txt
+        lvcreate -L <MB> -n swap2 vg00
+        swapon /dev/vg00/swap2
+      check: "성공: swapinfo 에 새 장치·PCT USED 하락 · 실패: VG 여유 없음 → 다른 VG 사용"
+      note: "사전조건: VG 여유 PE 확인 · 영향: 운영 중 수행 가능 · 승인: 시스템 담당 · 백업/롤백: /etc/fstab 에 넣지 않으면 재부팅 시 원래 구성으로 복귀, 영구화는 fstab 백업 후 추가 · 적용: HP-UX 11i v1~v3"
+    - do: "(2차·승인 후) Solaris — ZFS 스왑 볼륨 추가"
+      cmd: |
+        swap -l > /tmp/swap_before.txt
+        zfs create -V <크기>G rpool/swap2 ; swap -a /dev/zvol/dsk/rpool/swap2
+      check: "성공: swap -l 에 새 장치·available 증가 · 실패: 풀 공간 부족 → 다른 풀 사용"
+      note: "사전조건: rpool 여유 공간 확인 · 영향: 운영 중 수행 가능 · 승인: 시스템 담당 · 백업/롤백: swap -d /dev/zvol/dsk/rpool/swap2 후 zfs destroy rpool/swap2 로 원복, 영구화는 vfstab 백업 후 추가 · 적용: ZFS 루트(Solaris 10 10/08+·11), UFS 는 mkfile 후 swap -a"
+    - do: "(2차·승인 후) 누수 프로세스 재기동 — 응용 담당"
+      cmd: |
+        # 응용 담당이 해당 서비스의 정상 종료·기동 절차로 수행(OS 명령으로 강제 종료하지 않음)
+        ps -eo pid,vsz,args | sort -k2 -rn | head -5 > /tmp/top_vsz_before.txt
+      check: "성공: 재기동 후 스왑 사용률 정상화 · 실패: 다시 증가 → 응용 메모리 설정(힙·캐시) 재산정, 물리 메모리 증설 검토"
+      note: "사전조건: 업무 영향 시간 합의, 힙 덤프 등 분석 자료 먼저 확보 · 영향: 해당 서비스 일시 중단 · 승인: 업무 담당·시스템 담당 · 백업/롤백: 설정 변경이 없으면 롤백 불필요, 설정을 바꾸면 원본 백업"
+  - stage: 3
+    steps:
+    - do: "제조사 의뢰 자료 (OS 별)"
+      cmd: |
+        vmstat 2 30 > vmstat_$(date +%Y%m%d).txt
+        lsps -a > lsps.txt          # AIX (snap -gc 함께)
+        swapinfo -tam > swapinfo.txt  # HP-UX
+        swap -s > swap.txt ; prstat -s rss -n 30 5 3 > prstat.txt   # Solaris
+      check: "vmstat·스왑 사용률·상위 프로세스 목록(OS 별)"
+      note: "민감정보 마스킹: 호스트명·사용자명·프로세스 인자(비밀번호 가능)를 가린 뒤 전달 · 전달 승인: 시스템 담당 확인 후 보안 담당 승인"
+
+- id: UNX-PROC-R6-FSFULL
+  scope: id
+  products: [aix, hpux, solaris]
+  category: disk
+  match: [OS-UNX-002]
+  title: 파일시스템 공간 고갈 — AIX·HP-UX·Solaris 공통 룰
+  source: "IBM AIX 7.x(df -g, du, fuser -d, chfs) · HP-UX 11i v3(bdf, du -x, lvextend, fsadm) · Oracle Solaris 10/11(df, du -d, zfs list -o space, zfs set quota)"
+  stages:
+  - stage: 1
+    steps:
+    - do: "AIX — 사용률·큰 파일·지워졌지만 열린 파일 확인 (읽기 전용)"
+      cmd: |
+        df -g
+        du -sm <mount>/* 2>/dev/null | sort -rn | head
+        find <mount> -xdev -type f -size +2097152 -exec ls -l {} \; | head
+        fuser -dV <mount>
+      check: "%Used 95% 이상이면 확정 · 1GB 이상 파일의 소유자·용도 기록(정리는 2차) · fuser -d 에 나오는 프로세스는 지워졌지만 열린 파일을 잡고 있어 공간이 반환되지 않음"
+      note: "적용: AIX 5.3~7.3 · 권한: du·find·fuser 는 root 권장"
+    - do: "HP-UX — 사용률·큰 디렉터리 확인 (읽기 전용)"
+      cmd: |
+        bdf ; bdf -i
+        du -kx <mount> | sort -rn | head -15
+      check: "사용률 95% 이상 또는 %iuse 95% 이상이면 확정 · 상위 디렉터리의 소유 업무 기록"
+      note: "적용: HP-UX 11i v1~v3 · 권한: 일반 사용자 가능(du 는 root 권장)"
+    - do: "Solaris — 사용률·ZFS 점유 원인 확인 (읽기 전용)"
+      cmd: |
+        df -h
+        zpool list ; zfs list -o space -r <pool> | head -30
+        du -dsk <mount>/* 2>/dev/null | sort -n | tail -15
+      check: "사용률 95% 이상 확정 · ZFS 는 USEDSNAP 이 크면 스냅숏 원인, USEDREFRESERV 이 크면 예약 원인 · /tmp 는 tmpfs 라 swap available 과 함께 판단"
+      note: "적용: Solaris 10/11(ZFS 10 6/06+) · 권한: du 는 root 권장"
+  - stage: 2
+    steps:
+    - do: "(2차·승인 후) 불필요 파일 보관 후 정리"
+      cmd: |
+        tar -cvf <다른 파일시스템>/<정리대상>_$(date +%Y%m%d).tar <정리대상>
+        rm <정리대상>
+      check: "성공: 사용률 85% 이하 · 실패: 공간이 줄지 않음 → 지워졌지만 열린 파일(AIX fuser -d) — 그 서비스 재시작 일정 협의"
+      note: "사전조건: 정리 대상의 소유 업무 담당 확인, 감사·법정 보존 대상 아님 확인 · 영향: 지운 파일은 되돌릴 수 없음 · 승인: 시스템 담당·파일 소유 업무 담당 · 백업/롤백: 정리 전 tar 보관본으로 복원 · 적용: AIX·HP-UX·Solaris"
+    - do: "(2차·승인 후) 파일시스템 증설 (OS 별)"
+      cmd: |
+        chfs -a size=+<n>G <mount>                                          # AIX JFS2
+        lvextend -L <새크기MB> /dev/<vg>/<lv> ; fsadm -F vxfs -b <새크기>M <mount>   # HP-UX OnlineJFS
+        zfs set quota=<새값> <pool>/<dataset>                                # Solaris ZFS 쿼터
+      check: "성공: df/bdf/zfs list 에 늘어난 크기 반영 · 실패: AIX 0516-404(VG 여유 PP 부족)·HP-UX 'Not enough free physical extents' → 디스크 추가 요청, fsadm 라이선스 오류 → OnlineJFS 없음(오프라인 extendfs 일정), ZFS 풀 자체가 가득이면 디스크 추가 검토"
+      note: "사전조건: AIX lsvg <vg> FREE PPs·HP-UX Free PE·Solaris zpool list 여유 확인, 현재 값 기록(zfs get quota) · 영향: 온라인 증설은 무중단(HP-UX OnlineJFS 없으면 umount 필요) · 승인: 시스템 담당(변경 관리) · 백업/롤백: 증설은 사실상 되돌릴 수 없어 용량 계획에 반영, ZFS 쿼터는 zfs set quota=<원래값> 으로 원복 · 적용: AIX 5.3~7.3·HP-UX 11i v2/v3·Solaris 10/11"
+  - stage: 3
+    steps:
+    - do: "제조사 의뢰 자료 (OS 별)"
+      cmd: |
+        df -g > df_$(date +%Y%m%d).txt                 # AIX
+        bdf > bdf_$(date +%Y%m%d).txt                  # HP-UX
+        df -h > df_$(date +%Y%m%d).txt ; zfs list -o space > zfs_space.txt   # Solaris
+      check: "사용률 출력·급증 디렉터리 목록·급증 시각의 응용 로그"
+      note: "민감정보 마스킹: 호스트명·IP·파일 경로의 사용자명·업무명을 가린 뒤 전달 · 전달 승인: 시스템 담당 확인 후 보안 담당 승인"
+
+- id: UNX-PROC-R6-PANIC
+  scope: id
+  products: [aix, hpux, solaris]
+  category: hardware
+  match: [OS-UNX-003]
+  title: 시스템 패닉·HALT·LVM 실패 — AIX·HP-UX·Solaris 공통 룰
+  source: "IBM AIX 7.x(errpt, sysdumpdev, snap) · HP-UX 11i v3(crashconf, savecrash, /etc/shutdownlog) · Oracle Solaris 10/11(dumpadm, savecore, fmdump)"
+  stages:
+  - stage: 1
+    steps:
+    - do: "AIX — 덤프·하드웨어 오류·VG 상태 확인 (읽기 전용)"
+      cmd: |
+        errpt -a | head -100
+        sysdumpdev -L ; sysdumpdev -l
+        lsvg -o ; lsvg
+      check: "sysdumpdev -L 에 최근 덤프 성공·크기가 있으면 패닉 확정(덤프 보존), errpt 의 PERM·H 항목이 직전에 있으면 하드웨어 원인 · lsvg 에 있고 lsvg -o 에 없는 VG 가 있으면 LVM 실패 → AIX-PROC-R6-LVM"
+      note: "적용: AIX 5.3~7.3 · 권한: sysdumpdev 는 root"
+    - do: "HP-UX — 패닉 기록·덤프 저장 확인 (읽기 전용)"
+      cmd: |
+        tail -10 /etc/shutdownlog
+        crashconf -v
+        ls -l /var/adm/crash
+        grep -i -e panic -e lvm /var/adm/syslog/OLDsyslog.log /var/adm/syslog/syslog.log | tail -30
+      check: "shutdownlog 에 panic 문자열이면 패닉, /var/adm/crash 에 crash.N 이 있으면 덤프 저장 완료 · LVM 문구면 HPUX-PROC-R6-LVM"
+      note: "적용: HP-UX 11i v1~v3 (저장 경로는 savecrash 설정 SAVECRASH_DIR, 기본 /var/adm/crash) · 권한: root"
+    - do: "Solaris — 패닉 기록·덤프 저장 확인 (읽기 전용)"
+      cmd: |
+        grep -i -e panic -e WARNING /var/adm/messages | tail -30
+        dumpadm
+        ls -l /var/crash/*
+        fmdump | tail -20
+      check: "messages 에 panic 이 있고 savecore 디렉터리에 vmdump.N/vmcore.N 이 있으면 덤프 저장 완료 · fmdump 에 같은 시각 결함 진단이 있으면 하드웨어 원인 · 볼륨 오류면 SOL-PROC-R6-SVM 또는 SOL-PROC-R6-ZFSHEALTH"
+      note: "적용: Solaris 10/11(11.2+ 는 압축 vmdump) · 권한: root"
+  - stage: 2
+    steps:
+    - do: "(2차·승인 후) 덤프가 자동 저장되지 않았을 때 수동 저장 (OS 별)"
+      cmd: |
+        snap -a -c                 # AIX — 덤프 정보 포함 수집(/tmp/ibmsupt 공간 확인)
+        savecrash                  # HP-UX — SAVECRASH_DIR 로 저장
+        savecore -v                # Solaris — dumpadm 의 savecore 디렉터리로 저장
+      check: "성공: AIX /tmp/ibmsupt 에 snap 결과·HP-UX crash.N·Solaris vmdump.N 생성 · 실패: 공간 부족 → 저장 경로 파일시스템 증설 후 재시도(덤프 장치가 페이징/스왑과 같으면 시간이 지나 덮어써질 수 있어 서두름)"
+      note: "사전조건: 저장 경로 여유 공간이 덤프 크기 이상 · 영향: 수집 중 디스크 사용·부하 · 승인: 시스템 담당 · 백업/롤백: 새 파일 생성만 하므로 롤백 불필요, 원본 덤프 장치는 건드리지 않음"
+    - do: "(2차·승인 후) 재기동 뒤 서비스·클러스터 정상화 확인 및 원인 부품 조치"
+      cmd: |
+        lssrc -a | grep -v active | head -20      # AIX
+        cmviewcl -v | head -40                    # HP-UX Serviceguard
+        svcs -xv                                  # Solaris
+      check: "성공: 서비스·클러스터 패키지 모두 정상, 새 패닉 없음 · 실패: 같은 패닉 반복 → 덤프와 함께 제조사 긴급 의뢰(3차), 하드웨어 원인이면 각 OS 하드웨어 절차로 부품 교체"
+      note: "사전조건: 덤프 보존 완료 · 영향: 확인만 하고 기동은 각 서비스 절차로 · 승인: 시스템 담당·업무 담당 · 백업/롤백: 상태 출력 보관, 서비스 기동은 각 서비스 절차의 롤백을 따름"
+  - stage: 3
+    steps:
+    - do: "제조사 긴급 의뢰 자료 (OS 별)"
+      cmd: |
+        errpt -a > errpt_$(date +%Y%m%d).txt                                   # AIX (snap 결과 함께)
+        tar -cvf crash_$(date +%Y%m%d).tar /var/adm/crash/crash.<N>            # HP-UX
+        ls -l /var/crash/* > crash_list.txt ; fmdump -eV > fmdump_eV.txt       # Solaris (vmdump.N 함께)
+      check: "덤프 파일·errpt/syslog/messages·shutdownlog·fmdump"
+      note: "민감정보 마스킹: 호스트명·IP·사용자명을 가리고, 덤프는 메모리 내용(비밀번호·개인정보 가능)이 들어 있어 반출 심사 · 전달 승인: 시스템 담당 확인 후 보안 담당 승인(덤프는 보안 담당 필수)"

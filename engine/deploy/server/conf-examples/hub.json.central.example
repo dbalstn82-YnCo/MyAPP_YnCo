@@ -1,0 +1,8 @@
+{
+  "_설명": "본사 서버용. <설치경로>/conf/hub.json 으로 복사 후 서비스 재시작. 사이트 등록·토큰 발급은 [사용자 · 권한 → 사이트]에서 합니다.",
+  "role": "central",
+  "site_id": "HQ",
+  "site_name": "본사",
+  "interval_sec": 60,
+  "send_reports": true
+}

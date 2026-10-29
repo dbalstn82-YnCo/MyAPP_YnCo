@@ -1,0 +1,11 @@
+product: was-common
+title: "WAS 공통 운영 참고 (Tomcat·JEUS·WebLogic·JBoss)"
+sections:
+  - heading: "로그 위치"
+    body: "Tomcat: $CATALINA_BASE/logs/catalina.out, localhost*.log · JBoss/WildFly: $JBOSS_HOME/standalone/log/server.log · WebLogic: <도메인>/servers/<서버>/logs/<서버>.log · JEUS: $JEUS_HOME/logs/<서버>/JeusServer_*.log · GC 로그: JVM 옵션 -Xlog:gc(JDK9+)/-Xloggc"
+  - heading: "수집 방법"
+    body: "서버 로그 + GC 로그 + (있으면) 애플리케이션 로그를 함께 투입. 행 시각이 없는 스택트레이스는 분석기가 자동 병합"
+  - heading: "대표 장애 신호"
+    body: "OutOfMemoryError 힙 고갈 · connection is not available 커넥션 풀 고갈 · maxThreads reached 스레드 고갈 · BEA-000337 WebLogic STUCK 스레드 · Full GC 반복"
+  - heading: "1차 확인 명령"
+    body: "프로세스: ps -ef | grep java (PID·기동 시각) · 포트: ss -ltnp 또는 netstat -an | grep LISTEN · 디스크: df -h · 서버 로그 마지막 200줄 저장 — 덤프(jstack/jmap/jstat)는 부하·정지 위험이 있어 2차가 수행"

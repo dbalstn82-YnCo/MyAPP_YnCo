@@ -1,0 +1,1163 @@
+# 근거 매뉴얼·작성 기준 (r5 G5 묶음, 2026-10-16)
+# - CUBRID: CUBRID 11.4 Manual 'Controlling CUBRID Processes(cubrid server/broker status·broker reset·pl, CAS 오류 코드표)'·'cubrid Utilities(spacedb·lockdb·tranlist·killtran·checkdb·paramdump)'·'CUBRID HA(applyinfo·heartbeat status·changemode·HA 오류 메시지표)'·'System Parameters' — www.cubrid.org/manual/en/11.4/
+#   (11.2 매뉴얼로 Java SP 유틸 'cubrid javasp status' 확인 — 11.4 는 'cubrid pl')
+# - GOLDILOCKS: SUNJESOFT GOLDILOCKS 26c 매뉴얼 '오류 메시지(Error Message)'·'Dictionary/Performance View(V$SESSION·V$TRANSACTION·V$LOCK_WAIT·V$LOCKED_OBJECT·V$TABLESPACE_STAT·V$DATAFILE·V$CONTROLFILE·V$PROPERTY·V$CLUSTER_MEMBER·V$CLUSTER_LOCATION·V$CLUSTER_CONNECTION·V$SESSION_WAIT·V$STATEMENT·V$SESSION_MEM_USAGE·V$SHM_SEGMENT·V$SYSTEM_MEM_STAT)' — manual.sunjesoft.co.kr (뷰·컬럼 이름은 26c 매뉴얼에서 확인)
+# - Java: Oracle Java SE API(예외 의미)·JDK Troubleshooting Guide 'Diagnostic Tools'·jcmd/jstat 매뉴얼 — docs.oracle.com/en/java/javase/
+# - BizMaster 어댑터·Indigo ESB: 공개 매뉴얼 없음 — 로그 문구 의미와 OS/JVM 일반 점검만 쓰고, 제품 고유 조작은 verify_note 로 표시
+# 작성 기준: knowledge_spec.md 5차(GPT 45차 관문) — 1차 읽기 전용 · 2차 사전조건·영향·승인·백업/롤백 + 성공/실패 판단 · 3차 민감정보 마스킹·전달 승인
+procedures:
+# ── CUBRID ──
+- id: CUB-PROC-R5-INTERNAL
+  products: [cubrid]
+  category: internal
+  match: ["-4", "-68", "-111", "-131", "-963", "-10004", "-19", "-10001"]
+  title: 서버 내부 오류·질의 중단·CAS 내부/인자 오류 (CUBRID)
+  source: "CUBRID 11.4 Manual 'Controlling CUBRID Processes — cubrid server status·cubrid broker status, Broker Logs(error_log·sql_log), CAS 오류 코드표(-10001 CAS_ER_INTERNAL·-10004 CAS_ER_ARGS)'·'cubrid Utilities — tranlist·checkdb·killtran'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 서버·브로커 상태와 오류 발생 위치 확인 (읽기 전용)
+      cmd: |
+        cubrid server status ; cubrid broker status -b
+        ls -lt $CUBRID/log/server/ | head -5
+        grep -nE "CODE = -(4|68|111|131|963|19)([^0-9]|$)" $CUBRID/log/server/<db>_*.err | tail -30
+        grep -nE "\-1000(1|4)" $CUBRID/log/broker/error_log/<broker>_*.err | tail -20
+      check: "서버가 목록에 없으면 -111(서버 다운) 계열 — .err 마지막 오류 확인. 서버 정상이고 특정 Tran·CLIENT 에만 반복되면 질의·애플리케이션 원인"
+      note: "적용: CUBRID 9.x~11.4 (error_log 디렉터리 이름은 11.4 매뉴얼 기준) · 권한: CUBRID 설치 계정"
+    - do: 실패 질의·트랜잭션 확인 (읽기 전용)
+      cmd: |
+        cubrid tranlist <db>
+        grep -n "<오류 시각 HH:MM>" $CUBRID/log/broker/sql_log/<broker>_<n>.sql.log | tail -40
+        cubrid broker status -f <broker>
+      check: "같은 SQL·같은 클라이언트(드라이버 버전)에서만 반복되면 그 SQL/드라이버가 원인 · -4 가 다수 동시면 일괄 취소·timeout·종료 신호"
+      note: "적용: CUBRID 9.x~11.4 · 권한: DBA(tranlist 는 DBA 비밀번호 입력 요구 가능 — 화면 내용 기록 시 비밀번호 제외)"
+  - stage: 2
+    steps:
+    - do: 블로킹·폭주 트랜잭션 정리 또는 일관성 점검
+      cmd: |
+        cubrid killtran -i <tran_index> <db>
+        cubrid checkdb -C <db> <schema.table>
+      check: "성공: killtran 후 tranlist 에서 해당 Tran 사라짐·같은 오류 재발 없음, checkdb 불일치 0건 · 실패: 불일치 보고 → --repair 하지 말고 3차 의뢰"
+      note: "사전조건: 업무 담당이 종료 대상 거래 확인 · 영향: 종료된 거래 롤백, checkdb 는 I/O 부하 · 승인: DB 담당·업무 담당 · 백업/롤백: 종료 거래는 애플리케이션 재처리 목록으로 보관, checkdb --repair 는 backupdb 완료 후 제조사 지시로만"
+    - do: 서버가 내려간 경우(-111) 원인 자료 보존 후 기동
+      cmd: |
+        cp -p $CUBRID/log/server/<db>_*.err /var/tmp/ ; ls -l <db경로>/core* 2>/dev/null
+        cubrid server start <db>
+      check: "성공: cubrid server status 에 <db> 표시·브로커 접속 정상 · 실패: 기동 오류 → .err 와 core 를 3차 자료로"
+      note: "사전조건: .err·core 보존 완료, HA 면 heartbeat status 로 절체 상태 확인 · 영향: 기동 중 접속 불가 · 승인: DB 담당 · 백업/롤백: 기동 실패 시 추가 조작 없이 제조사 지원(복구 작업은 백업 확인 후)"
+  - stage: 3
+    steps:
+    - do: CUBRID 기술지원 의뢰 자료
+      cmd: |
+        cubrid_rel > cubrid_rel.txt ; cubrid paramdump <db> > paramdump.txt
+        tar czf cubrid_internal_$(date +%Y%m%d).tgz $CUBRID/log/server/<db>_*.err $CUBRID/log/broker/error_log/ cubrid_rel.txt paramdump.txt
+      check: "서버 .err·브로커 error_log·버전·파라미터·재현 SQL"
+      note: "민감정보 마스킹: SQL 의 업무 데이터·호스트명·IP·계정명 가림 후 전달 · 전달 승인: 보안 담당·DB 담당"
+
+- id: CUB-PROC-R5-DISK
+  products: [cubrid]
+  category: disk
+  match: ["-234"]
+  title: 메서드 파일 없음 (CUBRID)
+  source: "CUBRID 11.4 Manual 'cubrid Utilities'·서버 오류 로그($CUBRID/log/server/<db>_<yyyymmdd>_<hhmi>.err)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 오류의 파일 경로·존재·권한 확인 (읽기 전용)
+      cmd: |
+        grep -nE "CODE = -234([^0-9]|$)" $CUBRID/log/server/<db>_*.err | tail -10
+        ls -l <path> ; ls -ld $(dirname <path>) ; id
+      check: "파일이 없거나 CUBRID 실행 계정이 읽을 수 없으면 확정"
+      note: "적용: CUBRID 9.x~11.4 · 권한: CUBRID 설치 계정"
+      verify_note: "미검증 — -234 의 ER_ 이름·메시지 원문을 CUBRID 공식 매뉴얼에서 확인하지 못함"
+  - stage: 2
+    steps:
+    - do: 메서드 파일 복원·권한 정정
+      cmd: |
+        cp -p <배포본 경로>/<file> <path>
+        ls -l <path>
+      check: "성공: 같은 메서드 호출 시 -234 재발 없음 · 실패: 파일이 있어도 재발 → 메서드 등록 경로와 실제 경로 불일치 의심, 3차"
+      note: "사전조건: 배포 담당이 올바른 파일 판·경로 확인 · 영향: 없음(파일 추가) · 승인: DB 담당·개발 담당 · 백업/롤백: 덮어쓰기 전 기존 파일 사본 보관, 문제 시 원상 복구"
+  - stage: 3
+    steps:
+    - do: 의뢰 자료
+      cmd: |
+        tar czf cubrid_method_$(date +%Y%m%d).tgz $CUBRID/log/server/<db>_*.err ; cubrid_rel
+      check: "오류 로그·파일 목록·버전"
+      note: "민감정보 마스킹: 경로의 사용자명·호스트명 가림 · 전달 승인: DB 담당"
+
+- id: CUB-PROC-R5-SECURITY
+  products: [cubrid]
+  category: security
+  match: ["-1022", "-10018", "-10103", "-10200"]
+  title: 접근 IP 거부·CAS 권한 거부·SSL 모드 불허·인증 실패 (CUBRID)
+  source: "CUBRID 11.4 Manual 'Controlling CUBRID Processes — CAS 오류 코드표(-10018 CAS_ER_NOT_AUTHORIZED_CLIENT·-10103 SSL 모드 불허·-10200 CAS_ER_IS), cubrid broker acl status'·'System Parameters — ACCESS_CONTROL·ACCESS_CONTROL_FILE·SSL(cubrid_broker.conf)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 거부된 클라이언트·사유 확인 (읽기 전용)
+      cmd: |
+        grep -nE "\-(10018|10103|10200)|-1022" $CUBRID/log/broker/error_log/<broker>_*.err $CUBRID/log/server/<db>_*.err | tail -30
+        cubrid broker acl status <broker>
+        grep -nE "^(ACCESS_CONTROL|ACCESS_CONTROL_FILE|SSL)" $CUBRID/conf/cubrid_broker.conf
+      check: "acl 목록에 없는 IP 면 접근제어(-10018/-1022), 클라이언트·브로커 SSL 설정이 다르면 -10103, 계정·비밀번호 오류면 -10200 · 한 출처에서 짧은 시간 다발이면 공격 의심 → 보안 담당 통보"
+      note: "적용: CUBRID 9.x~11.4(SSL 은 브로커 SSL 파라미터가 있는 판) · 권한: CUBRID 설치 계정 · 비밀번호 값은 기록하지 않음"
+  - stage: 2
+    steps:
+    - do: 허용 목록·SSL·계정 정보 정정
+      config:
+        file: $CUBRID/conf/cubrid_broker.conf · ACCESS_CONTROL_FILE 에 지정된 파일
+        snippet: |
+          # 허용 IP 추가 예(ACCESS_CONTROL_FILE): [%<broker>] 아래 <db>:<user>:<허용IP목록파일>
+          # SSL 은 클라이언트 URL 설정과 브로커 SSL=ON/OFF 를 같게 맞춤
+      cmd: |
+        cubrid broker acl reload <broker>
+        cubrid broker acl status <broker>
+      check: "성공: acl status 에 정정 내용 반영, 해당 클라이언트 접속 성공 · 실패: 여전히 거부 → 파일 문법·브로커 이름 확인"
+      note: "사전조건: 보안 담당이 허용 대상 확인 · 영향: 잘못된 목록이면 정상 클라이언트 차단 · 승인: 보안 담당·DB 담당 · 백업/롤백: 변경 전 ACL 파일·cubrid_broker.conf 사본 보관 후 원복하고 acl reload · -1022(서버 접근 IP)는 access_ip_control_file 수정 후 `cubrid server acl reload <db>`"
+  - stage: 3
+    steps:
+    - do: 의뢰 자료
+      cmd: |
+        cubrid broker acl status > acl_status.txt ; tar czf cubrid_sec_$(date +%Y%m%d).tgz $CUBRID/log/broker/error_log/ acl_status.txt
+      check: "브로커 error_log·acl 상태·브로커 설정"
+      note: "민감정보 마스킹: IP·계정명 가림(비밀번호는 포함 금지) · 전달 승인: 보안 담당"
+
+- id: CUB-PROC-R5-CONNECTION
+  products: [cubrid]
+  category: connection
+  match: ["-10016", "-10003", "-10025", "-199", "-353", "-1139", "-1144"]
+  title: CAS·서버·마스터 연결 실패, HA 모드 불일치 (CUBRID)
+  source: "CUBRID 11.4 Manual 'Controlling CUBRID Processes — CAS 오류 코드표(-10003·-10016·-10025), cubrid broker status -f, cubrid broker reset'·'CUBRID HA — HA 오류 메시지표(-199·-353·-1139·-1144), cubrid heartbeat status, cubrid changemode, Broker Mode(ACCESS_MODE)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 프로세스·HA 상태 확인 (읽기 전용)
+      cmd: |
+        cubrid service status ; cubrid server status ; cubrid broker status -b -f
+        cubrid heartbeat status
+        cubrid changemode <db>@<node>
+      check: "cub_master·서버가 없으면 -353/-199/-10025, ACCESS_MODE(RW)와 서버 상태(standby)가 다르면 -1139, 노드 응답 없음이면 -1144"
+      note: "적용: CUBRID 9.x~11.4 (heartbeat·changemode 는 HA 구성만) · changemode 는 옵션 없이 쓰면 상태 조회만 · 권한: CUBRID 설치 계정"
+    - do: 네트워크·버전 확인 (읽기 전용)
+      cmd: |
+        ping -c 5 <peer_host> ; nc -zvw3 <db_host> <cubrid_port_id>
+        tail -50 $CUBRID/log/<hostname>_master.err
+        cubrid_rel
+      check: "포트 도달 실패면 네트워크·방화벽, -10016 이면 브로커·서버·드라이버 버전 계열 불일치"
+      note: "적용: Linux/UNIX · 권한: 일반 사용자"
+  - stage: 2
+    steps:
+    - do: 마스터·서버 기동 또는 브로커 재연결
+      cmd: |
+        cubrid service start
+        cubrid server start <db>
+        cubrid broker reset <broker>
+      check: "성공: server status·broker status 정상, 오류 재발 없음 · 실패: 기동 오류 → master.err·서버 .err 를 3차로"
+      note: "사전조건: 정지 원인(.err·OS 로그) 보존, HA 면 현재 master 노드 확인 · 영향: broker reset 은 기존 CAS 연결을 끊고 재연결(진행 중 요청 실패 가능) · 승인: DB 담당 · 백업/롤백: 기동 전 로그 사본 보관, reset 은 연결 재수립만 하므로 되돌릴 설정 없음"
+  - stage: 3
+    steps:
+    - do: 의뢰 자료
+      cmd: |
+        cubrid heartbeat status > hb.txt ; cubrid broker status -b -f > broker.txt
+        tar czf cubrid_conn_$(date +%Y%m%d).tgz $CUBRID/log/*.err $CUBRID/log/server/ $CUBRID/log/broker/error_log/ hb.txt broker.txt $CUBRID/conf/cubrid_ha.conf $CUBRID/conf/cubrid_broker.conf
+      check: "master/서버/브로커 오류 로그·HA 상태·설정"
+      note: "민감정보 마스킹: 호스트명·IP·계정명 가림 · 전달 승인: 보안 담당·DB 담당"
+
+- id: CUB-PROC-R5-CAPACITY
+  products: [cubrid]
+  category: capacity
+  match: ["-10026", "-10017", "-80"]
+  title: 가용 CAS 없음·Prepared 문 한도 초과·복제 로그 공간 부족 (CUBRID)
+  source: "CUBRID 11.4 Manual 'Controlling CUBRID Processes — CAS 오류 코드표(-10017 CAS_ER_FREE_SERVER·-10026 MAX_PREPARED_STMT_COUNT), cubrid broker status(AS·JQ)'·'System Parameters — MAX_NUM_APPL_SERVER·MAX_PREPARED_STMT_COUNT'·'CUBRID HA — -80 복제 로그 공간 부족'"
+  stages:
+  - stage: 1
+    steps:
+    - do: CAS 사용량·대기열 확인 (읽기 전용)
+      cmd: |
+        cubrid broker status -b
+        cubrid broker status -f <broker> | head -60
+        grep -nE "^(MAX_NUM_APPL_SERVER|MIN_NUM_APPL_SERVER|MAX_PREPARED_STMT_COUNT)" $CUBRID/conf/cubrid_broker.conf
+      check: "JQ(대기열) > 0 이 지속되고 AS 가 MAX_NUM_APPL_SERVER 에 도달하면 -10017 확정 · 한 CAS 가 prepared 문을 계속 늘리면 -10026(문장 미close)"
+      note: "적용: CUBRID 9.x~11.4 · 권한: CUBRID 설치 계정"
+    - do: 복제 로그 파티션 공간 확인 (-80, 읽기 전용)
+      cmd: |
+        grep -n ha_copy_log_base $CUBRID/conf/cubrid_ha.conf
+        df -h <copylog_path> ; df -i <copylog_path>
+      check: "사용률 95% 이상이면 -80 확정"
+      note: "적용: CUBRID HA 구성 · 권한: 일반 사용자"
+  - stage: 2
+    steps:
+    - do: CAS 수·prepared 한도 조정 또는 복제 로그 공간 확보
+      config:
+        file: $CUBRID/conf/cubrid_broker.conf
+        snippet: |
+          [%<broker>]
+          MAX_NUM_APPL_SERVER     =<현재값보다 큰 값 — max_clients(cubrid.conf) 이내>
+          MAX_PREPARED_STMT_COUNT =<필요 값>
+      cmd: |
+        cubrid broker restart
+        cubrid broker status -b
+      check: "성공: JQ 0 유지·-10017/-10026 재발 없음 · 실패: max_clients 초과로 서버 접속 거부 → cubrid.conf max_clients 와 함께 재산정"
+      note: "사전조건: 서버 메모리 여유와 max_clients 확인, 애플리케이션 문장 close 누락은 개발팀 수정 병행 · 영향: broker restart 동안 신규 접속 실패 · 승인: DB 담당·서비스 담당 · 백업/롤백: 변경 전 cubrid_broker.conf 사본 보관, 문제 시 원복 후 broker restart"
+  - stage: 3
+    steps:
+    - do: 의뢰 자료
+      cmd: |
+        cubrid broker status -b -f > broker.txt ; tar czf cubrid_cap_$(date +%Y%m%d).tgz broker.txt $CUBRID/conf/cubrid_broker.conf $CUBRID/log/broker/error_log/
+      check: "브로커 상태·설정·error_log"
+      note: "민감정보 마스킹: 클라이언트 IP·호스트명 가림 · 전달 승인: DB 담당"
+
+- id: CUB-PROC-R5-UPSTREAM
+  products: [cubrid]
+  category: upstream
+  match: ["-902", "-903", "-905", "-186", "-1032", "-1140"]
+  title: PL(Java SP) 서버 미기동·통신 오류, HA 복제 수신·반영 실패·지연 (CUBRID)
+  source: "CUBRID 11.4 Manual 'Controlling CUBRID Processes — cubrid pl status/restart, PL 오류 표(-902·-903·-905)'·11.2 Manual 'cubrid javasp status'·'CUBRID HA — cubrid applyinfo(-L·-r·-a·-i), ha_delay_limit, HA 오류 메시지표(-186·-1032·-1140)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: PL(Java SP) 서버 상태 확인 (읽기 전용)
+      cmd: |
+        cubrid pl status <db>         # 11.4
+        cubrid javasp status <db>     # 11.2~11.3
+        grep -nE "\-90(2|3|5)" $CUBRID/log/broker/error_log/<broker>_*.err | tail -20
+      check: "PL 서버가 실행 중이 아니면 -902 확정, 실행 중인데 -903/-905 면 CAS↔PL 통신(포트·불안정) 문제"
+      note: "적용: 11.4(cubrid pl) · 11.2~11.3(cubrid javasp) · 10.x 는 Java SP 가 서버 내장 — 서버 .err 로 확인 · 권한: CUBRID 설치 계정"
+    - do: HA 복제 상태·지연 확인 (읽기 전용)
+      cmd: |
+        cubrid heartbeat status
+        cubrid applyinfo -L <copylog_path> -r <peer_host> -a <db> -i 5
+        ls $CUBRID/log/*applylogdb*.err ; tail -50 $CUBRID/log/<db>@<node>_copylogdb.err
+      check: "'Delay in Applying Copied Log' 가 계속 늘면 지연(-1140), applylogdb .err 에 -1032 class·key 가 있으면 반영 실패, -186 은 내부 복구 여부(이후 정상 수신) 확인"
+      note: "적용: CUBRID HA 구성(9.x~11.4) · -i 는 Ctrl+C 로 끝냄 · 권한: CUBRID 설치 계정"
+  - stage: 2
+    steps:
+    - do: PL 서버 재시작 또는 HA 복제 재구성
+      cmd: |
+        cubrid pl restart <db>
+        cubrid heartbeat applylogdb stop <db> <peer_node> ; cubrid heartbeat applylogdb start <db> <peer_node>
+      check: "성공: pl status 정상·-902/-903 재발 없음, applyinfo 지연 감소 · 실패: -1032 반복 → 매뉴얼 권고대로 복제 일관성 확인 후 HA 재구성(standby 재구축)"
+      note: "사전조건: 오류 로그 보존, -1032 는 마스터·standby 데이터 키 비교 선행 · 영향: PL 재시작 중 SP 호출 실패, applylogdb 재시작 중 반영 일시 정지 · 승인: DB 담당·업무 담당 · 백업/롤백: standby 재구축 전 standby DB backupdb 보관"
+  - stage: 3
+    steps:
+    - do: 의뢰 자료
+      cmd: |
+        cubrid applyinfo -L <copylog_path> -r <peer_host> -a <db> > applyinfo.txt
+        tar czf cubrid_ha_$(date +%Y%m%d).tgz $CUBRID/log/*.err $CUBRID/log/broker/error_log/ applyinfo.txt $CUBRID/conf/cubrid_ha.conf
+      check: "copylogdb/applylogdb 오류 로그·applyinfo·HA 설정"
+      note: "민감정보 마스킹: 오류 메시지의 key 값(업무 데이터)·호스트명 가림 · 전달 승인: 보안 담당·DB 담당"
+
+- id: CUB-PROC-R5-MEMORY
+  products: [cubrid]
+  category: memory
+  match: ["-3", "-10002", "-1035"]
+  title: 가상 메모리 부족·CAS 메모리 할당 실패·로그 적용 메모리 초과 (CUBRID)
+  source: "CUBRID 11.4 Manual 'Controlling CUBRID Processes — CAS 오류 코드표(-10002 CAS_ER_NO_MORE_MEMORY)'·'System Parameters — data_buffer_size·max_clients·APPL_SERVER_MAX_SIZE'·'CUBRID HA — -1035, ha_apply_max_mem_size'"
+  stages:
+  - stage: 1
+    steps:
+    - do: OS·프로세스 메모리 확인 (읽기 전용)
+      cmd: |
+        free -m ; ps -eo pid,rss,vsz,comm --sort=-rss | head -15
+        cubrid broker status -b
+        grep -nE "data_buffer_size|max_clients" $CUBRID/conf/cubrid.conf ; grep -n ha_apply_max_mem_size $CUBRID/conf/cubrid_ha.conf
+      check: "가용 메모리·swap 고갈이면 -3(ER_OUT_OF_VIRTUAL_MEMORY)/-10002 확정 · applylogdb 만 크면 -1035(매뉴얼: 내부 재시작으로 복구)"
+      note: "적용: Linux · CUBRID 9.x~11.4 · 권한: 일반 사용자"
+    - do: OOM 이력 확인 (읽기 전용)
+      cmd: |
+        dmesg -T | grep -i "out of memory" | tail -10
+      check: "cub_server·cub_cas 가 대상이면 메모리 재산정 필요"
+      note: "적용: Linux · 권한: 일반 사용자(배포판에 따라 root)"
+  - stage: 2
+    steps:
+    - do: 메모리 파라미터 재산정
+      config:
+        file: $CUBRID/conf/cubrid.conf · $CUBRID/conf/cubrid_broker.conf · $CUBRID/conf/cubrid_ha.conf
+        snippet: |
+          data_buffer_size=<물리 메모리의 일정 비율 이내>
+          APPL_SERVER_MAX_SIZE=<CAS 1개 상한 MB>
+          ha_apply_max_mem_size=<applylogdb 상한 MB>
+      cmd: |
+        cubrid server restart <db>
+        cubrid broker restart
+      check: "성공: 재기동 후 free 여유 확보·-3/-10002 재발 없음 · 실패: 기동 오류(메모리 할당 실패) → 값을 원복해 기동"
+      note: "사전조건: 업무 중단 창 확보·전체 메모리 합(서버+CAS 수×CAS 크기) 계산 · 영향: 재기동 동안 서비스 중단 · 승인: DB 담당·서비스 담당 · 백업/롤백: 변경 전 conf 사본 보관, 기동 실패 시 원복"
+  - stage: 3
+    steps:
+    - do: 의뢰 자료
+      cmd: |
+        free -m > mem.txt ; cubrid paramdump <db> > paramdump.txt ; tar czf cubrid_mem_$(date +%Y%m%d).tgz mem.txt paramdump.txt $CUBRID/log/server/ $CUBRID/log/broker/error_log/
+      check: "메모리 현황·파라미터·오류 로그"
+      note: "민감정보 마스킹: 호스트명·IP 가림 · 전달 승인: DB 담당"
+
+- id: CUB-PROC-R5-PERFORMANCE
+  products: [cubrid]
+  category: performance
+  match: ["-1125", "-1126", "DB-CUB-001", "DB-CUB-002"]
+  title: 느린 질의·디스크 읽기 많은 질의·Overflow 키/페이지 생성 (CUBRID)
+  source: "CUBRID 11.4 Manual 'System Parameters — sql_trace_slow·sql_trace_execution_plan, 브로커 LONG_QUERY_TIME'·'cubrid broker status(LONG-Q)'·'cubrid statdump·plandump'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 느린 질의 이벤트·브로커 지표 확인 (읽기 전용)
+      cmd: |
+        grep -nE "SLOW_QUERY|MANY_IOREADS" $CUBRID/log/server/<db>_*.event 2>/dev/null | tail -20
+        cubrid broker status -b
+        cubrid tranlist <db>
+      check: "같은 SQL 이 반복해서 sql_trace_slow 를 넘으면 튜닝 대상 · LONG-Q 증가와 함께면 업무 영향 · -1125/-1126 은 긴 키·큰 레코드 증가 알림(경고)"
+      note: "적용: 이벤트 로그 $CUBRID/log/server/<db>_<yyyymmdd>_<hhmi>.event(11.4 매뉴얼 'Event Log', sql_trace_slow·sql_trace_ioread_pages 설정 시 기록) · 권한: CUBRID 설치 계정"
+    - do: 실행 통계 확인 (읽기 전용, 짧은 간격)
+      cmd: |
+        cubrid statdump -i 5 <db> | head -80
+        cubrid plandump <db> | head -60
+      check: "Num_data_page_ioreads 급증·같은 계획 반복이면 인덱스 부재 의심"
+      note: "적용: CUBRID 9.x~11.4 · 권한: DBA"
+  - stage: 2
+    steps:
+    - do: 인덱스 보강·SQL 개선
+      cmd: |
+        csql -u dba <db> -c "CREATE INDEX <idx_name> ON <schema.table>(<col>);"
+      check: "성공: 같은 SQL 수행 시간·ioreads 감소, SLOW_QUERY 재발 감소 · 실패: 계획 변화 없음 → 통계 갱신(optimizedb) 검토"
+      note: "사전조건: 개발 DB 에서 계획 비교 완료·디스크 여유 확인 · 영향: 인덱스 생성 중 테이블 잠금·I/O 부하 · 승인: DB 담당·업무 담당 · 백업/롤백: 생성 전 DDL 기록, 문제 시 DROP INDEX <idx_name>"
+  - stage: 3
+    steps:
+    - do: 의뢰 자료
+      cmd: |
+        cubrid statdump <db> > statdump.txt ; tar czf cubrid_perf_$(date +%Y%m%d).tgz statdump.txt $CUBRID/log/server/ $CUBRID/log/broker/sql_log/<broker>_<n>.sql.log
+      check: "통계·서버 로그·SQL 로그(대상 SQL)"
+      note: "민감정보 마스킹: SQL 바인드 값·업무 데이터·계정명 가림 · 전달 승인: 보안 담당·DB 담당"
+
+# ── GOLDILOCKS ──
+- id: GD-PROC-R5-DISK
+  products: [goldilocks]
+  category: disk
+  match: [ERR-11011, ERR-11012, ERR-14168, ERR-11004, ERR-11007, ERR-11013, ERR-11015]
+  title: 파일 읽기·쓰기·열기·동기화·절단 실패, 비동기 I/O 실패 (GOLDILOCKS)
+  source: "SUNJESOFT GOLDILOCKS 26c 매뉴얼 '오류 메시지 — 11004·11007·11011·11012·11013·11015·14168'·'V$DATAFILE'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 대상 파일·디스크 상태 확인 (읽기 전용)
+      cmd: |
+        grep -nE "1100[47]|1101[1235]|14168" $GOLDILOCKS_DATA/trc/system.trc | tail -20
+        ls -l <file> ; df -h <path> ; df -i <path>
+        dmesg -T | grep -i -E "I/O error|EXT4-fs error|XFS" | tail -20
+      check: "권한·공간 부족이면 원인 확정(매뉴얼 조치: 권한·디스크 여유 확인) · I/O error 가 있으면 스토리지 장애 — 반복 작업 보류"
+      note: "적용: GOLDILOCKS 20c~26c(trc 경로는 설치 기본값) · 권한: GOLDILOCKS 설치 계정"
+      verify_note: "미검증 — system.trc 의 기본 경로($GOLDILOCKS_DATA/trc/)를 26c 매뉴얼 원문으로 확인하지 못함(기존 절차·학습 예문 기준)"
+    - do: 데이터파일 손상 여부 확인 (읽기 전용)
+      cmd: |
+        # gsql 접속 후
+        SELECT TBS_NAME, DATAFILE_NAME, FILE_SIZE FROM V$DATAFILE;
+      check: "데이터파일 경로를 확인해 그 경로의 df -h·OS I/O 오류 로그와 대조 — 동기화 실패만으로 데이터파일 손상이라 단정하지 않는다(손상 확정은 ERR-14094 계열 오류로)"
+      note: "적용: 26c 매뉴얼 뷰 기준 · 권한: DBA 계정"
+  - stage: 2
+    steps:
+    - do: 권한·공간·경로 정정 후 작업 재수행
+      cmd: |
+        df -h <path>
+        ls -l <file>
+      config:
+        file: 대상 파일·디렉터리 권한, 파일시스템 용량
+        snippet: |
+          # 소유자/권한을 설치 기준과 같게(예: <dbuser>:<dbgroup>, 0640), 필요 시 파일시스템 증설
+      check: "성공: 같은 작업 재수행 시 오류 없음 · 실패: 재발 → 스토리지 담당 점검·3차 의뢰"
+      note: "사전조건: 설치 기준 권한·소유자 확인, 롤백된 거래(14168) 목록 확보 · 영향: 권한 변경 잘못 시 인스턴스 접근 실패 · 승인: DB 담당·시스템 담당 · 백업/롤백: 변경 전 `ls -l` 결과 보관 후 원복"
+  - stage: 3
+    steps:
+    - do: SUNJESOFT 기술지원 자료
+      cmd: |
+        tar czf goldilocks_disk_$(date +%Y%m%d).tgz $GOLDILOCKS_DATA/trc/ ; dmesg -T > dmesg.txt ; df -h > df.txt
+      check: "system.trc·OS 로그·디스크 현황"
+      note: "민감정보 마스킹: 호스트명·IP·경로의 사용자명 가림 · 전달 승인: 보안 담당·DB 담당"
+
+- id: GD-PROC-R5-THREAD
+  products: [goldilocks]
+  category: thread
+  match: [ERR-11024, ERR-11023]
+  title: 스레드 생성·속성 설정 실패 (GOLDILOCKS)
+  source: "SUNJESOFT GOLDILOCKS 26c 매뉴얼 '오류 메시지 — 11023(Unable to set thread attribute)·11024(Unable to create a thread)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 스레드 수·한도·메모리 확인 (읽기 전용)
+      cmd: |
+        ps -o pid,nlwp,rss,comm -p <PID>
+        ulimit -u ; ulimit -s ; cat /proc/sys/kernel/threads-max
+        free -m
+      check: "nlwp 가 ulimit -u 에 근접하거나 가용 메모리 부족이면 확정(매뉴얼 조치: 스레드 한도·메모리 확인)"
+      note: "적용: Linux · GOLDILOCKS 20c~26c · 권한: 설치 계정"
+    - do: 세션 수 확인 (읽기 전용)
+      cmd: |
+        # gsql 접속 후
+        SELECT COUNT(*) FROM V$SESSION;
+      check: "평시 대비 세션 급증이면 접속 폭주가 원인"
+      note: "적용: 26c 매뉴얼 뷰 · 권한: DBA"
+  - stage: 2
+    steps:
+    - do: 사용자 프로세스·스택 한도 조정
+      config:
+        file: /etc/security/limits.conf
+        snippet: |
+          <dbuser> soft nproc <값>
+          <dbuser> hard nproc <값>
+      cmd: |
+        su - <dbuser> -c "ulimit -u"
+      check: "성공: 새 로그인 세션에서 한도 반영·인스턴스 재기동 후 오류 재발 없음 · 실패: 반영 안 됨 → systemd 서비스면 LimitNPROC 확인"
+      note: "사전조건: 서버 메모리 여유 확인 · 영향: 인스턴스 재기동 시점에 반영(서비스 중단 창 필요) · 승인: 시스템 담당·DB 담당 · 백업/롤백: limits.conf 사본 보관 후 원복"
+  - stage: 3
+    steps:
+    - do: 의뢰 자료
+      cmd: |
+        ulimit -a > ulimit.txt ; ps -eLf | wc -l > threads.txt ; tar czf goldilocks_thread_$(date +%Y%m%d).tgz ulimit.txt threads.txt $GOLDILOCKS_DATA/trc/
+      check: "한도·스레드 수·system.trc"
+      note: "민감정보 마스킹: 호스트명·사용자명 가림 · 전달 승인: DB 담당"
+
+- id: GD-PROC-R5-MEMORY
+  products: [goldilocks]
+  category: memory
+  match: [ERR-11031, ERR-11042]
+  title: 공유메모리 연결 실패·시스템 메모리 부족 (GOLDILOCKS)
+  source: "SUNJESOFT GOLDILOCKS 26c 매뉴얼 '오류 메시지 — 11031(Unable to attach the shared memory segment)·11042(Not enough memory)'·'V$SHM_SEGMENT·V$SESSION_MEM_USAGE·V$SYSTEM_MEM_STAT'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 공유메모리·OS 메모리 확인 (읽기 전용)
+      cmd: |
+        ipcs -m ; free -m
+        ps -eo pid,rss,comm --sort=-rss | head -15
+      check: "segment ID 가 ipcs 목록에 없거나 실행 계정이 다르면 11031(매뉴얼: segment ID·프로세스 권한 확인) · 가용 메모리 고갈이면 11042"
+      note: "적용: Linux · 권한: 설치 계정"
+    - do: 인스턴스 메모리 사용 확인 (읽기 전용)
+      cmd: |
+        # gsql 접속 후
+        SELECT SHM_NAME, SHM_ID, SHM_SIZE FROM V$SHM_SEGMENT;
+        SELECT SESSION_ID, SUM(USED_SIZE) FROM V$SESSION_MEM_USAGE GROUP BY SESSION_ID ORDER BY 2 DESC;
+      check: "특정 세션이 메모리를 크게 쓰면 해당 SQL 이 원인"
+      note: "적용: 26c 매뉴얼 뷰 · 권한: DBA"
+  - stage: 2
+    steps:
+    - do: 메모리 다량 사용 작업 조정
+      cmd: |
+        # gsql 접속 후 — 대상 세션의 업무 확인 뒤 업무 담당이 작업 중단(애플리케이션 측)
+        SELECT SESSION_ID, USER_NAME, PROGRAM_NAME FROM V$SESSION WHERE SESSION_ID = <session_id>;
+      check: "성공: 가용 메모리 회복·11042 재발 없음 · 실패: 지속 → 메모리 property 재산정·증설(3차 상담)"
+      note: "사전조건: 업무 담당이 중단 대상 확인 · 영향: 중단된 작업 재실행 필요 · 승인: DB 담당·업무 담당 · 백업/롤백: 중단 작업 목록 보관 후 재실행"
+  - stage: 3
+    steps:
+    - do: 의뢰 자료
+      cmd: |
+        ipcs -a > ipcs.txt ; free -m > mem.txt ; tar czf goldilocks_mem_$(date +%Y%m%d).tgz ipcs.txt mem.txt $GOLDILOCKS_DATA/trc/ $GOLDILOCKS_DATA/conf/
+      check: "IPC·메모리·system.trc·property 파일"
+      note: "민감정보 마스킹: 호스트명·사용자명 가림 · 전달 승인: DB 담당"
+
+- id: GD-PROC-R5-CAPACITY
+  products: [goldilocks]
+  category: capacity
+  match: [ERR-11034, ERR-13059, ERR-11017, ERR-11019, ERR-11046]
+  title: 세마포어·파이프·시스템 자원 부족, 클러스터 패킷 할당 시간 초과, 버퍼 부족 (GOLDILOCKS)
+  source: "SUNJESOFT GOLDILOCKS 26c 매뉴얼 '오류 메시지 — 11017·11019·11034(Unable to create a semaphore)·11046·13059(CLUSTER_PACKET_ALLOCATION_TIMEOUT)'·'V$PROPERTY'"
+  stages:
+  - stage: 1
+    steps:
+    - do: OS 자원 사용량 확인 (읽기 전용)
+      cmd: |
+        ipcs -s | wc -l ; cat /proc/sys/kernel/sem
+        ulimit -n ; cat /proc/sys/fs/file-nr ; ls /proc/<PID>/fd | wc -l
+      check: "세마포어 수가 kernel.sem 한도에 근접하면 11034, 열린 파일이 한도 근접이면 11017/11019"
+      note: "적용: Linux · 권한: 설치 계정"
+    - do: 클러스터 패킷 property 확인 (읽기 전용)
+      cmd: |
+        # gsql 접속 후
+        SELECT PROPERTY_NAME, PROPERTY_VALUE FROM V$PROPERTY WHERE PROPERTY_NAME LIKE 'CLUSTER_PACKET%';
+      check: "13059 반복이면 CLUSTER_PACKET_ALLOCATION_TIMEOUT 상향 대상(매뉴얼 조치)"
+      note: "적용: 클러스터 구성 · 26c 매뉴얼 기준 · 권한: DBA"
+  - stage: 2
+    steps:
+    - do: 커널 자원 한도 또는 property 조정
+      config:
+        file: /etc/sysctl.conf (kernel.sem) · /etc/security/limits.conf (nofile) · GOLDILOCKS property
+        snippet: |
+          kernel.sem = <SEMMSL> <SEMMNS> <SEMOPM> <SEMMNI>
+          <dbuser> soft nofile <값>
+          # 13059: CLUSTER_PACKET_ALLOCATION_TIMEOUT 상향(매뉴얼 조치)
+      cmd: |
+        sysctl -p
+        cat /proc/sys/kernel/sem
+      check: "성공: 반영 값 확인·오류 재발 없음 · 실패: 값 반영 안 됨 → 설정 파일 문법·적용 순서 확인"
+      note: "사전조건: 현재 값 기록·제조사 권장값 확인 · 영향: 커널 값 즉시 반영(잘못된 값은 다른 프로세스에 영향), nofile 은 재로그인·재기동 후 반영 · 승인: 시스템 담당·DB 담당 · 백업/롤백: sysctl.conf·limits.conf 사본 보관, 원복 후 sysctl -p"
+  - stage: 3
+    steps:
+    - do: 의뢰 자료
+      cmd: |
+        ipcs -a > ipcs.txt ; sysctl -a 2>/dev/null | grep -E "kernel.sem|fs.file" > sysctl.txt ; tar czf goldilocks_cap_$(date +%Y%m%d).tgz ipcs.txt sysctl.txt $GOLDILOCKS_DATA/trc/
+      check: "IPC·커널 값·system.trc"
+      note: "민감정보 마스킹: 호스트명 가림 · 전달 승인: DB 담당"
+
+- id: GD-PROC-R5-CONNECTION
+  products: [goldilocks]
+  category: connection
+  match: [ERR-11067, ERR-11080, ERR-11141, ERR-11047, ERR-58010, ERR-58015]
+  title: 소켓·통신 컨텍스트·통신 링크 실패, 주소 오류, 클러스터 소켓 단절·연결 시간 초과 (GOLDILOCKS)
+  source: "SUNJESOFT GOLDILOCKS 26c 매뉴얼 '오류 메시지 — 11047·11067·11080·11141(08S01)'·'V$CLUSTER_LOCATION·V$CLUSTER_CONNECTION·V$CLUSTER_MEMBER'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 네트워크·프로세스 확인 (읽기 전용)
+      cmd: |
+        ping -c 5 <server> ; nc -zvw3 <server> <port>
+        ps -ef | grep -i goldilocks | grep -v grep
+        tail -100 $GOLDILOCKS_DATA/trc/system.trc
+      check: "포트 도달 실패면 서버 정지·방화벽(11067 매뉴얼 조치: 대상 서버·네트워크·방화벽 확인) · 주소 형식 오류면 11047"
+      note: "적용: Linux · 권한: 일반 사용자"
+    - do: 클러스터 연결 상태 확인 (읽기 전용)
+      cmd: |
+        # gsql 접속 후
+        SELECT MEMBER_NAME, HOST, PORT FROM V$CLUSTER_LOCATION;
+        SELECT MEMBER_ID, MEMBER_POSITION, STATUS FROM V$CLUSTER_MEMBER;
+        SELECT PEER_MEMBER_POS, PEER_ADDR, PEER_PORT FROM V$CLUSTER_CONNECTION;
+      check: "STATUS 가 비정상인 멤버·연결 목록에 없는 피어가 단절 대상(58010/58015)"
+      note: "적용: 클러스터 구성 · 26c 매뉴얼 뷰 · 권한: DBA"
+      verify_note: "미검증 — ERR-58010·58015 의 메시지 원문을 26c 오류 메시지 매뉴얼에서 찾지 못함"
+  - stage: 2
+    steps:
+    - do: 접속 설정 정정 또는 네트워크 복구 후 재연결
+      config:
+        file: 애플리케이션 DSN(odbc.ini 등)·클러스터 위치 설정
+        snippet: |
+          # HOST·PORT 를 V$CLUSTER_LOCATION 결과와 일치하게 정정
+      cmd: |
+        nc -zvw3 <server> <port>
+      check: "성공: 접속 성공·오류 재발 없음 · 실패: 도달 불가 지속 → 네트워크 담당·3차"
+      note: "사전조건: 네트워크 담당과 경로 확인 · 영향: DSN 변경은 애플리케이션 재접속 필요 · 승인: DB 담당·애플리케이션 담당 · 백업/롤백: 변경 전 DSN 파일 사본 보관 후 원복"
+  - stage: 3
+    steps:
+    - do: 의뢰 자료
+      cmd: |
+        tar czf goldilocks_conn_$(date +%Y%m%d).tgz $GOLDILOCKS_DATA/trc/ ; ss -tan > ss.txt
+      check: "system.trc·소켓 상태·클러스터 뷰 조회 결과"
+      note: "민감정보 마스킹: IP·호스트명 가림 · 전달 승인: 보안 담당·DB 담당"
+
+- id: GD-PROC-R5-LOCK
+  products: [goldilocks]
+  category: lock
+  match: [ERR-14007, ERR-11005, ERR-11038]
+  title: 교착상태·파일 잠금 실패·객체 사용 중 (GOLDILOCKS)
+  source: "SUNJESOFT GOLDILOCKS 26c 매뉴얼 '오류 메시지 — 14007(deadlock detected: 잠금 순서 보장하도록 트랜잭션 수정)·11005·11038'·'V$LOCK_WAIT·V$LOCKED_OBJECT·V$TRANSACTION·V$SESSION'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 잠금 대기·점유 확인 (읽기 전용)
+      cmd: |
+        # gsql 접속 후
+        SELECT GRANT_TRANS_ID, REQUEST_TRANS_ID FROM V$LOCK_WAIT;
+        SELECT TABLE_SCHEMA, TABLE_NAME, LOCK_MODE FROM V$LOCKED_OBJECT;
+        SELECT TRANS_ID, SESSION_ID, TRANS_STATE, START_TIME FROM V$TRANSACTION;
+      check: "GRANT_TRANS_ID 가 오래된(START_TIME) 트랜잭션이면 장시간 점유 — 세션은 V$SESSION 으로 프로그램 확인"
+      note: "적용: 26c 매뉴얼 뷰 · 권한: DBA"
+    - do: 파일 잠금 점유 프로세스 확인 (11005, 읽기 전용)
+      cmd: |
+        grep -n "11005" $GOLDILOCKS_DATA/trc/system.trc | tail -10
+        fuser -v <file> ; lsof <file>
+      check: "다른 인스턴스·백업 도구가 파일을 잡고 있으면 확정"
+      note: "적용: Linux · 권한: 설치 계정(lsof 는 root 필요할 수 있음)"
+  - stage: 2
+    steps:
+    - do: 점유 트랜잭션 정리(업무 확인 후) 또는 재시도
+      cmd: |
+        # gsql 접속 후 — 점유 세션 확인
+        SELECT SESSION_ID, SERIAL_NO, USER_NAME, PROGRAM_NAME, CLIENT_ADDRESS FROM V$SESSION WHERE TRANS_ID = <trans_id>;
+      check: "성공: 업무 담당이 해당 작업을 commit/rollback 하거나 종료해 V$LOCK_WAIT 0행 · 실패: 정리되지 않음 → 제조사 절차로 세션 종료(3차 상담)"
+      note: "사전조건: 업무 담당 확인 · 영향: 종료 작업 롤백 · 승인: DB 담당·업무 담당 · 백업/롤백: 종료 거래 목록 보관 후 재실행"
+      verify_note: "미검증 — GOLDILOCKS 세션 강제 종료 SQL(ALTER SYSTEM … SESSION 형식)을 26c 매뉴얼에서 확인하지 못해 명령을 적지 않음"
+  - stage: 3
+    steps:
+    - do: 의뢰 자료
+      cmd: |
+        tar czf goldilocks_lock_$(date +%Y%m%d).tgz $GOLDILOCKS_DATA/trc/
+      check: "system.trc·잠금 뷰 조회 결과"
+      note: "민감정보 마스킹: SQL 의 업무 데이터·계정명·IP 가림 · 전달 승인: DB 담당"
+
+- id: GD-PROC-R5-UPSTREAM
+  products: [goldilocks]
+  category: upstream
+  match: [ERR-16351, ERR-16354, ERR-58012]
+  title: 클러스터 멤버 접속 실패·연결 단절·failover 진행 중 (GOLDILOCKS)
+  source: "SUNJESOFT GOLDILOCKS 26c 매뉴얼 '오류 메시지 — 16351(멤버 위치 확인)·16354(CLUSTER_IGNORE_INACTIVE_MEMBER)'·'V$CLUSTER_MEMBER·V$CLUSTER_LOCATION'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 클러스터 멤버 상태·위치 확인 (읽기 전용)
+      cmd: |
+        # gsql 접속 후
+        SELECT MEMBER_ID, MEMBER_POSITION, STATUS, IS_GLOBAL_COORD, IS_GROUP_COORD FROM V$CLUSTER_MEMBER;
+        SELECT MEMBER_NAME, HOST, PORT FROM V$CLUSTER_LOCATION;
+      check: "16351: 위치(HOST·PORT)가 틀리거나 멤버 정지 · 16354: 세션과 멤버 연결 단절 · failover 진행 중이면 재가입 대기"
+      note: "적용: 클러스터 구성 · 26c 매뉴얼 뷰 · 권한: DBA"
+    - do: 네트워크·로그 확인 (읽기 전용)
+      cmd: |
+        ping -c 5 <peer_host> ; nc -zvw3 <peer_host> <port>
+        grep -n -i -E "failover|1635[14]" $GOLDILOCKS_DATA/trc/system.trc | tail -20
+      check: "도달 불가면 네트워크·멤버 장애, failover 완료 기록 전이면 58012"
+      note: "적용: Linux · 권한: 일반 사용자"
+      verify_note: "미검증 — ERR-58012 메시지 원문을 26c 오류 메시지 매뉴얼에서 찾지 못함"
+  - stage: 2
+    steps:
+    - do: 세션 옵션으로 비활성 멤버 무시(임시) 또는 멤버 복구
+      cmd: |
+        # gsql 세션에서 — 매뉴얼 16354 조치(오류를 경고로)
+        ALTER SESSION SET CLUSTER_IGNORE_INACTIVE_MEMBER = 1;
+      check: "성공: 해당 세션 업무 계속(경고만) · 실패: 오류 지속 → 멤버 복구·3차"
+      note: "사전조건: 비활성 멤버 데이터 없이 처리해도 되는 업무인지 업무 담당 확인 · 영향: 비활성 멤버의 데이터가 결과에서 빠질 수 있음 · 승인: DB 담당·업무 담당 · 백업/롤백: 세션 한정 설정 — 세션 종료 또는 값 0 으로 원복"
+      verify_note: "미검증 — CLUSTER_IGNORE_INACTIVE_MEMBER 의 ALTER SESSION 문법·값 형식(1/YES)을 매뉴얼 원문으로 확인하지 못함(오류 메시지 조치문에 세션 옵션 이름만 확인)"
+  - stage: 3
+    steps:
+    - do: 의뢰 자료
+      cmd: |
+        tar czf goldilocks_cluster_$(date +%Y%m%d).tgz $GOLDILOCKS_DATA/trc/ $GOLDILOCKS_DATA/conf/
+      check: "system.trc·클러스터 뷰 결과·설정"
+      note: "민감정보 마스킹: IP·호스트명 가림 · 전달 승인: 보안 담당·DB 담당"
+
+- id: GD-PROC-R5-SECURITY
+  products: [goldilocks]
+  category: security
+  match: [ERR-16004, ERR-16312]
+  title: 사용자명·비밀번호 오류·비밀번호 만료 (GOLDILOCKS)
+  source: "SUNJESOFT GOLDILOCKS 26c 매뉴얼 '오류 메시지 — 16004(invalid username/password; 28000)·16312(the password has expired)'·'V$SESSION'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 실패 계정·출처 확인 (읽기 전용)
+      cmd: |
+        grep -n -E "16004|16312|28000" <app_log> | tail -30
+        # gsql 접속 후
+        SELECT USER_NAME, PROGRAM_NAME, CLIENT_ADDRESS, LOGON_TIME FROM V$SESSION WHERE USER_NAME = '<user>';
+      check: "같은 계정 정상 세션이 있으면 특정 애플리케이션 설정 문제 · 16312 면 비밀번호 만료(매뉴얼: 새 비밀번호 입력) · 짧은 시간 다발이면 보안 담당 통보"
+      note: "적용: 26c 매뉴얼 기준 · 권한: DBA · 비밀번호 값은 기록하지 않음"
+  - stage: 2
+    steps:
+    - do: 비밀번호 갱신과 애플리케이션 설정 동시 반영
+      cmd: |
+        # 계정 관리자가 gsql 대화형 접속 후 판 매뉴얼의 비밀번호 변경 방법으로 직접 입력 — 값이 든 IDENTIFIED BY 문은
+        #   입력 기록·화면·감사에 남을 수 있어 이 절차·작업 기록에 쓰지 않는다
+        SELECT USER_NAME, PROGRAM_NAME, CLIENT_ADDRESS, LOGON_TIME FROM V$SESSION WHERE USER_NAME = '<user>';   # 바꾸기 전 이 계정을 쓰는 접속(애플리케이션) 확인 — 1차와 같은 조회
+      check: "성공: 애플리케이션 재접속 성공·16004/16312 재발 없음 · 실패: 애플리케이션 미반영 → 데이터소스 설정 확인"
+      note: "사전조건: 해당 계정을 쓰는 애플리케이션 목록 확보 · 영향: 미반영 애플리케이션 접속 실패 · 승인: 보안 담당·계정 관리자 · 백업/롤백: 이전 비밀번호로 되돌릴 수 없으므로 반영 순서(애플리케이션 설정 준비 → 변경 → 반영) 계획"
+  - stage: 3
+    steps:
+    - do: 의뢰 자료
+      cmd: |
+        grep -n -E "16004|16312" <app_log> > auth_fail.txt
+      check: "실패 시각·계정·출처 목록"
+      note: "민감정보 마스킹: 계정명·IP 가림(비밀번호 포함 금지) · 전달 승인: 보안 담당"
+
+- id: GD-PROC-R5-INTERNAL
+  products: [goldilocks]
+  category: internal
+  match: [ERR-11039]
+  title: 작업 시간 초과 (GOLDILOCKS)
+  source: "SUNJESOFT GOLDILOCKS 26c 매뉴얼 '오류 메시지 — 11039(Operation timed out: timeout 값 조정·시스템 성능 확인)'·'V$SESSION_WAIT·V$PROPERTY'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 시스템 부하·대기 이벤트 확인 (읽기 전용)
+      cmd: |
+        vmstat 5 3 ; grep -n "11039" $GOLDILOCKS_DATA/trc/system.trc | tail -10
+        # gsql 접속 후
+        SELECT SESSION_ID, WAIT_EVENT_NAME, WAIT_TIME, STATE FROM V$SESSION_WAIT;
+      check: "CPU·I/O 대기 높음 또는 특정 대기 이벤트 집중이면 성능 원인, 그 외면 timeout property 과소 검토"
+      note: "적용: 26c 매뉴얼 뷰 · 권한: DBA"
+  - stage: 2
+    steps:
+    - do: 관련 timeout property 조정
+      cmd: |
+        # gsql 접속 후 — 현재 값 기록
+        SELECT PROPERTY_NAME, PROPERTY_VALUE, SYS_MODIFIABLE FROM V$PROPERTY WHERE PROPERTY_NAME LIKE '%TIMEOUT%';
+      check: "성공: 조정 후 11039 재발 없음 · 실패: 재발 → 성능 원인 해소 우선, 3차"
+      note: "사전조건: 대기 원인 분석 완료 · 영향: timeout 상향 시 장애 감지 지연 · 승인: DB 담당 · 백업/롤백: 변경 전 값 기록 후 원복"
+  - stage: 3
+    steps:
+    - do: 의뢰 자료
+      cmd: |
+        tar czf goldilocks_timeout_$(date +%Y%m%d).tgz $GOLDILOCKS_DATA/trc/ ; vmstat 5 6 > vmstat.txt
+      check: "system.trc·OS 부하·대기 뷰 결과"
+      note: "민감정보 마스킹: 호스트명 가림 · 전달 승인: DB 담당"
+
+- id: GD-PROC-R5-PERFORMANCE
+  products: [goldilocks]
+  category: performance
+  match: [DB-GD-001]
+  title: 장기 실행 문장 시간 초과 정리 (GOLDILOCKS)
+  source: "SUNJESOFT GOLDILOCKS 26c system.trc 예문 '[CLEANUP] long statement timeout'·'V$STATEMENT·V$SESSION·V$PROPERTY'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 정리된 문장·프로그램 확인 (읽기 전용)
+      cmd: |
+        grep -n -A1 "long statement timeout" $GOLDILOCKS_DATA/trc/system.trc | tail -20
+        # gsql 접속 후
+        SELECT SESSION_ID, SQL_TEXT, START_TIME, TOTAL_EXEC_TIME FROM V$STATEMENT ORDER BY TOTAL_EXEC_TIME DESC;
+      check: "같은 프로그램·SQL 이 반복 정리되면 튜닝 대상 · 인스턴스 전체 장애를 뜻하지 않음"
+      note: "적용: 26c 매뉴얼 뷰 · 권한: DBA"
+  - stage: 2
+    steps:
+    - do: SQL 튜닝·timeout 정책 정비
+      cmd: |
+        # gsql 접속 후 — 실행계획 확인(실제 실행 없이)
+        EXPLAIN PLAN ONLY <SQL>;
+      check: "성공: 수정 SQL 수행 시간 감소·정리 기록 감소 · 실패: 계획 변화 없음 → 인덱스·통계 검토"
+      note: "사전조건: 개발 DB 에서 SQL 비교 · 영향: 인덱스 추가 시 I/O 부하 · 승인: DB 담당·개발 담당 · 백업/롤백: 변경 DDL 기록 후 원복 가능하도록 준비"
+      verify_note: "미검증 — GOLDILOCKS 의 실행계획 확인 문법(EXPLAIN PLAN ONLY 형식)을 26c 매뉴얼에서 확인하지 못함"
+  - stage: 3
+    steps:
+    - do: 의뢰 자료
+      cmd: |
+        grep -n -A1 "long statement timeout" $GOLDILOCKS_DATA/trc/system.trc > cleanup.txt
+      check: "정리 기록·대상 SQL"
+      note: "민감정보 마스킹: SQL 리터럴 값·프로그램명의 사용자 정보 가림 · 전달 승인: DB 담당"
+
+# ── Java ──
+- id: JAVA-PROC-R5-APP
+  products: [java]
+  category: app
+  match: [JAVA.LANG.STACKOVERFLOWERROR, JAVA.LANG.NULLPOINTEREXCEPTION, JAVA.LANG.CLASSNOTFOUNDEXCEPTION, JAVA.LANG.NOCLASSDEFFOUNDERROR, JAVA.LANG.ILLEGALSTATEEXCEPTION, JAVA.LANG.NUMBERFORMATEXCEPTION, JAVA.UTIL.CONCURRENTMODIFICATIONEXCEPTION, ORG.SPRINGFRAMEWORK.JDBC.BADSQLGRAMMAREXCEPTION, ORG.APACHE.IBATIS.BINDING.BINDINGEXCEPTION, COM.FASTERXML.JACKSON.CORE.JSONPARSEEXCEPTION]
+  title: 소스(애플리케이션) 결함 예외 — NPE·스택 넘침·클래스 누락·상태/변환 오류
+  source: "Oracle Java SE 21 API Specification(각 예외 클래스 설명)·JDK Troubleshooting Guide 'Diagnostic Tools(jcmd Thread.print, VM.flags)' — docs.oracle.com/en/java/javase/"
+  stages:
+  - stage: 1
+    steps:
+    - do: 최초 애플리케이션 프레임·빈도 확인 (읽기 전용)
+      cmd: |
+        grep -n -A20 "<예외클래스>" <app_log> | head -80
+        grep -c "<예외클래스>" <app_log>
+      check: "같은 클래스:줄에서 반복되면 소스 결함 확정 — WAS/WEB 장애 아님. StackOverflowError 는 같은 프레임 반복, ClassNotFound/NoClassDefFound 는 배포 jar 누락"
+      note: "적용: JDK 8~21 · 권한: 애플리케이션 로그 읽기"
+    - do: 배포·JVM 정보 확인 (읽기 전용)
+      cmd: |
+        jcmd <PID> VM.version ; jcmd <PID> VM.flags
+        ls -l <배포경로>/WEB-INF/lib | head -50
+      check: "직전 배포 이후 발생이면 배포본 결함, -Xss 등 옵션 변경 여부 확인"
+      note: "적용: jcmd 는 JDK 7+ · 권한: JVM 실행 계정"
+  - stage: 2
+    steps:
+    - do: 수정 배포 또는 직전 판 원복
+      cmd: |
+        cp -p <배포본> <백업경로>/ ; <배포 스크립트> <수정본>
+      check: "성공: 같은 요청에서 예외 재발 없음 · 실패: 재발 → 직전 판으로 원복"
+      note: "사전조건: 개발 담당 수정·시험 완료 · 영향: 배포 중 서비스 재시작 · 승인: 개발 담당·운영 담당 · 백업/롤백: 현재 배포본 사본 보관 후 원복"
+  - stage: 3
+    steps:
+    - do: 개발팀 이관 자료
+      cmd: |
+        grep -n -A40 "<예외클래스>" <app_log> > exception.txt ; jcmd <PID> VM.version > jvm.txt
+      check: "스택트레이스·발생 빈도·JVM 버전·배포 판"
+      note: "민감정보 마스킹: 요청 파라미터의 개인정보·세션 ID·IP 가림 · 전달 승인: 개발 담당·보안 담당"
+
+- id: JAVA-PROC-R5-UPSTREAM
+  products: [java]
+  category: upstream
+  match: [JAVA.NET.SOCKETTIMEOUTEXCEPTION, ORG.SPRINGFRAMEWORK.WEB.CLIENT.RESOURCEACCESSEXCEPTION, ORG.SPRINGFRAMEWORK.WEB.CLIENT.HTTPCLIENTERROREXCEPTION, ORG.SPRINGFRAMEWORK.WEB.CLIENT.HTTPSERVERERROREXCEPTION, JAVAX.NAMING.COMMUNICATIONEXCEPTION, ORG.APACHE.KAFKA.COMMON.ERRORS.TIMEOUTEXCEPTION]
+  title: 외부 연계 호출 실패 — 소켓 시간 초과·HTTP 4xx/5xx·LDAP 통신·Kafka 시간 초과
+  source: "Oracle Java SE 21 API(SocketTimeoutException·javax.naming.CommunicationException)·JDK Troubleshooting Guide 'jcmd Thread.print'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 대상·유형 확인 (읽기 전용)
+      cmd: |
+        grep -n -E "SocketTimeoutException|ResourceAccessException|HttpClientErrorException|HttpServerErrorException|CommunicationException|TimeoutException" <app_log> | tail -30
+        getent hosts <host> ; nc -zvw3 <host> <port>
+      check: "connect/read timeout·4xx·5xx 를 구분 — 특정 대상에만 집중되면 대상 시스템 원인, 전 대상이면 우리 쪽 네트워크·스레드"
+      note: "적용: JDK 8~21 · 권한: 일반 사용자"
+    - do: 외부 호출 대기 스레드 확인 (읽기 전용, 프로세스 유지)
+      cmd: |
+        jcmd <PID> Thread.print > /var/tmp/td_$(date +%H%M%S).txt
+        grep -c "socketRead\|SocketInputStream" /var/tmp/td_*.txt
+      check: "외부 호출 읽기 대기 스레드가 많으면 대상 지연이 스레드 고갈로 번지는 중"
+      note: "적용: jcmd JDK 7+ (JDK 8 이하에서 jcmd 불가 시 kill -3 <PID> — 스레드 덤프, 프로세스는 유지) · 권한: JVM 실행 계정"
+  - stage: 2
+    steps:
+    - do: 연계 timeout·재시도·서킷 설정 조정
+      config:
+        file: 애플리케이션 설정(application.yml 등)
+        snippet: |
+          # HTTP 클라이언트 connectTimeout / readTimeout 을 대상 SLA 기준으로, 재시도는 멱등 요청만
+      cmd: |
+        <배포 스크립트> <설정 반영본>
+      check: "성공: timeout 건수 감소·스레드 대기 감소 · 실패: 대상 지연 지속 → 대상 시스템 담당 조치 요청"
+      note: "사전조건: 대상 시스템 담당과 SLA 확인 · 영향: timeout 상향 시 스레드 점유 증가 · 승인: 개발 담당·운영 담당 · 백업/롤백: 변경 전 설정 사본 보관 후 원복"
+  - stage: 3
+    steps:
+    - do: 대상 시스템·개발팀 전달 자료
+      cmd: |
+        grep -n -E "Exception" <app_log> | tail -200 > upstream.txt ; tar czf upstream_$(date +%Y%m%d).tgz upstream.txt /var/tmp/td_*.txt
+      check: "실패 시각·대상·유형 집계·스레드 덤프"
+      note: "민감정보 마스킹: URL 쿼리의 개인정보·토큰·IP 가림 · 전달 승인: 보안 담당·연계 담당"
+
+- id: JAVA-PROC-R5-INTERNAL
+  products: [java]
+  category: internal
+  match: [JAVA.SQL.SQLEXCEPTION, JAVA.SQL.SQLINTEGRITYCONSTRAINTVIOLATIONEXCEPTION, ORG.SPRINGFRAMEWORK.DAO.DUPLICATEKEYEXCEPTION, ORG.SPRINGFRAMEWORK.TRANSACTION.UNEXPECTEDROLLBACKEXCEPTION, ORG.APACHE.IBATIS.EXCEPTIONS.PERSISTENCEEXCEPTION, JAVAX.NAMING.NAMENOTFOUNDEXCEPTION, JAVA.LANG.ARRAYINDEXOUTOFBOUNDSEXCEPTION, JAVA.LANG.CLASSCASTEXCEPTION, JAVA.LANG.ILLEGALARGUMENTEXCEPTION, JAVA.LANG.UNSUPPORTEDOPERATIONEXCEPTION, JAVA.IO.EOFEXCEPTION, JAVA.NIO.CHANNELS.CLOSEDCHANNELEXCEPTION, JAVA.SQL.SQLSYNTAXERROREXCEPTION, JAVA.UTIL.NOSUCHELEMENTEXCEPTION, ORG.SPRINGFRAMEWORK.WEB.HTTPREQUESTMETHODNOTSUPPORTEDEXCEPTION, ORG.SPRINGFRAMEWORK.DAO.DATAINTEGRITYVIOLATIONEXCEPTION, ORG.SPRINGFRAMEWORK.TRANSACTION.CANNOTCREATETRANSACTIONEXCEPTION, ORG.HIBERNATE.EXCEPTION.GENERICJDBCEXCEPTION, ORG.HIBERNATE.LAZYINITIALIZATIONEXCEPTION, COM.FASTERXML.JACKSON.DATABIND.JSONMAPPINGEXCEPTION, SW-JAVA-003, SW-APP-VALID-001, SW-APP-BIZ-001]
+  title: 애플리케이션 내부 처리 예외 — SQL·제약 위반·트랜잭션·매핑·입력 검증
+  source: "Oracle Java SE 21 API(java.sql.SQLException·SQLSyntaxErrorException·SQLIntegrityConstraintViolationException 등 SQLState 분류)·JDK Troubleshooting Guide 'Diagnostic Tools'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 근본 원인(Caused by)·SQLState 확인 (읽기 전용)
+      cmd: |
+        grep -n -A25 "<예외클래스>" <app_log> | grep -E "Caused by|SQLState|ErrorCode|ORA-|ERROR CODE" | head -30
+        grep -c "<예외클래스>" <app_log>
+      check: "SQLState 23=무결성 위반, 42=구문·권한, 08=연결 · Caused by 최하위가 실제 원인 — 데이터는 조회만"
+      note: "적용: JDK 8~21 · 권한: 로그 읽기"
+    - do: 자원 한계(Too many open files·SW-JAVA-003) 확인 (읽기 전용)
+      cmd: |
+        ls /proc/<PID>/fd | wc -l ; grep "Max open files" /proc/<PID>/limits
+        lsof -p <PID> 2>/dev/null | awk '{print $5}' | sort | uniq -c | sort -rn | head
+      check: "열린 파일 수가 한도의 90% 이상이면 확정 — 소켓(IPv4)·파일(REG) 중 무엇이 늘었는지 확인"
+      note: "적용: Linux · 권한: JVM 실행 계정 또는 root"
+  - stage: 2
+    steps:
+    - do: 원인별 수정 배포 또는 nofile 한도 조정
+      config:
+        file: /etc/security/limits.conf 또는 systemd 유닛(LimitNOFILE)
+        snippet: |
+          <appuser> soft nofile <값>
+          <appuser> hard nofile <값>
+      cmd: |
+        systemctl restart <app>
+      check: "성공: 재기동 후 /proc/<PID>/limits 에 새 한도·예외 재발 없음 · 실패: fd 계속 증가 → 미close 누수, 개발팀 수정"
+      note: "사전조건: lsof 결과로 누수 유형 기록, 업무 영향 적은 시간 · 영향: 재기동 동안 서비스 중단 · 승인: 운영 담당·서비스 담당 · 백업/롤백: 변경 전 limits.conf·유닛 파일 사본 보관 후 원복"
+  - stage: 3
+    steps:
+    - do: 개발팀·DB 담당 전달 자료
+      cmd: |
+        grep -n -A40 "<예외클래스>" <app_log> > internal.txt ; lsof -p <PID> > lsof.txt 2>/dev/null
+      check: "스택트레이스·SQLState·fd 목록"
+      note: "민감정보 마스킹: SQL 바인드 값·업무 키·개인정보·IP 가림 · 전달 승인: 개발 담당·보안 담당"
+
+- id: JAVA-PROC-R5-PERFORMANCE
+  products: [java]
+  category: performance
+  match: [JAVA.SQL.SQLTIMEOUTEXCEPTION, ORG.SPRINGFRAMEWORK.DAO.QUERYTIMEOUTEXCEPTION, ORG.SPRINGFRAMEWORK.TRANSACTION.TRANSACTIONTIMEDOUTEXCEPTION, JAVA.UTIL.CONCURRENT.TIMEOUTEXCEPTION]
+  title: 쿼리·트랜잭션·비동기 작업 시간 초과
+  source: "Oracle Java SE 21 API(SQLTimeoutException·java.util.concurrent.TimeoutException)·JDK Troubleshooting Guide 'jcmd Thread.print·jstat'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 어떤 timeout 인지·대상 SQL 확인 (읽기 전용)
+      cmd: |
+        grep -n -B5 -A15 -E "SQLTimeoutException|QueryTimeoutException|TransactionTimedOutException|TimeoutException" <app_log> | tail -60
+      check: "Statement queryTimeout·트랜잭션 timeout·Future.get timeout 중 무엇인지 구분, 같은 SQL 반복이면 DB 쪽 튜닝"
+      note: "적용: JDK 8~21 · 권한: 로그 읽기"
+    - do: JVM·스레드 상태 확인 (읽기 전용, 프로세스 유지)
+      cmd: |
+        jstat -gcutil <PID> 5000 3
+        jcmd <PID> Thread.print > /var/tmp/td_$(date +%H%M%S).txt
+      check: "Full GC 반복(FGC 급증)이면 JVM 원인, DB 호출 대기 스레드 다수면 DB 지연"
+      note: "적용: jstat JDK 8~21, jcmd JDK 7+ · 권한: JVM 실행 계정"
+  - stage: 2
+    steps:
+    - do: SQL 튜닝 반영 또는 timeout 값 재설정
+      config:
+        file: 애플리케이션 설정(데이터소스·@Transactional timeout)
+        snippet: |
+          # queryTimeout < 트랜잭션 timeout < 상위(HTTP) timeout 순서 유지
+      cmd: |
+        <배포 스크립트> <설정 반영본>
+      check: "성공: timeout 건수 감소 · 실패: 지속 → DB 담당 튜닝 결과 대기"
+      note: "사전조건: DB 담당의 SQL 분석 결과 · 영향: timeout 상향 시 스레드 점유 증가 · 승인: 개발 담당·운영 담당 · 백업/롤백: 변경 전 설정 사본 보관 후 원복"
+  - stage: 3
+    steps:
+    - do: 전달 자료
+      cmd: |
+        tar czf timeout_$(date +%Y%m%d).tgz /var/tmp/td_*.txt ; grep -n "Timeout" <app_log> | tail -200 > timeouts.txt
+      check: "스레드 덤프·timeout 기록·대상 SQL"
+      note: "민감정보 마스킹: SQL 바인드 값·개인정보 가림 · 전달 승인: 개발 담당·DB 담당"
+
+- id: JAVA-PROC-R5-LOCK
+  products: [java]
+  category: lock
+  match: [ORG.SPRINGFRAMEWORK.DAO.DEADLOCKLOSERDATAACCESSEXCEPTION, JAVAX.PERSISTENCE.OPTIMISTICLOCKEXCEPTION, ORG.SPRINGFRAMEWORK.DAO.CANNOTACQUIRELOCKEXCEPTION, ORG.HIBERNATE.STALEOBJECTSTATEEXCEPTION]
+  title: DB 교착·잠금 획득 실패·낙관적 잠금 충돌
+  source: "Oracle Java SE API(java.sql.SQLException SQLState)·각 DB 제품 잠금 조회 뷰(Oracle V$SESSION, CUBRID lockdb, GOLDILOCKS V$LOCK_WAIT)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 충돌 대상·빈도 확인 (읽기 전용)
+      cmd: |
+        grep -n -A15 -E "DeadlockLoser|CannotAcquireLock|OptimisticLock|StaleObjectState" <app_log> | tail -60
+        grep -c -E "DeadlockLoser|CannotAcquireLock|OptimisticLock|StaleObjectState" <app_log>
+      check: "같은 테이블·엔티티에 반복되면 동시성 설계 문제 · 낙관적 잠금은 정상 동작일 수 있음(빈도로 판단)"
+      note: "적용: JDK 8~21 · 권한: 로그 읽기"
+    - do: DB 잠금 대기 조회 의뢰 (읽기 전용)
+      cmd: |
+        cubrid lockdb -o /var/tmp/lockdb_<db>.txt <db>      # CUBRID
+        # Oracle: SELECT sid, blocking_session, event FROM v$session WHERE blocking_session IS NOT NULL;
+      check: "블로킹 세션이 장시간이면 2차 정리 대상"
+      note: "적용: 대상 DB 제품별 · 권한: DB 담당"
+  - stage: 2
+    steps:
+    - do: 블로킹 거래 정리(업무 확인 후)·재시도 정책 반영
+      cmd: |
+        cubrid killtran -i <tran_index> <db>      # CUBRID 예
+      check: "성공: 잠금 대기 해소·예외 감소 · 실패: 반복 → 트랜잭션 범위·접근 순서 수정(개발)"
+      note: "사전조건: 업무 담당이 종료 대상 확인 · 영향: 종료 거래 롤백 · 승인: DB 담당·업무 담당 · 백업/롤백: 종료 거래 목록 보관 후 재처리"
+  - stage: 3
+    steps:
+    - do: 전달 자료
+      cmd: |
+        grep -n -A30 -E "Deadlock|Lock" <app_log> > lock.txt
+      check: "예외 스택·잠금 조회 결과"
+      note: "민감정보 마스킹: 업무 키·SQL 바인드 값 가림 · 전달 승인: 개발 담당·DB 담당"
+
+- id: JAVA-PROC-R5-CAPACITY
+  products: [java]
+  category: capacity
+  match: [JAVA.IO.IOEXCEPTION, JAVA.UTIL.CONCURRENT.REJECTEDEXECUTIONEXCEPTION, ORG.APACHE.COMMONS.DBCP.SQLNESTEDEXCEPTION]
+  title: 파일 디스크립터 고갈·작업 거부·DB 풀 고갈
+  source: "Oracle Java SE API(RejectedExecutionException·IOException)·JDK Troubleshooting Guide 'Diagnostic Tools(jcmd Thread.print)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: fd·스레드 풀·커넥션 풀 상태 확인 (읽기 전용)
+      cmd: |
+        ls /proc/<PID>/fd | wc -l ; grep "Max open files" /proc/<PID>/limits
+        grep -n -E "Too many open files|RejectedExecutionException|pool exhausted|Cannot get a connection" <app_log> | tail -20
+        jcmd <PID> Thread.print | grep -c "getConnection"
+      check: "fd 가 한도 근접이면 FD 고갈, getConnection 대기 스레드 다수면 풀 고갈, RejectedExecution 이면 Executor 큐 포화"
+      note: "적용: Linux · jcmd JDK 7+ · 권한: JVM 실행 계정"
+  - stage: 2
+    steps:
+    - do: 한도·풀 크기 조정 후 재기동
+      config:
+        file: limits.conf/LimitNOFILE · 데이터소스(maxActive·maxWait) · Executor 설정
+        snippet: |
+          <appuser> soft nofile <값>
+          # DBCP: maxActive=<동시 요청 기준>, maxWait=<ms>, removeAbandoned=true(누수 추적)
+      cmd: |
+        systemctl restart <app>
+      check: "성공: 재기동 후 fd·풀 대기 정상, 예외 재발 없음 · 실패: 계속 증가 → 누수(미close) 수정"
+      note: "사전조건: 재기동 전 스레드 덤프·lsof 결과 보존 · 영향: 재기동 동안 서비스 중단 · 승인: 운영 담당·서비스 담당 · 백업/롤백: 변경 전 설정 사본 보관 후 원복"
+  - stage: 3
+    steps:
+    - do: 전달 자료
+      cmd: |
+        lsof -p <PID> > lsof.txt 2>/dev/null ; jcmd <PID> Thread.print > td.txt ; tar czf capacity_$(date +%Y%m%d).tgz lsof.txt td.txt
+      check: "fd 목록·스레드 덤프·풀 설정"
+      note: "민감정보 마스킹: 접속 IP·파일 경로의 사용자명 가림 · 전달 승인: 개발 담당·보안 담당"
+
+- id: JAVA-PROC-R5-STORAGE
+  products: [java]
+  category: storage
+  match: [JAVA.NIO.FILE.NOSUCHFILEEXCEPTION]
+  title: 접근 대상 파일 없음 (NoSuchFileException)
+  source: "Oracle Java SE 21 API 'java.nio.file.NoSuchFileException'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 경로·마운트 확인 (읽기 전용)
+      cmd: |
+        grep -n "NoSuchFileException" <app_log> | tail -10
+        ls -l <path> ; ls -ld $(dirname <path>) ; mount | grep <마운트지점>
+      check: "파일 없음·마운트 누락·선행 배치 미생성 중 무엇인지 확인 — 파일을 임의 생성하지 않음"
+      note: "적용: JDK 7+ · 권한: 애플리케이션 실행 계정"
+  - stage: 2
+    steps:
+    - do: 마운트 복구 또는 선행 작업 재실행
+      cmd: |
+        mount <마운트지점>
+        ls -l <path>
+      check: "성공: 파일 확인·예외 재발 없음 · 실패: 마운트 오류 → 스토리지 담당"
+      note: "사전조건: fstab 항목·스토리지 상태 확인 · 영향: 마운트 중 해당 경로 접근 일시 불가 · 승인: 시스템 담당 · 백업/롤백: 마운트 실패 시 이전 상태 유지(추가 조작 없음), 선행 배치 재실행은 업무 담당 확인"
+  - stage: 3
+    steps:
+    - do: 전달 자료
+      cmd: |
+        grep -n -A10 "NoSuchFileException" <app_log> > nsf.txt ; mount > mount.txt
+      check: "예외 경로·마운트 상태"
+      note: "민감정보 마스킹: 경로의 사용자명·호스트명 가림 · 전달 승인: 운영 담당"
+
+- id: JAVA-PROC-R5-DISK
+  products: [java]
+  category: disk
+  match: [JAVA.IO.FILENOTFOUNDEXCEPTION]
+  title: 파일 열기 실패 (FileNotFoundException — 없음·디렉터리·권한)
+  source: "Oracle Java SE 21 API 'java.io.FileNotFoundException'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 사유·경로·권한·공간 확인 (읽기 전용)
+      cmd: |
+        grep -n "FileNotFoundException" <app_log> | tail -10
+        ls -l <path> ; ls -ld $(dirname <path>) ; ps -o user= -p <PID> ; df -h $(dirname <path>)
+      check: "'(No such file or directory)'=없음, '(Permission denied)'=권한, '(Is a directory)'=경로 오류 · 공간 100% 면 쓰기 실패 동반"
+      note: "적용: JDK 6~21 · 권한: 애플리케이션 실행 계정"
+  - stage: 2
+    steps:
+    - do: 권한·경로 정정
+      cmd: |
+        ls -l <path>
+      config:
+        file: 애플리케이션 경로 설정 또는 대상 디렉터리 권한
+        snippet: |
+          # 실행 계정이 읽기/쓰기 가능하도록 소유자·권한을 설치 기준과 같게
+      check: "성공: 같은 기능 재실행 시 예외 없음 · 실패: 재발 → 경로 설정값 재확인"
+      note: "사전조건: 설치 기준 권한 확인 · 영향: 권한 과다 부여 시 보안 위험 · 승인: 시스템 담당·보안 담당 · 백업/롤백: 변경 전 `ls -l` 결과 보관 후 원복"
+  - stage: 3
+    steps:
+    - do: 전달 자료
+      cmd: |
+        grep -n -A10 "FileNotFoundException" <app_log> > fnf.txt
+      check: "예외 경로·사유"
+      note: "민감정보 마스킹: 경로의 사용자명 가림 · 전달 승인: 운영 담당"
+
+# ── BizMaster 어댑터 ──
+- id: BM-PROC-R5-INTERNAL
+  products: [bizmaster-adapter]
+  category: internal
+  match: [SW-BM-001, SW-BM-009]
+  title: 어댑터 처리 중 미처리 예외·어댑터 기동 기록 (BizMaster)
+  source: "BizMaster 어댑터 로그 문구('Uncaught exception while processing request'·'Adapter Shell … initialized'·'DeployService started') 의미 기준 — 공개 매뉴얼 없음, JVM 점검은 JDK Troubleshooting Guide(jstat·jstack·jcmd)"
+  verify_note: "미검증 — BizMaster 어댑터가 쓰는 JDK 버전을 납품 문서로 확인하지 못함. jcmd 는 JDK 7+, GC.heap_info 는 JDK 9+ 에만 있으므로 먼저 어댑터 프로세스의 java -version 으로 버전을 보고, JDK 6 이하이면 jstat·jstack(또는 kill -3) 만 쓴다"
+  stages:
+  - stage: 1
+    steps:
+    - do: 예외 원인 클래스·bxId·기동 전후 비교 (읽기 전용)
+      cmd: |
+        grep -n -A20 "Uncaught exception while processing request" <adapter_log> | head -60
+        grep -n -E "Adapter Shell .* initialized|AdapterShell.*initialized|DeployService started" <adapter_log> | tail -5
+        grep -n "MEMORY USAGE" <adapter_log> | tail -5
+      check: "같은 원인 클래스가 반복되면 결함·연계 데이터 문제 · 기동 기록 직전에 메모리 증가·예외가 있으면 비정상 종료 후 재기동"
+      note: "적용: BizMaster 4.x 어댑터 로그 · 권한: 로그 읽기"
+    - do: 같은 bxId 재처리 여부·JVM 상태 확인 (읽기 전용)
+      cmd: |
+        grep -n "<bxId>" <adapter_log> | head -20
+        $(dirname $(readlink -f /proc/<PID>/exe))/java -version     # 어댑터가 실제로 쓰는 JDK 버전 (Linux)
+        jstat -gcutil <PID> 5000 3      # JDK 5+ 공통(어댑터와 같은 JDK 의 jstat 사용)
+        jcmd <PID> GC.heap_info         # JDK 9+ 에서만
+        jstack <PID> > bm_jstack_$(date +%H%M%S).txt     # JDK 5+ (스레드 덤프, 프로세스는 유지), 또는 kill -3 <PID>
+      check: "같은 bxId 가 재요청·재처리됐으면 업무 영향 없음, 아니면 누락 후보 목록 작성 · jstat 의 O(Old) 가 95% 이상에서 FGC 가 계속 늘면 메모리 고갈로 예외 발생 후보"
+      note: "적용: jstat·jstack 은 JDK 5+, jcmd 는 JDK 7+, GC.heap_info 는 JDK 9+ — 버전에 맞는 줄만 실행 · /proc/<PID>/exe 는 Linux, AIX·HP-UX 는 ps -ef 의 java 경로 사용 · 권한: JVM 실행 계정(같은 사용자로 실행해야 attach 가능)"
+  - stage: 2
+    steps:
+    - do: 누락 거래 재처리(업무 확인 후)
+      cmd: |
+        grep -n "<bxId>" <adapter_log>
+      check: "성공: 재처리 후 상대 기관 수신 확인 · 실패: 재처리 오류 → 3차"
+      note: "사전조건: 업무 담당이 중복 여부 확인 · 영향: 중복 전송 시 상대 기관 중복 처리 · 승인: 업무 담당·연계 담당 · 백업/롤백: 재처리 대상 목록·원문 보관(중복 시 상대 기관 취소 절차)"
+      verify_note: "미검증 — BizMaster 어댑터의 재처리(재전송) 조작 명령·화면을 납품 매뉴얼로 확인하지 못함"
+  - stage: 3
+    steps:
+    - do: 제조사(Tmax)·유지보수사 의뢰 자료
+      cmd: |
+        tar czf bm_adapter_$(date +%Y%m%d).tgz <adapter_log> bm_jstack_*.txt
+        <어댑터 JDK 경로>/bin/java -version 2> jvm.txt     # JDK 7+ 이면 jcmd <PID> VM.version >> jvm.txt 도 가능
+      check: "어댑터 로그(예외·기동 전후)·JVM 버전"
+      note: "민감정보 마스킹: 전문 내용의 개인정보·기관 계정·IP 가림 · 전달 승인: 보안 담당·연계 담당"
+
+- id: BM-PROC-R5-STORAGE
+  products: [bizmaster-adapter]
+  category: storage
+  match: [SW-BM-005]
+  title: 어댑터 메시지 파일 상태 전이 실패 — 이동 실패·기존 파일 존재 (BizMaster)
+  source: "BizMaster 어댑터 로그 문구('Cannot move (sending) message file'·'message file … already exists'·'Resending … message failed') 의미 기준 — 공개 매뉴얼 없음"
+  stages:
+  - stage: 1
+    steps:
+    - do: 메시지 디렉터리·권한·공간 확인 (읽기 전용)
+      cmd: |
+        grep -n -E "Cannot move (sending )?message file|already exists|Resending .* message failed" <adapter_log> | tail -20
+        ls -ld <msg_dir>/unsent <msg_dir>/sending ; ls <msg_dir>/unsent | wc -l ; ls <msg_dir>/sending | wc -l
+        df -h <msg_dir> ; df -i <msg_dir>
+      check: "공간·inode 부족, 권한 오류, 같은 이름 파일 존재(중복) 중 무엇인지 확인 — 파일은 옮기거나 지우지 않음"
+      note: "적용: BizMaster 4.x · 권한: 어댑터 실행 계정"
+      verify_note: "미검증 — 메시지 저장 디렉터리 이름(unsent/sending)과 위치는 실로그 문구 기준이며 납품 매뉴얼로 확인하지 못함"
+  - stage: 2
+    steps:
+    - do: 공간·권한 확보 후 중복 파일 판정
+      cmd: |
+        ls -l <msg_dir>/sending/<file> <msg_dir>/unsent/<file>
+        cmp <msg_dir>/sending/<file> <msg_dir>/unsent/<file>
+      check: "성공: 원인 해소 후 '이동 실패' 기록 중단·미전송 건수 감소 · 실패: 같은 파일 반복 → 3차"
+      note: "사전조건: 업무 담당과 전송 여부(상대 기관 수신) 확인 · 영향: 잘못 정리하면 누락·중복 전송 · 승인: 연계 담당·업무 담당 · 백업/롤백: 정리 전 두 디렉터리 전체를 tar 로 보관"
+  - stage: 3
+    steps:
+    - do: 의뢰 자료
+      cmd: |
+        tar czf bm_msgfile_$(date +%Y%m%d).tgz <adapter_log> ; ls -lR <msg_dir> > msgdir.txt
+      check: "어댑터 로그·디렉터리 목록"
+      note: "민감정보 마스킹: 메시지 파일 본문은 제외(목록만), 기관 정보·IP 가림 · 전달 승인: 보안 담당·연계 담당"
+
+# ── Indigo ESB ──
+- id: IND-PROC-R5-INTERNAL
+  products: [indigo-esb]
+  category: internal
+  match: [LEG-IND-010]
+  title: GPKI 서명 검증·복호화 단계 — START 뒤 END 없음 확인 (Indigo ESB)
+  source: "Indigo ESB 로그 문구('==[inHandle] SingDecryptProcessor START/END!==') 의미 기준 — 공개 매뉴얼 없음, 인증서 점검은 OpenSSL x509 일반 명령"
+  stages:
+  - stage: 1
+    steps:
+    - do: START/END 짝 확인 (읽기 전용)
+      cmd: |
+        grep -c "SingDecryptProcessor START" <esb_log> ; grep -c "SingDecryptProcessor END" <esb_log>
+        grep -n -A10 "SingDecryptProcessor START" <esb_log> | grep -i -E "exception|error" | head -20
+      check: "START 수와 END 수가 같으면 정상 흐름(조치 불필요) · 차이가 나면 그 사이 예외(인증서·LDAP 조회 실패)를 확인"
+      note: "적용: Indigo ESB 납품판 · 권한: 로그 읽기"
+    - do: 인증서 만료·LDAP 도달 확인 (읽기 전용)
+      cmd: |
+        openssl x509 -in <cert.pem> -noout -enddate      # DER 이면 -inform DER 추가
+        nc -zvw3 <ldap_host> <ldap_port>
+      check: "만료일 경과 또는 LDAP 포트 도달 실패면 복호화 실패 원인"
+      note: "적용: OpenSSL 1.0+ · 권한: 인증서 파일 읽기"
+      verify_note: "미검증 — Indigo ESB 의 GPKI 인증서 파일 위치·형식은 납품 매뉴얼로 확인하지 못함"
+  - stage: 2
+    steps:
+    - do: 인증서 갱신본 적용
+      cmd: |
+        cp -p <cert 경로> <백업경로>/ ; cp -p <갱신 인증서> <cert 경로>
+      check: "성공: START/END 짝 회복·복호화 오류 없음 · 실패: 오류 지속 → 원본 복원 후 3차"
+      note: "사전조건: GPKI 갱신 인증서 수령·상대 기관 통보 · 영향: 적용 중 서명 검증 실패 가능, 반영에 ESB 재기동이 필요할 수 있음 · 승인: 보안 담당·연계 담당 · 백업/롤백: 기존 인증서 사본 보관 후 원복"
+  - stage: 3
+    steps:
+    - do: 유지보수사 의뢰 자료
+      cmd: |
+        grep -n -B5 -A20 "SingDecryptProcessor START" <esb_log> | tail -200 > gpki.txt
+      check: "START/END 불일치 구간 로그·인증서 만료일"
+      note: "민감정보 마스킹: 인증서·키 파일 자체는 전달 금지, 전문 본문·기관 식별자·IP 가림 · 전달 승인: 보안 담당"
+
+- id: IND-PROC-R5-PERFORMANCE
+  products: [indigo-esb]
+  category: performance
+  match: [LEG-IND-011]
+  title: EUC-KR 응답 복호화 — 한글 필드 깨짐 확인 (Indigo ESB)
+  source: "Indigo ESB 로그 문구('===== Decrypte encoding: <인코딩>=====') 의미 기준 — 공개 매뉴얼 없음, 인코딩 점검은 iconv 일반 명령"
+  stages:
+  - stage: 1
+    steps:
+    - do: 인코딩 분포·깨짐 여부 확인 (읽기 전용)
+      cmd: |
+        grep -o "Decrypte encoding: *[A-Za-z0-9_-]*" <esb_log> | sort | uniq -c
+        grep -n -A5 "Decrypte encoding: *EUC-KR" <esb_log> | tail -20
+      check: "EUC-KR 응답 뒤 userName 등 한글 필드가 '?'·깨진 문자로 찍히면 변환 누락 — 정상 흐름 로그 자체는 장애 아님"
+      note: "적용: Indigo ESB 납품판 · 권한: 로그 읽기"
+    - do: 샘플 변환 시험 (읽기 전용)
+      cmd: |
+        iconv -f EUC-KR -t UTF-8 <샘플파일> > /dev/null && echo OK
+      check: "OK 가 아니면 원문이 EUC-KR 이 아님(선언과 실제 불일치)"
+      note: "적용: glibc iconv · 권한: 일반 사용자 · 샘플은 개인정보 가린 사본 사용"
+  - stage: 2
+    steps:
+    - do: 응답 인코딩 변환 로직 수정 배포
+      cmd: |
+        cp -p <배포본> <백업경로>/ ; <배포 스크립트> <수정본>
+      check: "성공: 한글 필드 정상 표시 · 실패: 깨짐 지속 → 원복 후 상대 기관 인코딩 선언 확인"
+      note: "사전조건: 개발 담당이 EUC-KR→UTF-8 변환 수정·시험 완료 · 영향: 배포 중 연계 일시 중단 · 승인: 연계 담당·개발 담당 · 백업/롤백: 기존 배포본 보관 후 원복"
+      verify_note: "미검증 — Indigo ESB 의 서비스 배포 절차·명령은 납품 매뉴얼로 확인하지 못함"
+  - stage: 3
+    steps:
+    - do: 유지보수사 의뢰 자료
+      cmd: |
+        grep -n -A5 "Decrypte encoding" <esb_log> | tail -100 > encoding.txt
+      check: "인코딩 로그·깨짐 사례(가린 사본)"
+      note: "민감정보 마스킹: 한글 이름 등 개인정보 필드 가림 · 전달 승인: 보안 담당"

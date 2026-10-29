@@ -1,0 +1,152 @@
+# SW 계층 제품 버전 카탈로그 — 코드 조회 › 제품 › [버전] 탭 (검증 2026-09-11, Claude 웹 대조 + GPT 교차 수집)
+products:
+  java:
+    title: Java SE / JDK 버전별 수명주기·JVM 로그 문구
+    updated: '2026-09-11'
+    note: '예외 클래스명은 JDK 6~25 동일(GPT A: 고정 숫자 코드 없음). 버전에 따라 달라지는 것은 JVM 문구: PermGen space(≤7)→Metaspace·Compressed class space(8+, JEP 122), ''unable to create native thread: possibly out of memory or process/resource limits reached''(11 세대 — 공식 도입 버전
+      미확인), ''Direct buffer memory''→현행 ''Cannot reserve N bytes of direct buffer memory''(룰은 대소문자 무시로 둘 다 매칭), helpful NullPointerException 상세(14+), GC 로그 legacy ''[Full GC …]''→-Xlog 통합 형식(9+), TLS 1.0/1.1 기본 비활성(8u291·11.0.11 릴리스 노트). Jakarta EE 9+(JDK
+      17 세대)에서 javax.persistence 등 패키지가 jakarta.* 로 바뀌므로 룰은 클래스 단순명으로 매칭. Spring Boot 3 는 기본 로그 시각이 ISO-8601(''T'')로 바뀌며 log4j 파서가 두 형식을 읽는다. GPT 교차 A24/B14.'
+    columns:
+    - version
+    - released
+    - premier_end
+    - extended_end
+    - jvm_note
+    - source
+    labels:
+      version: 버전
+      released: GA
+      premier_end: Premier 종료
+      extended_end: Extended 종료
+      jvm_note: JVM 문구·로그
+      source: 출처
+    versions:
+    - version: JDK 6
+      released: 2006-12
+      premier_end: 2015-12
+      extended_end: 2018-12
+      jvm_note: PermGen space, GC overhead limit exceeded, hs_err_pid<pid>.log(header/thread/process/system), legacy GC 로그 '[Full GC 267628K->83769K(776768K), 1.8 secs]'
+      source: https://endoflife.date/oracle-jdk ; Oracle Lifetime Support Policy(Middleware)
+    - version: JDK 7
+      released: 2011-07
+      premier_end: 2019-07
+      extended_end: 2022-07
+      jvm_note: PermGen 유지(마지막), NIO.2(java.nio.file), G1 정식; Extended 이후 Sustaining
+      source: https://endoflife.date/oracle-jdk ; Oracle Lifetime Support Policy(Middleware)
+    - version: JDK 8 (LTS)
+      released: 2014-03
+      premier_end: 2022-03
+      extended_end: 2030-12
+      jvm_note: 'PermGen 제거(JEP 122) → Metaspace·Compressed class space 문구, ''VM warning: Ignoring option MaxPermSize'', TLS 1.0/1.1 기본 비활성(8u291, 2021-04)'
+      source: https://endoflife.date/oracle-jdk ; docs.oracle.com/javase/8 troubleshoot memleaks
+    - version: JDK 11 (LTS)
+      released: 2018-09
+      premier_end: 2023-09
+      extended_end: 2032-01
+      jvm_note: Unified JVM Logging '[uptime][info][gc] GC(n) …'(-Xlog, 9+), native thread OOM 문구 확장, TLS 1.0/1.1 비활성(11.0.11)
+      source: https://endoflife.date/oracle-jdk ; docs.oracle.com/en/java/javase/11/tools/java.html
+    - version: JDK 17 (LTS)
+      released: 2021-09
+      premier_end: '2026-09-30'
+      extended_end: '2029-09-30'
+      jvm_note: helpful NPE 기본(15+), Jakarta EE 9+ 세대(Spring 6/Boot 3)
+      source: https://endoflife.date/oracle-jdk
+    - version: JDK 21 (LTS)
+      released: 2023-09
+      premier_end: '2028-09-30'
+      extended_end: '2031-09-30'
+      jvm_note: 가상 스레드 — 스레드 덤프 형식 추가
+      source: https://endoflife.date/oracle-jdk
+    - version: JDK 25 (LTS)
+      released: 2025-09
+      premier_end: '2030-09-30'
+      extended_end: '2033-09-30'
+      jvm_note: 동일
+      source: https://endoflife.date/oracle-jdk
+  mesim-esb: &id001
+    title: 메타빌드 MESIM ESB/APIG/EAI 운영 버전
+    updated: '2026-09-11'
+    note: '메타빌드(MetaBuild) 제품군. 공개 버전·EOS 표 없음(계약 기준). 레거시 룰의 문구(CamelJettyServer, WireTap, HTTP CALL ERROR, CIRCUIT BREAK RESULT, API KEY ACCESS FAIL)로 보아 Apache Camel 2.x + Jetty 9 + Netflix Hystrix 1.5 기반 구성이며 의사코드(ESB-/APIG-)는 문구 추정. 기반 스택 수명주기(GPT
+      A): Camel 2.x 2009-08~2021-05(2.25.4 최종)·3.x EOL 2024-12·4.x 2023-08~(Java 17, jakarta), Jetty 9 EOCS 2022-06/EOL 2025-01·10/11 EOL 2025-01-01·12 2023~, Hystrix 1.5.18 최종(maintenance mode, resilience4j 권고), Log4j 1.2 EOL 2015-08-05. manuals/mesim.yaml
+      의 EOS 대응 정책 참고.'
+    columns:
+    - version
+    - released
+    - support_end
+    - stack
+    - source
+    labels:
+      version: 제품
+      released: 출시
+      support_end: 지원 종료
+      stack: 기반 스택(로그 문구 근거)
+      source: 출처
+    versions:
+    - version: MESIM ESB
+      released: 미공개
+      support_end: 미공개(계약)
+      stack: Apache Camel 2.x(EOL 2021-05) 라우트 로그·Exchange[...] 출력, Jetty 9(EOL 2025-01), WireTap, log4j 1.2(EOL 2015-08)
+      source: collect/gpt_mesim_deep_2026-09-09.md ; collect/verify/resp_sw_versions_2026-09-11.txt
+    - version: MESIM APIG
+      released: 미공개
+      support_end: 미공개(계약)
+      stack: Camel + Hystrix 1.5.18(최종, SUCCESS/FAILURE/TIMEOUT/SHORT_CIRCUITED/THREAD_POOL_REJECTED 이벤트·CIRCUIT BREAK RESULT), API KEY, rate limit
+      source: rules/legacy/legacy_mesim_apig_hystrix_rules.yaml ; github.com/Netflix/Hystrix
+    - version: MESIM EAI
+      released: 미공개
+      support_end: EOS(manuals/mesim.yaml 대응 정책)
+      stack: 어댑터·거래 로그
+      source: manuals/mesim.yaml
+  bizmaster-app: &id002
+    title: Tmax BizMaster (EAI) 운영 버전
+    updated: '2026-09-11'
+    note: BizMaster 4.x(2007 기사, C등급) 허브는 JEUS 6 위에서 동작(JeusServer.log), 어댑터 adt_YYYYMMDD.log, 업무 앱(GISS) eai.log. 공개 EOL 자료 없음 — 허브의 JEUS 6 은 EOL 2016-12-31/EOS 2018-12-31. 후속 제품은 AnyLink 7/8(코드 체계 상이, 미수집).
+    columns:
+    - version
+    - released
+    - support_end
+    - logs
+    - source
+    labels:
+      version: 제품
+      released: 출시
+      support_end: 지원 종료
+      logs: 로그
+      source: 출처
+    versions:
+    - version: BizMaster 4.x (허브/어댑터/업무 앱)
+      released: 2007 (4.5)
+      support_end: 미공개 — 기반 JEUS 6 EOS 2018-12-31
+      logs: JeusServer.log / adt_YYYYMMDD.log / eai.log
+      source: collect/gpt_bizmaster_2026-09-10.md
+    - version: AnyLink 7 / 8 (후속)
+      released: AnyLink 8 현행
+      support_end: 지원 중
+      logs: 미수집(코드 체계 상이)
+      source: collect/gpt_bizmaster_2026-09-10.md
+  indigo-esb:
+    title: Indigo ESB 운영 버전
+    updated: '2026-09-11'
+    note: '실로그 문구가 Apache CXF(''Interceptor for {ns}Svc#{ns}op has thrown exception, unwinding now'', ''Executing operation'')·ServiceMix/Camel(''Error processing exchange InOnly[id: ID:…]'') 계열이라 CXF 2.x/ServiceMix(Camel 2.x, EOL 2021-05) 기반으로 판단. 제품
+      버전·EOS 는 공개 자료 없음.'
+    columns:
+    - version
+    - released
+    - support_end
+    - stack
+    - source
+    labels:
+      version: 제품
+      released: 출시
+      support_end: 지원 종료
+      stack: 기반 스택
+      source: 출처
+    versions:
+    - version: Indigo ESB (납품 버전)
+      released: 미공개
+      support_end: 미공개
+      stack: Apache CXF 2.x + ServiceMix/Camel
+      source: rules/legacy/legacy_indigo_esb_rules.yaml
+  mesim-apig: *id001
+  mesim-eai: *id001
+  bizmaster-adapter: *id002

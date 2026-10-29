@@ -1,0 +1,11 @@
+product: oracle
+title: "Oracle Database 운영 참고 (수집·진단)"
+sections:
+  - heading: "로그 위치"
+    body: "alert log: $ORACLE_BASE/diag/rdbms/<db명>/<SID>/trace/alert_<SID>.log · 리스너 로그: $ORACLE_BASE/diag/tnslsnr/<호스트>/listener/trace/listener.log · trace/incident: 같은 diag 트리 하위"
+  - heading: "수집 방법"
+    body: "장애 시각 전후 alert_<SID>.log 를 그대로 투입. ADR 명령: adrci> show alert / show incident. trace 파일은 alert log 에 경로가 기록됨"
+  - heading: "대표 에러코드"
+    body: "ORA-00060 데드락 · ORA-00600/07445 내부 오류 · ORA-04030 PGA 부족 · ORA-04031 공유 풀 부족 · ORA-01555 스냅샷 과거 · ORA-01653/01654 테이블스페이스 부족 · ORA-00257 아카이브 풀 · ORA-00020 프로세스 한도 · ORA-12541 리스너 없음 · ORA-01034 인스턴스 다운 · ORA-03113/03135 연결 끊김"
+  - heading: "1차 확인 명령"
+    body: "인스턴스 상태: sqlplus / as sysdba → select status from v$instance; · 세션 수: select count(*) from v$session; · 락 대기: v$lock, dba_blockers · 테이블스페이스: dba_free_space"

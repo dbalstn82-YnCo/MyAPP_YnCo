@@ -1,0 +1,496 @@
+# DB 계층 제품 버전 카탈로그 — 코드 조회 › 제품 › [버전] 탭 (검증 2026-09-11, Claude 웹 대조 + GPT 교차 수집 A58/B15 반영)
+products:
+  oracle:
+    title: Oracle Database 버전별 수명주기·로그 체계
+    updated: '2026-09-11'
+    note: ORA-/TNS- 코드 번호는 8i 이후 동일해 EOS 된 10g/11g/12c 로그도 같은 코드로 판정. alert log 는 11g 부터 ADR(alert_<SID>.log + log.xml), 12.2 부터 시각이 ISO8601('2026-09-11T10:00:00.123456+09:00')로 바뀌며 파서가 고전('Thu Sep 11 10:00:00 2026')·ISO 두 형식을 읽는다. 12cR1 PGA_AGGREGATE_LIMIT(ORA-04036),
+      11g ORA-00700 등 버전 한정 코드는 version_note 에 표기.
+    columns:
+    - version
+    - released
+    - premier_end
+    - extended_end
+    - alert_log
+    - source
+    labels:
+      version: 버전
+      released: 출시
+      premier_end: Premier 종료
+      extended_end: Extended 종료
+      alert_log: alert log
+      source: 출처
+    versions:
+    - version: 10gR2 (10.2)
+      released: '2005-07-11'
+      premier_end: '2010-07-31'
+      extended_end: 2013-07-31 (endoflife.date 표기 2015-07-31 — Sustaining)
+      alert_log: $ORACLE_HOME/… bdump/alert_<SID>.log (고전 시각)
+      source: https://endoflife.date/oracle-database
+    - version: 11gR1 (11.1)
+      released: '2007-08-09'
+      premier_end: '2012-08-31'
+      extended_end: '2015-08-31'
+      alert_log: ADR diag/rdbms/<db>/<SID>/trace/alert_<SID>.log + alert/log.xml
+      source: https://endoflife.date/oracle-database
+    - version: 11gR2 (11.2)
+      released: '2009-09-01'
+      premier_end: '2015-01-31'
+      extended_end: 2020-12-31 (Market Driven 2022-04)
+      alert_log: ADR
+      source: https://endoflife.date/oracle-database
+    - version: 12cR1 (12.1)
+      released: '2013-06-25'
+      premier_end: '2018-07-31'
+      extended_end: '2022-07-31'
+      alert_log: ADR (CDB/PDB)
+      source: https://endoflife.date/oracle-database
+    - version: 12cR2 (12.2)
+      released: '2017-03-01'
+      premier_end: 2020-11-30 (제한 Error Correction 2022-03-31)
+      extended_end: 없음
+      alert_log: ADR, ISO8601 시각(실로그 기준 — 공식 문서 명시 미확인, GPT D)
+      source: https://endoflife.date/oracle-database
+    - version: 18c
+      released: '2018-07-23'
+      premier_end: '2021-06-30'
+      extended_end: 없음
+      alert_log: 동일
+      source: https://endoflife.date/oracle-database
+    - version: 19c (LTR)
+      released: '2019-04-25'
+      premier_end: '2029-12-31'
+      extended_end: '2032-12-31'
+      alert_log: 동일
+      source: https://endoflife.date/oracle-database
+    - version: 21c
+      released: '2021-08-13'
+      premier_end: '2027-07-31'
+      extended_end: 없음
+      alert_log: 동일
+      source: https://endoflife.date/oracle-database
+    - version: 23ai → 26ai (LTR)
+      released: 2023-09-19 (23c) / 2024-05 (23ai) / 2026 (26ai 명칭)
+      premier_end: '2031-12-31'
+      extended_end: 미정
+      alert_log: 동일
+      source: https://endoflife.date/oracle-database
+  tibero:
+    title: TmaxTibero Tibero 버전별 수명주기·로그 체계
+    updated: '2026-09-11'
+    note: TBR-nnnnn 오류 코드는 4~7 공통으로 수집(버전 간 번호 재편 근거 없음 — GPT B). 6/7 의 sys.log 는 '[2025-04-08T15:25:04.096365] [COM-298] [I] msg' 처럼 컴포넌트 코드(COM-/FRM-)와 I/W/E 레벨을 쓰며 파서가 이 형식과 고전 '[YYYY-MM-DD HH:MM:SS] TBR-nnnnn:' 형식을 모두 읽는다. EOS 는 TmaxTibero 2022 EOL/EOS
+      공지(GPT A/B) 기준. 7 은 차기 버전 출시 후 2년 EOL·+1년 EOS·+3년 Extended 정책.
+    columns:
+    - version
+    - released
+    - support_end
+    - extended_end
+    - log_files
+    - log_format
+    - source
+    labels:
+      version: 버전
+      released: 출시
+      support_end: EOS
+      extended_end: Extended 종료
+      log_files: 로그 파일
+      log_format: 로그 형식
+      source: 출처
+    versions:
+    - version: '4'
+      released: 2008-12 (TAC 도입)
+      support_end: '2015-06-30'
+      extended_end: '2018-06-30'
+      log_files: $TB_HOME/instance/<sid>/log/ (tbsvr.out·sys.log)
+      log_format: 미확인
+      source: technet.tmax.co.kr CUST-20221102-000001 (GPT B)
+    - version: '5'
+      released: 2011-10
+      support_end: '2017-10-31'
+      extended_end: '2020-10-31'
+      log_files: 동일
+      log_format: 미확인
+      source: technet.tmax.co.kr CUST-20221102-000001 (GPT B)
+    - version: 5 SP1
+      released: 2014-08
+      support_end: '2019-08-31'
+      extended_end: '2022-08-31'
+      log_files: tbsvr.out.<pid>, sys.log
+      log_format: 미확인
+      source: technet.tmax.co.kr CUST-20221102-000001 (GPT B)
+    - version: '6'
+      released: 2015-04
+      support_end: '2025-03-31'
+      extended_end: '2028-03-31'
+      log_files: $TB_HOME/instance/$TB_SID/log/slog/sys.log, tbsvr.out.<pid>
+      log_format: '[2025-04-08T15:25:04.096365] [COM-298] [I] msg (컴포넌트 코드·레벨) + TBR-nnnnn'
+      source: support.tibero.com REDZONE CHECK ERROR 사례 (GPT A)
+    - version: 7 (7.1/7.2)
+      released: 2022-03
+      support_end: 차기 버전 출시 후 2년(EOL) + 1년
+      extended_end: EOS + 3년
+      log_files: 동일
+      log_format: 6 과 동일 (+ in-memory column store)
+      source: support.tibero.com 운영 가이드 (GPT A)
+  mysql:
+    title: MySQL 버전별 수명주기·에러 로그 형식
+    updated: '2026-09-11'
+    note: 서버 오류 번호(ER_ 1xxx)·클라이언트 번호(CR_ 2xxx)는 전 버전 동일. 에러 로그는 5.5/5.6 'YYMMDD hh:mm:ss [ERROR] msg', 5.7 'YYYY-MM-DDThh:mm:ss.ffffffZ tid [ERROR] msg', 8.0 부터 '[ERROR] [MY-010119] [Server] msg' 로 6자리 코드·서브시스템 필드 추가 → MY-01xxxx 코드는 8.0 이후만, 5.7 이하는 문구
+      룰로 판정. 파서가 세 형식을 모두 읽는다.
+    columns:
+    - version
+    - released
+    - premier_end
+    - extended_end
+    - latest
+    - errorlog
+    - source
+    labels:
+      version: 버전
+      released: 출시
+      premier_end: Premier 종료
+      extended_end: Extended 종료
+      latest: 최종
+      errorlog: 에러 로그 형식
+      source: 출처
+    versions:
+    - version: '5.5'
+      released: '2010-12-03'
+      premier_end: '2015-12-31'
+      extended_end: '2018-12-31'
+      latest: 5.5.63
+      errorlog: YYMMDD hh:mm:ss [ERROR] msg
+      source: https://endoflife.date/mysql
+    - version: '5.6'
+      released: '2013-02-01'
+      premier_end: '2018-02-28'
+      extended_end: '2021-02-28'
+      latest: 5.6.51
+      errorlog: YYYY-MM-DD hh:mm:ss tid [ERROR] msg
+      source: https://endoflife.date/mysql
+    - version: '5.7'
+      released: '2015-10-09'
+      premier_end: '2020-10-31'
+      extended_end: '2023-10-31'
+      latest: 5.7.44
+      errorlog: YYYY-MM-DDThh:mm:ss.ffffffZ tid [ERROR] msg
+      source: https://endoflife.date/mysql
+    - version: 8.0 (LTS)
+      released: '2018-04-08'
+      premier_end: '2025-04-30'
+      extended_end: '2026-04-30'
+      latest: 8.0.46
+      errorlog: … tid [ERROR] [MY-010119] [Server] msg
+      source: https://endoflife.date/mysql
+    - version: 8.4 (LTS)
+      released: '2024-04-10'
+      premier_end: '2029-04-30'
+      extended_end: '2032-04-30'
+      latest: 8.4.11
+      errorlog: 8.0 과 동일
+      source: https://endoflife.date/mysql
+    - version: 9.x (9.0~9.6 Innovation, 9.7 LTS)
+      released: 2024-06-07 ~ 2026-04-21
+      premier_end: Innovation 은 다음 릴리스까지 / 9.7 LTS 2034-04-21
+      extended_end: —
+      latest: 9.7.2
+      errorlog: 8.0 과 동일
+      source: https://endoflife.date/mysql
+  altibase:
+    title: Altibase 버전별 수명주기·로그 체계
+    updated: '2026-09-11'
+    note: 'ERR-xxxxx(16진 5자리) 코드는 5.x~7.3 동일 체계. 로그는 $ALTIBASE_HOME/trc/altibase_boot.log·altibase_qp.log ''[YYYY/MM/DD HH:MM:SS] [Thread-n] [Level-n] … ERR-xxxxx : msg''. 6.1.1 이하 qp 로그는 8자리 10진 errorcode(822329545 = 0x3103C049 → ERR-3103C)만 찍어 파서가 변환한다(6.3.1
+      부터 ERR 직접 출력 — GPT A). EOS 는 Altibase EOL/EOS/ES Guideline(2024-09) 기준. 7.1 오픈소스판 2023-03-17 중단.'
+    columns:
+    - version
+    - released
+    - support_end
+    - extended_end
+    - latest
+    - qp_log_code
+    - source
+    labels:
+      version: 버전
+      released: 출시
+      support_end: EOS
+      extended_end: ES 종료
+      latest: 최종 패치
+      qp_log_code: qp 로그 코드 표기
+      source: 출처
+    versions:
+    - version: 5.1 / 5.3 / 5.5.1
+      released: 2007-10 / 2009-10 / 2011-02
+      support_end: 2014-12 / 2016-12 / 2018-12
+      extended_end: 2015-12 / 2017-12 / 2019-12
+      latest: 5.1.5.119 / 5.3.5.48 / 5.5.1.8.1
+      qp_log_code: 8자리 10진 errorcode
+      source: support.altibase.com EOL/EOS/ES Guideline ; wikipedia
+    - version: 6.1.1
+      released: 2012-04
+      support_end: 2019-12
+      extended_end: 2020-12
+      latest: 6.1.1.10.5 (2023-09)
+      qp_log_code: 8자리 10진 errorcode (hex 변환 필요)
+      source: docs.altibase.com FAQE 8-digit errorcode ; EOL Guideline
+    - version: 6.3.1 / 6.5.1
+      released: 2013-10 / 2015-06
+      support_end: 2021-12 / 2023-12
+      extended_end: 2022-12 / 2024-12 (Solaris·Windows ES 2031-12)
+      latest: 6.3.1.12.5 / 6.5.1.10.0
+      qp_log_code: ERR-xxxxx 직접 출력
+      source: docs.altibase.com FAQE ; EOL Guideline
+    - version: '7.1'
+      released: 2017-07
+      support_end: 2027-12
+      extended_end: 2028-12
+      latest: 7.1.1.9.2 (2023-12)
+      qp_log_code: ERR-xxxxx
+      source: EOL Guideline ; wikipedia
+    - version: '7.3'
+      released: '2023-08-31'
+      support_end: 2030-12
+      extended_end: 2031-12
+      latest: 7.3.0.0.3 (2023-12)
+      qp_log_code: ERR-xxxxx
+      source: EOL Guideline ; wikipedia
+  mssql:
+    title: Microsoft SQL Server 버전별 수명주기·ERRORLOG 체계
+    updated: '2026-09-11'
+    note: 'Msg 번호·Severity·State 체계와 ERRORLOG 형식(''YYYY-MM-DD hh:mm:ss.nn spidNN Error: 9002, Severity: 17, State: 4.'')은 2005~2025 동일(2017 부터 Linux /var/opt/mssql/log/errorlog 추가). AlwaysOn AG 오류(19406·35262·41144·41145·35264)는 2012 도입, 미러링 1418 은 2005
+      도입(2012 부터 비권장), read-retry 825 는 2005 도입.'
+    columns:
+    - version
+    - released
+    - mainstream_end
+    - extended_end
+    - source
+    labels:
+      version: 버전
+      released: 출시
+      mainstream_end: Mainstream 종료
+      extended_end: Extended 종료
+      source: 출처
+    versions:
+    - version: '2005'
+      released: 2005-11 (SP4 2010-12-13)
+      mainstream_end: '2011-04-12'
+      extended_end: '2016-04-12'
+      source: https://endoflife.date/mssqlserver
+    - version: 2008 / 2008 R2
+      released: 2008-08 / 2010-04 (SP4/SP3 2014-07-07)
+      mainstream_end: '2014-07-08'
+      extended_end: '2019-07-09'
+      source: https://endoflife.date/mssqlserver
+    - version: '2012'
+      released: 2012-04 (SP4 2017-10-05)
+      mainstream_end: '2017-07-11'
+      extended_end: '2022-07-12'
+      source: https://endoflife.date/mssqlserver
+    - version: '2014'
+      released: 2014-04 (SP3 2018-10-30)
+      mainstream_end: '2019-07-09'
+      extended_end: '2024-07-09'
+      source: https://endoflife.date/mssqlserver
+    - version: '2016'
+      released: 2016-06 (SP3 2021-09-15)
+      mainstream_end: '2026-07-14'
+      extended_end: '2029-07-17'
+      source: https://endoflife.date/mssqlserver
+    - version: '2017'
+      released: '2017-09-29'
+      mainstream_end: '2022-10-11'
+      extended_end: '2027-10-12'
+      source: https://endoflife.date/mssqlserver
+    - version: '2019'
+      released: '2019-11-04'
+      mainstream_end: '2025-02-28'
+      extended_end: '2030-01-08'
+      source: https://endoflife.date/mssqlserver
+    - version: '2022'
+      released: '2022-11-16'
+      mainstream_end: '2028-01-11'
+      extended_end: '2033-01-11'
+      source: https://endoflife.date/mssqlserver
+    - version: '2025'
+      released: '2025-11-18'
+      mainstream_end: '2031-01-06'
+      extended_end: '2036-01-06'
+      source: https://endoflife.date/mssqlserver
+  postgresql:
+    title: PostgreSQL 버전별 수명주기·로그 체계
+    updated: '2026-09-11'
+    note: SQLSTATE 5자리 코드는 9.2 오류 코드 부록에 사전 등록 코드 전부가 존재해 18 까지 동일. 서버 로그 형식은 log_line_prefix 설정(기본 '%m [%p] ')에 따르며 파서가 시각·[pid] 접두를 읽는다. 10 부터 pg_xlog→pg_wal, 'transaction log'→'write-ahead log' 문구 변경(별칭에 두 표기 포함), 9.6 idle_in_transaction_session_timeout,
+      9.0 스트리밍 복제(walsender).
+    columns:
+    - version
+    - released
+    - support_end
+    - latest
+    - source
+    labels:
+      version: 버전
+      released: 출시
+      support_end: 지원 종료
+      latest: 최종
+      source: 출처
+    versions:
+    - version: 9.2 / 9.3 / 9.4 / 9.5 / 9.6
+      released: 2012-09-10 / 2013-09-09 / 2014-12-18 / 2016-01-07 / 2016-09-29
+      support_end: 2017-11-09 / 2018-11-08 / 2020-02-13 / 2021-02-11 / 2021-11-11
+      latest: 9.2.24 / 9.3.25 / 9.4.26 / 9.5.25 / 9.6.24
+      source: https://endoflife.date/postgresql
+    - version: '10'
+      released: '2017-10-05'
+      support_end: '2022-11-10'
+      latest: '10.23'
+      source: https://endoflife.date/postgresql
+    - version: '11'
+      released: '2018-10-18'
+      support_end: '2023-11-09'
+      latest: '11.22'
+      source: https://endoflife.date/postgresql
+    - version: '12'
+      released: '2019-10-03'
+      support_end: '2024-11-21'
+      latest: '12.22'
+      source: https://endoflife.date/postgresql
+    - version: '13'
+      released: '2020-09-24'
+      support_end: '2025-11-13'
+      latest: '13.23'
+      source: https://endoflife.date/postgresql
+    - version: '14'
+      released: '2021-09-30'
+      support_end: '2026-11-12'
+      latest: '14.24'
+      source: https://endoflife.date/postgresql
+    - version: '15'
+      released: '2022-10-13'
+      support_end: '2027-11-11'
+      latest: '15.19'
+      source: https://endoflife.date/postgresql
+    - version: '16'
+      released: '2023-09-14'
+      support_end: '2028-11-09'
+      latest: '16.15'
+      source: https://endoflife.date/postgresql
+    - version: '17'
+      released: '2024-09-26'
+      support_end: '2029-11-08'
+      latest: '17.11'
+      source: https://endoflife.date/postgresql
+    - version: '18'
+      released: '2025-09-25'
+      support_end: '2030-11-14'
+      latest: '18.6'
+      source: https://endoflife.date/postgresql
+  cubrid:
+    title: CUBRID 버전별 수명주기·로그 체계
+    updated: '2026-09-11'
+    note: '서버 오류 번호(음수)·ER_ 이름과 CAS 오류(-10xxx)는 8.4~11.4 동일. 서버 오류 로그 $CUBRID/log/server/<db>_<yyyymmdd>_<hhmi>.err 의 ''Time: 10/29/10 17:32:42.360 - ERROR *** … ERROR CODE = -1022, Tran = 0, CLIENT = …, EID = 2'' 형식(8.4.4 공식 예)을 파서가 읽는다(다음 줄 본문 결합). 11.0
+      에서 TDE·패킷 암호화·SSL(CAS -10103) 도입, Java SP 서버 분리(-902/-903/-905), 8.4.4 접근 제한(-1022). 지원 정책 5년 + 필요 시 3년 연장(매년 12월 공지).'
+    columns:
+    - version
+    - released
+    - support_end
+    - latest
+    - note
+    - source
+    labels:
+      version: 버전
+      released: 출시
+      support_end: EOL
+      latest: 최종
+      note: 비고
+      source: 출처
+    versions:
+    - version: 8.4.x
+      released: 2011-07 (8.4.0) ~ 2012-11 (8.4.3)
+      support_end: 종료
+      latest: 8.4.4
+      note: 8.4.4 접근 제한(-1022), REGEXP(8.4.1), 샤딩(8.4.3)
+      source: https://en.wikipedia.org/wiki/CUBRID
+    - version: 9.x
+      released: 2012-10 (9.0) ~ 2014-05 (9.3)
+      support_end: 종료
+      latest: '9.3'
+      note: 윈도 함수·함수 기반 인덱스
+      source: https://en.wikipedia.org/wiki/CUBRID
+    - version: 10.0 / 10.1
+      released: 2016-02 / 2017-07
+      support_end: '2024-12-31'
+      latest: 10.0.0 / 10.1.8
+      note: MVCC(10.0), CTE(10.1)
+      source: https://www.cubrid.org/cubrid_eol
+    - version: '10.2'
+      released: 2019-12
+      support_end: 2027-12-31 (연장)
+      latest: 10.2.17
+      note: JSON 타입
+      source: https://www.cubrid.org/cubrid_eol
+    - version: '11.0'
+      released: 2021-01
+      support_end: '2026-12-31'
+      latest: 11.0.15
+      note: TDE·SSL
+      source: https://www.cubrid.org/cubrid_eol
+    - version: '11.2'
+      released: 2022-05
+      support_end: '2027-12-31'
+      latest: 11.2.9
+      note: DB 링크
+      source: https://www.cubrid.org/cubrid_eol
+    - version: '11.3'
+      released: 2023-09
+      support_end: '2028-12-31'
+      latest: 11.3.4
+      note: ''
+      source: https://www.cubrid.org/cubrid_eol
+    - version: '11.4'
+      released: 2025-05
+      support_end: '2030-12-31'
+      latest: 11.4.4
+      note: PL/CSQL(Oracle 호환)
+      source: https://www.cubrid.org/cubrid_eol
+  goldilocks:
+    title: SUNJESOFT GOLDILOCKS 버전별 로그 체계
+    updated: '2026-09-11'
+    note: 선재소프트 인메모리 DBMS(구 SunDB, 2010 첫 출시). 현행 제품 버전은 달력형(20c.1·22c.1·26c.1), 3.1 은 '3.1 이후 미지원' 참조로만 확인(3.2 는 DB 버전으로 확인 안 됨 — GPT). 오류 표기는 ERR-<SQLSTATE>(내부번호) 예 ERR-42000(14006)·ERR-HY000(13011) — 사전 코드는 내부번호이며 파서가 괄호 안 번호로 대응. 출시·EOS 일자는 공개 자료 없음.
+    columns:
+    - version
+    - released
+    - support_end
+    - log_files
+    - code_format
+    - source
+    labels:
+      version: 버전
+      released: 출시
+      support_end: 지원 종료
+      log_files: 로그 파일
+      code_format: 오류 표기
+      source: 출처
+    versions:
+    - version: 3.1 (r23084)
+      released: 미확인
+      support_end: 미확인(현행 매뉴얼 '3.1 이후 미지원')
+      log_files: $GOLDILOCKS_DATA/trc/system.trc
+      code_format: ERR-<SQLSTATE>(내부번호) 동일 여부 미확인
+      source: https://github.com/sunjesoft/goldilocks_dbms_docs
+    - version: 20c.1
+      released: 미확인
+      support_end: 미확인
+      log_files: $GOLDILOCKS_DATA/trc/system.trc
+      code_format: ERR-HY000(13011) 형식
+      source: https://manual.sunjesoft.co.kr/goldilocks/20c_1/
+    - version: 22c.1
+      released: 미확인
+      support_end: 미확인
+      log_files: 동일
+      code_format: 동일
+      source: https://manual.sunjesoft.co.kr/goldilocks/22c_1/
+    - version: 26c.1
+      released: 미확인
+      support_end: 지원 중(현행)
+      log_files: system.trc, xa.trc, listener.trc
+      code_format: ERR-42000(14006), ERR-HY000(13011)
+      source: https://manual.sunjesoft.co.kr/goldilocks/26c_1/

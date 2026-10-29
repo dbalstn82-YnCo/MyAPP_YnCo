@@ -1,0 +1,2166 @@
+# 화면 값 출처 검토 목록 — 파일<TAB>식. 2026-10-15 XSS 전수 점검(화면 9개, ${…} 약 1,290곳, 서버 출처까지 추적)에서
+
+# 안전(숫자·서버가 만드는 값·내부 HTML 조각·confirm 같은 HTML 아닌 곳·이미 이스케이프한 조각)으로 확인한 것. 실제 XSS 였던 두 곳은 esc 로 고쳐 여기 없다.
+
+# 새 줄은 값의 출처를 확인한 뒤에만 넣는다 — 로그·업로드 파일·다른 사용자·장비가 정하는 글이면 넣지 말고 esc() 로 감싼다.
+
+# 셋째 칸 = 출처 태그(3차 아이디어 3): num 숫자·횟수 / cond 고정 글을 고르는 조건 / local 이 화면 대본이 만든 값·조각 / const 대본 안 고정 표 / server 서버가 만드는 값. server 줄의 값이 사용자·로그 글로 바뀌면 그 줄을 지우고 esc() 로 감싼다.
+
+admin.html	(u.asset_sites||[]).map(s=>pill(sn[s]||s,'warn')).join(' ')||'<span class="note">없음</span>'	server
+
+admin.html	(u.sites||[]).includes('*')?pill('전체','acc'):(u.sites||[]).map(s=>esc(sn[s]||s)).join(', ')||'<span class="note">없음</span>'	cond
+
+admin.html	A.policy.classes	num
+
+admin.html	A.policy.expire_days	num
+
+admin.html	A.policy.lock_minutes	num
+
+admin.html	A.policy.max_fails	num
+
+admin.html	A.policy.min_length	num
+
+admin.html	U.active_1h	num
+
+admin.html	U.users.filter(u=>u.disabled).length	num
+
+admin.html	U.users.filter(u=>u.role==='admin').length	num
+
+admin.html	U.users.filter(u=>u.role==='operator').length	num
+
+admin.html	c.max_uses?(' / '+c.max_uses):' (제한 없음)'	cond
+
+admin.html	c.uses	num
+
+admin.html	c.valid?pill('사용 가능','ok'):pill('만료 · 소진','mute')	cond
+
+
+
+
+admin.html	ex===null?'<span class="note">기한 없음</span>':(ex<=0?pill('기한 지남','crit'):(ex+'일 남음'))	cond
+
+admin.html	j.max_uses?(j.max_uses+'명까지'):'횟수 제한 없음'	cond
+
+admin.html	j.minutes	num
+
+admin.html	k	num
+
+admin.html	k===sm.mode?'checked':''	cond
+
+admin.html	r.code&&r.code.valid?' '+pill('재설정 코드 유효','warn'):''	cond
+
+admin.html	r.id	server
+
+admin.html	r.locked?'<button class="btn sm ghost" data-op="unlock">잠금 해제</button>':''	cond
+
+admin.html	r.ok?pill('성공','ok'):pill('실패','crit')	cond
+
+admin.html	r.status==='pending'?'<button class="btn sm" data-op="ok">승인</button><button class="btn sm ghost danger" data-op="no">거절</button>':''	cond
+
+admin.html	s.disabled?'재개':'중지'	cond
+
+
+admin.html	s.local?' · 본사 자체':''	cond
+
+admin.html	s.name	server
+
+
+
+admin.html	sel.includes(s.id)?'checked':''	cond
+
+admin.html	u.disabled?'재개':'중지'	cond
+
+admin.html	u.disabled?pill('중지','crit'):pill('사용','ok')	cond
+
+admin.html	u.login	server
+
+admin.html	when(c.expires)	server
+
+admin.html	when(r.at)	server
+
+admin.html	when(r.created)	server
+
+admin.html	when(r.last_login)	server
+
+admin.html	when(s.last_seen)	server
+
+admin.html	when(u.last_login)	server
+
+admin.html	x.files	num
+
+admin.html	x.modified?esc(new Date(x.modified*1000).toLocaleString()):'-'	cond
+
+automation.html	(o.analyzed||[]).length	num
+
+automation.html	KIND_ICON[j.kind]||''	server
+
+automation.html	KIND_ICON[k]	num
+
+automation.html	S.notices.filter(n=>!n.ack).length	num
+
+automation.html	a	server
+
+automation.html	box('board','게시판에 공유','분석 이력을 붙인 글을 게시판에 올립니다(글쓴이: 무인 1차 대응)')	server
+
+automation.html	box('notify','담당자에게 알림','알림함에 판정 요약을 남깁니다')	server
+
+automation.html	box('report','보고서 초안 만들기','분석 결과로 장애 보고서 초안을 만들어 보고서 폴더에 둡니다')	server
+
+automation.html	chosen.join(' · ')	server
+
+automation.html	cls	local
+
+automation.html	d	server
+
+automation.html	dl(f)	server
+
+automation.html	dl(f,1)	server
+
+automation.html	due.name	server
+
+automation.html	e.saved_hour	server
+
+automation.html	f.acts	server
+
+automation.html	f.stale?'마지막 분석':'최근 실행'	cond
+
+automation.html	hc.length?'점검 '+hc.join(' · '):'점검 스케줄 없음'	cond
+
+automation.html	hm(e.machine_min)	server
+
+automation.html	hm(e.manual_min)	server
+
+automation.html	hm(e.saved_min)	server
+
+automation.html	hm(p.total)	server
+
+automation.html	icon	server
+
+automation.html	inline?'&inline=1':''	cond
+
+automation.html	j.enabled?'':' '+pill('중지','mute')	cond
+
+automation.html	j.enabled?'<button class="btn sm ghost" data-op="pause">중지</button>':'<button class="btn sm ghost" data-op="resume">재개</button>'	cond
+
+automation.html	j.enabled?('다음 '+(when(j.next_due)||'즉시')):'일시 중지'	cond
+
+automation.html	j.kind==='health_check'?(j.params.save?' · 결과 저장':' · 알림만'):''	cond
+
+automation.html	j.name	server
+
+automation.html	j.params.formats?' · '+j.params.formats.join('/').toUpperCase():''	cond
+
+automation.html	k	num
+
+automation.html	k===curKind?'checked':''	cond
+
+automation.html	k===curKind?'on':''	cond
+
+automation.html	kb(f.size)	server
+
+automation.html	kb(p.bytes)	server
+
+automation.html	lastRun(j)	server
+
+automation.html	m.analyzed	num
+
+automation.html	m.machine_sec!=null&&m.machine_sec<60?m.machine_sec+'초':hm(m.machine_min)	cond
+
+automation.html	m.reports	num
+
+automation.html	m.shares	num
+
+automation.html	mark	local
+
+automation.html	n	num
+
+automation.html	n.ack?'ack':''	cond
+
+automation.html	n.id	server
+
+automation.html	o.filter(f=>f.ext==='hwpx').length	num
+
+automation.html	o.filter(f=>f.ext==='pdf').length	num
+
+automation.html	o.formats.includes(v)?'checked':''	cond
+
+automation.html	o.observed||0	num
+
+automation.html	o.summary?' · '+esc(o.summary):r.error?' · '+esc(r.error.slice(0,80)):''	cond
+
+automation.html	on?'checked':''	cond
+
+automation.html	p.count	num
+
+automation.html	p.count==null?'-':(p.exists?p.count+(p.more?'+':''):'<span class="note">없음</span>')	cond
+
+automation.html	p.key	server
+
+automation.html	p.minutes	num
+
+automation.html	s.seconds	num
+
+automation.html	s.seconds/3600	server
+
+automation.html	s.seconds/60	server
+
+automation.html	s.time	server
+
+automation.html	sel.includes(v)?'checked':''	cond
+
+automation.html	t	server
+
+automation.html	tone||''	server
+
+automation.html	un	server
+
+automation.html	v	server
+
+automation.html	v[a]?'checked':''	cond
+
+automation.html	w==='always'?'selected':''	cond
+
+automation.html	w==='critical'?'selected':''	cond
+
+automation.html	w==='error'?'selected':''	cond
+
+automation.html	when(due.next_due)	server
+
+automation.html	when(f.mtime)	server
+
+automation.html	when(f.shown.run.started)	server
+
+automation.html	when(n.at)	server
+
+automation.html	when(r.started)	server
+
+board.html	(d.posts||[]).length	num
+
+board.html	(mine||admin)?'<button class="btn ghost sm danger" id="del">삭제</button>':""	cond
+
+board.html	(p.replies||[]).length	num
+
+board.html	CSS.escape(id)	server
+
+board.html	ICON_SEARCH	const
+
+board.html	IC_CLIP	const
+
+board.html	IC_OPEN	const
+
+board.html	IC_POSTS	const
+
+board.html	IC_REP	const
+
+board.html	SEVC[k]||"mute"	server
+
+board.html	SPLIT()?" on":""	cond
+
+
+board.html	att	local
+
+board.html	bad?"errbox":"okbox"	cond
+
+board.html	c	server
+
+board.html	chip("","전체",!STATE.kind&&!STATE.mine)	server
+
+board.html	chip("mine","내 글",!!STATE.mine)	server
+
+board.html	chip("question","질문",STATE.kind==="question")	server
+
+board.html	chip("request","분석 요청",STATE.kind==="request")	server
+
+board.html	chip("share","분석 공유",STATE.kind==="share")	server
+
+board.html	d	server
+
+board.html	d.getFullYear()	server
+
+board.html	d.total	num
+
+board.html	edit&&edit.share_raw?" checked":""	cond
+
+board.html	edit?"고치기":"등록"	cond
+
+board.html	edit?"글 고치기":"새 글 쓰기"	cond
+
+board.html	edit?"글로 돌아가기":"목록으로"	cond
+
+board.html	id	local
+
+board.html	kind==="question"?"on":""	cond
+
+board.html	kind==="request"?"on":""	cond
+
+board.html	kind==="share"?"on":""	cond
+
+board.html	masked?'<span class="maskchip">🔒 IP·호스트명 가림</span>':'<span class="pill ok">원문</span>'	cond
+
+board.html	mine?'<button class="btn ghost sm" id="edit">고치기</button>':""	cond
+
+board.html	on?" on":""	cond
+
+board.html	p(d.getDate())	server
+
+board.html	p(d.getHours())	server
+
+board.html	p(d.getMinutes())	server
+
+board.html	p(d.getMonth()+1)	server
+
+board.html	p.id	server
+
+board.html	p.kind==="share"?"":stCell(p)	cond
+
+board.html	p.replies	num
+
+board.html	p.share_raw?'<span class="pill acc">원문 공개</span>':""	cond
+
+board.html	p.views	num
+
+board.html	picked.has(x.id)?" checked":""	cond
+
+board.html	picked.has(x.id)?" on":""	cond
+
+board.html	picked.size	num
+
+board.html	post	local
+
+board.html	r.accepted?" best":""	cond
+
+board.html	r.accepted?'<span class="pill ok">채택된 답변</span>':""	cond
+
+board.html	r.id	server
+
+board.html	reps||'<div class="empty">아직 답글이 없습니다</div>'	server
+
+board.html	row("대상",inc.target||inc.host)	server
+
+board.html	row("등록한 담당자",d.owner_name||"")	server
+
+board.html	row("분석 시각",inc.analyzed_at)	server
+
+board.html	row("판정",inc.verdict||inc.summary)	server
+
+board.html	st.open	server
+
+board.html	st.posts	num
+
+board.html	st.replies	num
+
+board.html	stCell(p)	server
+
+board.html	when(p.at)	server
+
+board.html	when(r.at)	server
+
+board.html	x.gone?'<span class="pill mute">보관 기간 지남</span>':""	cond
+
+board.html	x.masked?'<span class="pill acc">가림</span>':""	cond
+
+hub.html	!s.critical&&!s.error?pill('경고 '+(s.warn||0),'mute'):''	cond
+
+hub.html	MODE&&MODE.broken?' open':''	cond
+
+hub.html	MODE.allow_list.map(esc).join(', ')	server
+
+hub.html	a.address	server
+
+hub.html	a.name	server
+
+hub.html	blocked(k)?' disabled':''	cond
+
+hub.html	blocked(k)?'.6':'1'	cond
+
+hub.html	blocked(k)?'<br><b style="color:#b42318">지금은 쓸 수 없습니다</b> — 이 서버는 로그인이 없어 접속할 수 있는 사람이 모두 관리자입니다. 그 상태에서는 보낼 수 있는 본사를 서버의 <code>conf/hub_allow.txt</code> 에 정해 두어야 자료를 밖으로 내보낼 수 있습니다.':''	cond
+
+hub.html	blocked(k)?'not-allowed':'pointer'	cond
+
+hub.html	brokenBox	local
+
+hub.html	c.interval	num
+
+hub.html	c.sent.incidents	num
+
+hub.html	c.sent.reports	num
+
+hub.html	c?esc(c.hub_url):''	cond
+
+hub.html	el	local
+
+hub.html	j.total.down	num
+
+hub.html	j.total.online	num
+
+hub.html	j.total.sites	server
+
+hub.html	j.total.targets	server
+
+hub.html	k	num
+
+hub.html	kb(r.size)	server
+
+hub.html	locked?' readonly':''	cond
+
+hub.html	m.send_reports!==false?' checked':''	cond
+
+hub.html	m.token_set?'설정되어 있습니다 — 바꿀 때만 입력':'본사에서 발급받은 토큰'	cond
+
+hub.html	meter(r.cpu)	server
+
+hub.html	meter(r.disk)	server
+
+hub.html	meter(r.mem)	server
+
+hub.html	modeForm()	server
+
+hub.html	pct	num
+
+hub.html	pick('central')	server
+
+hub.html	pick('none')	server
+
+hub.html	pick('site')	server
+
+hub.html	r.message?' — '+r.message:''	cond
+
+hub.html	r.name	server
+
+hub.html	r===k?' checked':''	cond
+
+hub.html	s.critical?pill('치명 '+s.critical,'crit'):''	cond
+
+hub.html	s.down	num
+
+hub.html	s.down?'bad':''	cond
+
+hub.html	s.error?pill('오류 '+s.error,'warn'):''	cond
+
+hub.html	s.failed_runs_24h	server
+
+hub.html	s.hot	num
+
+hub.html	s.hot?'bad':''	cond
+
+hub.html	s.incidents_24h	server
+
+hub.html	s.info&&s.info.hostname?' · '+esc(s.info.hostname):''	cond
+
+hub.html	s.local?' · 본사':''	cond
+
+hub.html	s.stale_targets	server
+
+hub.html	s.state	server
+
+hub.html	s.state==='online'?'':' oldv'	cond
+
+hub.html	s.state==='online'?'ok':''	cond
+
+hub.html	s.up	num
+
+hub.html	s.version?' · v'+esc(s.version):''	cond
+
+hub.html	sel===s.id?'sel':''	cond
+
+hub.html	t.down	num
+
+hub.html	t.down+t.hot	num
+
+hub.html	t.down_past	server
+
+hub.html	t.hot	num
+
+hub.html	t.incidents_24h	server
+
+hub.html	t.nochk	server
+
+hub.html	t.online	num
+
+hub.html	t.reports	num
+
+hub.html	t.sites	server
+
+hub.html	t.targets	server
+
+hub.html	t.up	num
+
+hub.html	v>=90?'hot':''	cond
+
+hub.html	when(c.last_ok)	server
+
+hub.html	when(e.at)	server
+
+hub.html	when(r.mtime)	server
+
+inventory.html	(x.size/1024).toFixed(0)	num
+
+inventory.html	DOC_ICON	const
+
+inventory.html	EMPTY_ART.docs	const
+
+inventory.html	SCOPE_KO()	server
+
+inventory.html	c.dropped?' — 지움':((c.ambiguous&&c.ambiguous.length)||c.suspicious?' — 사람이 골라 주십시오':(c.field?' → '+esc((SPEC&&SPEC.fields||[]).find(x=>x.id===c.field)?.label||c.field):' — 모름'))	cond
+
+inventory.html	c.dropped?'crit':(c.ambiguous||c.suspicious?'warn':(CONF[c.confidence]||'info'))	cond
+
+inventory.html	cells	num
+
+inventory.html	cs.map(fldRow).join('')	server
+
+inventory.html	d.dropped_columns	server
+
+inventory.html	d.type_requirements_checked ?'유형별 필수까지 검사':'공통 항목만 검사'	cond
+
+inventory.html	d.type_requirements_checked?'ok':'warn'	cond
+
+inventory.html	head	local
+
+inventory.html	i+1	server
+
+inventory.html	k==='advised'?' selected':''	cond
+
+inventory.html	k===now?' selected':''	cond
+
+inventory.html	lvSel(f.id, f.level, f.label)	server
+
+inventory.html	opts	local
+
+inventory.html	r.name	server
+
+inventory.html	r.sheets.map(s=>s[0]+' '+s[1]+'행').join(', ')	server
+
+inventory.html	rows	num
+
+inventory.html	sdate(x.at)	server
+
+inventory.html	sh.checked.unread.map(u=>esc(u.label)+'('+esc(u.raw)+')').join(' · ')	server
+
+inventory.html	sh.dropped_cells	server
+
+inventory.html	sh.header_row+1	server
+
+inventory.html	sh.rows	num
+
+inventory.html	sn.length-3	server
+
+inventory.html	x.edits	num
+
+inventory.html	x.id	server
+
+inventory.html	x.sheets	num
+
+inventory_view.html		server
+
+inventory_view.html	(DOC.size/1024).toFixed(0)	num
+
+inventory_view.html	(hidR.has(rno)||hidC.has(c))?' hid':''	cond
+
+
+
+inventory_view.html	DOC.edits	num
+
+inventory_view.html	DOC.name	const
+
+inventory_view.html	DOC.sha256.slice(0,12)	server
+
+inventory_view.html	EDIT?'클릭: 행 선택 (Shift: 범위 선택)':(rno==null?'편집으로 추가한 행':'원본 행 번호')	cond
+
+inventory_view.html	ID	const
+
+inventory_view.html	SELC.has(c)?' selc':''	cond
+
+inventory_view.html	SELC.size	num
+
+
+inventory_view.html	SELR.size	num
+
+inventory_view.html	SHOWHID?'(표시 중)':''	cond
+
+inventory_view.html	SHOWHID?1:0	server
+
+inventory_view.html	W	num
+
+inventory_view.html	[...SELC].sort((a,b)=>a-b).map(colL).join(', ')	server
+
+inventory_view.html	a	server
+
+inventory_view.html	c	server
+
+inventory_view.html	colL(c)	server
+
+inventory_view.html	colsShown.length+1	server
+
+inventory_view.html	cs	local
+
+inventory_view.html	date(DOC.at)	server
+
+inventory_view.html	date(DOC.edited_at)	server
+
+inventory_view.html	date(e.at)	server
+
+inventory_view.html	e.rev	server
+
+inventory_view.html	e.undone?' <span class="note">(되돌림)</span>':e.undoable?'':' <span class="note">(되돌리기 불가)</span>'	cond
+
+inventory_view.html	e.undone?' style="opacity:.55;text-decoration:line-through"':''	cond
+
+inventory_view.html	hidC.size	num
+
+
+inventory_view.html	hidR.size	num
+
+inventory_view.html	i	num
+
+inventory_view.html	i===SI?' on':''	cond
+
+inventory_view.html	labels.length>15?' …':''	cond
+
+inventory_view.html	labels.slice(0,15).join(', ')	server
+
+inventory_view.html	n	num
+
+inventory_view.html	n===s.header_rows?' selected':''	cond
+
+inventory_view.html	num?'num':''	cond
+
+inventory_view.html	rno==null?' nw':''	cond
+
+inventory_view.html	rno==null?'편집으로 추가한 행':'원본 행 번호'	cond
+
+inventory_view.html	rno??'신규'	server
+
+inventory_view.html	s.header_rows	server
+
+
+inventory_view.html	sp?' m':''	cond
+
+inventory_view.html	sp[0]	server
+
+inventory_view.html	tag	local
+
+inventory_view.html	terms.length?'검색 결과가 없습니다.':'데이터 행이 없습니다.'+(EDIT?' [행 추가 ↓]로 행을 만드십시오.':'')	cond
+
+inventory_view.html	th?esc(v):hl(v)	server
+
+nms.html	(H-B).toFixed(1)	num
+
+nms.html	(H-B-6).toFixed(1)	num
+
+nms.html	(P[i+1][0]-h/3).toFixed(1)	num
+
+nms.html	(P[i+1][1]-tg[i+1]*h/3).toFixed(1)	num
+
+nms.html	(P[i][0]+h/3).toFixed(1)	num
+
+nms.html	(P[i][1]+tg[i]*h/3).toFixed(1)	num
+
+nms.html	(names[v.oid]||v.oid).padEnd(28)	server
+
+nms.html	(x(m.at)-2).toFixed(1)	num
+
+nms.html	(yy+3.5).toFixed(1)	num
+
+nms.html	CSS.escape(a.key)	server
+
+nms.html	CSS.escape(key)	server
+
+nms.html	EMPTY_ART.targets	const
+
+nms.html	H	num
+
+nms.html	H-5	server
+
+nms.html	H-B	server
+
+nms.html	H-T-B+2	server
+
+nms.html	KIND_ICONS[t.kind]||KIND_ICONS.other	num
+
+nms.html	L	const
+
+nms.html	L-5	server
+
+nms.html	P.at(-1)[0].toFixed(1)	num
+
+nms.html	P[0][0].toFixed(1)	num
+
+nms.html	P[i+1][0].toFixed(1)	num
+
+nms.html	P[i+1][1].toFixed(1)	num
+
+nms.html	T	const
+
+nms.html	T-2	server
+
+nms.html	T-5	server
+
+nms.html	T-8	server
+
+nms.html	TITLE	const
+
+nms.html	W	num
+
+nms.html	W-L-R	server
+
+nms.html	W-R	server
+
+nms.html	a.closed?' · 종료 '+date(a.closed):''	cond
+
+nms.html	a.closed?(a.close_reason==='recovered'?'<span class="sev ok">복구</span>':'<span class="sev pause">설정 변경으로 종료</span>'):'<span class="sev crit">장애 진행 중</span>'	cond
+
+nms.html	a.detail?' · '+a.detail:''	cond
+
+nms.html	a.id	server
+
+nms.html	a.kind	server
+
+nms.html	a.kind==='down'?ALARM_ICONS.down:ALARM_ICONS.warn	num
+
+nms.html	a.kind==='usage'?' · 임계치 아래로 내려가면 자동으로 닫힘':' · 복구되면 자동으로 닫힘'	cond
+
+nms.html	a.label	server
+
+nms.html	a.name	server
+
+nms.html	a.threshold	server
+
+nms.html	ago<60?ago+'분':Math.round(ago/60)+'시간'	cond
+
+nms.html	al.address	server
+
+nms.html	al.name	server
+
+nms.html	body	server
+
+nms.html	bps(u.rx)	server
+
+nms.html	bps(u.tx)	server
+
+nms.html	c.fmt(hit.pt[s.key])	server
+
+nms.html	d	server
+
+nms.html	d.used_gb!=null?d.used_gb+' / '+d.total_gb+' GB':''	cond
+
+nms.html	date(a.opened)	server
+
+nms.html	date(al.opened)	server
+
+
+
+nms.html	date(procs.at)	server
+
+nms.html	date(rows.at(-1).at)	server
+
+nms.html	date(rows[0].at)	server
+
+nms.html	date(t.created)	server
+
+nms.html	date(t.last_check)	server
+
+nms.html	date(u.at)	server
+
+nms.html	defs	local
+
+nms.html	err	num
+
+nms.html	fl	local
+
+nms.html	g	server
+
+nms.html	gid	local
+
+nms.html	hit.mark.detail?' · '+esc(hit.mark.detail):''	cond
+
+nms.html	hit.mark.kind==='down'?'#F06B5D':'#F2A93B'	cond
+
+nms.html	hit.mark.kind==='down'?'실패':'수집 오류'	cond
+
+nms.html	i===0?'start':i===ticks.length-1?'end':'middle'	cond
+
+nms.html	ico	server
+
+nms.html	id	local
+
+nms.html	k	num
+
+nms.html	l	server
+
+nms.html	lastV?' · 현재 '+esc(lastV):''	cond
+
+nms.html	last[0].toFixed(1)	num
+
+nms.html	last[1].toFixed(1)	num
+
+nms.html	legend	local
+
+nms.html	lvl(d.pct)	server
+
+nms.html	lvl(u.disk)	server
+
+nms.html	lvl(u[k])	server
+
+nms.html	lvl(v)	server
+
+nms.html	lx	server
+
+nms.html	lx+12	server
+
+nms.html	lx+15	server
+
+nms.html	m.kind==='down'?'#C62828':'#B26A00'	cond
+
+nms.html	n	num
+
+nms.html	nOn	server
+
+nms.html	na	local
+
+nms.html	net	local
+
+nms.html	new Date().toLocaleTimeString()	server
+
+nms.html	o.emptyText||'아직 수집된 값이 없습니다'	server
+
+nms.html	p(d.getDate())	server
+
+nms.html	p(d.getHours())	server
+
+nms.html	p(d.getMinutes())	server
+
+nms.html	p(d.getMonth()+1)	server
+
+nms.html	p(d.getSeconds())	server
+
+nms.html	pr	server
+
+nms.html	procs.failed	server
+
+nms.html	procs.total	num
+
+nms.html	procs.total-procs.known	server
+
+nms.html	row('cpu','CPU')	server
+
+nms.html	row('disk','DISK')	server
+
+nms.html	row('mem','MEM')	server
+
+nms.html	s.color	server
+
+nms.html	s.dash	server
+
+nms.html	s.label||s.key	server
+
+nms.html	shortT(t.last_check)	server
+
+nms.html	spark(rows,'disk','#B26A00')	server
+
+nms.html	spark(rows,k,color)	server
+
+nms.html	sparkNet(rows)	server
+
+nms.html	st	local
+
+nms.html	st[0]	server
+
+nms.html	st[1]	server
+
+nms.html	st[2]	server
+
+nms.html	t.days_left	server
+
+nms.html	t.days_left<=7?'crit':(t.days_left<=30?'warn':'ok')	cond
+
+nms.html	t.fail_limit	server
+
+nms.html	t.id	server
+
+nms.html	t.id===selected?'sel':''	cond
+
+nms.html	t.interval	num
+
+nms.html	t.last_used?date(t.last_used):'—'	cond
+
+nms.html	t.latency!=null?' · '+t.latency.toFixed(1)+' ms':''	num
+
+nms.html	t.latency==null?'—':t.latency.toFixed(1)+' ms'	num
+
+
+
+nms.html	t.recover_limit	server
+
+nms.html	t.stale&&statuses[t.status]?'마지막 결과 '+esc(statuses[t.status][0])+' · ':''	cond
+
+nms.html	t.stale?' · <b class="unkt">3회 주기 넘게 결과 없음</b>':''	cond
+
+nms.html	t.timeout	num
+
+nms.html	t.uses||0	num
+
+nms.html	tfmt(at,c.span)	server
+
+nms.html	tfmt(tt,span)	server
+
+nms.html	th.color	server
+
+nms.html	u.disk==null?'—':u.disk.toFixed(1)+'%'	num
+
+nms.html	u.error	num
+
+nms.html	u.if_error	server
+
+nms.html	u.load1	server
+
+nms.html	u.load1!=null?' · load '+u.load1:''	cond
+
+nms.html	u.pcount	num
+
+nms.html	u.pcount==null?'—':u.pcount+'개'	cond
+
+nms.html	u.pknown!=null&&u.pknown<u.pcount?' · 계정 미확인 '+(u.pcount-u.pknown)+'개(권한)':''	cond
+
+nms.html	u.pusers??'—'	server
+
+nms.html	u.stale?'3분 이상 수신 없음 · ':''	cond
+
+nms.html	u.stale?'old':''	cond
+
+nms.html	u.uptime!=null?' · 가동 '+Math.floor(u.uptime/86400)+'일':''	cond
+
+nms.html	u[k]==null?'—':u[k].toFixed(1)+'%'	num
+
+nms.html	usageHtml(t)	server
+
+nms.html	v.value==null?'(값 없음 — OID 확인)':v.value	cond
+
+nms.html	v==null?'—':v.toFixed(0)+'%'	num
+
+nms.html	v==null?0:Math.min(100,v)	server
+
+nms.html	vols	local
+
+nms.html	x(tt).toFixed(1)	num
+
+nms.html	x.count	num
+
+nms.html	x.cpu>=50?'hi':''	cond
+
+nms.html	x.oid	server
+
+nms.html	x.pid	server
+
+nms.html	x.value	server
+
+nms.html	y(th.v).toFixed(1)	num
+
+ui.html		server
+
+ui.html	$("#lsinc").value||"result"	server
+
+ui.html	$("#repwrap").innerHTML	server
+
+ui.html	($("#osmode")&&$("#osmode").value==="manual"&&$("#oshint").value)?esc($("#oshint").options[$("#oshint").selectedIndex].text.split(" ")[0])+'<small> 수동</small>':'자동<small> 탐지</small>'	cond
+
+ui.html	((s.sev?.critical||0)/sevSum*100).toFixed(1)	num
+
+ui.html	((s.sev?.error||0)/sevSum*100).toFixed(1)	num
+
+ui.html	((s.sev?.warn||0)/sevSum*100).toFixed(1)	num
+
+ui.html	(C*Math.max(0.02,ratio)).toFixed(1)	num
+
+ui.html	(KBP.codes||[]).length	num
+
+ui.html	(KBP.rules||[]).length	num
+
+ui.html	(a.events_total||0).toLocaleString()	server
+
+ui.html	(a.files||[]).length	num
+
+ui.html	(b.events_total||0).toLocaleString()	server
+
+ui.html	(b.files||[]).length	num
+
+ui.html	(c.count||0).toLocaleString()	server
+
+ui.html	(d.n-d.crit)/maxD2*100	server
+
+ui.html	(d.verdicts||[]).length?"\n"+esc(d.verdicts.join(" / ")):""	cond
+
+ui.html	(h-1).toFixed(1)	num
+
+ui.html	(h.events_total||0).toLocaleString()	server
+
+ui.html	(h.files||[]).length	num
+
+ui.html	(l.n/tot*100).toFixed(1)	num
+
+ui.html	(last.judge.matches||0).toLocaleString()	server
+
+ui.html	(last.match.events||0).toLocaleString()	server
+
+ui.html	(last.match.rules||0).toLocaleString()	server
+
+ui.html	(last.read_done.done||0).toLocaleString()	server
+
+ui.html	(lastReport.timeline_total||lastReport.timeline.length).toLocaleString()	server
+
+ui.html	(m.actions||0).toLocaleString()	server
+
+ui.html	(m.incidents||0).toLocaleString()	server
+
+ui.html	(m.resolved||0).toLocaleString()	server
+
+ui.html	(n/tot*100).toFixed(1)	num
+
+ui.html	(r.analyzed_at||"").slice(0,16)	server
+
+ui.html	(r.events_total||0).toLocaleString()	server
+
+ui.html	(r.files||[]).length	num
+
+ui.html	(r.files||[]).length-nCustom	server
+
+ui.html	(r.files||[]).map(x=>x.name).join(", ")	server
+
+ui.html	(r.kb_skipped||[]).join(", ")	server
+
+ui.html	(r.kb_skipped||[]).length	num
+
+ui.html	(s.critical||0).toLocaleString()	server
+
+ui.html	(s.sev?.[k]||0).toLocaleString()	server
+
+ui.html	(sc[k]||0).toLocaleString()	server
+
+ui.html	(tot[k]||0).toLocaleString()	server
+
+ui.html	(x.events||0).toLocaleString()	server
+
+ui.html	(x.state==="unk"||x.state==="ok"||x.state==="weak")?sevChip(x.state):sevChip(x.state,obsText(x))	cond
+
+ui.html	/^(url|source)/.test(c)?"":"white-space:normal"	cond
+
+ui.html	/^https?:/.test(s)?linkOrText(s):esc(s)	server
+
+ui.html	/최초 이상|critical|대표/.test(m)?"":" n"	cond
+
+ui.html	60-v/mh*54	server
+
+ui.html	ACTS.list.length?ACTS.list.map(a=>actRow(a,true)).join(""): '<div class="empty">아직 적은 조치가 없습니다 — 무엇을 했는지 한 줄이라도 남기면 다음 사람이 그것부터 봅니다.</div>'	cond
+
+ui.html	ACTS.past.map(a=>actRow(a,false)).join("")	server
+
+ui.html	BW	num
+
+ui.html	CH.crit	num
+
+ui.html	CH.err	num
+
+ui.html	CH.other	num
+
+ui.html	DCH.crit	num
+
+ui.html	DCH.n	num
+
+ui.html	HISTCMP.includes(i)?"checked":""	cond
+
+ui.html	HT+16	server
+
+ui.html	HT+6	server
+
+ui.html	HT-8	server
+
+ui.html	ICO.bar	const
+
+ui.html	ICO.doc	const
+
+ui.html	ICO.warn	num
+
+ui.html	L5.map(([k,n])=>row(n,cell(oa[k]),cell(ob[k]),oa[k].state!==ob[k].state||obsText(oa[k])!==obsText(ob[k]))).join("")	server
+
+ui.html	LICO[k]||""	server
+
+ui.html	LN.status==="new"?"아직 모인 후보가 없습니다 — 로그를 분석하면 룰·코드에 안 걸린 오류 문구가 여기에 모입니다.":"없습니다."	cond
+
+ui.html	LY[pi.layer]||""	server
+
+ui.html	PAD	num
+
+ui.html	PAD-5	server
+
+ui.html	SEVKO[SEVK[k]]	server
+
+ui.html	SEVKO[SEVK[t.severity]]||""	server
+
+ui.html	SEVKO[w]	num
+
+ui.html	String(h).padStart(2,"0")	server
+
+ui.html	String(i).padStart(2,"0")	server
+
+ui.html	String(l.n).padStart(6)	server
+
+ui.html	String(m).padStart(2,"0")	server
+
+ui.html	W	num
+
+ui.html	W-4	server
+
+ui.html	X(p.x)	server
+
+ui.html	X(t)	server
+
+ui.html	a.analyzed	num
+
+ui.html	a.last?("마지막 처리 "+esc(a.last)):"오늘은 아직 처리한 로그가 없습니다"	cond
+
+ui.html	a.minutes	num
+
+ui.html	a.paragraphs	server
+
+ui.html	a.result==="resolved"?" ok":a.result==="failed"?" no":""	cond
+
+ui.html	a.result==="resolved"?"ok":a.result==="failed"?"crit":"info"	cond
+
+ui.html	a.sample_id	server
+
+ui.html	a.tables	server
+
+ui.html	a.watch	server
+
+ui.html	b.critical	num
+
+ui.html	b.dataset.del	server
+
+ui.html	b.error	num
+
+ui.html	b.findings||0	num
+
+ui.html	b.other	num
+
+ui.html	bad.length?" open":""	cond
+
+ui.html	bad?" bad":(n?" hit":"")	cond
+
+ui.html	bad?"—":n.toLocaleString()	cond
+
+ui.html	bad?"불러오지 못함":esc(hint||"")	cond
+
+ui.html	band	local
+
+ui.html	bars	local
+
+ui.html	bg	local
+
+ui.html	box(a.actions,"자동 조치")	server
+
+ui.html	box(a.analyzed,"자동 분석")	server
+
+ui.html	box(a.armed+" / "+a.watch,"조치 켠 작업")	server
+
+ui.html	box(a.critical,"치명 판정",a.critical?"crit":"")	cond
+
+ui.html	briefSev(h)	server
+
+ui.html	c	server
+
+ui.html	c.also_matches??0	server
+
+ui.html	c.ambiguous	server
+
+ui.html	c.auto	server
+
+ui.html	c.body	server
+
+ui.html	c.cause||c.action?'<span class="vend">원인·조치</span>':'<span class="src">-</span>'	cond
+
+ui.html	c.code	server
+
+ui.html	c.confirm	server
+
+ui.html	c.count	num
+
+ui.html	c.count/mx*100	server
+
+ui.html	c.file	server
+
+ui.html	c.mine	server
+
+ui.html	c.n/mc*100	server
+
+ui.html	c.ok?"var(--ok)":"var(--crit)"	cond
+
+ui.html	c.ok?"✔ 통과 — 승인할 수 있습니다":"✗ 고쳐야 승인할 수 있습니다"	cond
+
+ui.html	c.procedures.map((p,i)=>procHtml(p,i===0)).join("")	server
+
+ui.html	c.product	server
+
+ui.html	c.range	server
+
+ui.html	c.regex_ms??"-"	server
+
+ui.html	c.severity	server
+
+ui.html	c.title	server
+
+ui.html	c.ts	server
+
+ui.html	c.verdict	server
+
+ui.html	can?"":"disabled"	cond
+
+ui.html	caps	local
+
+ui.html	cards.join("")	server
+
+ui.html	cd.layers??(cd.by_layer||[]).length	num
+
+ui.html	cd.products	server
+
+ui.html	cd.rules	num
+
+ui.html	cfg	local
+
+ui.html	charts	local
+
+ui.html	chip	local
+
+ui.html	chk	local
+
+ui.html	chkul(t2.checks)	server
+
+ui.html	chkul(t3.collect)	server
+
+ui.html	cid	local
+
+ui.html	cmd	local
+
+ui.html	cmds	local
+
+ui.html	codes	num
+
+ui.html	color	server
+
+ui.html	crit	num
+
+ui.html	css	local
+
+ui.html	d	server
+
+ui.html	d.crit	num
+
+ui.html	d.crit/maxD*100	server
+
+ui.html	d.crit/maxD2*100	server
+
+ui.html	d.edits	num
+
+ui.html	d.n	num
+
+ui.html	d.n/maxD*100	server
+
+ui.html	d.other||0	num
+
+ui.html	d.postmortem||0	num
+
+ui.html	d.sheets	num
+
+ui.html	d.status||0	num
+
+ui.html	d.url	server
+
+ui.html	d===pk	server
+
+ui.html	d===pk?"on":""	cond
+
+ui.html	diff?"d":""	cond
+
+ui.html	diff?'<em class="dif">차이 있음</em>':""	cond
+
+ui.html	dist	local
+
+ui.html	dt(d.at).slice(0,-3)	server
+
+ui.html	dt(inv.last_at)	server
+
+ui.html	dt(mon.recent_alerts[0].opened).slice(0,-3)	server
+
+ui.html	e.counts?"—":(t.acting||0)	cond
+
+ui.html	e.counts?"—":(t.open||0)	cond
+
+ui.html	e.jobs?"—":(t.job_failed||0)	cond
+
+ui.html	e.unack?"—":(t.unack||0)	cond
+
+ui.html	eid	local
+
+ui.html	eos?"color:var(--crit);font-weight:600":""	cond
+
+ui.html	f.filled	num
+
+ui.html	f.id	server
+
+ui.html	f.layer_ko||""	server
+
+ui.html	f.layer_ko||"—"	server
+
+ui.html	f.product?'<small><span class="autochip">'+(f.auto?"자동 판별":"수동 지정")+'</span></small>':'<small style="color:var(--warn)">판별 보류 — 분석 시 재시도</small>'	cond
+
+ui.html	f.rule_id||""	server
+
+ui.html	f.size?fmtMB(f.size):"-"	cond
+
+ui.html	f.ts||""	server
+
+ui.html	f.verdict?"· "+f.verdict:""	cond
+
+ui.html	f.verdict||""	server
+
+ui.html	fg	local
+
+ui.html	first?" first":""	cond
+
+ui.html	firstL	server
+
+ui.html	fn	server
+
+ui.html	folder	server
+
+ui.html	fullTimelineHtml(r)	server
+
+ui.html	g.count	num
+
+ui.html	g.each?' <b>· 줄마다 다른 값</b>':''	cond
+
+ui.html	gauge	server
+
+ui.html	grid	local
+
+ui.html	h.first?sevChip(w):sevChip("ok")	cond
+
+ui.html	h.status==="resolved"?"ok":h.status==="acting"?"warn":"info"	cond
+
+ui.html	has?est+"<small> 초</small>":"-"	cond
+
+ui.html	has?fmtMB(tot):"-"	cond
+
+ui.html	has?fmtMB(tot):"0"	cond
+
+ui.html	head	local
+
+ui.html	hits	local
+
+ui.html	hl(e.code||"")	server
+
+ui.html	hl(e.message)	server
+
+ui.html	hms(t)	server
+
+ui.html	homeList("대응 필요",d.open||[],"손대지 않은 건이 없습니다.","open")	server
+
+ui.html	homeList("조치 중인 건",d.acting||[],"조치 중인 건이 없습니다.","acting")	server
+
+ui.html	homeMap(r)	server
+
+ui.html	homeRecent()	server
+
+ui.html	i	num
+
+ui.html	i*10	server
+
+ui.html	i*10+4	server
+
+ui.html	i+1	server
+
+ui.html	i===HISTSEL?" sel":""	cond
+
+ui.html	i?"#8FBFCC":"#0891B2"	cond
+
+ui.html	i?"sub":"main"	cond
+
+ui.html	id	local
+
+ui.html	inc	local
+
+ui.html	inv.docs	server
+
+ui.html	inv.edits	num
+
+ui.html	inv.edits?'warn':''	cond
+
+ui.html	inv.sheets	num
+
+ui.html	item.hits	server
+
+ui.html	k	num
+
+ui.html	k.n	num
+
+ui.html	k.n/Math.max(1,mon.total)*100	server
+
+ui.html	k===(f.field||"blank")?" selected":""	cond
+
+ui.html	k===LN.status?" on":""	cond
+
+ui.html	k===e.layer?"selected":""	cond
+
+ui.html	k===sel?" selected":""	cond
+
+ui.html	k===sp.category?"selected":""	cond
+
+ui.html	kbSrc(c.source)	server
+
+ui.html	kbWarn(r)	server
+
+ui.html	l	server
+
+ui.html	l.critical	num
+
+ui.html	l.error	num
+
+ui.html	l.hit?" hit":""	cond
+
+ui.html	l.hit?">>":" "	cond
+
+ui.html	l.hit?"hit":""	cond
+
+ui.html	l.layer==="CLEAR"?"clear":""	cond
+
+ui.html	l.n	num
+
+ui.html	l.n/maxL*100	server
+
+ui.html	l.n/maxL2*100	server
+
+ui.html	l.rules	num
+
+ui.html	l.text	server
+
+ui.html	lab	server
+
+ui.html	label	local
+
+ui.html	last.check.files	num
+
+ui.html	last.read.name	server
+
+ui.html	lastReport.id||"report"	server
+
+ui.html	layers	local
+
+ui.html	lico(k)	server
+
+ui.html	link(f.hwpx,"HWPX")	server
+
+ui.html	lnSev(x.severity)	server
+
+ui.html	m	server
+
+ui.html	markX	server
+
+ui.html	markX+4	server
+
+ui.html	marker	server
+
+ui.html	marks	local
+
+ui.html	mine?"":" · "+esc((a.incident_id||"").slice(0,16))	cond
+
+ui.html	mk	local
+
+ui.html	mon.attention	server
+
+ui.html	mon.down	num
+
+ui.html	mon.metrics	server
+
+ui.html	mon.paused	server
+
+ui.html	mon.total	num
+
+ui.html	mon.up	num
+
+ui.html	mon.usage_over	server
+
+ui.html	mon.usage_over?'var(--warn)':'inherit'	cond
+
+ui.html	n	num
+
+ui.html	nBasis>=1000?(nBasis/1000).toFixed(nBasis>=10000?0:1)+"k":nBasis	num
+
+ui.html	nCustom	local
+
+ui.html	name	server
+
+ui.html	obsSentence(h,"이 분석에서")	server
+
+ui.html	obsSentence(r)	server
+
+ui.html	obsSentence(r,"이번 분석에서")	server
+
+ui.html	oc	local
+
+ui.html	open?" open":""	cond
+
+ui.html	open?"▾":"▸"	cond
+
+ui.html	ops	local
+
+ui.html	opt(ACTS.kinds,"restart")	server
+
+ui.html	opt(ACTS.results,"resolved")	server
+
+ui.html	opt(ACTS.statuses,ACTS.status)	server
+
+ui.html	p	server
+
+ui.html	p.backup?"이전본 백업(rules.bak) 있음 — 문제가 있으면 폴더를 되돌려 복구":"백업 없음(최초 상태)"	cond
+
+ui.html	p.codes_vendor	server
+
+ui.html	p.codes||"·"	server
+
+ui.html	p.current.applied_at	server
+
+ui.html	p.current.version	num
+
+ui.html	p.local_rules	server
+
+ui.html	p.manuals?"✓":""	cond
+
+ui.html	p.parser?"":' <span title="파서 없음 — 코드 사전만" style="color:var(--muted);font-size:10px">(사전만)</span>'	cond
+
+ui.html	p.product	server
+
+ui.html	p.product===KBCUR?" on":""	cond
+
+ui.html	p.rule_id	server
+
+ui.html	p.rules_mtime	server
+
+ui.html	p.rules||"·"	server
+
+ui.html	p.sign_mode==="ed25519"?"Ed25519 서명 룰팩만 허용 · 검증용 공개키 등록됨":"Ed25519 서명 룰팩만 허용 · 검증용 공개키 미등록(처음 반입 때 지문 대조)"	cond
+
+ui.html	p.sign_mode==="ed25519"?"✓ 지금 적용된 지식베이스는 등록된 공개키로 서명된 룰팩입니다(새로 반입하는 룰팩의 검증은 오른쪽에서 따로 합니다). ":""	cond
+
+ui.html	p.source?" — 근거: "+p.source:""	cond
+
+ui.html	p.sv	server
+
+ui.html	p.title	server
+
+ui.html	p.trust_fp?esc(p.trust_fp.slice(0,9))+"…":"—"	cond
+
+ui.html	p===cur?"selected":""	cond
+
+ui.html	p===f.product?"selected":""	cond
+
+ui.html	pct	num
+
+ui.html	ph	server
+
+ui.html	pi.codes_vendor||0	num
+
+ui.html	pi.codes||0	num
+
+ui.html	pi.manuals||0	num
+
+ui.html	pi.rules||0	num
+
+ui.html	pk	local
+
+ui.html	plain	server
+
+ui.html	procStepsHtml(p.steps)	server
+
+ui.html	procStepsHtml(s.steps)	server
+
+ui.html	p||"자동 판별"	server
+
+ui.html	r.auto_detected?" · 자동 탐지":""	cond
+
+ui.html	r.cells	num
+
+ui.html	r.code_count||0	num
+
+ui.html	r.download	server
+
+ui.html	r.fields	num
+
+ui.html	r.files.map(f=>esc(f.name)).join(", ")	server
+
+ui.html	r.filled	num
+
+ui.html	r.first?"#C62828":"#1E7D4B"	cond
+
+ui.html	r.hist_group_min>1?r.hist_group_min+"분":"1분"	cond
+
+ui.html	r.hosts	num
+
+ui.html	r.html?(dl?" + "+link(r.html,"분석 요약 HTML"):" + 분석 요약 HTML"):""	cond
+
+ui.html	r.id||""	server
+
+ui.html	r.input_files	num
+
+ui.html	r.learned	num
+
+ui.html	r.mapped	num
+
+ui.html	r.match_count	num
+
+ui.html	r.matches===0?'<div style="color:var(--warn);font-size:12px;margin-top:4px">일치 없음 — 정규식이 너무 구체적일 수 있습니다</div>':""	cond
+
+
+ui.html	r.name	server
+
+ui.html	r.name||r.id||""	server
+
+ui.html	r.rule_count	num
+
+ui.html	r.rules	num
+
+ui.html	r.sample_id	server
+
+ui.html	r.signer_fp	server
+
+ui.html	r.source==="local"?"사이트":r.source==="legacy"?"기존 도구":"룰팩"	cond
+
+ui.html	r.style.input_files	num
+
+ui.html	r.total	num
+
+ui.html	r.trust_new?" — 이 공개키를 등록했습니다(이제 이 키로 서명한 룰팩만 받습니다)":""	cond
+
+ui.html	r.version	num
+
+ui.html	rawName(t.raw_ref)	server
+
+ui.html	rec	local
+
+ui.html	renderHitsAndSimilar(r)	server
+
+ui.html	renderPlan(r)	server
+
+ui.html	repEvidence(r)	server
+
+ui.html	repTop(r)	server
+
+ui.html	row("대표 등급",sevChip(worstOf(a)),sevChip(worstOf(b)),worstOf(a)!==worstOf(b))	server
+
+ui.html	row("최초 관측",esc((fa.layer_ko||"—")+" · "+(fa.ts||"")),esc((fb.layer_ko||"—")+" · "+(fb.ts||"")),fa.layer!==fb.layer)	server
+
+ui.html	row("판정",esc(fa.verdict||"알려진 장애 패턴 미검출"),esc(fb.verdict||"알려진 장애 패턴 미검출"),(fa.rule_id||"")!==(fb.rule_id||""))	server
+
+ui.html	rows	num
+
+ui.html	rows.length?rows.length+"건":""	cond
+
+ui.html	s	server
+
+ui.html	s.cells	num
+
+
+
+
+ui.html	s.fields	num
+
+ui.html	s.input_files	num
+
+ui.html	s.stage	server
+
+ui.html	s===(e.severity==="info"?"warn":e.severity)?"selected":""	cond
+
+ui.html	s===sp.severity?"selected":""	cond
+
+ui.html	s?":"+String(s).padStart(2,"0"):""	cond
+
+ui.html	scope	server
+
+ui.html	secTxt(s.elapsed_avg)	server
+
+ui.html	sel(f)	server
+
+ui.html	shape[p.sv]	server
+
+ui.html	sim	local
+
+ui.html	span	server
+
+ui.html	st	local
+
+ui.html	st.check	server
+
+ui.html	st.do	server
+
+ui.html	st.how	server
+
+ui.html	st.n	num
+
+ui.html	stageProcsHtml(t1.procedures,1)	server
+
+ui.html	stageProcsHtml(t2.procedures,2)	server
+
+ui.html	stageProcsHtml(t3.procedures,3)	server
+
+ui.html	strip	local
+
+ui.html	sub	server
+
+ui.html	t.eid	server
+
+ui.html	t.eid?"ev-"+esc(t.eid):""	cond
+
+ui.html	t.fields	num
+
+ui.html	t.layer_ko||t.layer||""	server
+
+ui.html	t.local_rules	server
+
+ui.html	t.mapped	num
+
+ui.html	t.n	num
+
+ui.html	t.name	server
+
+ui.html	t.open_crit	server
+
+ui.html	t.severity?sevPill(t.severity):sevPill0("unk")	cond
+
+ui.html	t.source==="벤더 에러코드"?" · 벤더":""	cond
+
+ui.html	t.ts||""	server
+
+ui.html	t.verdict||""	server
+
+ui.html	tf?" · "+tf:""	cond
+
+ui.html	tiers(c)	server
+
+ui.html	tiers(r)	server
+
+ui.html	title	server
+
+ui.html	tl	local
+
+ui.html	tone||''	server
+
+ui.html	top	local
+
+
+ui.html	tot	local
+
+ui.html	tot>limit?"over":""	cond
+
+
+ui.html	total	num
+
+ui.html	ul(a.observations)	server
+
+ui.html	ul(a.summary)	server
+
+ui.html	ul(t1.deferred)	server
+
+ui.html	ul(t1.detail)	server
+
+ui.html	ul(t1.dont)	server
+
+ui.html	ul(t2.handover)	server
+
+ui.html	ul(t3.mid_long)	server
+
+ui.html	ul(t3.summary)	server
+
+ui.html	v	server
+
+ui.html	v.action_type==="remediation"?"warn":v.action_type==="monitoring"?"info":"info"	cond
+
+ui.html	v.action_type_ko?"("+v.action_type_ko+")":""	cond
+
+ui.html	v.action||"-"	server
+
+ui.html	v.cause||"-"	server
+
+ui.html	v.code	server
+
+ui.html	v.count	num
+
+ui.html	v.url	server
+
+ui.html	v.url?linkOrText(v.url):"-"	cond
+
+ui.html	v.verdict	server
+
+ui.html	va	local
+
+ui.html	vb	server
+
+ui.html	vbars	local
+
+ui.html	vc	local
+
+ui.html	vendor	server
+
+ui.html	vendorBox(c)	server
+
+ui.html	verCell(c)	server
+
+ui.html	verCell(r)	server
+
+ui.html	verNote(c)	server
+
+ui.html	verNote(r)	server
+
+ui.html	vr	server
+
+ui.html	w	num
+
+ui.html	where	server
+
+ui.html	window.LT_SERVER?"/automation":"#"	cond
+
+ui.html	wrapId	local
+
+ui.html	x(i)+BW/2	server
+
+ui.html	x(i).toFixed(1)	num
+
+ui.html	x.do	server
+
+ui.html	x.event==="복구됨"?'<span class="sev ok">복구됨</span>':'<span class="sev crit">손상 발견</span>'	cond
+
+ui.html	x.files	num
+
+ui.html	x.hits	server
+
+ui.html	x.how?" — "+x.how:""	cond
+
+ui.html	x.layer_ko==="CLEAR"?"ok":"acc"	cond
+
+ui.html	x.n	num
+
+ui.html	x.n/maxP*100	server
+
+ui.html	x.name?" · "+esc(x.name):""	cond
+
+ui.html	x.name?" — "+esc(x.name):""	cond
+
+ui.html	x.rule_count??"-"	server
+
+ui.html	x.state	server
+
+ui.html	x.status==="resolved"?"ok":x.status==="acting"?"warn":"info"	cond
+
+ui.html	xlabels	local
+
+ui.html	y(maxV*f)	server
+
+ui.html	y(maxV*f)+4	server
+
+ui.html	cl	local
+
+hub.html	diff	num
+
+hub.html	hq?'<small class="mono">'+esc(hq.sha256.slice(0,8))+'</small>':'<span class="note">없음</span>'	cond
+
+hub.html	kind==='builtin'?' 기본':' 사용자'	cond
+
+hub.html	sites.length+2	num
+
+hub.html	sites.map(cell).join('')	local
+
+ui.html	r.conform.gaps.map(g=>esc(g.check)+" "+Math.round(Number(g.gen)*100)+"%/"+Math.round(Number(g.ceiling)*100)+"%").join(", ")	local
+
+ui.html	c.ref?"제조사 원인":"원인 <small>분석기 지식 · 제조사 문서 미대조</small>"	const
+
+ui.html	c.ref?"제조사 원인·조치":"원인·조치 (분석기 지식 — 제조사 문서 미대조)"	const
+
+ui.html	p.link==="이 판정 전용"?"ok":"info"	const
+
+ui.html	p.link?", 연결: "+p.link:""	server
+
+ui.html	procRefNote(p)	local
+
+ui.html	stage>1?procRefNote(p):""	local
+
+ui.html	(ch.added||[]).length	num
+
+ui.html	(ch.changed||[]).length	num
+
+ui.html	(ch.deleted||[]).length	num
+
+ui.html	axesHtml(c.axes,ci)	local
+
+ui.html	b("문법: "+x.syntax,cl(x.syntax),"명령 문법 검사(검사기가 실제 있는 경우만) — 문법 통과는 실행 성공이 아닙니다")	local
+
+ui.html	ci	num
+
+ui.html	cls	cond
+
+ui.html	cmdsHtml(c,ci,r.id)	local
+
+ui.html	cp	local
+
+ui.html	fit	local
+
+ui.html	m.safe?"판이 달라 복사 막음":"위험 명령 — 복사 막음(2차·승인 후)"	cond
+
+ui.html	n.fail||0	num
+
+ui.html	n.ok||0	num
+
+ui.html	n.version||0	num
+
+ui.html	opt(PM.cert,p?p.certainty:"probable")	local
+
+ui.html	opt(PM.vok,p?p.verdict_ok:"yes")	local
+
+ui.html	p.certainty==="confirmed"?"ok":"warn"	cond
+
+ui.html	p.verdict_ok==="yes"?"ok":p.verdict_ok==="no"?"crit":"warn"	cond
+
+ui.html	t.fail	num
+
+ui.html	t.ok	num
+
+ui.html	t.version	num
+
+ui.html	verBanner(r)	local
+
+ui.html	x.hit	num
+
+ui.html	x.miss_confirmed	num
+
+ui.html	x.miss_probable+x.miss_unknown	num
+
+ui.html	x.total	num
+
+ui.html	x.unverified?b("미확인 부분 있음","crit","제조사 문서로 확인하지 못한 부분이 있습니다 — 그 부분은 제조사 확인 후 진행"):""	local
+
+
+
+ui.html	p.revisions	num
+
+ui.html	x.hit_confirmed	num
+
+hub.html	m.send_feedback===true?' checked':''	cond
+
+ui.html	(x.causes||[]).join(" / ")	local
+
+ui.html	(x.evidence||[]).join(" / ")||"(없음)"	local
+
+ui.html	(x.incidents||[]).join(", ")	local
+
+ui.html	(x.resolved_actions||[]).join(" / ")||"(없음)"	local
+
+ui.html	ATT.f===k?"":"ghost"	cond
+
+ui.html	ATT.f?"ghost":""	cond
+
+ui.html	b(x.cross==="수정 후 재확인"?"교차 검증: 수정 후 재확인":x.cross?"교차 검증: 표본 확인":"교차 검증: 표본 밖",x.cross?"ok":"","GPT 표본 실검증 — 전수 검증이 아닙니다. '수정 후 재확인'은 표본에서 고친 뒤 다시 대조한 것")	local
+
+ui.html	x.cases	num
+
+ui.html	x.records	num
+
+ui.html	x.rule_id	local
+
+ui.html	x.verdict	local
+
+ui.html	bs==="제출 출력 확인"?" — 붙인 출력에서 읽은 판(그 호스트에서 돈 증거는 아님)":" — 실제 판을 확인하십시오"	cond
+
+ui.html	bs==="제출 출력 확인"?"ok":"info"	cond
+
+ui.html	r.record.source==="evidence"?"제출 출력 확인":"담당자 지정"	cond
+
+admin.html	x.state==='quarantined'?(x.trusted===false?'격리 기록 없음 — 앱이 지우지 않음(OS 관리자 확인)':'격리 10분 뒤 지울 수 있음'):x.state==='in_use'?'진행 중':'지금은 못 함'	cond
+
+admin.html	LR.opened.has(lrk(s.procedure,s.id))?'ghost':''	cond
+
+admin.html	LR.opened.has(lrk(s.procedure,s.id))?'✓ ':''	cond
+
+admin.html	LR.picked.length<4?' — 3건 이하는 한 건씩 승인':''	cond
+
+admin.html	d.id	server
+
+admin.html	d.procedure	server
+
+admin.html	d.state	server
+
+admin.html	dec	const
+
+admin.html	left?'disabled':''	cond
+
+hub.html	m.send_exec_reports===true?' checked':''	cond
+
+ui.html	(x.members||[]).length	num
+
+ui.html	b("출처: "+x.source,x.source==="분석기 지식"?"warn":String(x.source).startsWith("반입 원문과 다름")?"crit":"info","원인·조치의 출처 — 공식 근거 보관 > 반입 원문 대조(사람이 반입 문서의 그 쪽을 확인) > 제조사 문서 대조 > 분석기 지식. '반입 원문과 다름'은 확인 결과 문서와 달라 고칠 대상")	local
+
+ui.html	grp(x,i)	local
+
+ui.html	grp(x,rows.length+j)	local
+
+ui.html	m.manual?' <b>(관리자 지정)</b>':''	cond
+
+ui.html	r.verdict==="조건 충족"||r.verdict==="수치 조건 충족"?"crit":r.verdict==="조건 미충족"?"ok":""	cond
+
+ui.html	s.error	num
+
+ui.html	s.ok	num
+
+ui.html	x.current.source==="evidence"?"출력 확인":"담당자 지정"	cond
+
+ui.html	x.instance?"#"+esc(x.instance):""	cond
+
+ui.html	b(x.exec==="미실행"||x.exec==="시험 환경 없음"?"실행: "+x.exec:String(x.exec).startsWith("현장 보고")?"실행: "+x.exec:"시험 PG 실행: "+(x.exec==="통과"?"성공":"실패"), String(x.exec).startsWith("현장 보고")?(String(x.exec).includes("오류")?"warn":"info"):cl(x.exec),"버리는 시험용 PostgreSQL 클러스터에서 SQL 이 돌았는지만 — 운영 DB 결과·진단 정확성과는 다릅니다. '시험 환경 없음'은 그 제품의 시험 DB·서버가 없어 돌릴 수 없는 것. '현장 보고'는 현장 담당자가 남긴 실행 결과(앱이 실행을 확인한 것 아님)")	local
+
+ui.html	x.manual_groups	num
+
+admin.html	g.product	server
+
+ui.html	r.note||"설치 기록과 다른 판입니다"	server
+
+ui.html	r.sha||""	server
+
+ui.html	r.want||""	server
+
+ui.html	r.note||""	server
+
+ui.html	d.codes??"-"	server
+
+ui.html	d.codes||0	server
+
+ui.html	d.incidents||0	server
+
+ui.html	d.rules??"-"	server
+
+ui.html	d.rules||0	server
+
+ui.html	hs.count??"-"	server
+
+ui.html	hs.where||""	server
+
+ui.html	lg.missing||0	server
+
+ui.html	lg.total	server
+
+ui.html	sc.findings||0	server
+
+ui.html	ep.workers	num
+
+ui.html	ep.yaml_c?"C 파서":"파이썬 파서"	cond
+
+ui.html	ep.avail_mb	num
+
+ui.html	btn(w.action)	local
+
+nms_live.html	e.fresh&&now-e.fresh<8000?' fresh':''	cond
+
+
+nms_live.html	io	local
+
+nms_live.html	m==='none'?' disabled':''	cond
+
+nms_live.html	m==='none'||!t.enabled?' disabled':''	cond
+
+nms_live.html	mo	local
+
+nms_live.html	v==='snmp'&&!t.snmp_has_community&&m!=='snmp'?' disabled':''	cond
+
+nms_live.html	v==='snmp'&&!t.snmp_has_community?' (편집에서 커뮤니티 필요)':''	cond
+
+nms_live.html	v===iv?' selected':''	cond
+
+nms_live.html	v===m?' selected':''	cond
+
+nms.html	r.hostname?' · 호스트명 <b>'+esc(r.hostname)+'</b>':''	local
+
+nms_live.html	r.hostname?' · 호스트명 <b>'+esc(r.hostname)+'</b>':''	local
+
+ui.html	EVMODE!=="all"?" on":""	cond
+
+ui.html	EVMODE==="all"?" on":""	cond
+
+ui.html	btns	local
+
+ui.html	dl?"아래 단추를 눌러 내려받으십시오":"아래 폴더에 저장했습니다"	cond
+
+ui.html	x.codes.size-3	num
+ui.html	x.hosts.size	num
+ui.html	x.sevs.size-1	num
+
+ui.html	x.last&&x.last!==x.first?" → "+esc(x.last):""	local
+
+
+automation.html	d.getFullYear()	num
+automation.html	j.created?esc(regAt(j.created)):'<span class="mute" title="등록일시 기록 기능이 생기기 전에 등록된 작업입니다">기록 없음</span>'	cond
+automation.html	p(d.getDate())	num
+automation.html	p(d.getHours())	num
+automation.html	p(d.getMinutes())	num
+automation.html	p(d.getMonth()+1)	num
+inventory_view.html	NC?' (번호 열 기준)':''	cond
+inventory_view.html	SELR.has(i)?'sel':''	cond
+inventory_view.html	f(ST.lines)	num
+inventory_view.html	f(ST.nonum)	num
+inventory_view.html	f(ST.rec)	num
+inventory_view.html	f(body.length)	num
+inventory_view.html	f(colsShown.length)	num
+inventory_view.html	nn?' nonum':''	cond
+inventory_view.html	sheetStat(s).rec.toLocaleString()	num
+nms.html	t.method==='tcp'?'TCP':'ICMP'	cond
+nms.html	t.method==='tcp'?(t.port==null?'TCP 포트 <span class="pmask">(자산 권한 필요)</span>':'TCP 포트 <span class="pmask" id="pmask">●●●●●</span> <button type="button" class="btn sm ghost pshow" id="pshow" aria-pressed="false">보기</button>'):'ICMP(ping)'	cond
+
+inventory_view.html	sp?'m':''	cond
+nms.html	t.method==='tcp'?'<small class="pnote">ⓘ 보안을 위해 포트 번호는 가려 둡니다 — 자산 권한이 있는 사용자만 [보기]로 확인합니다</small>':''	cond
+
+automation.html	kb(r.bytes)	num
+automation.html	p.key==='uploads'&&S.can_admin&&p.count>0?PURGE_HTML:''	cond
+automation.html	r.kept	num
+automation.html	r.removed	num
+ui.html	autoLink()	const
+ui.html	ok?"✔ 요약 글을 복사했습니다":"✖ 복사하지 못했습니다 — 브라우저가 클립보드를 막았습니다. 아래 글을 직접 골라 복사하십시오"	cond
+ui.html	ok?"메신저·메일 입력창에서 <kbd>Ctrl</kbd>+<kbd>V</kbd> 로 붙여 넣으십시오 · 파일은 만들지 않습니다":""	cond
+
+inventory_view.html	f(ST.dup)	num
+inventory_view.html	f(ST.gap)	num
+
+board.html	STATE.q||STATE.kind||STATE.mine?"조건에 맞는 글이 없습니다":"아직 글이 없습니다 — 첫 질문을 올려 보십시오"	cond
+ui.html	a.map(([h,i])=>opt(h,i)).join("")	local
+ui.html	h===cur?" selected":""	cond
+ui.html	r.matches>500?'<div style="color:var(--warn);font-size:12px;margin-top:4px">매칭이 많습니다 — 광범위 패턴(오탐) 가능성을 확인하십시오</div>':""	cond
+ui.html	r.owner===myLogin()?"own":"other"	cond
+ui.html	r.owner===myLogin()?"나":esc(r.owner_name||r.owner)	cond
+ui.html	repPicker(null)	local
+ui.html	repPicker(r)	local
+ui.html	tot>limit?'<div style="font-size:11.5px;color:var(--crit);margin-top:8px">한도 초과 — 장애 시각 전후 구간만 잘라서 투입하십시오</div>':""	cond
+ui.html	p.has_shared?" — '공용 값(이전 판)'을 불러와 쓸 수 있습니다":""	cond
+ui.html	p.source==="incident"&&(p.saved_by||p.saved_at)?" · "+esc(p.saved_by||"")+" "+esc(pfWhen(p.saved_at)):""	cond
+nms_live.html	D.range===v?'on':''	cond
+nms_live.html	S.tf===k?'on':''	cond
+nms_live.html	S.tf===k?'true':'false'	cond
+nms_live.html	S.tm==='lat'?'':' — [⚙ 수집 설정]에서 켜십시오'	cond
+nms_live.html	String(v).length>9?' sm':''	cond
+nms_live.html	avg!=null?' · 평균 '+esc(fmtMs(avg))+' · 최대 '+esc(fmtMs(Math.max(...ok))):''	cond
+nms_live.html	bars	local
+nms_live.html	best.load1!=null?' · 부하 <b>'+esc(Number(best.load1).toFixed(2))+'</b>':''	cond
+nms_live.html	cells	local
+nms_live.html	dtab	local
+nms_live.html	live&&u.load1!=null?'부하<b>'+esc(Number(u.load1).toFixed(2))+'</b>':''	cond
+nms_live.html	ptab	local
+nms_live.html	sp	local
+nms_live.html	sparkSvg(vals,96,34,'currentColor',fixed)	local
+nms_live.html	t.latency!=null&&s!=='down'?' · '+esc(fmtMs(t.latency)):''	cond
+nms_live.html	unit?'<small>'+esc(unit)+'</small>':''	cond
+ui.html	r[2]	local
+ui.html	res	local
+ui.html	v(m.action_min_median,"분")	local
+ui.html	(m.manual||[]).map(esc).join(" / ")	local
+ui.html	(m.notes||[]).map(esc).join(" · ")	local

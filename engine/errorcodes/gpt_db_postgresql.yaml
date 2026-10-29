@@ -1,0 +1,303 @@
+product: postgresql
+layer: db
+note: GPT 협업 수집분 — 벤더 공식 문서와 대조 후 확정
+codes:
+- code: '53100'
+  severity: critical
+  category: disk
+  title: 디스크 공간 부족
+  immediate:
+  - "`df -h <PGDATA>` 와 `df -h <PGDATA>/pg_wal` (10+, 9.6 이하 pg_xlog), `du -sh <PGDATA>/base <PGDATA>/pg_wal <PGDATA>/log` — 100% 인 파일시스템과 큰 영역 특정 (읽기 전용)"
+  - "WAL 적체 원인(주 서버): `SELECT slot_name, active, pg_size_pretty(pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn)) AS retained FROM pg_replication_slots;` 와 `SELECT archived_count, failed_count, last_failed_wal, last_failed_time FROM pg_stat_archiver;` — 비활성 슬롯 retained 가 크거나 failed_count 증가면 원인"
+  - "DB별 용량: `SELECT datname, pg_size_pretty(pg_database_size(datname)) FROM pg_database ORDER BY pg_database_size(datname) DESC;`"
+  short:
+  - "(2차·승인 후, 롤백: 슬롯 제거는 되돌릴 수 없어 해당 대기 서버 재구성 필요) 미사용 복제 슬롯 `SELECT pg_drop_replication_slot('<slot>');`, archive_command 실패 원인(대상 공간·권한) 해소, 오래된 서버 로그 파일 정리 — pg_wal 파일 직접 삭제 금지"
+  mid:
+  - 볼륨을 증설하고 데이터 증가 및 보존정책을 조정
+  long:
+  - 디스크 증가율 예측과 임계치 경보를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://www.postgresql.org/docs/current/errcodes-appendix.html)
+  vendor_cause: PostgreSQL 데이터 또는 WAL이 사용하는 디스크 공간이 가득 참
+  vendor_action: 불필요한 파일을 삭제해 공간을 확보하고, 불가하면 일부 DB 파일을 다른 파일시스템의 tablespace로 이동
+  vendor_url: https://www.postgresql.org/docs/current/diskusage.html
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: SQLSTATE 5자리 코드 — 9.2 오류 코드 표에 전부 존재(부록 확인), 18 까지 동일
+- code: '53200'
+  severity: critical
+  category: memory
+  title: 메모리 부족
+  immediate:
+  - "서버 로그의 'out of memory' 와 'Failed on request of size …'·메모리 컨텍스트 덤프 기록: `grep -n -B2 -A5 'out of memory' <로그 경로> | tail -60` — log_line_prefix 의 %p 로 세션 특정 (10~16, 읽기 전용)"
+  - "`SELECT name, setting, unit FROM pg_settings WHERE name IN ('shared_buffers','work_mem','maintenance_work_mem','max_connections','hash_mem_multiplier');` (hash_mem_multiplier 13+) — work_mem × 동시 정렬·해시 수가 여유 메모리를 넘는지 계산"
+  - "OS: `free -m`, `cat /proc/sys/vm/overcommit_memory`, `dmesg -T | grep -i -E 'out of memory|oom' | tail -20` — 2(엄격) 에서 commit 한도 초과면 OS 설정 원인"
+  short:
+  - "(2차·승인 후, 롤백: 이전 값 기록 후 `ALTER SYSTEM RESET <param>; SELECT pg_reload_conf();`) 문제 SQL 세션에 한해 `SET work_mem = '<값>';` 로 낮추거나 전역 work_mem 조정, 대형 쿼리 세션 종료는 업무 담당 확인 후"
+  mid:
+  - 워크로드별 메모리 상한과 서버 용량을 재산정
+  long:
+  - 메모리 헤드룸과 OOM 조기경보를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://www.postgresql.org/docs/current/errcodes-appendix.html)
+  vendor_cause: PostgreSQL 또는 다른 프로세스의 메모리 요구로 시스템 메모리·스왑이 부족해짐
+  vendor_action: shared_buffers·work_mem·hash_mem_multiplier 또는 max_connections를 낮추고 필요 시 swap·connection pool 사용
+  vendor_url: https://www.postgresql.org/docs/current/kernel-resources.html
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: SQLSTATE 5자리 코드 — 9.2 오류 코드 표에 전부 존재(부록 확인), 18 까지 동일
+- code: '53300'
+  severity: critical
+  category: capacity
+  title: 접속 수 초과
+  immediate:
+  - "superuser 예약 연결(superuser_reserved_connections, 16 은 reserved_connections 역할 예약 포함)로 접속해 `SELECT count(*), state, usename, application_name FROM pg_stat_activity GROUP BY 2,3,4 ORDER BY 1 DESC;` 와 `SHOW max_connections;` — 특정 애플리케이션 idle 다수면 풀 누수 (읽기 전용)"
+  - "오래 유휴인 세션: `SELECT pid, usename, client_addr, state, now()-state_change AS idle_for FROM pg_stat_activity WHERE state IN ('idle','idle in transaction') ORDER BY state_change LIMIT 20;`"
+  short:
+  - "(2차·승인 후, 롤백: 종료한 세션은 되돌릴 수 없음 — 목록 기록 선행) 업무 담당 확인 후 장시간 idle 세션 `SELECT pg_terminate_backend(<pid>);`, max_connections 상향은 재시작 필요·메모리 영향 계산 후"
+  mid:
+  - PgBouncer 등 풀링과 서버 접속용량을 재설계
+  long:
+  - 연결 수요 예측과 백프레셔 정책을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://www.postgresql.org/docs/current/errcodes-appendix.html)
+  vendor_cause: 활성 연결 수가 max_connections의 허용 슬롯에 도달함
+  vendor_action: max_connections를 조정하되 자원 증가를 고려하고, 많은 연결은 외부 connection pool 사용을 고려
+  vendor_url: https://www.postgresql.org/docs/current/runtime-config-connection.html
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: SQLSTATE 5자리 코드 — 9.2 오류 코드 표에 전부 존재(부록 확인), 18 까지 동일
+- code: '53400'
+  severity: error
+  category: capacity
+  title: 구성 한도 초과
+  immediate:
+  - "서버 로그의 53400 본문과 HINT 기록: `grep -n -A2 -E 'are in use|exceeds|max_[a-z_]+' <로그 경로> | tail -40` — HINT·본문에 나온 파라미터 이름(예: max_replication_slots)이 초과 대상 (읽기 전용)"
+  - "한도와 사용량: `SELECT name, setting, pending_restart FROM pg_settings WHERE name LIKE 'max\\_%';` 와 슬롯이면 `SELECT count(*) FROM pg_replication_slots;`, 워커면 `SELECT backend_type, count(*) FROM pg_stat_activity GROUP BY 1;` (10+)"
+  short:
+  - "(2차·승인 후, 롤백: 이전 값 기록 후 `ALTER SYSTEM RESET <param>;`) 미사용 슬롯 등 사용량 정리 또는 `ALTER SYSTEM SET <param> = <값>;` 후 재시작(대부분 postmaster 파라미터) — 성공: pending_restart=f 와 오류 미재발"
+  verify_note: "미검증 — 53400(configuration_limit_exceeded)을 내는 메시지 전체 목록은 공식 문서에서 확인하지 못함(HINT 의 파라미터 이름 기준으로 판단)"
+  mid:
+  - 업무량에 맞춰 한도를 재산정하고 검증 후 반영
+  long:
+  - 구성 한도 사용률의 사전 모니터링을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://www.postgresql.org/docs/current/errcodes-appendix.html)
+  vendor_cause: PostgreSQL의 구성상 허용된 한도를 초과함
+  vendor_action: ''
+  vendor_url: https://www.postgresql.org/docs/current/errcodes-appendix.html
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: SQLSTATE 5자리 코드 — 9.2 오류 코드 표에 전부 존재(부록 확인), 18 까지 동일
+- code: 55P03
+  severity: warn
+  category: lock
+  title: 잠금 획득 불가
+  immediate:
+  - "잠금 보유 세션 확인: `SELECT pid, pg_blocking_pids(pid) AS blocked_by, state, now()-xact_start AS xact_age, LEFT(query,80) FROM pg_stat_activity WHERE cardinality(pg_blocking_pids(pid)) > 0;` (9.6+, 읽기 전용)"
+  - "`SHOW lock_timeout;` 과 실패 SQL 의 NOWAIT 사용 여부 확인 — 업무 영향에 따라 대기 또는 재시도 판단"
+  short:
+  - "(2차·승인 후) pg_locks·pg_stat_activity 로 장기 트랜잭션 소유 앱 확인 후 커밋·종료 협의(`SELECT pg_terminate_backend(<pid>);` 는 승인 후, 영향: 해당 트랜잭션 롤백)"
+  mid:
+  - 트랜잭션 범위와 잠금 순서를 개선
+  long:
+  - 잠금 대기 임계치와 배치 동시성 정책을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://www.postgresql.org/docs/current/errcodes-appendix.html)
+  vendor_cause: 요청한 잠금을 즉시 얻지 못한 경우(lock_not_available). SELECT … FOR UPDATE NOWAIT 실패나 lock_timeout 초과('canceling statement due to lock timeout')가 대표적이며 장기 트랜잭션이 잠금을 쥔 경우가 흔하다.
+  vendor_action: ''
+  vendor_url: https://www.postgresql.org/docs/current/errcodes-appendix.html
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: SQLSTATE 5자리 코드 — 9.2 오류 코드 표에 전부 존재(부록 확인), 18 까지 동일
+- code: 57P01
+  severity: critical
+  category: internal
+  title: 관리자 종료
+  immediate:
+  - "서버 로그에서 종료 신호: `grep -n -E 'received (smart|fast|immediate) shutdown request|terminating connection due to administrator command|database system is shut down|database system is ready' <로그 경로> | tail -30` — shutdown request 가 있으면 서버 종료, 없고 개별 세션만이면 pg_terminate_backend 호출 (읽기 전용)"
+  - "현재 상태·기동 시각: `SELECT pg_postmaster_start_time(), pg_is_in_recovery();` 와 `systemctl status postgresql-<ver>`(배포판별 서비스명) — 기동 시각이 오류 직후면 서버가 다시 올라온 것"
+  - "OS 측 요청 주체: `journalctl -u 'postgresql*' --since '-2h' | tail -50` — 운영자 작업·패키지 업데이트·HA(Patroni 등) failover 기록 대조"
+  short:
+  - 종료 요청 주체와 시스템 로그, failover 결과를 확인
+  mid:
+  - 운영 절차와 재기동 및 연결풀 복구를 검증
+  long:
+  - 계획중지와 비계획중지를 구분한 자동복구 체계를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://www.postgresql.org/docs/current/errcodes-appendix.html)
+  vendor_cause: 관리자 요청으로 PostgreSQL 서버가 종료 중이거나 세션이 종료됨
+  vendor_action: ''
+  vendor_url: https://www.postgresql.org/docs/current/errcodes-appendix.html
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: SQLSTATE 5자리 코드 — 9.2 오류 코드 표에 전부 존재(부록 확인), 18 까지 동일
+- code: 57P02
+  severity: critical
+  category: internal
+  title: 크래시 종료
+  immediate:
+  - "선행 원인 프로세스: `grep -n -E 'was terminated by signal|terminated by exception|all server processes terminated|database system was interrupted|redo done' <로그 경로> | tail -30` — signal 9 면 OOM killer 의심, signal 11 이면 크래시(core 확인) (10~16, 읽기 전용)"
+  - "OS 흔적: `dmesg -T | grep -i -E 'out of memory|oom|segfault' | tail -20` — postgres 프로세스가 대상이면 원인 확정"
+  - "복구 진행: `pg_isready -p <port>` — 'rejecting connections' 면 crash recovery 진행 중, 로그에 'ready to accept connections' 가 나오면 완료"
+  short:
+  - 선행 PANIC, OOM, I/O 오류를 분석하고 데이터 무결성을 점검
+  mid:
+  - 원인 패치와 OS 또는 스토리지 조치를 적용
+  long:
+  - HA 자동전환과 crash recovery 훈련을 정례화
+  source: GPT 수집·벤더 문서 대조 완료(https://www.postgresql.org/docs/current/errcodes-appendix.html)
+  vendor_cause: 서버 프로세스 충돌로 PostgreSQL이 crash shutdown 상태가 됨
+  vendor_action: restart_after_crash가 기본값 on이면 PostgreSQL이 backend crash 후 자동으로 재초기화
+  vendor_url: https://www.postgresql.org/docs/current/runtime-config-error-handling.html
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: SQLSTATE 5자리 코드 — 9.2 오류 코드 표에 전부 존재(부록 확인), 18 까지 동일
+- code: 57P03
+  severity: error
+  category: connection
+  title: 현재 접속 불가
+  immediate:
+  - "`pg_isready -h <server> -p <port>` — 'rejecting connections' 면 기동·복구·종료 진행 중 (10~16, 읽기 전용)"
+  - "진행 단계: `grep -n -E 'database system is (starting up|shutting down|ready)|redo starts|redo done|consistent recovery state|not yet accepting' <로그 경로> | tail -30` — redo 진행 중이면 완료 대기, 대기 서버면 접속 가능할 때 `SHOW hot_standby;` 확인"
+  short:
+  - "(2차) 복구 완료('ready to accept connections') 후 애플리케이션 풀 재접속 확인, 장시간 redo 면 pg_wal·스토리지 I/O 확인 후 DBA 판단 — 진행 중 강제 재시작 금지(필요 시 승인 후, 롤백: 해당 없음)"
+  - "(2차) 연결 풀·애플리케이션의 재시도 간격(백오프)을 기동·failover 소요 시간 이상으로 설정 — 롤백: 이전 풀 설정 보관"
+  mid:
+  - 기동 및 failover 중 연결 재시도 정책을 개선
+  long:
+  - DB 상태기반 헬스체크와 백오프 표준을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://www.postgresql.org/docs/current/errcodes-appendix.html)
+  vendor_cause: 서버가 현재 연결을 받아들일 수 없는 상태임
+  vendor_action: ''
+  vendor_url: https://www.postgresql.org/docs/current/errcodes-appendix.html
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: SQLSTATE 5자리 코드 — 9.2 오류 코드 표에 전부 존재(부록 확인), 18 까지 동일
+- code: 08006
+  severity: error
+  category: connection
+  title: 연결 실패
+  immediate:
+  - "`pg_isready -h <server> -p <port>` 와 `SELECT pg_postmaster_start_time();` — 오류 시각 직후 기동이면 서버 측 원인 (10~16, 읽기 전용)"
+  - "서버 로그의 같은 시각 사유: `grep -n -E 'could not receive data from client|unexpected EOF|connection reset|SSL error|terminating connection' <로그 경로> | tail -30` — 'Connection reset by peer' 면 네트워크·클라이언트, terminating 이면 서버 측"
+  - "keepalive: `SELECT name, setting FROM pg_settings WHERE name LIKE 'tcp_keepalives%';` — 0(OS 기본)이고 중간 방화벽 유휴 타임아웃이 짧으면 원인 후보"
+  short:
+  - 서버 로그, 방화벽, TCP reset과 SSL 오류를 분석
+  mid:
+  - 네트워크 경로와 연결풀 재시도 정책을 개선
+  long:
+  - 연결 품질 SLO와 HA 경로를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://www.postgresql.org/docs/current/errcodes-appendix.html)
+  note: 개별 연결 실패 조건이므로 서비스 전체 중단 수준의 critical보다 error가 타당함
+  vendor_cause: 기존 PostgreSQL 연결이 실패함
+  vendor_action: ''
+  vendor_url: https://www.postgresql.org/docs/current/errcodes-appendix.html
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: SQLSTATE 5자리 코드 — 9.2 오류 코드 표에 전부 존재(부록 확인), 18 까지 동일
+- code: 40P01
+  severity: error
+  category: lock
+  title: 교착상태 감지
+  immediate:
+  - "서버 로그의 'deadlock detected' DETAIL(Process … waits for … blocked by process …)과 각 프로세스 SQL 기록: `grep -n -A12 'deadlock detected' <로그 경로> | tail -60` (10~16, 읽기 전용)"
+  - "`SELECT name, setting FROM pg_settings WHERE name IN ('deadlock_timeout','log_lock_waits');` — log_lock_waits 가 off 면 잠금 대기 이력이 없으므로 2차에서 수집 여부 판단"
+  - "현재 잠금 대기: `SELECT pid, pg_blocking_pids(pid) AS blocked_by, wait_event_type, LEFT(query,60) FROM pg_stat_activity WHERE cardinality(pg_blocking_pids(pid)) > 0;`"
+  short:
+  - "(2차) 애플리케이션이 40P01 수신 시 트랜잭션 전체 재시도, 반복되면 `ALTER SYSTEM SET log_lock_waits = on; SELECT pg_reload_conf();` 로 대기 이력 수집(승인 후, 롤백: `ALTER SYSTEM RESET log_lock_waits;`)"
+  mid:
+  - 트랜잭션 잠금 순서를 통일하고 범위를 축소
+  long:
+  - deadlock 자동수집과 재시도 표준을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://www.postgresql.org/docs/current/errcodes-appendix.html)
+  vendor_cause: 두 개 이상 트랜잭션이 서로 상대가 보유한 잠금을 기다려 진행할 수 없음
+  vendor_action: 여러 객체 잠금은 모든 애플리케이션에서 일관된 순서로 획득하고, 교착으로 중단된 트랜잭션은 재시도
+  vendor_url: https://www.postgresql.org/docs/current/explicit-locking.html
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: SQLSTATE 5자리 코드 — 9.2 오류 코드 표에 전부 존재(부록 확인), 18 까지 동일

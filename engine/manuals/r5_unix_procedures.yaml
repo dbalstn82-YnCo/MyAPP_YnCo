@@ -1,0 +1,956 @@
+# 근거 매뉴얼·작성 기준 (2026-10-16, 5차 지식 보강 G1 — Unix OS: AIX·HP-UX·Solaris)
+# - AIX: IBM AIX 7.x 문서(Error logging: errpt/errdemon, LVM: lsvg/lspv/syncvg/varyonvg, Paging space: lsps/chps,
+#        System dump: sysdumpdev, MPIO: lspath/chpath, RSCT/RMC), IBM 지원 문서 'Resolving missing or removed disks in AIX LVM',
+#        'Fixing the No RMC Connection Error'. AIX 6.1~7.3 공통 명령 위주, 판별로 다른 명령은 note 에 적용 범위 표시.
+# - HP-UX: HP-UX 11i v3 System Administration(bdf, ioscan, swapinfo, kctune, crashconf/savecrash, LVM vgdisplay/vgsync),
+#        Serviceguard(cmviewcl/cmrunpkg), EMS/SFM(event.log, evweb). 11i v1 은 kmtune, 11i v3 는 agile 장치 경로(ioscan -N).
+# - Solaris: Oracle Solaris 10/11 관리 문서(fmadm/fmdump, svcs/svcadm, zpool/zfs, iostat -En, prstat, prctl/projmod, dladm/ipadm, ipmpstat).
+# - 공통 기준: knowledge_spec.md 5차(GPT 45차 관문) — 1차 읽기 전용, 2차 사전조건·영향·승인·백업/롤백 + 성공/실패 판단, 3차 민감정보 마스킹·전달 승인.
+# - OS-UNX-001/002 는 aix·hpux·solaris 공통 룰이라 match 에 넣지 않았다(match 는 제품 구분 없이 우선 연결되므로) — 제품+유형으로 연결된다.
+procedures:
+# ── AIX ──
+- id: AIX-PROC-R5-CAPACITY
+  products: [aix]
+  category: capacity
+  match: [AIX-INODE-FULL, AIX-CPU-HIGH, AIX-FD-EXHAUSTED, AIX-PROC-LIMIT]
+  title: inode·CPU·파일 디스크립터·프로세스 수 한도 (AIX)
+  source: "IBM AIX 7.x 문서 — df, lsfs, vmstat, lparstat, lsuser/chuser(nofiles), lsattr/chdev(sys0 maxuproc), chfs"
+  stages:
+  - stage: 1
+    steps:
+    - do: 어떤 한도에 닿았는지 구분 (읽기 전용)
+      cmd: |
+        df -g | awk 'NR==1 || $4+0>=90 || $6+0>=90'
+        lsattr -El sys0 -a maxuproc
+        vmstat 2 5 ; lparstat 2 3
+      check: "df -g %Iused 95% 이상이면 inode, %entc 100% 이상 지속·run queue(r) 가 논리 CPU 수보다 크면 CPU, 사용자 프로세스 수가 maxuproc 근접이면 프로세스 한도"
+      note: "적용: AIX 6.1~7.3 · 권한: 일반 사용자 가능(lsattr·df)"
+    - do: 원인 프로세스·사용자 식별 (읽기 전용)
+      cmd: |
+        ps aux | sort -rn -k3 | head -10
+        ps -e -o user,ppid,comm | sort | uniq -c | sort -rn | head
+        ls /proc/<PID>/fd | wc -l ; lsuser -a nofiles nofiles_hard <user>
+      check: "한 부모 프로세스가 같은 명령을 대량 생성하면 폭주, 열린 FD 수가 nofiles 의 90% 이상이면 FD 고갈 확정"
+      note: "적용: AIX 6.1~7.3 · 권한: lsuser 는 root 권장"
+  - stage: 2
+    steps:
+    - do: 한도 상향 또는 공간 증설
+      cmd: |
+        chdev -l sys0 -a maxuproc=<값>
+        chuser nofiles=<값> <user>
+        chfs -a size=+<n>G <mount>
+      check: "성공: lsattr·lsuser 에 새 값, df -g %Iused·%Used 85% 이하, 오류 재발 없음 · 실패: chfs 0516-xxx(VG 여유 PP 없음) → 디스크 추가 요청"
+      note: "사전조건: 폭주·누수 원인 프로세스를 담당자와 먼저 확인 · 영향: maxuproc 는 즉시 반영, nofiles 는 다음 로그인/재시작부터 · 승인: 시스템 담당·업무 담당 · 백업/롤백: 변경 전 lsattr -El sys0·lsuser 출력 보관, 이전 값으로 chdev/chuser 원복(chfs 증설은 되돌릴 수 없음)"
+    - do: CPU 폭주 프로세스 완화
+      cmd: |
+        renice -n 10 -p <PID>
+      check: "성공: ps 의 %CPU 하락·응답 시간 회복 · 실패: 변화 없으면 업무 담당과 프로세스 재시작 일정 협의"
+      note: "사전조건: 대상 PID 의 업무 담당 확인 · 영향: 해당 작업 처리 지연 · 승인: 업무 담당 · 백업/롤백: renice -n -10 -p <PID> 로 원복"
+  - stage: 3
+    steps:
+    - do: IBM 지원 의뢰 자료
+      cmd: |
+        snap -g -c
+        vmstat 2 30 > vmstat_$(date +%Y%m%d).txt ; ps aux > ps_$(date +%Y%m%d).txt
+      check: "/tmp/ibmsupt/snap.pax.Z, vmstat·ps 결과"
+      note: "민감정보 마스킹: 호스트명·IP·사용자명·명령 인자(비밀번호 포함 가능) 가림 후 전달 · 전달 승인: 보안 담당"
+
+- id: AIX-PROC-R5-DISK
+  products: [aix]
+  category: disk
+  match: [AIX-DUMP-DEVICE-FULL, AIX-ERRLOG-FULL, AIX-DISK-FULL, AIX-TMP-FULL, AIX-DISK-OP-ERROR, AIX-SC-DISK-ERR, '747725D9', DE3B8540, LEG-AIX-DISK-ERR]
+  title: 파일시스템 공간·덤프 장치·오류 로그·디스크 오류 (AIX)
+  source: "IBM AIX 7.x 문서 — df/chfs, sysdumpdev, errdemon/errpt, lspv/lsvg/lspath, diag · IBM 'Resolving missing or removed disks in AIX LVM'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 공간 사용률·큰 파일 확인 (읽기 전용)
+      cmd: |
+        df -g
+        du -sm <mount>/* 2>/dev/null | sort -rn | head
+        find <mount> -xdev -type f -size +2097152 -exec ls -l {} \; | head
+      check: "%Used 95% 이상이면 공간 부족 확정. 1GB 이상 파일의 소유자·용도를 기록(정리는 2차)"
+      note: "적용: AIX 6.1~7.3 · 권한: du/find 는 root 권장"
+    - do: 디스크 오류·경로 상태 확인 (읽기 전용)
+      cmd: |
+        errpt -d H | head -20
+        errpt -a -N hdisk<N> | head -80
+        lspv ; lsvg -p <vg> ; lspath | grep -v Enabled
+      check: "SC_DISK_ERR/DISK_ERR 의 Type PERM 이면 하드웨어 결함 가능성, PV STATE missing·경로 Failed 가 있으면 2차 이관"
+      note: "적용: AIX 6.1~7.3 · 권한: root"
+    - do: 덤프 장치·오류 로그 설정 확인 (읽기 전용)
+      cmd: |
+        sysdumpdev -l ; sysdumpdev -e
+        /usr/lib/errdemon -l ; ls -l /var/adm/ras/errlog
+      check: "sysdumpdev -e 예상 크기가 덤프 LV 크기보다 크면 덤프 장치 부족, errlog 크기가 작고 폭주 항목이 있으면 오류 로그 순환 과다"
+      note: "적용: AIX 6.1~7.3 · 권한: root"
+  - stage: 2
+    steps:
+    - do: 공간 확보·증설
+      cmd: |
+        fuser -cu <mount>
+        tar -cvf /backup/<정리대상>.tar <정리대상> && rm <정리대상>
+        chfs -a size=+<n>G <mount>
+      check: "성공: df -g %Used 85% 이하 · 실패: 열린 파일이라 공간 미반환이면 해당 서비스 재시작 일정 협의, chfs 실패면 VG 여유 PP 확인(lsvg <vg>)"
+      note: "사전조건: 정리 대상 소유자 확인·보관본 생성 · 영향: 증설 중 짧은 I/O 지연 · 승인: 시스템 담당·파일 소유 업무 담당 · 백업/롤백: 정리 전 tar 보관본으로 복원, 증설은 되돌릴 수 없어 용량 계획에 반영"
+    - do: 덤프 장치·오류 로그 크기 조정
+      cmd: |
+        extendlv <덤프LV> <LP수>
+        /usr/lib/errdemon -s <바이트>
+      check: "성공: sysdumpdev -e 예상 크기 ≤ 덤프 LV 크기, errdemon -l 에 새 크기 · 실패: extendlv 0516 오류(VG 여유 없음) → 디스크 추가"
+      note: "사전조건: rootvg 여유 PP 확인 · 영향: 운영 중 수행 가능 · 승인: 시스템 담당 · 백업/롤백: 변경 전 errpt -a 를 파일로 보관, errdemon 크기는 이전 값으로 재설정(LV 확장은 축소 불가)"
+    - do: 디스크 진단·교체
+      cmd: |
+        diag -d hdisk<N>
+        replacepv hdisk<N> hdisk<M>
+      check: "성공: 새 디스크 PV STATE active, lsvg <vg> STALE PPs 0 · 실패: replacepv 오류면 미러 해제(unmirrorvg) 후 IBM 지원과 절차 협의"
+      note: "사전조건: 미러 구성·최신 백업 확인 · 영향: 진단·교체 중 I/O 지연 · 승인: 시스템 담당·HW 업체 · 백업/롤백: 교체 전 mksysb/savevg 백업, 실패 시 백업에서 복원"
+  - stage: 3
+    steps:
+    - do: IBM 지원 의뢰 자료
+      cmd: |
+        errpt -a > errpt_$(date +%Y%m%d).txt
+        snap -g -c
+      check: "errpt -a 전문(sense data 포함), snap 결과, lspv·lsvg 출력"
+      note: "민감정보 마스킹: 호스트명·IP·시리얼(필요 시)·사용자명 가림 후 전달 · 전달 승인: 보안 담당"
+
+- id: AIX-PROC-R5-SECURITY
+  products: [aix]
+  category: security
+  match: [AIX-LICENSE-EXPIRE, AIX-SSH-FAIL, AIX-SUDO-FAIL, AIX-AUTH-FAIL]
+  title: 인증 실패·sudo 거부·라이선스 만료 (AIX)
+  source: "IBM AIX 7.x 문서 — /etc/security/user·lastlog(lsuser/chsec), failedlogin(who), syslog.conf, lslicense · OpenSSH sshd_config"
+  stages:
+  - stage: 1
+    steps:
+    - do: 실패 계정·출발지 확인 (읽기 전용)
+      cmd: |
+        grep -i auth /etc/syslog.conf
+        grep -i -E "sshd|sudo" <인증로그> | grep -i -E "fail|invalid|incorrect|not in sudoers" | tail -30
+        who /etc/security/failedlogin | tail -20
+      check: "같은 출발지에서 여러 계정 반복이면 무차별 대입, 한 계정 반복이면 비밀번호 오입력·만료"
+      note: "적용: AIX 6.1~7.3 · 권한: root (failedlogin·인증 로그)"
+    - do: 계정 잠금·라이선스 상태 확인 (읽기 전용)
+      cmd: |
+        lsuser -a unsuccessful_login_count account_locked loginretries <user>
+        lslicense
+        lslpp -L | grep -i <제품>
+      check: "unsuccessful_login_count ≥ loginretries 면 잠금. 라이선스 메시지는 제품명·만료일을 기록"
+      note: "적용: AIX 6.1~7.3 · 권한: root"
+  - stage: 2
+    steps:
+    - do: 잠금 해제 또는 출발지 차단
+      cmd: |
+        chsec -f /etc/security/lastlog -a unsuccessful_login_count=0 -s <user>
+        chuser account_locked=false <user>
+      check: "성공: 본인 로그인 성공, lsuser 카운트 0 · 실패: 다시 잠기면 비밀번호 만료·키 문제 확인"
+      note: "사전조건: 본인 확인(정상 사용자)·외부 공격이면 해제 금지 · 영향: 해당 계정 로그인 재개 · 승인: 보안 담당 · 백업/롤백: 변경 전 lsuser 출력 보관, 필요 시 chuser account_locked=true 로 원복"
+    - do: sudo·sshd 정책 정비
+      cmd: |
+        cp -p /etc/sudoers /etc/sudoers.$(date +%Y%m%d) ; visudo
+        cp -p /etc/ssh/sshd_config /etc/ssh/sshd_config.$(date +%Y%m%d)
+      check: "성공: visudo 문법 검사 통과·sudo -l -U <user> 에 의도한 명령만 · 실패: 문법 오류면 백업본 복원"
+      note: "사전조건: 권한 요청 승인서 · 영향: 해당 사용자 권한 변경 · 승인: 보안 담당 · 백업/롤백: 날짜 붙은 백업본으로 원복"
+  - stage: 3
+    steps:
+    - do: 보안 사고 의심 시 보고 자료
+      cmd: |
+        who /etc/security/failedlogin > failedlogin_$(date +%Y%m%d).txt
+        grep -i -E "sshd|sudo" <인증로그> > auth_$(date +%Y%m%d).txt
+      check: "실패 계정·출발지·시각 목록"
+      note: "민감정보 마스킹: 계정명·내부 IP 는 보안 담당 지시에 따라 가림 · 전달 승인: 보안 담당(외부 전달 시 정보보호 책임자)"
+
+- id: AIX-PROC-R5-INTERNAL
+  products: [aix]
+  category: internal
+  match: [AIX-PROCESS-KILLED, AIX-NIM-FAIL, AIX-CORE-DUMP, AIX-SYSTEM-DUMP, AIX-KERNEL-PANIC, AIX-SRC-FAIL, AIX-HACMP-EVENT, 4E8BE8F9, 192AC071, LEG-AIX-CORE, LEG-AIX-NETWORK, LEG-AIX-BACKUP, LEG-AIX-0XX-8-7AC6, LEG-AIX-HSCL-W-6FF8, OS-AIX-ERRPT-003]
+  title: 프로세스 비정상 종료·코어·시스템 덤프·서브시스템·클러스터 이벤트 (AIX)
+  source: "IBM AIX 7.x 문서 — errpt, lscore/snapcore, sysdumpdev, lssrc/startsrc, PowerHA SystemMirror 7.x(hacmp.out, clRGinfo, clmgr), NIM(lsnim, nim -o showlog)"
+  stages:
+  - stage: 1
+    steps:
+    - do: errpt 로 사건 종류·시각 확정 (읽기 전용)
+      cmd: |
+        errpt | head -30
+        errpt -a -j <IDENTIFIER> | head -80
+        errpt -a | grep -E "^LABEL:" | sort | uniq -c | sort -rn | head
+      check: "LABEL 로 구분 — CORE_DUMP(코어), SYSDUMP/DUMP_STATS(시스템 덤프), PGSP 계열(페이징 부족에 따른 종료), SRC(서브시스템), ERRLOG_OFF(로깅 꺼짐)"
+      note: "적용: AIX 6.1~7.3 · 권한: 일반 사용자도 errpt 가능, -a 상세는 root 권장"
+    - do: 서브시스템·덤프·코어 상태 확인 (읽기 전용)
+      cmd: |
+        lssrc -a | grep -v active | head -30
+        sysdumpdev -L
+        lscore ; ps -ef | grep errdemon | grep -v grep
+      check: "inoperative 서브시스템 목록, 마지막 덤프 성공 여부, errdemon 동작 여부를 기록"
+      note: "적용: AIX 6.1~7.3(lscore 5.3+) · 권한: root"
+    - do: 클러스터·NIM 이벤트 확인 (해당 시, 읽기 전용)
+      cmd: |
+        tail -300 /var/hacmp/log/hacmp.out | grep -i -E "EVENT (START|COMPLETED|FAILED)|ERROR"
+        /usr/es/sbin/cluster/utilities/clRGinfo
+        lsnim -l <client>
+      check: "EVENT FAILED 가 있으면 해당 이벤트 스크립트 원인 확인 대상, 리소스 그룹 ERROR 상태면 2차 이관"
+      note: "적용: PowerHA 6.1+/7.x(HACMP 5.x 는 /tmp/hacmp.out) · NIM 은 마스터에서 · 권한: root"
+  - stage: 2
+    steps:
+    - do: 서브시스템·오류 로깅 재개
+      cmd: |
+        startsrc -s <subsys>
+        /usr/lib/errdemon
+      check: "성공: lssrc -s <subsys> active, errpt 에 ERRLOG_ON 기록 · 실패: 즉시 다시 inoperative 면 설정 파일·로그 확인"
+      note: "사전조건: 정지 원인(의도된 작업 여부) 확인 · 영향: 해당 서비스 재개 · 승인: 시스템 담당 · 백업/롤백: 설정 수정 시 원본 파일 백업 후 수정, 문제 시 stopsrc -s <subsys> 와 원본 복원"
+    - do: PowerHA 이벤트 실패 복구
+      cmd: |
+        smitty hacmp   # Problem Determination Tools → Recover From PowerHA SystemMirror Script Failure
+      check: "성공: clRGinfo 에서 리소스 그룹 ONLINE · 실패: 다시 EVENT FAILED 면 hacmp.out 의 실패 명령 원인 수정 후 재시도"
+      note: "사전조건: 실패 원인(VG·IP·앱 스크립트) 해결 · 영향: 리소스 그룹 기동 재개 · 승인: 업무 담당·시스템 담당 · 백업/롤백: 실행 전 clRGinfo·hacmp.out 보관, 문제 시 리소스 그룹 offline 후 IBM 지원 협의"
+    - do: 코어·덤프 분석 자료 준비
+      cmd: |
+        snapcore -d /var/tmp <core> <program>
+        dbx <program> <core>   # where 출력 후 quit
+      check: "성공: snapcore pax 파일 생성, 스택에서 종료 지점 확인 · 실패: 코어가 잘렸으면 ulimit -c·lscore 설정 보완"
+      note: "사전조건: /var/tmp 여유 공간 확인 · 영향: 디스크 공간 사용 · 승인: 시스템 담당 · 백업/롤백: 원본 코어는 이동하지 않고 복사본만 사용"
+  - stage: 3
+    steps:
+    - do: IBM 지원 의뢰 자료
+      cmd: |
+        snap -a -c
+        errpt -a > errpt_$(date +%Y%m%d).txt
+      check: "snap 결과(/tmp/ibmsupt), errpt 전문, 시스템 덤프(vmcore)·snapcore 파일"
+      note: "민감정보 마스킹: 호스트명·IP·사용자명·애플리케이션 설정의 비밀번호 가림, 코어·덤프는 메모리 내용(개인정보 가능) 포함이므로 반출 심사 · 전달 승인: 보안 담당"
+
+- id: AIX-PROC-R5-CONNECTION
+  products: [aix]
+  category: connection
+  match: [AIX-DNS-FAIL, AIX-ENT-LINK-DOWN, AIX-ETHERCHANNEL-FAILOVER, AIX-HACMP-NODE-DOWN, AIX-NFS-HANG, AIX-NTP-FAIL, AIX-HMC-CONNECT-FAIL, FE3E6B3B, AE7C4B0F, 7BFEEA1F, '26623394', EC0BCCD4, LEG-AIX-SSH]
+  title: 네트워크 링크·이름 해석·NFS·NTP·HMC·가상 FC·클러스터 연결 (AIX)
+  source: "IBM AIX 7.x 문서 — entstat, netstat, lsattr(EtherChannel), nfsstat, xntpd, RSCT/RMC(lsrsrc IBM.MCP), fcstat/lspath · IBM 'Fixing the No RMC Connection Error' · PowerHA 7.x(lscluster)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 링크·인터페이스 상태 확인 (읽기 전용)
+      cmd: |
+        netstat -in
+        entstat -d ent<N> | grep -i -E "link status|media speed|error|active channel"
+        errpt | head -20
+      check: "Link Status Down·Ierrs/Oerrs 증가면 물리 링크 문제, EtherChannel 은 Active channel 이 backup 이면 전환 상태"
+      note: "적용: AIX 6.1~7.3 · 권한: 일반 사용자 가능"
+    - do: 이름 해석·NFS·NTP·HMC 연결 확인 (읽기 전용)
+      cmd: |
+        cat /etc/resolv.conf ; nslookup <host>
+        mount | grep -i nfs ; nfsstat -c
+        ntpq -p ; lssrc -s ctrmc ; lsrsrc IBM.MCP
+      check: "nslookup 실패면 DNS, nfsstat timeout·retrans 증가면 NFS 서버 경로, ntpq reach 0 이면 NTP 통신 불가, IBM.MCP 에 HMC 가 없으면 RMC 단절(멈춘 NFS 경로에는 df·ls 금지)"
+      note: "적용: AIX 6.1~7.3 · 권한: lsrsrc 는 root"
+    - do: 가상 FC·FC 경로·클러스터 노드 확인 (해당 시, 읽기 전용)
+      cmd: |
+        lspath | grep -v Enabled
+        fcstat fcs<N> | head -40
+        lscluster -m
+      check: "Failed 경로·fcs 링크 Down 이면 SAN/VIOS 측 원인, lscluster 에 DOWN 노드가 있으면 클러스터 2차 이관"
+      note: "적용: lscluster 는 PowerHA 7.1+(CAA) · 권한: root"
+  - stage: 2
+    steps:
+    - do: 링크·경로 복구 후 확인
+      cmd: |
+        chpath -l hdisk<N> -p <fscsi|vscsi> -s enable
+        /usr/sbin/rsct/bin/rmcctrl -z ; /usr/sbin/rsct/bin/rmcctrl -A ; /usr/sbin/rsct/bin/rmcctrl -p
+      check: "성공: lspath Enabled, 수 분 뒤 lsrsrc IBM.MCP 에 HMC 표시 · 실패: 경로가 다시 Failed 면 SAN/VIOS 원인 미해결"
+      note: "사전조건: 케이블·스위치·VIOS 측 원인 해결 확인 · 영향: RMC 재시작 중 DLPAR 등 HMC 기능 일시 불가 · 승인: 시스템 담당 · 백업/롤백: 실행 전 lspath·lsrsrc 출력 보관, 경로는 chpath -s disable 로 원복"
+    - do: NTP·이름 해석·NFS 조치
+      cmd: |
+        cp -p /etc/resolv.conf /etc/resolv.conf.$(date +%Y%m%d)
+        stopsrc -s xntpd ; startsrc -s xntpd
+        umount -f <nfs-mount>
+      check: "성공: nslookup 정상, ntpq reach 증가·offset 수렴, NFS 재마운트 후 접근 정상 · 실패: 강제 해제 실패면 사용 프로세스(fuser -cu) 정리 협의"
+      note: "사전조건: NFS 강제 해제는 사용 프로세스 확인 후 · 영향: 강제 해제 시 해당 경로 작업 실패 · 승인: 업무 담당·시스템 담당 · 백업/롤백: 설정 파일 날짜 백업본으로 원복, NFS 는 mount 로 재연결"
+  - stage: 3
+    steps:
+    - do: IBM 지원 의뢰 자료
+      cmd: |
+        snap -g -t -c
+        entstat -d ent<N> > entstat_$(date +%Y%m%d).txt
+      check: "snap(TCP/IP 포함), entstat, errpt -a, 클러스터는 clsnap 결과"
+      note: "민감정보 마스킹: IP·호스트명·MAC 주소 가림 후 전달 · 전달 승인: 보안 담당"
+
+- id: AIX-PROC-R5-MEMORY
+  products: [aix]
+  category: memory
+  match: [AIX-PAGING-LOW, LEG-AIX-PERF]
+  title: 페이징 공간 부족·메모리 과부하 (AIX)
+  source: "IBM AIX 7.x 문서 — Paging space(lsps, chps, mkps), svmon, vmstat -v"
+  stages:
+  - stage: 1
+    steps:
+    - do: 페이징·메모리 사용률 확인 (읽기 전용)
+      cmd: |
+        lsps -a ; lsps -s
+        svmon -G
+        vmstat 2 5
+      check: "lsps -s 70% 이상 경고·90% 이상 위험, vmstat pi/po 가 계속 0 보다 크면 메모리 부족"
+      note: "적용: AIX 6.1~7.3 · 권한: svmon 은 root"
+    - do: 메모리 상위 프로세스 확인 (읽기 전용)
+      cmd: |
+        ps -eo pid,vsz,user,args | sort -k2 -rn | head -10
+        errpt | grep -i pgsp | head
+      check: "특정 프로세스의 vsz 가 계속 증가하면 누수 의심, errpt 에 PGSP 항목이 있으면 이미 프로세스 강제 종료 발생"
+      note: "적용: AIX 6.1~7.3 · 권한: 일반 사용자 가능"
+  - stage: 2
+    steps:
+    - do: 페이징 공간 즉시 확장
+      cmd: |
+        chps -s <LP수> hd6
+      check: "성공: lsps -s 사용률 하락 · 실패: rootvg 여유 PP 부족이면 다른 VG 에 mkps 로 추가"
+      note: "사전조건: rootvg 여유 PP 확인(lsvg rootvg) · 영향: 운영 중 수행 가능 · 승인: 시스템 담당 · 백업/롤백: chps -d <LP수> hd6 로 축소 가능(사용 중인 페이지 없을 때)"
+    - do: 누수 프로세스 재기동 일정
+      cmd: |
+        stopsrc -s <subsys> ; startsrc -s <subsys>
+      check: "성공: 재기동 후 lsps 사용률 정상화 · 실패: 다시 증가하면 애플리케이션 메모리 설정 재산정"
+      note: "사전조건: 업무 영향 시간 협의 · 영향: 해당 서비스 일시 중단 · 승인: 업무 담당 · 백업/롤백: 설정 변경이 없으면 롤백 불필요, 설정 변경 시 원본 백업"
+  - stage: 3
+    steps:
+    - do: IBM 지원 의뢰 자료
+      cmd: |
+        snap -g -c
+        svmon -G > svmon_$(date +%Y%m%d).txt ; vmstat -v > vmstat_v_$(date +%Y%m%d).txt
+      check: "snap, svmon, vmstat -v, lsps 결과"
+      note: "민감정보 마스킹: 호스트명·사용자명·프로세스 인자 가림 후 전달 · 전달 승인: 보안 담당"
+
+- id: AIX-PROC-R5-PERFORMANCE
+  products: [aix]
+  category: performance
+  match: [A2205861]
+  title: 인터럽트 비활성 시간 과다 DELAYED_INTS (AIX)
+  source: "IBM 지원 문서 'Detection of excessive interrupt disablement' (https://www.ibm.com/support/pages/detection-excessive-interrupt-disablement) · AIX errpt"
+  stages:
+  - stage: 1
+    steps:
+    - do: 발생 빈도·자원 확인 (읽기 전용)
+      cmd: |
+        errpt -j A2205861 | head -20
+        errpt -a -j A2205861 | head -60
+      check: "같은 시각 응답 지연 신고가 있는지, 발생이 특정 시간대·작업에 몰리는지 기록"
+      note: "적용: AIX 5.3~7.3 · 권한: root"
+    - do: 같은 시각 드라이버·어댑터 오류 확인 (읽기 전용)
+      cmd: |
+        errpt | head -40
+        oslevel -s
+      check: "같은 시각 어댑터·커널 확장 관련 항목이 있으면 해당 드라이버 의심, TL/SP 수준 기록"
+      note: "적용: AIX 5.3~7.3 · 권한: 일반 사용자 가능"
+  - stage: 2
+    steps:
+    - do: APAR·서비스 팩 적용
+      cmd: |
+        instfix -ik <APAR번호>
+      check: "성공: 해당 APAR 'All filesets ... were found', 적용 후 DELAYED_INTS 감소 · 실패: 미적용이면 변경 관리로 SP 적용 계획"
+      note: "사전조건: IBM 지원이 지목한 APAR 확인 · 영향: 서비스 팩 적용은 재부팅 필요 가능 · 승인: 변경 관리 위원회 · 백업/롤백: 적용 전 mksysb 백업, 문제 시 mksysb 복원 또는 installp -r(applied 상태) 거절"
+  - stage: 3
+    steps:
+    - do: IBM 지원 의뢰 자료
+      cmd: |
+        snap -a -c
+      check: "snap 결과와 errpt -a 의 DELAYED_INTS 항목"
+      note: "민감정보 마스킹: 호스트명·IP 가림 후 전달 · 전달 승인: 보안 담당"
+
+# ── HP-UX ──
+- id: HPUX-PROC-R5-DISK
+  products: [hpux]
+  category: disk
+  match: [HPUX-DISK-FULL, HPUX-TMP-FULL, HPUX-SYSLOG-FULL, HPUX-DISK-ERROR, HPUX-SCSI-ASYNC-WRITE]
+  title: 파일시스템·/tmp·syslog 공간 부족과 디스크 I/O 오류 (HP-UX)
+  source: "HP-UX 11i v3 System Administration Guide (bdf, fuser, lvextend/extendfs, fsadm) · ioscan(1M)·scsimgr(1M) · syslogd(1M)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 사용률·inode 확인 (읽기 전용)
+      cmd: |
+        bdf ; bdf -i
+        ls -l /var/adm/syslog/
+        du -kx <mount> | sort -rn | head -15
+      check: "사용률 95% 이상 또는 %iuse 95% 이상이면 확정, syslog.log 가 수 GB 면 syslog 원인"
+      note: "적용: HP-UX 11i v1~v3 · 권한: 일반 사용자 가능(du 는 root 권장)"
+    - do: 디스크 오류 장치 확인 (읽기 전용)
+      cmd: |
+        grep -i -E "disk|scsi|async write|lbolt" /var/adm/syslog/syslog.log | tail -30
+        ioscan -P health -C disk
+        ioscan -kfnC disk
+      check: "health 가 online 이 아니거나 CLAIMED 가 아닌 장치가 있으면 2차 이관, 메시지의 dev 번호를 ll /dev/dsk 로 장치명에 대응"
+      note: "적용: ioscan -P health 는 11i v3, v1/v2 는 ioscan -kfnC disk 만 · 권한: root"
+  - stage: 2
+    steps:
+    - do: 불필요 파일 정리 또는 증설
+      cmd: |
+        fuser -cu /tmp
+        lvextend -L <새크기MB> /dev/<vg>/<lv> ; fsadm -F vxfs -b <새크기>M <mount>
+      check: "성공: bdf 사용률 85% 이하 · 실패: lvextend 오류(VG 여유 없음) → 디스크 추가 요청"
+      note: "사전조건: 정리 대상 소유자 확인·백업 · 영향: 증설 중 I/O 지연 · 승인: 시스템 담당 · 백업/롤백: 정리 전 tar 보관, 증설은 되돌릴 수 없어 계획 반영 · 적용: OnlineJFS 필요(없으면 umount 후 extendfs)"
+    - do: syslog.log 순환
+      cmd: |
+        cp -p /var/adm/syslog/syslog.log /var/adm/syslog/syslog.log.$(date +%Y%m%d)
+        cat /dev/null > /var/adm/syslog/syslog.log
+      check: "성공: syslog.log 크기 0 에서 다시 기록 시작(logger test 로 확인) · 실패: 기록이 안 되면 syslogd 상태 확인"
+      note: "사전조건: 복사본 공간 확인 · 영향: 없음(파일 핸들 유지) · 승인: 시스템 담당 · 백업/롤백: 날짜 붙은 복사본 보관(압축 후 이관)"
+    - do: 결함 디스크 교체
+      cmd: |
+        scsimgr get_info -D /dev/rdisk/disk<N>
+        vgcfgrestore -n <vg> /dev/rdisk/disk<N> ; vgchange -a y <vg> ; vgsync <vg>
+      check: "성공: vgdisplay -v 의 PV Status available, stale extent 0 · 실패: vgcfgrestore 오류면 HPE 지원과 절차 협의"
+      note: "사전조건: 미러 구성·최신 백업 확인 · 영향: 동기화 중 I/O 부하 · 승인: 시스템 담당·HPE · 백업/롤백: /etc/lvmconf/<vg>.conf 구성 백업 확인, 실패 시 백업에서 복원"
+  - stage: 3
+    steps:
+    - do: 제조사(HPE) 의뢰 자료
+      cmd: |
+        bdf > bdf_$(date +%Y%m%d).txt ; tail -500 /var/adm/syslog/syslog.log > syslog_tail.txt
+        ioscan -kfn > ioscan_$(date +%Y%m%d).txt ; vgdisplay -v > vgdisplay_$(date +%Y%m%d).txt
+      check: "bdf·syslog·ioscan·vgdisplay -v 결과"
+      note: "민감정보 마스킹: 호스트명·IP·사용자명 가림 후 전달 · 전달 승인: 보안 담당"
+
+- id: HPUX-PROC-R5-SECURITY
+  products: [hpux]
+  category: security
+  match: [HPUX-SSH-FAIL, HPUX-SUDO-FAIL, HPUX-LICENSE-EXPIRE, HPUX-AUTH-FAIL]
+  title: 인증 실패·sudo 거부·라이선스 만료 (HP-UX)
+  source: "HP-UX 11i v3 Security(/etc/default/security, Trusted 모드 getprpw/modprpw) · HP-UX Secure Shell · lastb(1M) · swlist(1M)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 실패 계정·출발지 확인 (읽기 전용)
+      cmd: |
+        grep -i -E "sshd|sudo" /var/adm/syslog/syslog.log | grep -i -E "fail|invalid|incorrect|not in sudoers" | tail -30
+        lastb | head -20
+      check: "같은 출발지 다수 계정이면 무차별 대입, 한 계정 반복이면 비밀번호 문제"
+      note: "적용: HP-UX 11i v1~v3 · 권한: root"
+    - do: 계정 잠금·라이선스 확인 (읽기 전용)
+      cmd: |
+        /usr/lbin/getprpw -m lockout <user>
+        grep -i -E "AUTH_MAXTRIES" /etc/default/security
+        swlist -l product | grep -i <제품>
+      check: "lockout 값에 1 이 있으면 잠금(Trusted 모드). 라이선스는 제품명·만료일 기록"
+      note: "적용: getprpw 는 Trusted 모드만 · 권한: root"
+  - stage: 2
+    steps:
+    - do: 잠금 해제·정책 정비
+      cmd: |
+        /usr/lbin/modprpw -k <user>
+        cp -p /etc/default/security /etc/default/security.$(date +%Y%m%d)
+      check: "성공: 본인 로그인 성공·lockout 0 · 실패: 다시 잠기면 비밀번호 만료 확인"
+      note: "사전조건: 본인 확인·외부 공격이면 해제 금지 · 영향: 해당 계정 로그인 재개 · 승인: 보안 담당 · 백업/롤백: 설정 파일 날짜 백업본으로 원복"
+    - do: sudoers 정비
+      cmd: |
+        cp -p /etc/sudoers /etc/sudoers.$(date +%Y%m%d) ; visudo
+      check: "성공: visudo 문법 통과·sudo -l -U <user> 에 의도한 명령만 · 실패: 문법 오류면 백업 복원"
+      note: "사전조건: 권한 요청 승인서 · 영향: 해당 사용자 권한 변경 · 승인: 보안 담당 · 백업/롤백: 날짜 백업본 복원"
+  - stage: 3
+    steps:
+    - do: 보안 사고 의심 시 보고 자료
+      cmd: |
+        lastb > lastb_$(date +%Y%m%d).txt
+        grep -i -E "sshd|sudo" /var/adm/syslog/syslog.log > auth_$(date +%Y%m%d).txt
+      check: "실패 계정·출발지·시각 목록"
+      note: "민감정보 마스킹: 계정명·내부 IP 는 보안 담당 지시에 따라 가림 · 전달 승인: 보안 담당"
+
+- id: HPUX-PROC-R5-CONNECTION
+  products: [hpux]
+  category: connection
+  match: [HPUX-DNS-FAIL, HPUX-LAN-DOWN, HPUX-APA-FAILOVER, HPUX-SERVICEGUARD-NODE-FAIL, HPUX-NFS-HANG, HPUX-NTP-FAIL]
+  title: LAN·APA 링크·이름 해석·NFS·NTP·Serviceguard 노드 (HP-UX)
+  verify_note: "미검증 — 11i v3 nwmgr 단독 실행 출력 형식(링크 상태 열)을 HPE 매뉴얼로 확인하지 못함"
+  source: "HP-UX 11i v3 Networking(lanscan, nwmgr, lanadmin, APA) · NFS Services(nfsstat, rpcinfo) · xntpd · Serviceguard(cmviewcl, cmrunnode)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 링크·인터페이스 상태 확인 (읽기 전용)
+      cmd: |
+        lanscan ; lanscan -q
+        netstat -in
+        nwmgr
+      check: "Hardware State 가 UP 이 아니면 링크 문제, lanscan -q 로 APA 구성원 확인, Ierrs/Oerrs 증가면 케이블·포트"
+      note: "적용: nwmgr 는 11i v3, v1/v2 는 lanadmin -x <PPA> · 권한: 일반 사용자 가능"
+    - do: 이름 해석·NFS·NTP·클러스터 확인 (읽기 전용)
+      cmd: |
+        cat /etc/resolv.conf ; nslookup <host>
+        mount | grep -i nfs ; nfsstat -c
+        ntpq -p ; cmviewcl -v | head -60
+      check: "nslookup 실패면 DNS, nfsstat retrans 증가면 NFS 서버 경로, ntpq reach 0 이면 NTP 통신 불가, cmviewcl 에 down 노드가 있으면 클러스터 재구성(멈춘 NFS 경로에는 bdf·ls 금지)"
+      note: "적용: HP-UX 11i v1~v3 · 권한: cmviewcl 은 root"
+  - stage: 2
+    steps:
+    - do: 링크·NTP·노드 복구
+      cmd: |
+        /sbin/init.d/xntpd stop ; /sbin/init.d/xntpd start
+        cmrunnode <node>
+      check: "성공: ntpq reach 증가·offset 수렴, cmviewcl 에서 노드 up · 실패: 노드가 다시 빠지면 하트비트 네트워크 원인 미해결"
+      note: "사전조건: 케이블·스위치·하트비트 원인 해결 · 영향: 클러스터 재구성 중 짧은 지연 · 승인: 시스템 담당·업무 담당 · 백업/롤백: 실행 전 cmviewcl -v 출력 보관, 노드 재가입 실패 시 cmhaltnode 로 원복"
+    - do: 이름 해석·NFS 조치
+      cmd: |
+        cp -p /etc/resolv.conf /etc/resolv.conf.$(date +%Y%m%d)
+        fuser -cu <nfs-mount>
+      check: "성공: nslookup 정상, NFS 서버 복구 후 접근 정상 · 실패: NFS 가 계속 멈추면 업무 담당과 강제 해제 협의"
+      note: "사전조건: 변경 내용 검토 · 영향: 이름 해석 경로 변경 · 승인: 시스템 담당 · 백업/롤백: 날짜 백업본으로 원복"
+  - stage: 3
+    steps:
+    - do: 제조사(HPE) 의뢰 자료
+      cmd: |
+        lanscan -v > lanscan_$(date +%Y%m%d).txt ; netstat -in > netstat_$(date +%Y%m%d).txt
+        tail -500 /var/adm/syslog/syslog.log > syslog_tail.txt
+      check: "lanscan·netstat·syslog, 클러스터는 cmviewcl -v 와 cmcld 메시지"
+      note: "민감정보 마스킹: IP·호스트명·MAC 가림 후 전달 · 전달 승인: 보안 담당"
+
+- id: HPUX-PROC-R5-INTERNAL
+  products: [hpux]
+  category: internal
+  match: [HPUX-CRON-FAIL, HPUX-PROCESS-KILLED, HPUX-DUMP-FAIL, HPUX-PANIC, HPUX-SERVICEGUARD-PKG-FAIL, HPUX-CORE-DUMP, HPUX-VPAR-FAIL]
+  title: 패닉·덤프 저장·코어·cron·프로세스 종료·Serviceguard 패키지·vPar (HP-UX)
+  source: "HP-UX 11i v3 System Administration(crashconf, savecrash, /etc/shutdownlog, coreadm) · HPE 'HP-UX 11.x - How To Get Valid Corefiles' · Serviceguard(cmviewcl, cmrunpkg) · vPars(vparstatus)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 패닉·커널 크래시 덤프 이력 확인 (읽기 전용)
+      cmd: |
+        tail -10 /etc/shutdownlog
+        grep -E '^(SAVECRASH|SAVECRASH_DIR|LOG_ONLY|SAVE_PART)=' /etc/rc.config.d/savecrash ; crashconf -v
+        ls -l <SAVECRASH_DIR> ; bdf <SAVECRASH_DIR>
+        cat <SAVECRASH_DIR>/crash.<N>/INDEX
+      check: "shutdownlog 에 panic 문자열이 있으면 패닉 · SAVECRASH=0 또는 LOG_ONLY=1 이면 설정상 덤프 미저장 · 설정이 정상인데 crash.N 이 없거나 bdf 여유가 덤프 크기보다 작으면 공간 부족으로 저장 실패"
+      note: "적용: HP-UX 11i v1~v3 · 저장 경로는 SAVECRASH_DIR(비어 있으면 기본 /var/adm/crash) · 미검증 — 변수 이름은 설정 파일 사본·HPE 커뮤니티로 확인, savecrash(1M) 원문 미대조 · 권한: root"
+    - do: 프로세스 core·cron·패키지·vPar 상태 확인 (읽기 전용)
+      cmd: |
+        tail -50 /var/adm/cron/log
+        file <core경로> ; coreadm
+        cmviewcl -v -p <pkg> ; vparstatus
+      check: "cron 로그 rc 0 이 아니면 스크립트 오류, 패키지 halted·switching disabled 면 2차, vPar Down 이면 2차"
+      note: "적용: coreadm 은 프로세스 core 파일 경로·패턴 설정 확인용이며 커널 크래시 덤프(savecrash)와 무관 · coreadm 은 11i v3(11.23 이하는 작업 디렉터리 core) · 권한: root"
+  - stage: 2
+    steps:
+    - do: Serviceguard 패키지 복구
+      cmd: |
+        cmmodpkg -e <pkg>
+        cmrunpkg -n <node> <pkg>
+      check: "성공: cmviewcl 에서 패키지 up·switching enabled · 실패: 패키지 로그의 ERROR 원인 수정 후 재시도"
+      note: "사전조건: 실패 원인(VG·마운트·IP·서비스) 해결 · 영향: 패키지 기동 중 서비스 전환 · 승인: 업무 담당·시스템 담당 · 백업/롤백: 실행 전 cmviewcl -v 보관, 문제 시 cmhaltpkg <pkg>"
+    - do: 덤프 수동 저장·cron 재시험
+      cmd: |
+        savecrash
+        su - <user> -c "<스크립트>"
+      check: "성공: <SAVECRASH_DIR>/crash.N 생성(기본 /var/adm/crash), 스크립트 rc 0 · 실패: 공간 부족이면 SAVECRASH_DIR 파일시스템 증설"
+      note: "사전조건: SAVECRASH_DIR 여유 공간 확인 · 영향: 디스크 사용 · 승인: 시스템 담당 · 백업/롤백: 새 파일 생성만 하므로 롤백 불필요, 스크립트 수정 시 원본 백업"
+  - stage: 3
+    steps:
+    - do: 제조사(HPE) 의뢰 자료
+      cmd: |
+        tar -cvf crash_$(date +%Y%m%d).tar /var/adm/crash/crash.<N>
+        cp /var/adm/syslog/OLDsyslog.log OLDsyslog_$(date +%Y%m%d).log
+      check: "크래시 덤프 디렉터리, OLDsyslog.log, shutdownlog, 코어는 바이너리·라이브러리 목록과 함께"
+      note: "민감정보 마스킹: 호스트명·IP·사용자명 가림, 덤프·코어는 메모리 내용(개인정보 가능) 포함이므로 반출 심사 · 전달 승인: 보안 담당"
+
+- id: HPUX-PROC-R5-CAPACITY
+  products: [hpux]
+  category: capacity
+  match: [HPUX-CPU-HIGH, HPUX-IPC-EXHAUSTED, HPUX-FS-INODE-FULL, HPUX-NPROC-LIMIT, HPUX-NFILE-LIMIT]
+  title: CPU·프로세스·파일 테이블·IPC·inode 한도 (HP-UX)
+  source: "HP-UX 11i v3 Kernel Tunables(kctune: nproc, maxuprc, nfile, maxfiles, shmmni, semmni) · sar(1M) · ipcs(1) · bdf(1M)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 커널 테이블·CPU 사용 확인 (읽기 전용)
+      cmd: |
+        sar -v 2 3
+        sar -u 2 5 ; sar -q 2 5
+        bdf -i
+      check: "sar -v 의 proc-sz·file-sz 가 한도 근접이거나 ov 가 0 이 아니면 테이블 고갈, runq-sz 가 CPU 수보다 계속 크면 CPU 과부하, %iuse 95% 이상이면 inode"
+      note: "적용: HP-UX 11i v1~v3 · 권한: 일반 사용자 가능"
+    - do: 한도값·상위 프로세스·IPC 확인 (읽기 전용)
+      cmd: |
+        kctune nproc maxuprc nfile maxfiles shmmni semmni msgmni
+        UNIX95= ps -eo pid,pcpu,vsz,user,comm | sort -k2 -rn | head -10
+        ipcs -a | head -60
+      check: "한도 대비 사용량 기록, 소유 프로세스가 없는 IPC 자원이 많으면 잔여 자원"
+      note: "적용: kctune 은 11i v2+, 11i v1 은 kmtune -q <파라미터> · 권한: root"
+  - stage: 2
+    steps:
+    - do: 커널 파라미터 상향
+      cmd: |
+        kctune nproc=<값>
+        kctune nfile=<값>
+      check: "성공: kctune 출력에 새 값(동적 파라미터는 즉시), sar -v ov 0 · 실패: 정적 파라미터면 재부팅 후 반영 — 변경 관리로 일정 수립"
+      note: "사전조건: 폭주·누수 원인 확인 · 영향: 정적 파라미터는 재부팅 필요 · 승인: 변경 관리 · 백업/롤백: 변경 전 kctune 출력 보관, kctune <파라미터>=<이전값> 으로 원복(kctune 은 이전 구성 백업 유지)"
+    - do: 잔여 IPC 정리·CPU 완화
+      cmd: |
+        ipcrm -m <shmid>
+        renice -n 10 <PID>
+      check: "성공: ipcs 수 감소·애플리케이션 IPC 생성 성공, CPU 사용 하락 · 실패: 정리 후에도 실패면 한도 상향"
+      note: "사전조건: 소유 프로세스 부재(ipcs -p 의 CPID/LPID) 확인 · 영향: 잘못 지우면 애플리케이션 장애 · 승인: 업무 담당(DB·미들웨어) · 백업/롤백: 정리 전 ipcs -a 출력 보관(IPC 는 되돌릴 수 없어 애플리케이션 재기동으로 복구)"
+  - stage: 3
+    steps:
+    - do: 제조사(HPE) 의뢰 자료
+      cmd: |
+        kctune > kctune_$(date +%Y%m%d).txt ; sar -v 2 10 > sar_v_$(date +%Y%m%d).txt
+        ipcs -a > ipcs_$(date +%Y%m%d).txt
+      check: "kctune 전체, sar, ipcs, ps 결과"
+      note: "민감정보 마스킹: 호스트명·사용자명·프로세스 인자 가림 후 전달 · 전달 승인: 보안 담당"
+
+- id: HPUX-PROC-R5-MEMORY
+  products: [hpux]
+  category: memory
+  match: [HPUX-MEMORY-LOW, HPUX-SHM-FAIL, HPUX-SEM-FAIL, HPUX-SWAP-FULL, HPUX-SWAP-RESERVATION]
+  title: 메모리·스왑 고갈과 공유 메모리·세마포어 할당 실패 (HP-UX)
+  source: "HP-UX 11i v3 System Administration(swapinfo, swapon, lvcreate) · Kernel Tunables(swapmem_on, filecache_max, shmmax, semmni) · vmstat(1)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 스왑·메모리 사용률 확인 (읽기 전용)
+      cmd: |
+        swapinfo -tam
+        vmstat 2 5
+        kctune swapmem_on filecache_max
+      check: "swapinfo total PCT USED 90% 이상이면 스왑 고갈, vmstat po 가 계속 0 보다 크면 메모리 압박"
+      note: "적용: filecache_max 는 11i v3, v1/v2 는 dbc_max_pct · 권한: 일반 사용자 가능(kctune 은 root)"
+    - do: 상위 프로세스·IPC 확인 (읽기 전용)
+      cmd: |
+        UNIX95= ps -eo pid,vsz,sz,user,comm | sort -k2 -rn | head -10
+        ipcs -mob | head -40 ; ipcs -sa | head -20
+        kctune shmmax shmmni semmni semmns
+      check: "특정 프로세스 vsz 계속 증가면 누수 의심, 요청 세그먼트 크기가 shmmax 초과면 한도 문제"
+      note: "적용: kctune 은 11i v2+, 11i v1 은 kmtune -q · 권한: root"
+  - stage: 2
+    steps:
+    - do: 장치 스왑 추가
+      cmd: |
+        lvcreate -L <MB> -n swap2 vg00
+        swapon /dev/vg00/swap2
+      check: "성공: swapinfo 에 새 장치·PCT USED 하락 · 실패: VG 여유 없음이면 다른 VG 사용"
+      note: "사전조건: VG 여유 PE 확인 · 영향: 운영 중 수행 가능 · 승인: 시스템 담당 · 백업/롤백: /etc/fstab 에 넣지 않으면 재부팅 시 원래 구성으로 복귀, 영구화는 fstab 백업 후 추가"
+    - do: IPC 한도 조정
+      cmd: |
+        kctune shmmax=<값>
+        kctune semmni=<값>
+      check: "성공: 애플리케이션 shmget/semget 성공 · 실패: 정적 파라미터면 재부팅 후 반영"
+      note: "사전조건: DB·미들웨어 요구값 확인 · 영향: 정적 파라미터는 재부팅 필요 · 승인: 변경 관리 · 백업/롤백: 변경 전 kctune 출력 보관, 이전 값으로 원복"
+  - stage: 3
+    steps:
+    - do: 제조사(HPE) 의뢰 자료
+      cmd: |
+        swapinfo -tam > swapinfo_$(date +%Y%m%d).txt ; vmstat 2 30 > vmstat_$(date +%Y%m%d).txt
+        kctune > kctune_$(date +%Y%m%d).txt
+      check: "swapinfo, vmstat, kctune, ipcs 결과"
+      note: "민감정보 마스킹: 호스트명·사용자명·프로세스 인자 가림 후 전달 · 전달 승인: 보안 담당"
+
+# ── Solaris ──
+- id: SOL-PROC-R5-CAPACITY
+  products: [solaris]
+  category: capacity
+  match: [SOL-INODE-FULL, SOL-SENDMAIL-QUEUE, SOL-RESOURCE-CONTROL, SOL-TOO-MANY-OPEN-FILES, SOL-FORK-FAIL, SOL-CPU-HIGH-LOAD]
+  title: CPU·프로세스·FD·자원 제어·inode·메일 큐 한도 (Solaris)
+  source: "Oracle Solaris 10/11 관리 문서 — prstat, mpstat, sar, prctl/projmod(Resource Controls), df -o i(UFS), mailq"
+  stages:
+  - stage: 1
+    steps:
+    - do: CPU·프로세스·자원 제어 상태 확인 (읽기 전용)
+      cmd: |
+        vmstat 2 5 ; prstat -s cpu -n 10 5 1
+        sar -v 1 1 ; swap -s
+        grep -i rctl /var/adm/messages | tail -20
+      check: "vmstat r 이 CPU 수보다 계속 크면 CPU 과부하, proc-sz 한도 근접 또는 swap available 거의 없으면 fork 실패 원인, rctl 메시지로 한도에 닿은 자원 확인"
+      note: "적용: Solaris 10/11 · 권한: 일반 사용자 가능(messages 는 root)"
+    - do: FD·inode·메일 큐 확인 (읽기 전용)
+      cmd: |
+        ls /proc/<PID>/fd | wc -l
+        prctl -n process.max-file-descriptor -i process <PID>
+        df -F ufs -o i ; mailq | tail -20
+      check: "열린 FD 가 한도 90% 이상이면 FD 고갈, %iused 95% 이상이면 inode, mailq 건수 급증이면 메일 큐(pfiles 는 대상 프로세스를 멈추므로 1차 금지)"
+      note: "적용: prctl 은 Solaris 10+ · 권한: 대상 프로세스 소유자 또는 root"
+  - stage: 2
+    steps:
+    - do: 자원 제어 한도 상향
+      cmd: |
+        prctl -n <rctl이름> -r -v <값> -i project <project>
+        projmod -s -K "<rctl이름>=(priv,<값>,deny)" <project>
+      check: "성공: prctl 출력에 새 값, 오류 재발 없음 · 실패: zone 단위 한도(zone.*)면 전역 zone 에서 zonecfg 조정"
+      note: "사전조건: 누수·폭주 원인 확인 · 영향: prctl 은 즉시, projmod 는 새 태스크부터 · 승인: 시스템 담당 · 백업/롤백: 변경 전 prctl 출력·/etc/project 백업, 이전 값으로 prctl -r 원복"
+    - do: CPU 폭주 완화·메일 큐 재처리
+      cmd: |
+        priocntl -s -c FX -m 0 -p 0 -i pid <PID>
+        sendmail -q -v
+      check: "성공: prstat CPU 하락, mailq 감소 · 실패: 변화 없으면 업무 담당과 재기동 협의"
+      note: "사전조건: 대상 PID 업무 담당 확인·메일 릴레이 원인 해결 · 영향: 해당 작업 처리 지연 · 승인: 업무 담당 · 백업/롤백: priocntl -s -c TS -i pid <PID> 로 원래 클래스 복귀, 큐 파일은 재처리 전 /var/spool/mqueue 백업"
+  - stage: 3
+    steps:
+    - do: 제조사(Oracle) 의뢰 자료
+      cmd: |
+        explorer        # Oracle Services Tools Bundle(Explorer) 설치 시 — 없으면 아래 수동 수집
+        prstat -s cpu -n 20 5 6 > prstat_$(date +%Y%m%d).txt ; sar -v 1 10 > sar_v_$(date +%Y%m%d).txt
+      check: "Explorer 결과 또는 prstat·sar·prctl 출력"
+      note: "민감정보 마스킹: 호스트명·IP·사용자명·프로세스 인자 가림 후 전달 · 전달 승인: 보안 담당"
+
+- id: SOL-PROC-R5-CONNECTION
+  products: [solaris]
+  category: connection
+  match: [SOL-NIC-ERROR, SOL-DNS-FAIL, SOL-LINK-DOWN, SOL-IPMP-FAIL, SOL-CLUSTER-NODE-LOST, SOL-NTP-FAIL]
+  title: 링크·NIC 오류·IPMP·이름 해석·NTP·클러스터 노드 (Solaris)
+  source: "Oracle Solaris 11 'Managing Network Datalinks'(dladm), 'Administering TCP/IP Networks, IPMP'(ipmpstat) · Solaris 10 dladm show-dev/ifconfig · Oracle Solaris Cluster(clnode, clinterconnect)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 링크·인터페이스 상태 확인 (읽기 전용)
+      cmd: |
+        dladm show-phys
+        netstat -in
+        ipmpstat -g ; ipmpstat -i
+      check: "STATE down 이면 링크 단절, Ierrs/Oerrs 증가면 케이블·포트, IPMP failed 인터페이스 확인"
+      note: "적용: Solaris 11(10 은 dladm show-dev·ifconfig -a 의 FAILED 플래그) · 권한: 일반 사용자 가능"
+    - do: 이름 해석·NTP·클러스터 확인 (읽기 전용)
+      cmd: |
+        cat /etc/resolv.conf ; getent hosts <host>
+        ntpq -p ; svcs -l svc:/network/ntp:default
+        clnode status ; clinterconnect status
+      check: "getent 실패면 이름 해석, ntpq reach 0 이면 NTP 통신 불가, clnode Offline·인터커넥트 faulted 면 클러스터 2차 이관"
+      note: "적용: clnode 는 Cluster 3.2+/4.x(3.1 은 scstat -n) · 권한: root"
+  - stage: 2
+    steps:
+    - do: 서비스 재시작·클러스터 노드 복귀
+      cmd: |
+        svcadm restart svc:/network/ntp:default
+        clresourcegroup switch -n <node> <rg>
+      check: "성공: ntpq reach 증가, 리소스 그룹이 지정 노드에서 Online · 실패: 다시 이탈하면 인터커넥트 원인 미해결"
+      note: "사전조건: 링크·인터커넥트 원인 해결 · 영향: 리소스 그룹 이동 중 서비스 순간 중단 · 승인: 업무 담당·시스템 담당 · 백업/롤백: 실행 전 cluster status 출력 보관, 문제 시 원래 노드로 switch"
+    - do: 이름 해석 설정 수정
+      cmd: |
+        svccfg -s network/dns/client listprop config > dns_client_$(date +%Y%m%d).txt
+        svccfg -s network/dns/client setprop config/nameserver = net_address: "(<ip1> <ip2>)" ; svcadm refresh network/dns/client
+      check: "성공: getent hosts 정상 · 실패: 백업 값으로 setprop 원복"
+      note: "사전조건: 새 DNS 서버 도달 확인 · 영향: 이름 해석 경로 변경 · 승인: 시스템 담당 · 백업/롤백: listprop 백업 파일 값으로 원복(Solaris 10 은 /etc/resolv.conf 백업 복원)"
+  - stage: 3
+    steps:
+    - do: 제조사(Oracle) 의뢰 자료
+      cmd: |
+        dladm show-phys > dladm_$(date +%Y%m%d).txt ; netstat -in > netstat_$(date +%Y%m%d).txt
+        tail -500 /var/adm/messages > messages_tail.txt
+      check: "dladm·netstat·messages, 클러스터는 cluster status 와 /var/cluster/logs 결과"
+      note: "민감정보 마스킹: IP·호스트명·MAC 가림 후 전달 · 전달 승인: 보안 담당"
+
+- id: SOL-PROC-R5-INTERNAL
+  products: [solaris]
+  category: internal
+  match: [SOL-CRON-FAIL, SOL-PROCESS-KILLED, SOL-SVC-MAINTENANCE, SOL-SVC-DEGRADED, SOL-ZONE-FAIL, SOL-LDOM-FAIL, SOL-CORE-DUMP, SOL-KERNEL-PANIC, SOL-SMF-MAINTENANCE]
+  title: SMF 서비스 이상·패닉·코어·cron·zone·LDom (Solaris)
+  source: "Oracle Solaris 10/11 관리 문서 — SMF(svcs -xv, svcadm clear), dumpadm/savecore, coreadm, zoneadm/zonecfg, Oracle VM Server for SPARC(ldm)"
+  stages:
+  - stage: 1
+    steps:
+    - do: SMF 서비스·cron 상태 확인 (읽기 전용)
+      cmd: |
+        svcs -xv
+        tail -50 /var/svc/log/<서비스 로그>.log
+        tail -50 /var/cron/log
+      check: "maintenance/degraded 서비스와 Reason, 로그의 마지막 오류 줄 기록, cron rc 0 이 아니면 스크립트 오류"
+      note: "적용: SMF 는 Solaris 10+ · 권한: 일반 사용자 가능(로그는 root)"
+    - do: 패닉·코어 이력 확인 (읽기 전용)
+      cmd: |
+        dumpadm
+        ls -l /var/crash/*
+        grep -i -A 5 "panic" /var/adm/messages* | head -40 ; coreadm
+      check: "vmdump.N/vmcore.N 이 있으면 덤프 저장 완료, panic 문자열·스택 첫 줄 기록"
+      note: "적용: Solaris 10/11(11.2+ 는 압축 vmdump) · 권한: root"
+    - do: zone·LDom 상태 확인 (해당 시, 읽기 전용)
+      cmd: |
+        zoneadm list -cv
+        ldm list
+      check: "zone 이 installed/ready 에 머물면 기동 실패, ldm 도메인 STATE 가 active 가 아니면 2차"
+      note: "적용: zone 은 Solaris 10+, ldm 은 SPARC 컨트롤 도메인 · 권한: root"
+  - stage: 2
+    steps:
+    - do: SMF 서비스 복구
+      cmd: |
+        svccfg export <FMRI> > <서비스>_$(date +%Y%m%d).xml
+        svcadm clear <FMRI>
+      check: "성공: svcs <FMRI> 가 online · 실패: 다시 maintenance 면 로그 원인 수정 후 재시도"
+      note: "사전조건: 로그의 원인 수정 완료 · 영향: 서비스 재기동 · 승인: 업무 담당·시스템 담당 · 백업/롤백: export 한 XML 로 구성 원복(svccfg import)"
+    - do: zone·LDom 기동
+      cmd: |
+        zonecfg -z <zone> export > <zone>_$(date +%Y%m%d).cfg ; zoneadm -z <zone> boot
+        ldm list-constraints -x <domain> > <domain>_$(date +%Y%m%d).xml ; ldm start-domain <domain>
+      check: "성공: zoneadm list -cv running, ldm list active · 실패: 오류 메시지의 자원·네트워크 설정 수정 후 재시도"
+      note: "사전조건: 구성 오류 수정 · 영향: 해당 zone/도메인 서비스 기동 · 승인: 시스템 담당 · 백업/롤백: export 한 구성 파일로 원복"
+  - stage: 3
+    steps:
+    - do: 제조사(Oracle) 의뢰 자료
+      cmd: |
+        savecore -vf /var/crash/<host>/vmdump.<N>
+        explorer        # Oracle Services Tools Bundle(Explorer) 설치 시
+      check: "크래시 덤프(vmcore/unix), messages, svcs -xv, 코어는 pldd·pstack 결과와 함께"
+      note: "민감정보 마스킹: 호스트명·IP·사용자명 가림, 덤프·코어는 메모리 내용(개인정보 가능) 포함이므로 반출 심사 · 전달 승인: 보안 담당"
+
+- id: SOL-PROC-R5-DISK
+  products: [solaris]
+  category: disk
+  match: [SOL-AUDIT-FULL, SOL-DISK-FULL, SOL-TMP-FULL, SOL-ZFS-NO-SPACE, SOL-DISK-ERROR, SOL-DISK-RETRYABLE]
+  title: 파일시스템·ZFS·/tmp·감사 로그 공간과 디스크 오류 (Solaris)
+  source: "Oracle Solaris 10/11 관리 문서 — df, du, zfs list -o space, zpool, iostat -En, fmadm, audit/auditconfig, tmpfs(vfstab size)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 공간 사용률 확인 (읽기 전용)
+      cmd: |
+        df -h ; swap -s
+        zpool list ; zfs list -o space -r <pool> | head -30
+        du -dsk <mount>/* 2>/dev/null | sort -n | tail -15
+      check: "사용률 95% 이상 확정, ZFS 는 USEDSNAP 이 크면 스냅샷 원인, /tmp 는 tmpfs 라 swap available 감소와 함께 판단"
+      note: "적용: Solaris 10/11(ZFS 10 6/06+) · 권한: du 는 root 권장"
+    - do: 디스크 오류 확인 (읽기 전용)
+      cmd: |
+        iostat -En | grep -i -E "errors|Predictive"
+        fmadm faulty
+        grep -i -E "error for command|retryable|fatal" /var/adm/messages | tail -20
+      check: "Hard Errors 증가·Predictive Failure Analysis 0 이 아니거나 fmadm 결함이 있으면 교체 대상, Retryable 반복은 경로·케이블 점검"
+      note: "적용: Solaris 10/11 · 권한: root"
+  - stage: 2
+    steps:
+    - do: 공간 확보
+      cmd: |
+        fuser -c <mount>
+        zfs destroy <pool>/<dataset>@<스냅샷>
+        audit -n
+      check: "성공: df/zfs list 사용률 85% 이하, 감사는 새 파일로 전환 · 실패: 열린 파일이면 서비스 재시작 일정 협의"
+      note: "사전조건: 스냅샷·파일 소유자 확인, 감사 파일은 보안 담당 확인 · 영향: 스냅샷 삭제는 되돌릴 수 없음 · 승인: 시스템 담당·보안 담당(감사) · 백업/롤백: 삭제 전 백업 존재 확인, 감사 파일은 보관 서버로 이관 후 정리"
+    - do: 결함 디스크 교체
+      cmd: |
+        zpool replace <pool> <old-dev> <new-dev>
+        metareplace -e <mirror> <slice>
+      check: "성공: zpool status resilver 완료·ONLINE, metastat Okay · 실패: resilver 오류면 Oracle 지원 협의"
+      note: "사전조건: 중복 구성·최신 백업 확인 · 영향: resilver 중 I/O 부하 · 승인: 시스템 담당·HW 업체 · 백업/롤백: 교체 전 zpool status·metastat -p 보관, 실패 시 백업 복원"
+  - stage: 3
+    steps:
+    - do: 제조사(Oracle) 의뢰 자료
+      cmd: |
+        iostat -En > iostat_En_$(date +%Y%m%d).txt ; fmdump -eV > fmdump_eV_$(date +%Y%m%d).txt
+        zpool status -v > zpool_$(date +%Y%m%d).txt
+      check: "iostat -En, fmdump -eV, zpool status, messages"
+      note: "민감정보 마스킹: 호스트명·IP·파일 경로의 사용자명 가림 후 전달 · 전달 승인: 보안 담당"
+
+- id: SOL-PROC-R5-SECURITY
+  products: [solaris]
+  category: security
+  match: [SOL-LDAP-FAIL, SOL-SSH-FAIL, SOL-SUDO-FAIL, SOL-RBAC-DENY, SOL-AUTH-FAIL]
+  title: 인증 실패·LDAP 연결·sudo·RBAC 거부 (Solaris)
+  source: "Oracle Solaris 10/11 'Securing Users and Processes'(RBAC: profiles, auths, roles, user_attr) · passwd(1) · ldapclient/ldaplist · policy.conf"
+  stages:
+  - stage: 1
+    steps:
+    - do: 실패 계정·출발지 확인 (읽기 전용)
+      cmd: |
+        grep -i auth /etc/syslog.conf
+        grep -i -E "sshd|sudo|login" <인증로그> | grep -i -E "fail|invalid|incorrect|not in sudoers" | tail -30
+        passwd -s <user>
+      check: "같은 출발지 다수 계정이면 무차별 대입, passwd -s 상태 LK 면 잠금"
+      note: "적용: Solaris 10/11 · 권한: root"
+    - do: 권한·LDAP 상태 확인 (읽기 전용)
+      cmd: |
+        profiles -l <user> ; auths <user> ; roles <user>
+        svcs -l svc:/network/ldap/client:default
+        ldapclient list | grep -v -i passwd
+      check: "거부된 명령이 프로파일에 없으면 RBAC 미할당, ldap/client 가 online 이 아니거나 서버 목록이 비어 있으면 LDAP 연결 문제(비밀번호 줄은 표시 제외)"
+      note: "적용: Solaris 10/11 · 권한: root"
+  - stage: 2
+    steps:
+    - do: 잠금 해제·권한 부여
+      cmd: |
+        passwd -u <user>
+        usermod -P "<프로파일>" <user>
+      check: "성공: 본인 로그인 성공, profiles -l 에 새 프로파일 · 실패: 다시 잠기면 비밀번호 만료 확인"
+      note: "사전조건: 본인 확인·권한 요청 승인서 · 영향: 해당 계정 권한 변경 · 승인: 보안 담당 · 백업/롤백: 변경 전 /etc/user_attr 백업, usermod -P 이전 값으로 원복"
+    - do: LDAP 클라이언트 재기동
+      cmd: |
+        ldapclient list > ldapclient_$(date +%Y%m%d).txt
+        svcadm restart svc:/network/ldap/client:default
+      check: "성공: ldaplist -l passwd <user> 조회 성공 · 실패: 서버·인증서 원인 확인"
+      note: "사전조건: 서버·방화벽 원인 해결 · 영향: 재기동 중 LDAP 사용자 조회 일시 불가 · 승인: 시스템 담당 · 백업/롤백: 설정 목록 백업 파일 보관(비밀번호 포함 — 접근 통제)"
+  - stage: 3
+    steps:
+    - do: 보안 사고 의심 시 보고 자료
+      cmd: |
+        last > last_$(date +%Y%m%d).txt
+        grep -i -E "sshd|sudo|login" <인증로그> > auth_$(date +%Y%m%d).txt
+      check: "실패 계정·출발지·시각 목록"
+      note: "민감정보 마스킹: 계정명·내부 IP 는 보안 담당 지시에 따라 가림 · 전달 승인: 보안 담당"
+
+- id: SOL-PROC-R5-MEMORY
+  products: [solaris]
+  category: memory
+  match: [SOL-SHM-FAIL, SOL-SWAP-EXHAUSTED]
+  title: 스왑(가상 메모리) 고갈·공유 메모리 할당 실패 (Solaris)
+  source: "Oracle Solaris 10/11 관리 문서 — swap -s/-l/-a, prstat, Resource Controls(project.max-shm-memory), ipcs"
+  stages:
+  - stage: 1
+    steps:
+    - do: 스왑·메모리 사용 확인 (읽기 전용)
+      cmd: |
+        swap -s ; swap -l
+        vmstat 2 5
+        prstat -s rss -n 10 5 1 ; df -h /tmp
+      check: "swap -s available 이 거의 없으면 고갈, vmstat sr(scan rate) 이 계속 높으면 메모리 압박, /tmp(tmpfs) 사용이 크면 원인 후보"
+      note: "적용: Solaris 10/11 · 권한: 일반 사용자 가능"
+    - do: 공유 메모리 한도 확인 (읽기 전용)
+      cmd: |
+        ps -o pid,projid,project,args -p <PID>
+        prctl -n project.max-shm-memory -i project <project> ; prctl -n project.max-shm-ids -i project <project>
+        ipcs -mJ | head -40 ; ipcs -mA | head -40
+      check: "요청 크기와 같은 프로젝트의 기존 세그먼트 합이 max-shm-memory 를 넘으면 한도 EINVAL, 세그먼트 수가 max-shm-ids 에 닿으면 ENOSPC · 같은 key 의 기존 세그먼트가 요청보다 작으면 한도와 무관한 EINVAL(애플리케이션 key·크기 확인)"
+      note: "적용: Solaris 10+ (shmget(2) NOTES 기준, 8/9 는 /etc/system shmsys:shminfo_shmmax) · 프로젝트는 사용자 기본값(id -p)이 아니라 실패 프로세스의 실제 값(ps -o project)으로 본다 · 권한: root"
+  - stage: 2
+    steps:
+    - do: 스왑 추가
+      cmd: |
+        zfs create -V <크기>G rpool/swap2 ; swap -a /dev/zvol/dsk/rpool/swap2
+      check: "성공: swap -l 에 새 장치·available 증가 · 실패: 풀 공간 부족이면 다른 풀 사용"
+      note: "사전조건: 풀 여유 공간 확인 · 영향: 운영 중 수행 가능 · 승인: 시스템 담당 · 백업/롤백: swap -d /dev/zvol/dsk/rpool/swap2 후 zfs destroy 로 원복, 영구화는 vfstab 백업 후 추가 · 적용: ZFS 루트(11), UFS 는 mkfile 후 swap -a"
+    - do: 공유 메모리 한도 상향
+      cmd: |
+        prctl -n project.max-shm-memory -r -v <크기> -i project <project>
+        projmod -s -K "project.max-shm-memory=(priv,<크기>,deny)" <project>
+      check: "성공: 애플리케이션 shmget 성공, prctl 에 새 값 · 실패: zone 한도(zone.max-shm-memory) 확인"
+      note: "사전조건: DB·미들웨어 요구값 확인 · 영향: projmod 는 새 태스크부터 적용 · 승인: 시스템 담당 · 백업/롤백: /etc/project 백업, 이전 값으로 prctl -r 원복"
+  - stage: 3
+    steps:
+    - do: 제조사(Oracle) 의뢰 자료
+      cmd: |
+        swap -s > swap_$(date +%Y%m%d).txt ; vmstat 2 30 > vmstat_$(date +%Y%m%d).txt
+        prstat -s rss -n 30 5 3 > prstat_$(date +%Y%m%d).txt
+      check: "swap, vmstat, prstat, prctl, ipcs 결과"
+      note: "민감정보 마스킹: 호스트명·사용자명·프로세스 인자 가림 후 전달 · 전달 승인: 보안 담당"
+
+- id: SOL-PROC-R5-UPSTREAM
+  products: [solaris]
+  category: upstream
+  match: [SOL-NFS-NOT-RESPONDING]
+  title: NFS 서버 응답 없음 (Solaris 클라이언트)
+  source: "Oracle Solaris 10/11 'Managing Network File Systems'(nfsstat, rpcinfo, mount options)"
+  stages:
+  - stage: 1
+    steps:
+    - do: NFS 마운트·통계 확인 (읽기 전용)
+      cmd: |
+        nfsstat -m
+        nfsstat -c
+      check: "nfsstat -m 으로 서버·옵션(hard/soft) 확인, timeout·retrans 증가면 서버 경로 문제(멈춘 경로에 df·ls 금지 — 세션이 멈춤)"
+      note: "적용: Solaris 10/11 · 권한: 일반 사용자 가능"
+    - do: 서버 도달성 확인 (읽기 전용)
+      cmd: |
+        ping <server> 3
+        rpcinfo -s <server> | head -20
+      check: "ping 무응답이면 네트워크·서버 다운, rpcinfo 에 nfs·mountd 가 없으면 서버 서비스 이상 → NFS 서버 담당 이관"
+      note: "적용: Solaris 10/11 · 권한: 일반 사용자 가능"
+  - stage: 2
+    steps:
+    - do: 영향 프로세스 확인 후 강제 해제
+      cmd: |
+        fuser -c <mount>
+        umount -f <mount>
+      check: "성공: 서버 복구 후 mount 로 재연결·접근 정상 · 실패: 해제 실패면 영향 프로세스 정리 협의"
+      note: "사전조건: NFS 서버·네트워크 복구가 우선, 장기화 시에만 · 영향: 해당 경로 작업 실패 · 승인: 업무 담당·시스템 담당 · 백업/롤백: 해제 전 nfsstat -m 출력 보관, mount <server>:<path> <mount> 로 재연결"
+  - stage: 3
+    steps:
+    - do: 제조사(Oracle)·NFS 서버 담당 전달 자료
+      cmd: |
+        nfsstat -c > nfsstat_$(date +%Y%m%d).txt ; nfsstat -m > nfsmount_$(date +%Y%m%d).txt
+        grep -i nfs /var/adm/messages | tail -100 > nfs_messages.txt
+      check: "nfsstat, mount 옵션, messages 의 not responding/OK 시각"
+      note: "민감정보 마스킹: 서버 IP·호스트명·경로의 사용자명 가림 후 전달 · 전달 승인: 보안 담당"

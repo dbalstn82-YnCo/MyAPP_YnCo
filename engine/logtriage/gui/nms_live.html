@@ -1,0 +1,784 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LogTriage · 실시간 관제</title>
+<style>
+/* 14차(2026-10-22 마스터: "감시 항목 등록 후 서버 정보를 제니퍼처럼 액티브하게") — 관제실 모니터용 전체 화면.
+   시안: GPT 이미지 생성 → Claude 구현 → 화면 대조(KPI 미니 막대·그라데이션 게이지·미니 도넛 3·X-View 선택 배지·이벤트 표·이퀄라이저 값 표시·추이 영역 채움).
+   외부 라이브러리 없이 캔버스로 그린다(폐쇄망). */
+:root{--bg:#0B1220;--card:#111A2E;--line:#1E2A44;--ink:#E6EDF7;--muted:#8A9BB8;--dim:#5B6B88;
+  --acc:#5AA2FF;--ok:#22C55E;--warn:#F59E0B;--crit:#EF4444;--mono:Consolas,"D2Coding","Cascadia Mono",monospace}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:13px/1.45 "Pretendard","Malgun Gothic","Apple SD Gothic Neo",sans-serif}
+body{display:flex;flex-direction:column;min-height:100vh;overflow-x:hidden;background:radial-gradient(1200px 500px at 50% -200px,#13213D,transparent),var(--bg)}
+button,select{font:inherit;color:var(--ink);background:#16223A;border:1px solid #26365A;border-radius:8px;padding:6px 12px;cursor:pointer}
+button:hover,select:hover{border-color:var(--acc)}button:focus-visible,select:focus-visible,canvas:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
+button:disabled{opacity:.5;cursor:default}
+button.on{background:rgba(90,162,255,.16);border-color:var(--acc);color:var(--acc)}
+.seg{display:inline-flex;border:1px solid #26365A;border-radius:9px;overflow:hidden}.seg button{border:0;border-radius:0;background:#121C31;padding:6px 12px}
+.seg button+button{border-left:1px solid #26365A}.seg button.on{background:rgba(90,162,255,.18);color:var(--acc)}
+.top{display:flex;align-items:center;gap:10px;padding:10px 18px;border-bottom:1px solid var(--line);background:linear-gradient(180deg,#0F1930,#0B1220);flex-wrap:wrap}
+.top h1{font-size:17px;margin:0;letter-spacing:.02em;display:flex;align-items:center;gap:10px}
+.top h1 .logo{width:6px;height:20px;border-radius:3px;background:linear-gradient(180deg,#5AA2FF,#1D6BFF);box-shadow:0 0 12px rgba(90,162,255,.6)}
+.dot{width:9px;height:9px;border-radius:99px;background:var(--ok);box-shadow:0 0 10px var(--ok);animation:pulse 1.6s infinite;display:inline-block}
+.dot.off{background:var(--dim);box-shadow:none;animation:none}.dot.bad{background:var(--crit);box-shadow:0 0 10px var(--crit)}
+.top .sp{flex:1}.top .clock{font-family:var(--mono);font-size:15px;color:#CFE0F5;display:flex;align-items:center;gap:8px}
+.note{font-size:12px;color:var(--muted)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+@keyframes blink{0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,0)}50%{box-shadow:0 0 0 2px rgba(239,68,68,.6),0 0 26px rgba(239,68,68,.45)}}
+main{flex:1;display:grid;gap:12px;padding:12px 18px 16px;grid-template-rows:auto minmax(340px,1.2fr) minmax(280px,1fr)}
+.kpis{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:12px}
+.kpi{background:linear-gradient(180deg,#132039,#0F192D);border:1px solid var(--line);border-radius:12px;padding:10px 12px;display:grid;grid-template-columns:auto 1fr;grid-template-rows:auto auto;gap:0 10px;align-items:center;min-width:0}
+.kpi .ic{grid-row:span 2;width:38px;height:38px;border-radius:11px;display:grid;place-items:center;background:rgba(90,162,255,.10);color:var(--c,var(--acc));font-size:18px}
+.kpi .k{font-size:12.5px;color:#BFD0E6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}.kpi .vv{display:flex;align-items:flex-end;gap:8px;min-width:0}
+.kpi .v{font:700 30px/1.05 var(--mono);color:var(--c,var(--acc))}.kpi .v small{font-size:15px;margin-left:2px}
+.kpi .spark{flex:1;height:26px;display:flex;align-items:flex-end;gap:2px;min-width:30px;opacity:.85}
+.kpi .spark i{flex:1;background:var(--c,var(--acc));border-radius:1px;min-height:2px;opacity:.75}
+.kpi.ok{--c:var(--ok)}.kpi.warn{--c:var(--warn)}.kpi.crit{--c:var(--crit)}.kpi.ok .ic{background:rgba(34,197,94,.12)}.kpi.warn .ic{background:rgba(245,158,11,.12)}.kpi.crit .ic{background:rgba(239,68,68,.12)}
+.kpi.crit.live{border-color:rgba(239,68,68,.75);background:linear-gradient(180deg,#2A1420,#1A1222);animation:blink 1.3s infinite}
+.row{display:grid;gap:12px;min-height:0}
+.row.mid{grid-template-columns:minmax(260px,.95fr) minmax(0,2.5fr) minmax(300px,1.15fr)}
+.row.bot{grid-template-columns:minmax(0,1.35fr) minmax(0,1fr)}
+.card{background:linear-gradient(180deg,#121D33,#0F182B);border:1px solid var(--line);border-radius:12px;display:flex;flex-direction:column;min-height:0;min-width:0}
+.card h2{font-size:14px;margin:0;padding:10px 14px 6px;display:flex;align-items:center;gap:8px;color:#DCE8F7;flex-wrap:wrap}
+.card h2 small{font-weight:400;color:var(--dim);font-size:11.5px}.card h2 .r{margin-left:auto;display:flex;gap:6px;align-items:center}
+.card h2 select{padding:3px 8px;font-size:12px}
+.cv{position:relative;flex:1;min-height:0}.cv canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+.eqlist{flex:1;min-height:0;overflow:auto;padding:2px 14px 8px}
+/* 15차(마스터: '서버 이퀄라이저가 너무 보기 힘듦'): 세로 칸 막대 → 서버마다 한 줄, CPU·메모리·디스크 가로 막대 + 숫자 */
+.eqh,.eqr{display:grid;grid-template-columns:minmax(110px,1.1fr) repeat(3,minmax(0,1fr));gap:10px;align-items:center}
+.eqh{position:sticky;top:0;background:#111B30;z-index:1;font-size:12px;color:var(--muted);padding:4px 0 6px;border-bottom:1px solid var(--line)}
+.eqr{padding:7px 0;border-bottom:1px solid #17223A;font-size:13px}
+.eqr .nm{display:flex;align-items:center;gap:8px;min-width:0;font-weight:600}.eqr .nm span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.eqr .nm i{width:8px;height:8px;border-radius:99px;flex:none;background:var(--ok)}.eqr .nm i.warn{background:var(--warn)}.eqr .nm i.crit{background:var(--crit);box-shadow:0 0 8px var(--crit)}
+.eb{display:grid;grid-template-columns:minmax(0,1fr) 46px;gap:8px;align-items:center}
+.eb .tr{position:relative;height:14px;border-radius:3px;background:#1A2640;overflow:hidden}
+.eb .tr b{position:absolute;left:0;top:0;bottom:0;border-radius:3px;background:var(--ok);transition:width .6s ease}
+.eb .tr b.warn{background:var(--warn)}.eb .tr b.crit{background:var(--crit)}.eb .tr b.na{background:transparent}
+.eb .tr u{position:absolute;top:-2px;bottom:-2px;width:2px;background:rgba(239,68,68,.75);text-decoration:none}
+.eb em{font:600 13px var(--mono);font-style:normal;text-align:right;color:#DCE8F7}.eb em.crit{color:#FCA5A5}.eb em.warn{color:#FCD34D}.eb em.na{color:var(--dim);font-weight:400}
+.eqempty{color:var(--muted);padding:26px 6px;text-align:center;font-size:13px;line-height:1.7}
+.legend{display:flex;gap:12px;flex-wrap:wrap;font-size:11.5px;color:var(--muted);padding:0 14px 8px}
+.legend i{display:inline-block;width:9px;height:9px;border-radius:99px;margin-right:5px;vertical-align:-1px}
+.events{flex:1;overflow:auto;padding:0 8px 8px;min-height:0}
+.evh,.ev{display:grid;grid-template-columns:22px 62px minmax(60px,.8fr) minmax(0,1.6fr);gap:6px;align-items:center;padding:6px 6px;font-size:12px}
+.evh{color:var(--dim);font-size:11.5px;position:sticky;top:0;background:#101A2E;z-index:1;border-bottom:1px solid var(--line)}
+.ev{border-bottom:1px solid #17223A;border-left:2px solid transparent}.ev .t{font-family:var(--mono);color:#9FB2CF}
+.ev .s{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600}.ev .x{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ev .b{width:18px;height:18px;border-radius:99px;display:grid;place-items:center;font-size:11px;font-weight:700;color:#0B1220}
+.ev.down{border-left-color:var(--crit)}.ev.down .b{background:var(--crit)}.ev.down .x{color:#FCA5A5}
+.ev.up{border-left-color:var(--ok)}.ev.up .b{background:var(--ok)}.ev.up .x{color:#86EFAC}
+.ev.th{border-left-color:var(--warn)}.ev.th .b{background:var(--warn)}.ev.th .x{color:#FCD34D}
+.ev.fresh{background:rgba(90,162,255,.07)}
+.empty{color:var(--dim);padding:18px 14px;font-size:12.5px}
+.tip{position:fixed;pointer-events:none;background:#0A1324;border:1px solid #2B3D63;border-radius:8px;padding:6px 9px;font-size:12px;z-index:9;box-shadow:0 8px 24px rgba(0,0,0,.45);white-space:nowrap}
+.tip[hidden],.sel[hidden],.drawer[hidden],.banner[hidden]{display:none}
+.sel,.drawer{position:fixed;background:#0D172B;border:1px solid #2B3D63;box-shadow:0 18px 50px rgba(0,0,0,.55);z-index:8;display:flex;flex-direction:column}
+.sel{right:22px;bottom:22px;width:min(580px,calc(100vw - 44px));max-height:56vh;border-radius:12px}
+.drawer{right:0;top:0;bottom:0;width:min(760px,100vw);border-radius:12px 0 0 12px}
+.sel header,.drawer header{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line)}
+.sel header b,.drawer header b{font-size:14px}.sel header .sp,.drawer header .sp{flex:1}
+.sel .body,.drawer .body{overflow:auto;padding:6px 12px 12px}
+table{width:100%;border-collapse:collapse;font-size:12px}th,td{padding:6px 6px;text-align:left;border-bottom:1px solid #18233B;vertical-align:middle}
+th{color:var(--muted);font-weight:500;position:sticky;top:0;background:#0D172B;z-index:1}
+td.n{font-family:var(--mono);text-align:right}.grp{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 8px}
+.grp span{background:#16223A;border:1px solid #26365A;border-radius:99px;padding:2px 9px;font-size:11.5px}
+.drawer select{padding:3px 6px;font-size:12px;max-width:170px}.drawer td .m{font-family:var(--mono);font-size:11.5px;color:#BFD0E6}
+.drawer .msg{font-size:11.5px;color:var(--muted);display:block;margin-top:2px}.drawer .msg.err{color:#FCA5A5}.drawer .msg.ok{color:#86EFAC}
+.drawer .intro{font-size:12px;color:var(--muted);margin:4px 2px 10px;line-height:1.6}
+.rej{margin:0 2px 10px;padding:8px 10px;border-radius:8px;background:rgba(245,158,11,.10);border:1px solid rgba(245,158,11,.5);color:#FDE68A;font-size:12px;line-height:1.6}.rej[hidden]{display:none}
+.r-up{color:var(--acc)}.r-slow{color:var(--warn)}.r-down{color:var(--crit)}
+.banner{margin:8px 18px 0;padding:8px 12px;border-radius:8px;background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.45);color:#FECACA;font-size:12.5px}
+/* 19차(현장: '점으로만 보이고 정적 — 표현 정보가 너무 적다, 서버를 누르면 CPU·메모리 등 상세를 반드시') · GPT 시안 118 → 클로드 검증:
+   가운데 = 가용률(게이지 겹침 수정 + 하위 3) · 성능 추이(CPU/메모리/디스크/응답 탭) · 이벤트, 아래 = 서버 현황 타일(목록=이퀄라이저) · X-View.
+   타일·X-View 점·이벤트·이퀄라이저 줄·하위 3·추이 범례를 누르면 오른쪽 '서버 상세'(지표 6 · 기간별 추이 · 볼륨 · 상위 프로세스 · 최근 검사 120회) */
+main{grid-template-rows:auto minmax(270px,.92fr) minmax(330px,1.5fr)}
+.row.mid{grid-template-columns:minmax(280px,.9fr) minmax(0,1.9fr) minmax(300px,1.05fr)}
+.row.bot{grid-template-columns:minmax(0,2.15fr) minmax(320px,1.15fr)}
+@media (min-width:1281px) and (min-height:860px){html,body{height:100%;overflow:hidden}body{min-height:0}main{min-height:0}}
+.gcard .cv{min-height:150px}
+.avmini{display:flex;justify-content:space-around;gap:6px;padding:0 10px 6px}
+.avmini div{display:flex;align-items:center;gap:7px;font-size:11.5px;color:var(--muted);line-height:1.25}
+.avmini i{width:34px;height:34px;border-radius:99px;flex:none;display:grid;place-items:center;background:conic-gradient(var(--c) calc(var(--p)*1%),#1A2640 0);font:700 10px var(--mono);color:#E6EDF7;font-style:normal;position:relative}
+.avmini i::before{content:"";position:absolute;inset:6px;border-radius:99px;background:#101A2E}
+.avmini i span{position:relative}
+.avmini b{display:block;color:#DCE8F7;font:600 12px "Malgun Gothic",sans-serif}
+.avlow{padding:0 12px 10px;display:grid;gap:3px}
+.avlow h3{font-size:12px;font-weight:600;color:#BFD0E6;margin:2px 2px 2px}.avlow h3 small{color:var(--dim);font-weight:400;margin-left:4px}
+.avr{display:grid;grid-template-columns:8px minmax(0,1fr) minmax(60px,1.1fr) 58px;gap:8px;align-items:center;font-size:12px;cursor:pointer;border-radius:6px;padding:3px 4px}
+.avr:hover,.avr:focus-visible{background:#16223A;outline:none}.avr i{width:8px;height:8px;border-radius:99px;background:var(--ok)}
+.avr .nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600}.avr .tr{height:6px;border-radius:3px;background:#1A2640;overflow:hidden}
+.avr .tr b{display:block;height:100%;background:var(--ok);border-radius:3px}.avr em{font:600 12px var(--mono);font-style:normal;text-align:right}
+.avr .warn,.avr i.warn{background:var(--warn)}.avr .crit,.avr i.crit{background:var(--crit)}.avr em.warn{background:none;color:#FCD34D}.avr em.crit{background:none;color:#FCA5A5}.avr em.ok{color:#86EFAC}
+.card h2 .seg button{padding:3px 10px;font-size:12px}
+.chips{display:inline-flex;gap:5px;flex-wrap:wrap}.chips button{padding:2px 10px;font-size:12px;border-radius:99px}.chips button b{margin-left:5px;font-family:var(--mono);font-weight:600}
+.tiles{flex:1;min-height:0;overflow:auto;padding:4px 12px 12px;display:grid;grid-template-columns:repeat(auto-fill,minmax(236px,1fr));gap:10px;align-content:start}
+.tiles[hidden],.eqlist[hidden],.legend[hidden]{display:none}
+.tile{background:linear-gradient(180deg,#14213A,#101A2E);border:1px solid #22324F;border-radius:10px;padding:8px 11px 9px;cursor:pointer;display:grid;gap:6px;min-width:0;transition:border-color .2s,transform .15s,box-shadow .2s}
+.tile:hover,.tile:focus-visible{border-color:var(--acc);box-shadow:0 0 0 1px rgba(90,162,255,.35);transform:translateY(-1px);outline:none}
+.tile.down{border-color:rgba(239,68,68,.8);animation:blink 1.6s infinite}.tile.warn{border-color:rgba(245,158,11,.6)}.tile.off{opacity:.45}
+.tile.cur{border-color:var(--acc);box-shadow:0 0 0 2px rgba(90,162,255,.55)}   /* '.sel' 은 '선택한 검사' 창 이름 — 겹치면 타일이 그 자리(오른쪽 아래)로 날아간다(19차 실측) */
+.tile .th{display:flex;align-items:center;gap:7px;min-width:0}
+.tile .th i,.det .dh i.sd{width:9px;height:9px;border-radius:99px;flex:none;background:var(--ok);box-shadow:0 0 8px rgba(34,197,94,.6)}
+.tile .th i.warn,.det .dh i.sd.warn{background:var(--warn);box-shadow:0 0 8px rgba(245,158,11,.6)}.tile .th i.down,.det .dh i.sd.down{background:var(--crit);box-shadow:0 0 10px var(--crit)}.tile .th i.off,.det .dh i.sd.off{background:var(--dim);box-shadow:none}
+.tile .th b{font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}.tile .th small{font-size:11px;color:var(--muted);white-space:nowrap}
+.tile .th svg{margin-left:auto;flex:none}
+.tile .tb{display:grid;grid-template-columns:minmax(0,1fr) 58px;gap:8px;align-items:center}
+.tile .bars{display:grid;gap:4px;min-width:0}
+.br{display:grid;grid-template-columns:36px minmax(0,1fr) 34px;gap:6px;align-items:center;font-size:11px;color:var(--muted)}
+.br .tr{height:6px;border-radius:3px;background:#1A2640;overflow:hidden}.br .tr b{display:block;height:100%;border-radius:3px;background:var(--ok);transition:width .6s ease}
+.br .tr b.warn{background:var(--warn)}.br .tr b.crit{background:var(--crit)}.br em{font:600 11.5px var(--mono);font-style:normal;color:#DCE8F7;text-align:right}.br em.crit{color:#FCA5A5}.br em.warn{color:#FCD34D}
+.tile .side{font-size:10.5px;color:var(--muted);text-align:right;line-height:1.35}.tile .side b{display:block;font:600 12.5px var(--mono);color:#DCE8F7;margin-bottom:2px}.tile .side b.bad{color:#FCA5A5}
+.tile .na{font-size:11.5px;color:var(--dim);line-height:1.5}
+.eqr,.ev{cursor:pointer}.eqr:hover,.eqr:focus-visible,.ev:hover,.ev:focus-visible{background:#15213A;outline:none}
+#trendlg span[data-open]{cursor:pointer}#trendlg span[data-open]:hover{color:#E6EDF7}
+.det{position:fixed;right:0;top:0;bottom:0;width:min(960px,50vw);background:#0C162A;border-left:1px solid #2B3D63;box-shadow:-24px 0 60px rgba(0,0,0,.6);z-index:7;display:flex;flex-direction:column;animation:slidein .2s ease-out}
+.det[hidden]{display:none}@keyframes slidein{from{transform:translateX(30px);opacity:.4}to{transform:none;opacity:1}}
+.det .dh{display:flex;align-items:center;gap:10px;padding:12px 16px 6px;flex-wrap:wrap}.det .dh .dn{font-size:20px;font-weight:700;letter-spacing:.01em}
+.det .dh .pill{font-size:12px;border-radius:99px;padding:2px 10px;border:1px solid;font-weight:600}
+.det .dh .pill.up{color:#86EFAC;border-color:rgba(34,197,94,.5);background:rgba(34,197,94,.1)}.det .dh .pill.warn{color:#FCD34D;border-color:rgba(245,158,11,.5);background:rgba(245,158,11,.1)}
+.det .dh .pill.down{color:#FCA5A5;border-color:rgba(239,68,68,.6);background:rgba(239,68,68,.12)}.det .dh .pill.off{color:var(--muted);border-color:#2B3D63}
+.det .dh .sp{flex:1}
+.det .di{display:flex;gap:18px;flex-wrap:wrap;padding:0 16px 10px;border-bottom:1px solid var(--line);font-size:12px;color:var(--muted)}.det .di b{color:#DCE8F7;font-weight:600;margin-left:6px}
+.det .di .av{margin-left:auto;text-align:right}.det .di .av b{font:700 15px var(--mono);color:#86EFAC}
+.det .body{flex:1;overflow:auto;padding:12px 16px 18px;display:grid;gap:12px;align-content:start}
+.mcards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.mc{background:linear-gradient(180deg,#132039,#0F192D);border:1px solid var(--line);border-radius:10px;padding:9px 12px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:1px 8px;min-width:0;--c:var(--acc)}
+.mc .k{font-size:12px;color:#BFD0E6;white-space:nowrap}.mc .v{font:700 25px/1.15 var(--mono);color:var(--c);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.mc .v small{font-size:13px;margin-left:2px}.mc .v.sm{font-size:17px;line-height:1.75}
+.mc .s{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.mc svg{grid-row:1/span 3;grid-column:2;align-self:center}
+.mc svg{color:var(--c)}.mc.ok{--c:var(--ok)}.mc.warn{--c:var(--warn)}.mc.crit{--c:var(--crit)}.mc.na{--c:var(--dim)}
+.dsec{background:linear-gradient(180deg,#121D33,#0F182B);border:1px solid var(--line);border-radius:10px;padding:10px 12px;min-width:0}
+.dsec h3{font-size:13px;margin:0 0 8px;display:flex;align-items:center;gap:8px;color:#DCE8F7}.dsec h3 small{color:var(--dim);font-weight:400}.dsec h3 .r{margin-left:auto;display:flex;gap:6px;align-items:center}
+.dchart{position:relative;height:220px}.dchart canvas{position:absolute;inset:0;width:100%;height:100%}
+.dgrid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.25fr);gap:12px}
+.dsec td .tr{display:inline-block;width:70px;height:6px;border-radius:3px;background:#1A2640;overflow:hidden;vertical-align:middle;margin-right:6px}.dsec td .tr b{display:block;height:100%;background:var(--ok)}
+.dsec td .tr b.warn{background:var(--warn)}.dsec td .tr b.crit{background:var(--crit)}
+.dsec th{background:#101A2E}.ugrp{display:flex;gap:5px;flex-wrap:wrap;margin:0 0 6px}.ugrp span{background:#16223A;border:1px solid #26365A;border-radius:99px;padding:1px 8px;font-size:11px}
+.strip{display:grid;grid-template-columns:repeat(60,minmax(0,1fr));gap:2px}.strip i{height:15px;border-radius:2px;background:var(--ok);opacity:.9}
+.strip i.down{background:var(--crit)}.strip i.error{background:var(--warn)}.strip i.slow{background:#EAB308}.strip i.none{background:#16223A}
+.dnone{color:var(--muted);font-size:12.5px;line-height:1.7;padding:6px 2px}
+@media (max-width:1280px){.det{width:100vw}.mcards{grid-template-columns:repeat(2,minmax(0,1fr))}.dgrid{grid-template-columns:1fr}}
+@media (prefers-reduced-motion:reduce){.tile.down{animation:none}.det{animation:none}}
+@media (max-width:1280px){.row.mid{grid-template-columns:1fr 1fr}.row.mid .tcard{grid-column:1/-1;order:-1;min-height:280px}.kpis{grid-template-columns:repeat(3,minmax(0,1fr))}
+  main{grid-template-rows:auto auto auto}.row.mid{min-height:700px}.row.bot{grid-template-columns:1fr;min-height:600px}}
+@media (max-width:720px){.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.row.mid{grid-template-columns:1fr;min-height:1060px}.kpi .spark{display:none}}
+@media (prefers-reduced-motion:reduce){.dot,.kpi.crit.live{animation:none}}
+/* ═══ 21차 재구성(2026-10-26): '트리아지 보드' — 브랜드 남색 유리 카드 · 상황 띠 · 원형 가용률 · 타임라인 · 레인 (GPT 155 시안) ═══ */
+:root{--bg:#060C1E;--card:#0D1833;--line:#1C2B4D;--acc:#5AA2FF}
+body{background:radial-gradient(1400px 620px at 12% -240px,#14275A,transparent),radial-gradient(900px 520px at 100% -80px,#102252,transparent),var(--bg)}
+.top{background:linear-gradient(180deg,rgba(16,30,64,.92),rgba(6,12,30,.92));border-bottom:1px solid rgba(90,162,255,.16)}
+.card,.kpi{background:linear-gradient(180deg,rgba(22,38,80,.80),rgba(10,20,44,.88));border:1px solid rgba(90,162,255,.16);border-radius:16px;box-shadow:0 12px 30px rgba(0,0,0,.32),inset 0 1px 0 rgba(255,255,255,.05)}
+.card h2{font-size:15px;padding:12px 16px 6px;letter-spacing:.01em}
+.sitbar{display:grid;grid-template-columns:minmax(380px,1fr) minmax(0,2.15fr);gap:12px;min-width:0}
+.sit{display:flex;align-items:center;gap:14px;padding:10px 18px;border-radius:16px;border:1px solid rgba(90,162,255,.2);background:linear-gradient(90deg,rgba(29,107,255,.16),rgba(10,20,44,.85));min-width:0}
+.sit .si{width:46px;height:46px;flex:none;border-radius:13px;display:grid;place-items:center;font:800 24px/1 "Malgun Gothic",sans-serif;color:#fff;background:#1D6BFF}
+.sit b{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;font-size:24px;line-height:1.2}.sit em{font-style:normal}
+.sit em.zero{color:#6B7FA3}.sit em.crit{color:#FF6B6E}.sit em.warn{color:#FFB547}.sit em.ok{color:#4ADE80}.sit b span{font-size:20px;color:#9CC8FF;margin-left:6px}
+.sit small{display:block;color:var(--muted);font-size:12px;margin-top:2px}
+.sit.crit{border-color:rgba(229,72,77,.55);background:linear-gradient(90deg,rgba(229,72,77,.22),rgba(10,20,44,.88))}.sit.crit .si{background:#E5484D;box-shadow:0 0 22px rgba(229,72,77,.55)}
+.sit.warn{border-color:rgba(255,181,71,.5);background:linear-gradient(90deg,rgba(255,181,71,.16),rgba(10,20,44,.88))}.sit.warn .si{background:#F59E0B}
+.sit.ok{border-color:rgba(74,222,128,.45);background:linear-gradient(90deg,rgba(74,222,128,.14),rgba(10,20,44,.88))}.sit.ok .si{background:#16A34A}
+.kpis{gap:10px}.kpi{padding:8px 11px}.kpi .v{font-size:27px}.kpi .ic{border-radius:12px}
+.kpi.crit.live{background:linear-gradient(180deg,rgba(70,20,34,.9),rgba(30,14,30,.9))}
+.lane{grid-column:1/-1;display:flex;align-items:center;gap:8px;padding:6px 2px 0;font-size:12.5px;color:#BFD0E6;border-bottom:1px dashed rgba(90,162,255,.16)}
+.lane:not(:first-child){margin-top:4px}
+.lane b{padding:2px 12px;border-radius:99px;font-size:13px;border:1px solid}
+.lane.down b{color:#FF8A8D;border-color:rgba(229,72,77,.6);background:rgba(229,72,77,.16)}.lane.warn b{color:#FFC370;border-color:rgba(255,181,71,.55);background:rgba(255,181,71,.12)}
+.lane.up b{color:#86EFAC;border-color:rgba(74,222,128,.45);background:rgba(74,222,128,.1)}.lane.off b{color:var(--muted);border-color:#2B3D63}
+.tile{border-radius:13px;background:linear-gradient(180deg,rgba(24,40,80,.75),rgba(12,22,46,.85))}
+.tile.down{grid-column:span 2;border-width:2px;box-shadow:0 0 0 1px rgba(229,72,77,.25),0 8px 26px rgba(229,72,77,.18)}
+.tile.down .th b{font-size:15px}
+.events{padding:2px 10px 10px}
+.ev{grid-template-columns:20px 56px minmax(0,1fr) auto;grid-template-areas:"b t s p" "b t x p";row-gap:1px;border:0;padding:8px 4px;position:relative}
+.ev::before{content:"";position:absolute;left:13px;top:0;bottom:0;width:2px;background:rgba(90,162,255,.16)}
+.ev .b{grid-area:b;z-index:1;width:16px;height:16px;font-size:10px;box-shadow:0 0 0 3px #0B1530}.ev .t{grid-area:t}.ev .s{grid-area:s;font-size:12.5px}.ev .x{grid-area:x;font-size:11.5px}
+.ev .pill{grid-area:p;font-size:11px;font-weight:700;padding:2px 9px;border-radius:99px;border:1px solid currentColor;white-space:nowrap}
+.ev.down .pill{color:#FF8A8D}.ev.up .pill{color:#86EFAC}.ev.th .pill{color:#FFC370}
+.ev.fresh{background:rgba(90,162,255,.08);border-radius:10px}
+@media (max-width:1280px){.sitbar{grid-template-columns:1fr}}
+@media (max-width:720px){.tile.down{grid-column:auto}.sit b{font-size:20px}}
+</style>
+</head>
+<body>
+<header class="top">
+  <h1><span class="logo"></span>LogTriage · 실시간 관제</h1>
+  <span class="note" id="note">불러오는 중…</span>
+  <span class="sp"></span>
+  <span class="note">새로고침 주기</span>
+  <div class="seg" id="every" role="group" aria-label="갱신 주기"><button type="button" data-s="2">2초</button><button type="button" data-s="5" class="on">5초</button><button type="button" data-s="10">10초</button></div>
+  <button id="pause" type="button" aria-pressed="false">❚❚ 일시정지</button>
+  <button id="full" type="button">⛶ 전체 화면</button>
+  <button id="cfg" type="button" title="항목별 자원 사용률 수집 방식·주기를 바꾸고 바로 갱신">⚙ 수집 설정</button>
+  <button id="back" type="button">★ 감시 항목으로</button>
+  <span class="clock"><span class="dot" id="livedot" title="수집 상태"></span><span id="clock">--:--:--</span></span>
+</header>
+<div class="banner" id="err" hidden></div>
+<main>
+  <section class="sitbar">
+  <div class="sit" id="sit" aria-live="polite"><span class="si" aria-hidden="true">!</span><div><b id="sitmain">불러오는 중…</b><small id="sitsub"></small></div></div>
+  <section class="kpis" aria-label="요약">
+    <div class="kpi"><span class="ic" aria-hidden="true">◫</span><span class="k">감시 항목</span><div class="vv"><span class="v" id="k_total">–</span><span class="spark" id="s_total"></span></div></div>
+    <div class="kpi ok"><span class="ic" aria-hidden="true">✓</span><span class="k">정상</span><div class="vv"><span class="v" id="k_up">–</span><span class="spark" id="s_up"></span></div></div>
+    <div class="kpi warn"><span class="ic" aria-hidden="true">!</span><span class="k">주의 <small class="note">의심·복구 중·미확인</small></span><div class="vv"><span class="v" id="k_warn">–</span><span class="spark" id="s_warn"></span></div></div>
+    <div class="kpi crit" id="k_down_c"><span class="ic" aria-hidden="true">⊗</span><span class="k">장애</span><div class="vv"><span class="v" id="k_down">–</span><span class="spark" id="s_down"></span></div></div>
+    <div class="kpi crit"><span class="ic" aria-hidden="true">🔔</span><span class="k">활성 알림 <small class="note" id="k_alert_s"></small></span><div class="vv"><span class="v" id="k_alert">–</span><span class="spark" id="s_alert"></span></div></div>
+    <div class="kpi"><span class="ic" aria-hidden="true">◷</span><span class="k">평균 응답 <small class="note">최근 1분</small></span><div class="vv"><span class="v" id="k_lat">–</span><span class="spark" id="s_lat"></span></div></div>
+  </section>
+  </section>
+  <section class="row mid">
+    <div class="card gcard"><h2>◎ 가용률 <span class="r note" title="24시간 항목별 검사 성공률 평균: 항목마다 최근 24시간 검사 중 성공 비율을 구해 평균합니다(시간 가용률·SLA 값이 아님). 수집기 오류는 장비 상태를 알 수 없어 빼고, 유효한 검사가 없는 항목은 '측정 불가'로 따로 표시합니다. 지금 정상인 항목 비율은 아래 '정상 비율'입니다.">최근 24시간 · 사용 중 항목</span></h2><div class="cv"><canvas id="gauge" aria-label="가용률 게이지와 상태 비율"></canvas></div>
+      <div class="avmini" id="avmini" aria-label="지금 상태 비율"></div><div class="avlow" id="avlow"></div></div>
+    <div class="card"><h2>📈 성능 추이 <small>최근 10분 · 상위 5 · 범례를 누르면 상세</small>
+      <span class="r"><div class="seg" id="tmet" role="group" aria-label="추이 지표"><button type="button" data-m="cpu">CPU</button><button type="button" data-m="mem">메모리</button><button type="button" data-m="disk">디스크</button><button type="button" data-m="lat">응답</button></div></span></h2>
+      <div class="cv"><canvas id="trend" aria-label="성능 추이"></canvas></div><div class="legend" id="trendlg"></div></div>
+    <div class="card"><h2>◷ 이벤트 타임라인 <span class="r"><select id="evf" aria-label="이벤트 고르기"><option value="">전체</option><option value="down">장애</option><option value="up">복구</option><option value="th">임계치·주의</option></select><span class="note" id="evcount"></span></span></h2>
+      <div class="events" id="events" aria-live="polite"></div></div>
+  </section>
+  <section class="row bot">
+    <div class="card tcard"><h2>▤ 트리아지 보드 <small id="tilecount"></small>
+      <span class="r"><span class="chips" id="tchips" role="group" aria-label="상태로 거르기"></span>
+        <select id="tsort" aria-label="정렬"><option value="risk">위험순</option><option value="name">이름순</option></select>
+        <div class="seg" id="tview" role="group" aria-label="보기"><button type="button" data-v="tile">타일</button><button type="button" data-v="list">목록</button></div><span class="note" id="eqnote"></span></span></h2>
+      <div class="tiles" id="tiles" aria-label="서버 현황 — 누르면 상세"></div>
+      <div class="eqlist" id="eq" hidden aria-label="서버별 사용률 — 높은 순"></div>
+      <div class="legend" id="eqlegend" hidden><span><i style="background:var(--ok)"></i>정상</span><span><i style="background:var(--warn)"></i>주의(임계치-15 이상)</span><span><i style="background:var(--crit)"></i>임계치 이상</span><span>세로 눈금선 = 임계치 · 줄을 누르면 상세</span></div></div>
+    <div class="card xv"><h2>◈ 응답 분포 지도 <small>최근 10분 · 끌어서 영역 선택 · 점을 누르면 상세</small>
+      <span class="r"><select id="xvf" aria-label="서버 고르기"><option value="">전체 서버</option></select><span class="note" id="xvcount"></span></span></h2>
+      <div class="cv"><canvas id="xview" tabindex="0" aria-label="응답 시간 산점도 — 끌어서 영역을 고르면 그 검사들을 목록으로 보여 줍니다. Enter 는 최근 1분"></canvas></div>
+      <div class="legend"><span><i style="background:var(--acc)"></i>정상 구간</span><span><i style="background:var(--warn)"></i>지연 구간(500 ms 이상)</span><span><i style="background:var(--crit)"></i>실패</span><span>점에 올리면 서버·시각·응답</span></div></div>
+  </section>
+</main>
+<div class="tip" id="tip" hidden></div>
+<aside class="sel" id="sel" hidden aria-label="선택한 검사">
+  <header><b id="seltitle">선택한 검사</b><span class="sp"></span><button type="button" id="selclose">닫기</button></header>
+  <div class="body"><div class="grp" id="selgrp"></div><table><thead><tr><th>시각</th><th>서버</th><th>결과</th><th style="text-align:right">응답</th></tr></thead><tbody id="selrows"></tbody></table></div>
+</aside>
+<aside class="det" id="det" hidden role="dialog" aria-label="서버 상세"><div id="dethead"></div>
+  <div class="body" id="detbody"><div class="mcards" id="dcards"></div>
+    <div class="dsec"><h3>성능 추이 <small>CPU · 메모리 · 디스크 (%) · 점선 = 임계치</small><span class="r"><span class="seg" id="drange" role="group" aria-label="기간"></span></span></h3>
+      <div class="dchart"><canvas id="dchart" aria-label="서버 사용률 추이"></canvas></div>
+      <div class="legend" style="padding:6px 0 0"><span><i style="background:#5AA2FF"></i>CPU</span><span><i style="background:#A78BFA"></i>메모리</span><span><i style="background:#22C55E"></i>디스크</span><span id="dleg"></span></div></div>
+    <div class="dgrid" id="dgrid"></div><div class="dsec" id="dhist"></div></div></aside>
+<aside class="drawer" id="drawer" hidden aria-label="자원 사용률 수집 설정">
+  <header><b>⚙ 자원 사용률 수집 설정</b><span class="sp"></span><button type="button" id="drefresh">전체 지금 갱신</button><button type="button" id="dclose">닫기</button></header>
+  <div class="body">
+    <p class="intro">항목마다 <b>수집 방식</b>과 <b>주기</b>를 바꾸면 바로 적용됩니다(가용성 상태·장애 이력은 그대로). <b>지금 갱신</b>은 이 서버 자체·SNMP 는 바로 수집하고, 에이전트는 원격 서버가 보내는 값이라 다음 보고 때 반영됩니다.
+      에이전트 설치·SNMP 커뮤니티 같은 자세한 설정은 [감시 항목으로] → 항목 [편집]에서 합니다.</p>
+    <div id="drej" class="rej" hidden></div>
+    <table><thead><tr><th>항목</th><th>수집 방식</th><th>주기</th><th>최근 값 (C/M/D)</th><th></th></tr></thead><tbody id="drows"></tbody></table>
+  </div>
+</aside>
+<script>
+"use strict";
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const num=v=>v==null||isNaN(v)?'–':String(Math.round(v));
+const fmtMs=v=>v==null?'—':v>=1000?(v/1000).toFixed(2)+' s':(v>=100?Math.round(v):v.toFixed(1))+' ms';
+const fmtT=t=>{const d=new Date(t*1000),p=x=>String(x).padStart(2,'0');return p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds())};
+const fmtAgo=t=>{if(!t)return '수집 없음';const s=Math.max(0,Math.round(Date.now()/1000-t));return s<60?s+'초 전':s<3600?Math.round(s/60)+'분 전':Math.round(s/3600)+'시간 전'};
+const fmtRes=r=>r==='up'?'정상':r==='down'?'실패':'오류';
+const WINDOW=600, SLOW=500, REDUCED=matchMedia('(prefers-reduced-motion: reduce)').matches;
+const MET=[['none','수집 안 함'],['local','이 LogTriage 서버 자체'],['agent','원격 — 에이전트'],['snmp','SNMP 장비']];
+const INT=[[0,'기본'],[5,'5초'],[10,'10초'],[30,'30초'],[60,'1분'],[300,'5분']];
+const S={targets:[],byId:{},samples:[],series:{},cursor:null,mcursor:null,settings:{th_cpu:90,th_mem:90,th_disk:90},paused:false,pauseAt:0,every:5,timer:null,
+  events:[],prevStatus:{},prevOver:{},gaugeV:0,gaugeT:0,counts:{up:0,warn:0,down:0},judged:0,eq:{},eqRows:[],drag:null,keep:null,first:true,hist:{},failRate:0};
+try{const e=localStorage.getItem('lt.live.every');if(['2','5','10'].includes(e)){S.every=Number(e)}}catch(e){}
+for(const b of $('every').children) b.classList.toggle('on',Number(b.dataset.s)===S.every);
+
+async function api(path,data){
+  const r=await fetch('/api/nms/'+path,data===undefined?{cache:'no-store'}:{method:'POST',headers:{'Content-Type':'application/json','X-NMS-Request':'1'},body:JSON.stringify(data)});
+  if(r.status===401){location.href='/login';throw Error('로그인이 필요합니다')}
+  let v={}; try{v=await r.json()}catch(e){}
+  if(r.status===403) throw Error(v.error||'권한이 없습니다(감시 항목 변경은 자산 권한이 필요합니다)');
+  if(!r.ok||v.error) throw Error(v.error||'서버 오류'); return v;
+}
+const nowT=()=>S.paused?S.pauseAt:Date.now()/1000;
+const statusOf=t=>!t.enabled?'off':t.status==='up'?'up':t.status==='down'?'down':'warn';
+const every=t=>{const n=t.metrics_interval||0;const s=n||({local:10,agent:30,snmp:30}[t.metrics]||30);return t.metrics==='snmp'?Math.max(10,s):s};
+
+// ── 이벤트 ──
+function addEvent(kind,server,text,at,id){ S.events.unshift({kind,server,text,at,id:id||'',fresh:Date.now()}); if(S.events.length>100) S.events.length=100; }
+function diffEvents(snap){
+  const first=S.first;
+  for(const t of snap.targets){
+    const st=statusOf(t), was=S.prevStatus[t.id], at=t.last_check||Date.now()/1000;
+    if(!first&&was&&was!==st&&st!=='off'){
+      if(st==='down') addEvent('down',t.name,'장애 발생 · 응답 없음',at,t.id);
+      else if(st==='up'&&was!=='off') addEvent('up',t.name,'복구 · 응답 정상화',at,t.id);
+      else if(st==='warn') addEvent('th',t.name,t.status==='suspect'?'응답 실패 · 장애 의심':t.status==='recovering'?'복구 확인 중':'상태 확인 중',at,t.id);
+    }
+    S.prevStatus[t.id]=st;
+  }
+  const over={};
+  for(const a of snap.usage_alarms||[]){ if(!a.over) continue; const k=a.target_id+':'+a.metric; over[k]=1;
+    if(!first&&!S.prevOver[k]) addEvent('th',a.name,'임계치 초과 · '+a.label+' '+num(a.value)+'%',a.at,a.target_id); }
+  S.prevOver=over;
+  if(first){
+    for(const a of (snap.alerts||[]).slice(0,40)){ addEvent('down',a.name,'장애 발생 · 응답 없음',a.opened,a.target_id); if(a.closed) addEvent('up',a.name,a.close_reason==='recovered'?'복구 · 응답 정상화':'장애 기록 닫힘(설정 변경 등)',a.closed,a.target_id); }
+    for(const a of snap.usage_alarms||[]) if(a.over) addEvent('th',a.name,'임계치 초과 · '+a.label+' '+num(a.value)+'%',a.at,a.target_id);
+    S.events.sort((x,y)=>y.at-x.at); S.events.forEach(e=>e.fresh=0);
+  }
+}
+function renderEvents(){
+  const f=$('evf').value, list=S.events.filter(e=>!f||e.kind===f), now=Date.now(), box=$('events');
+  $('evcount').textContent='최근 '+Math.min(list.length,60)+'건';
+  if(!list.length){box.innerHTML='<div class="empty">아직 이벤트가 없습니다 — 장애·복구·임계치 초과가 생기면 여기에 맨 위로 쌓입니다.</div>';return}
+  const EVK={down:'장애',up:'복구',th:'주의'};   // 21차 타임라인: 세로 시간줄 + 상태 배지
+  box.innerHTML=list.slice(0,60).map(e=>`<div class="ev ${esc(e.kind)}${e.fresh&&now-e.fresh<8000?' fresh':''}"${e.id&&S.byId[e.id]?` data-open="${esc(e.id)}" role="button" tabindex="0" title="${esc(e.server)} 상세 보기"`:''}><span class="b">${esc(e.kind==='up'?'✓':'!')}</span><span class="t">${esc(fmtT(e.at))}</span><span class="s" title="${esc(e.server)}">${esc(e.server)}</span><span class="x" title="${esc(e.text)}">${esc(e.text)}</span><span class="pill">${esc(EVK[e.kind]||'')}</span></div>`).join('');
+}
+
+// ── KPI(값 + 최근 30회 미니 막대) ──
+function spark(id,v){ const h=S.hist[id]||(S.hist[id]=[]); h.push(v==null?0:v); if(h.length>30) h.shift(); const mx=Math.max(1,...h);
+  $(id).innerHTML=h.map(x=>`<i style="height:${num(4+96*x/mx)}%"></i>`).join(''); }
+function renderKpis(snap){
+  const en=snap.targets.filter(t=>t.enabled), c={up:0,warn:0,down:0};
+  for(const t of en){ const s=statusOf(t); c[s]=(c[s]||0)+1; }
+  const th=(snap.usage_alarms||[]).filter(a=>a.over).length, al=(snap.active_alerts||0)+th;
+  const t0=nowT()-60, ok=S.samples.filter(s=>s[1]>=t0&&s[2]==='up'&&s[3]!=null), avg=ok.length?ok.reduce((a,s)=>a+s[3],0)/ok.length:null;
+  $('k_total').textContent=en.length; $('k_up').textContent=c.up; $('k_warn').textContent=c.warn; $('k_down').textContent=c.down; $('k_alert').textContent=al;
+  $('k_alert_s').textContent='장애 '+(snap.active_alerts||0)+' · 임계치 '+th;
+  $('k_lat').innerHTML=avg==null?'—':(avg>=1000?esc((avg/1000).toFixed(2))+'<small>s</small>':num(avg)+'<small>ms</small>');
+  $('k_down_c').classList.toggle('live',c.down>0);
+  spark('s_total',en.length); spark('s_up',c.up); spark('s_warn',c.warn); spark('s_down',c.down); spark('s_alert',al); spark('s_lat',avg);
+  const judged=c.up+c.warn+c.down; S.counts=c; S.judged=judged;
+  { const need=c.down+c.warn, sit=$('sit');   // 21차 상황 띠: 지금 확인할 서버 수를 맨 위에 크게
+    sit.className='sit '+(c.down?'crit':c.warn?'warn':en.length?'ok':'');
+    $('sitmain').innerHTML=!en.length?'감시 항목 없음':need?`<em class="${esc(c.down?'crit':'zero')}">장애 ${num(c.down)}</em> · <em class="${esc(c.warn?'warn':'zero')}">주의 ${num(c.warn)}</em><span>지금 확인할 서버 ${num(need)}대</span>`:`<em class="ok">모두 정상</em><span>감시 ${num(en.length)}대</span>`;
+    const cs=snap.collector||{}; $('sitsub').textContent='판정 '+judged+'대 · 활성 알림 '+al+'건'+(cs.stale||!cs.alive?' · ⚠ 수집 지연 — 값이 늦을 수 있음':''); }   // GPT 156: 수집이 멈추면 숫자만 믿지 않게
+  /* 17차(현장 '가용률이 항상 100%'): 예전엔 '지금 정상 항목 / 판정 항목'이라 지금 장애가 없으면 늘 100%.
+     → 최근 24시간 항목별 (성공 / 성공+실패) 의 평균. 수집기 오류는 장비 상태를 알 수 없어 뺀다. 지금 상태 비율은 '정상 비율' 도넛에 그대로 */
+  const by=(S.avail&&S.avail.by)||{}, av=[];
+  // GPT 110 P0 조건부: 수집 오류만 잔뜩이고 성공 1회면 오류를 뺀 비율이 100% 가 된다 → 유효 검사 0건은 '측정 불가', 오류 20% 초과는 '수집 오류 많음'으로 따로 알린다
+  S.avNone=0; S.avNoisy=0;
+  for(const t of en){ const x=by[t.id]||[0,0,0], ok=x[0]+x[1];
+    if(!ok){ S.avNone++; continue; }
+    if(x[2]>0.2*(ok+x[2])) S.avNoisy++;
+    av.push([t.name,100*x[0]/ok,ok]); }
+  S.avN=av.length; S.avChecks=av.reduce((a,x)=>a+x[2],0);
+  S.gaugeT=av.length?av.reduce((a,x)=>a+x[1],0)/av.length:0;
+  S.avWorst=av.length?av.reduce((m,x)=>x[1]<m[1]?x:m):null;
+  const tw=nowT()-WINDOW, w=S.samples.filter(s=>s[1]>=tw); S.failRate=w.length?100*w.filter(s=>s[2]!=='up').length/w.length:0; S.winN=w.length;
+  const col=snap.collector||{}, dot=$('livedot');
+  dot.className='dot'+(S.paused?' off':col.stale||!col.alive?' bad':'');
+  dot.title=S.paused?'일시정지':col.stale||!col.alive?'수집기 멈춤 — 서버 기록을 확인하십시오':'수집 중';
+  $('note').textContent=S.paused?'일시정지됨':en.length?'마지막 갱신 '+fmtT(snap.at):'감시 항목이 없습니다 — [감시 항목으로]에서 등록하십시오';
+}
+
+async function tick(){
+  if(S.paused||document.hidden) return;
+  try{
+    const [snap,live]=await Promise.all([api('status'),api('live?range='+WINDOW+(S.cursor!=null?'&after='+S.cursor+'&since='+S.mcursor:''))]);   // 표본은 행 번호로 이어 받는다(시각 반올림으로 놓치지 않게)
+    S.targets=snap.targets; S.byId={}; for(const t of snap.targets) S.byId[t.id]=t; renderRejects(snap.agent_rejects);
+    S.settings=snap.settings||S.settings;
+    if(live.partial){ S.samples.push(...live.samples);
+      for(const [id,pts] of Object.entries(live.series)){ const a=S.series[id]||(S.series[id]=[]); for(const p of pts) if(!a.length||p[0]>a[a.length-1][0]) a.push(p); } }
+    else { S.samples=live.samples; S.series=live.series; }
+    S.cursor=live.cursor; S.mcursor=live.mcursor; if(live.avail) S.avail=live.avail;
+    if(live.truncated&&!live.partial) $('xvcount').title='최근 표본이 많아 '+live.samples.length+'건까지만 받았습니다';
+    const lo=live.at-WINDOW-5; S.samples=S.samples.filter(s=>s[1]>=lo); if(S.samples.length>6000) S.samples=S.samples.slice(-6000);
+    for(const id of Object.keys(S.series)){ S.series[id]=S.series[id].filter(p=>p[0]>=lo); if(!S.byId[id]) delete S.series[id]; }
+    diffEvents(snap); renderKpis(snap); renderEvents(); updateEq(); renderTiles(); renderAvMini(); renderAvLow(); renderTrend(); renderFilter(); if(!$('drawer').hidden) renderDrawer();
+    if(D.id){ if(S.byId[D.id]){ renderDetail(); loadDetail(false); } else closeDetail(); } else if(S.first&&HASH0) openDetail(HASH0);
+    S.first=false; $('err').hidden=true;
+  }catch(e){ $('err').textContent='갱신 실패: '+e.message+' — 다음 주기에 다시 시도합니다'; $('err').hidden=false; }
+}
+function schedule(){ clearInterval(S.timer); S.timer=setInterval(tick,S.every*1000); }
+function renderFilter(){ const sel=$('xvf'), cur=sel.value, ids=[...new Set(S.samples.map(s=>s[0]))].filter(id=>S.byId[id]).sort((a,b)=>S.byId[a].name.localeCompare(S.byId[b].name));
+  const key=ids.join(','); if(sel.dataset.k===key) return; sel.dataset.k=key;
+  sel.innerHTML='<option value="">전체 서버</option>'+ids.map(id=>`<option value="${esc(id)}">${esc(S.byId[id].name)}</option>`).join(''); sel.value=ids.includes(cur)?cur:''; }
+
+// 10-26 가로축 눈금 글자: 끝 눈금이 캔버스 밖으로 잘리지 않게 안쪽으로 당기고(눈금선·데이터 좌표는 그대로), 겹치면 중간 눈금부터 건너뛴다 — 첫·끝 눈금 우선(GPT 151차)
+function axisRow(g,items,yy,W){
+  const L=items.map(([t,x])=>{ const w=g.measureText(t).width; return {t,w,c:Math.min(W-1-w/2,Math.max(1+w/2,x))}; }).filter(o=>o.w<=W-2);
+  const fits=a=>a.every((o,i)=>!i||a[i-1].c+a[i-1].w/2+6<=o.c-o.w/2);
+  for(let s=1;s<=L.length;s++){ const pick=L.filter((_,i)=>i%s===0), last=L[L.length-1];
+    if(pick[pick.length-1]!==last){ while(pick.length&&pick[pick.length-1].c+pick[pick.length-1].w/2+6>last.c-last.w/2) pick.pop(); pick.push(last); }
+    if(fits(pick)){ pick.forEach(o=>g.fillText(o.t,o.c,yy)); return; } }
+}
+function fit(cv){ const W0=cv.clientWidth, H0=cv.clientHeight, d=window.devicePixelRatio||1, w=Math.max(10,Math.round(W0*d)), h=Math.max(10,Math.round(H0*d));   // 배치 크기(변형·확대와 무관)
+  if(cv.width!==w||cv.height!==h){cv.width=w;cv.height=h} const g=cv.getContext('2d'); g.setTransform(d,0,0,d,0,0); return [g,W0,H0]; }
+
+// ── 가용률 게이지(빨강→주황→초록 그라데이션 반원) + 미니 도넛 3(정상 비율·주의 비율·검사 실패율) ──
+function donut(g,cx,cy,r,pct,col,title,label,sub){
+  g.lineWidth=r*.28; g.strokeStyle='#1A2640'; g.beginPath(); g.arc(cx,cy,r,0,7); g.stroke();
+  if(pct>0){ g.strokeStyle=col; g.beginPath(); g.arc(cx,cy,r,-Math.PI/2,-Math.PI/2+2*Math.PI*Math.min(1,pct/100)); g.stroke(); }
+  g.fillStyle='#E6EDF7'; g.textAlign='center'; g.font='700 '+Math.round(r*.5)+'px Consolas,monospace'; g.fillText(label,cx,cy+r*.18);
+  g.fillStyle='#BFD0E6'; g.font='11.5px "Malgun Gothic",sans-serif'; g.fillText(title,cx,cy-r-10); g.fillStyle='#5B6B88'; g.font='10.5px "Malgun Gothic",sans-serif'; g.fillText(sub,cx,cy+r+16);
+}
+function drawGauge(){
+  const [g,W,H]=fit($('gauge')); g.clearRect(0,0,W,H);
+  S.gaugeV+=(S.gaugeT-S.gaugeV)*(REDUCED?1:.08);
+  /* 21차: 반원 속도계 → 원형 링(왼쪽) + 설명(오른쪽). 값은 그대로(24시간 항목별 검사 성공률 평균), 0~100 그대로 그린다 */
+  const has=S.avN>0, v=Math.max(0,Math.min(100,S.gaugeV)), col=v>=99.5?'#4ADE80':v>=98?'#FFB547':'#FF6B6E';
+  const R=Math.max(28,Math.min(H/2-8,W*.2)), lw=Math.max(7,R*.16), cx=R+lw/2+14, cy=H/2;
+  g.lineWidth=lw; g.strokeStyle='#16264A'; g.beginPath(); g.arc(cx,cy,R,0,Math.PI*2); g.stroke();
+  if(has&&v>0){ const gr=g.createLinearGradient(cx-R,cy+R,cx+R,cy-R); gr.addColorStop(0,'#1D6BFF'); gr.addColorStop(1,col);
+    g.lineCap='round'; g.strokeStyle=gr; g.shadowColor=col; g.shadowBlur=REDUCED?0:12;
+    g.beginPath(); g.arc(cx,cy,R,-Math.PI/2,-Math.PI/2+Math.PI*2*v/100); g.stroke(); g.shadowBlur=0; g.lineCap='butt'; }
+  g.textAlign='center'; g.fillStyle=has?(v>=99.5?'#E6EDF7':col):'#5B6B88';
+  g.font='700 '+Math.round(Math.min(R*.36,34))+'px Consolas,monospace'; g.fillText(has?v.toFixed(2)+'%':'—',cx,cy+R*.12);
+  const tx=cx+R+lw/2+18, tw=W-tx-8; g.textAlign='left';
+  if(tw>80){ g.fillStyle='#DCE8F7'; g.font='600 14px "Malgun Gothic",sans-serif'; g.fillText('24시간 검사 성공률',tx,cy-14);
+    g.fillStyle='#8A9BB8'; g.font='12px "Malgun Gothic",sans-serif'; g.fillText(has?'항목 평균 · '+S.avN+'개':'최근 24시간 유효한 검사 없음(측정 불가)',tx,cy+6);
+    if(S.avNone||S.avNoisy){ g.fillStyle='#FBBF24'; g.font='11.5px "Malgun Gothic",sans-serif';   // 평균에 안 든 항목·믿기 어려운 항목은 숨기지 않고 알린다
+      [S.avNone?'⚠ 측정 불가 '+S.avNone+'개(평균 제외)':'',S.avNoisy?'⚠ 수집 오류 많음 '+S.avNoisy+'개':''].filter(Boolean).forEach((m,k)=>g.fillText(m,tx,cy+26+k*16)); } }
+}
+/* 18차까지 캔버스 도넛 3(정상 비율·주의 비율·검사 실패율)은 1080 화면에서 공간이 모자라 숨었다 → 같은 값을 작은 링으로 */
+function renderAvMini(){
+  const c=S.counts, j=S.judged||0, ring=(p,col,lab,t,s)=>`<div><i style="--p:${esc(Math.max(0,Math.min(100,p)).toFixed(1))};--c:${esc(col)}"><span>${esc(lab)}</span></i><span><b>${esc(t)}</b>${esc(s)}</span></div>`;
+  $('avmini').innerHTML=ring(j?100*c.up/j:0,'#5AA2FF',j?(100*c.up/j).toFixed(0)+'%':'—','정상 비율','정상 '+c.up)
+    +ring(j?100*c.warn/j:0,'#F59E0B',j?(100*c.warn/j).toFixed(0)+'%':'—','주의 비율','주의 '+c.warn+' · 장애 '+c.down)
+    +ring(S.failRate,'#EF4444',S.winN?S.failRate.toFixed(1)+'%':'—','검사 실패율','10분 '+(S.winN||0)+'건');
+}
+function renderAvLow(){
+  const by=(S.avail&&S.avail.by)||{}, rows=[];
+  for(const t of S.targets){ if(!t.enabled) continue; const x=by[t.id]||[0,0,0], n=x[0]+x[1]; if(n) rows.push([t,100*x[0]/n,n]); }
+  rows.sort((a,b)=>a[1]-b[1]);
+  $('avlow').innerHTML=rows.length<2?'':'<h3>가용률 낮은 서버<small>최근 24시간 · 하위 3 · 누르면 상세</small></h3>'+rows.slice(0,3).map(([t,v,n])=>{ const c=v>=99.5?'ok':v>=98?'warn':'crit';
+    return `<div class="avr" data-open="${esc(t.id)}" role="button" tabindex="0" title="${esc(t.name)} · 검사 ${esc(String(n))}건"><i class="${esc(c)}"></i><span class="nm">${esc(t.name)}</span><span class="tr"><b class="${esc(c)}" style="width:${esc(Math.max(2,Math.min(100,(v-90)*10)).toFixed(1))}%"></b></span><em class="${esc(c)}">${esc(v.toFixed(2))}%</em></div>`; }).join('');
+}
+
+// ── 응답 시간 분포(X-View) — x=시각(최근 10분), y=응답 ms(로그 눈금), 실패는 맨 위 띠. 끌어서 선택 → 목록 ──
+const XV={pad:{l:56,r:14,t:26,b:24},pts:[]};
+function xvData(){ const f=$('xvf').value; return f?S.samples.filter(s=>s[0]===f):S.samples; }
+function drawXView(){
+  const [g,W,H]=fit($('xview')); g.clearRect(0,0,W,H);
+  const data=xvData(), t1=nowT(), t0=t1-WINDOW, p=XV.pad;
+  let mx=1000; for(const s of data) if(s[3]!=null&&s[3]*1.15>mx) mx=s[3]*1.15;
+  const x=t=>p.l+(t-t0)/WINDOW*(W-p.l-p.r), ly1=Math.log10(mx), y=ms=>H-p.b-Math.log10(Math.max(1,ms))/ly1*(H-p.b-p.t-18), failY=p.t+6;
+  g.font='11px Consolas,monospace'; g.textAlign='right'; g.lineWidth=1;
+  for(let v=1;v<=mx;v*=10){ const yy=Math.round(y(v))+.5; g.strokeStyle='#18233B'; g.beginPath(); g.moveTo(p.l,yy); g.lineTo(W-p.r,yy); g.stroke();
+    g.fillStyle='#5B6B88'; g.fillText(v>=1000?(v/1000).toLocaleString()+'s':v+'ms',p.l-6,yy+4); }
+  { const sy0=y(SLOW), top=p.t+16, bot=H-p.b;   // 21차 응답 분포 지도: 정상 · 지연 구간을 바탕에 칠한다(경계 = SLOW)
+    g.fillStyle='rgba(74,222,128,.07)'; g.fillRect(p.l,sy0,W-p.l-p.r,bot-sy0);
+    g.fillStyle='rgba(255,181,71,.08)'; g.fillRect(p.l,top,W-p.l-p.r,Math.max(0,sy0-top));
+    g.save(); g.font='600 11px "Malgun Gothic",sans-serif'; g.textAlign='right';
+    g.fillStyle='rgba(134,239,172,.75)'; g.fillText('정상 구간',W-p.r-6,Math.min(bot-6,sy0+16));
+    if(sy0-top>22){ g.fillStyle='rgba(255,200,120,.8)'; g.fillText('지연 구간',W-p.r-6,top+16); } g.restore(); }
+  g.fillStyle='rgba(229,72,77,.16)'; g.fillRect(p.l,p.t-2,W-p.l-p.r,16); g.fillStyle='#FF8A8D'; g.fillText('실패',p.l-6,failY+4);
+  g.textAlign='center'; g.fillStyle='#5B6B88';
+  { const ax=[]; for(let k=0;k<=10;k++){ const t=t0+k*60, xx=Math.round(x(t))+.5; g.strokeStyle='#141E33'; g.beginPath(); g.moveTo(xx,p.t); g.lineTo(xx,H-p.b); g.stroke(); if(k%2===0||W>900) ax.push([fmtT(t).slice(0,5),xx]); } axisRow(g,ax,H-6,W); }
+  const sy=y(SLOW); g.setLineDash([4,4]); g.strokeStyle='rgba(245,158,11,.45)'; g.beginPath(); g.moveTo(p.l,sy); g.lineTo(W-p.r,sy); g.stroke(); g.setLineDash([]);
+  const now=Date.now()/1000; XV.pts=[];
+  for(const s of data){ if(s[1]<t0) continue;
+    const fail=s[2]!=='up'||s[3]==null, xx=x(s[1]), yy=fail?failY+((s[1]*997)%9)-4:y(s[3]);
+    const col=fail?'#EF4444':s[3]>=SLOW?'#F59E0B':'#5AA2FF', fresh=!S.paused&&now-s[1]<4;
+    g.fillStyle=col; g.globalAlpha=fail?.95:.8;
+    if(fresh&&!REDUCED){ g.shadowColor=col; g.shadowBlur=14; g.beginPath(); g.arc(xx,yy,4.4,0,7); g.fill(); g.shadowBlur=0; }
+    else { g.shadowColor=col; g.shadowBlur=REDUCED?0:4; g.beginPath(); g.arc(xx,yy,fail?3:2.4,0,7); g.fill(); g.shadowBlur=0; }
+    XV.pts.push([xx,yy,s]); }
+  g.globalAlpha=1;
+  const box=S.drag||S.keep;
+  if(box){ const rx=Math.min(box.x0,box.x1), ry=Math.min(box.y0,box.y1), rw=Math.abs(box.x1-box.x0), rh=Math.abs(box.y1-box.y0);
+    g.fillStyle='rgba(90,162,255,.10)'; g.fillRect(rx,ry,rw,rh); g.setLineDash([5,4]); g.strokeStyle='#9CC8FF'; g.strokeRect(rx+.5,ry+.5,rw,rh); g.setLineDash([]);
+    if(S.keep&&!S.drag){ const t='선택 '+S.keep.n+'건'; g.font='600 12px "Malgun Gothic",sans-serif'; const tw=g.measureText(t).width+16, bx=Math.min(W-tw-4,rx+rw+6), by=Math.max(4,ry+4);
+      g.fillStyle='#0A1324'; g.strokeStyle='#9CC8FF'; g.beginPath(); g.roundRect?g.roundRect(bx,by,tw,22,6):g.rect(bx,by,tw,22); g.fill(); g.stroke(); g.fillStyle='#E6EDF7'; g.textAlign='left'; g.fillText(t,bx+8,by+15); } }
+  $('xvcount').textContent='검사 '+XV.pts.length+'건';
+}
+function xvPos(e){ const r=$('xview').getBoundingClientRect(); return [e.clientX-r.left,e.clientY-r.top]; }
+$('xview').addEventListener('mousedown',e=>{ const [x,y]=xvPos(e); S.drag={x0:x,y0:y,x1:x,y1:y}; S.keep=null; });
+addEventListener('mousemove',e=>{
+  if(S.drag){ const [x,y]=xvPos(e); S.drag.x1=x; S.drag.y1=y; $('tip').hidden=true; return; }
+  const tip=$('tip');
+  if(e.target===$('trend')){ trendTip(e); return; }
+  if(e.target!==$('xview')){ tip.hidden=true; return; }
+  const [x,y]=xvPos(e); let best=null,bd=64;
+  for(const p of XV.pts){ const d=(p[0]-x)**2+(p[1]-y)**2; if(d<bd){bd=d;best=p} }
+  if(!best){tip.hidden=true;return}
+  const s=best[2], t=S.byId[s[0]];
+  tip.innerHTML=`<b>${esc(t?t.name:s[0])}</b><br>${esc(fmtT(s[1]))} · <span class="${esc(s[2]!=='up'?'r-down':s[3]>=SLOW?'r-slow':'r-up')}">${esc(fmtRes(s[2]))}</span> · ${esc(fmtMs(s[3]))}`;
+  tip.hidden=false; tip.style.left=Math.min(innerWidth-240,e.clientX+14)+'px'; tip.style.top=(e.clientY+14)+'px';
+});
+addEventListener('mouseup',()=>{ if(!S.drag) return; const d=S.drag; S.drag=null;
+  if(Math.abs(d.x1-d.x0)<4&&Math.abs(d.y1-d.y0)<4){   // 19차: 끌지 않고 누르면 가장 가까운 점의 서버 상세
+    let best=null,bd=100; for(const q of XV.pts){ const dd=(q[0]-d.x0)**2+(q[1]-d.y0)**2; if(dd<bd){bd=dd;best=q} }
+    if(best) openDetail(best[2][0],$('xview')); return; }
+  const x0=Math.min(d.x0,d.x1),x1=Math.max(d.x0,d.x1),y0=Math.min(d.y0,d.y1),y1=Math.max(d.y0,d.y1);
+  const list=XV.pts.filter(p=>p[0]>=x0&&p[0]<=x1&&p[1]>=y0&&p[1]<=y1).map(p=>p[2]);
+  S.keep={...d,n:list.length}; showSel(list);
+});
+$('xview').addEventListener('keydown',e=>{ if(e.key==='Enter'){ const t0=nowT()-60; showSel(xvData().filter(s=>s[1]>=t0)); } });
+function showSel(list){
+  list=list.slice().sort((a,b)=>b[1]-a[1]);
+  const by={}; for(const s of list){ const n=(S.byId[s[0]]||{}).name||s[0]; by[n]=(by[n]||0)+1; }
+  const fail=list.filter(s=>s[2]!=='up').length;
+  $('seltitle').textContent='선택한 검사 '+list.length+'건'+(fail?' · 실패 '+fail+'건':'');
+  $('selgrp').innerHTML=Object.entries(by).sort((a,b)=>b[1]-a[1]).slice(0,12).map(([n,c])=>`<span>${esc(n)} ${num(c)}</span>`).join('');
+  $('selrows').innerHTML=list.slice(0,300).map(s=>{ const t=S.byId[s[0]], cls=s[2]!=='up'?'r-down':s[3]>=SLOW?'r-slow':'r-up';
+    return `<tr><td>${esc(fmtT(s[1]))}</td><td>${esc(t?t.name:s[0])}</td><td class="${esc(cls)}">${esc(fmtRes(s[2]))}</td><td class="n">${esc(fmtMs(s[3]))}</td></tr>`; }).join('')
+    +(list.length>300?'<tr><td colspan="4" class="note">위 300건만 보여 줍니다 — 영역을 좁혀 보십시오</td></tr>':'');
+  $('sel').hidden=false;
+}
+$('selclose').addEventListener('click',()=>{$('sel').hidden=true;S.keep=null});
+addEventListener('keydown',e=>{
+  if(e.key==='Escape'){ if(!$('sel').hidden||!$('drawer').hidden){ $('sel').hidden=true; S.keep=null; $('drawer').hidden=true; } else if(D.id) closeDetail(); return; }
+  const tg=e.target, typing=tg&&/^(INPUT|SELECT|TEXTAREA)$/.test(tg.tagName);
+  if(D.id&&!typing&&(e.key==='ArrowLeft'||e.key==='ArrowRight')){ e.preventDefault(); stepDetail(e.key==='ArrowRight'?1:-1); return; }
+  if((e.key==='Enter'||e.key===' ')&&tg&&tg.dataset&&tg.dataset.open){ e.preventDefault(); openDetail(tg.dataset.open,tg); }
+});
+document.addEventListener('click',e=>{ const el=e.target.closest&&e.target.closest('[data-open]'); if(el) openDetail(el.dataset.open,el); });
+
+// ── 서버 이퀄라이저 — 서버마다 한 줄: CPU · 메모리 · 디스크 가로 막대 + 숫자(높은 순), 막대는 줄을 다시 만들지 않고 폭만 바꿔 부드럽게 ──
+function updateEq(){
+  // 16차(GPT 106 P1): 정렬은 '임계치에 가장 가까운 값' 기준 — CPU 30·메모리 99 인 서버가 메모리 임계 때문에 위로 온다
+  const th=[S.settings.th_cpu,S.settings.th_mem,S.settings.th_disk], risk=r=>Math.max(...r.v.map((x,k)=>x==null?0:x/Math.max(1,th[k]||100)));
+  const rows=S.targets.filter(t=>t.enabled&&t.usage&&!t.usage.stale&&[t.usage.cpu,t.usage.mem,t.usage.disk].some(v=>v!=null))
+    .map(t=>({id:t.id,name:t.name,v:[t.usage.cpu,t.usage.mem,t.usage.disk]}))
+    .sort((a,b)=>risk(b)-risk(a));
+  S.eqRows=rows;
+  const withU=S.targets.filter(t=>t.enabled&&t.metrics&&t.metrics!=='none').length;
+  $('eqnote').textContent=rows.length?(rows.length+'대 / 수집 설정 '+withU+'대'):'';
+  const box=$('eq');
+  if(!rows.length){ box.innerHTML='<div class="eqempty">사용률을 보내는 항목이 없습니다<br>위 [⚙ 수집 설정]에서 항목마다 수집 방식(이 서버 자체·에이전트·SNMP)을 고르면 바로 여기에 나타납니다</div>'; return; }
+  if(!box.querySelector('.eqh')) box.innerHTML='<div class="eqh"><span>서버</span><span>CPU</span><span>메모리</span><span>디스크</span></div>';
+  const seen=new Set();
+  rows.forEach((r,i)=>{ let el=box.querySelector('.eqr[data-id="'+CSS.escape(r.id)+'"]');
+    if(!el){ el=document.createElement('div'); el.className='eqr'; el.dataset.id=r.id; el.dataset.open=r.id; el.setAttribute('role','button'); el.tabIndex=0;
+      el.innerHTML='<div class="nm"><i></i><span></span></div>'+[0,1,2].map(()=>'<div class="eb"><div class="tr"><b></b><u></u></div><em></em></div>').join(''); }
+    box.appendChild(el); seen.add(r.id);   // 높은 순으로 다시 줄 세움
+    let worst='';
+    r.v.forEach((v,k)=>{ const eb=el.querySelectorAll('.eb')[k], b=eb.querySelector('b'), em=eb.querySelector('em'), u=eb.querySelector('u');
+      const lv=v==null?'na':v>=th[k]?'crit':v>=th[k]-15?'warn':'';
+      if(lv==='crit') worst='crit'; else if(lv==='warn'&&!worst) worst='warn';
+      b.className=lv; b.style.width=(v==null?0:Math.max(1,Math.min(100,v)))+'%'; u.style.left=Math.min(99,th[k])+'%';
+      em.className=lv; em.textContent=v==null?'—':Math.round(v)+'%'; });
+    el.querySelector('.nm i').className=worst; const nm=el.querySelector('.nm span'); nm.textContent=r.name; nm.title=r.name; });
+  box.querySelectorAll('.eqr').forEach(el=>{ if(!seen.has(el.dataset.id)) el.remove(); });
+}
+function drawEq(){}   // 15차: 캔버스 대신 위 HTML 줄로 그린다(글자가 선명하고 크기 조절이 쉬움)
+
+// ── 성능 추이 상위 5 — 19차: CPU · 메모리 · 디스크 · 응답(ms) 탭. 선 + 영역 채움, 마우스를 올리면 그 시각의 값, 범례를 누르면 상세 ──
+const TC=['#EF4444','#F59E0B','#5AA2FF','#A3E635','#A78BFA'];
+const TMET={cpu:[1,'CPU','%'],mem:[2,'메모리','%'],disk:[3,'디스크','%'],lat:[0,'응답','ms']};
+S.tm='cpu'; try{const v=localStorage.getItem('lt.live.tm'); if(TMET[v]) S.tm=v;}catch(e){}
+function tSeries(id){ if(S.tm==='lat') return (S.lat||{})[id]||[]; const k=TMET[S.tm][0]; return (S.series[id]||[]).map(q=>[q[0],q[k]]); }
+function tFmt(v){ return S.tm==='lat'?fmtMs(v):num(v)+'%'; }
+function renderTrend(){
+  for(const b of $('tmet').children) b.classList.toggle('on',b.dataset.m===S.tm);
+  if(S.tm==='lat'){ const L={}; for(const s of S.samples) if(s[2]==='up'&&s[3]!=null) (L[s[0]]||(L[s[0]]=[])).push([s[1],s[3]]); S.lat=L; }
+  const last=id=>{ const a=tSeries(id); for(let i=a.length-1;i>=0;i--) if(a[i][1]!=null) return a[i][1]; return null; };
+  const ids=S.tm==='lat'?Object.keys(S.lat||{}):Object.keys(S.series);
+  S.trendIds=ids.filter(id=>S.byId[id]&&last(id)!=null).sort((a,b)=>last(b)-last(a)).slice(0,5);
+  $('trendlg').innerHTML=S.trendIds.map((id,i)=>`<span data-open="${esc(id)}" role="button" tabindex="0" title="${esc(S.byId[id].name)} 상세 보기"><i style="background:${esc(TC[i])}"></i>${esc(S.byId[id].name)} ${esc(tFmt(last(id)))}</span>`).join('')
+    ||`<span>${esc(TMET[S.tm][1])} 값을 보내는 항목이 없습니다${S.tm==='lat'?'':' — [⚙ 수집 설정]에서 켜십시오'}</span>`;
+}
+$('tmet').addEventListener('click',e=>{ const b=e.target.closest('button[data-m]'); if(!b) return; S.tm=b.dataset.m; try{localStorage.setItem('lt.live.tm',S.tm)}catch(x){} renderTrend(); });
+const TR={p:{l:46,r:12,t:12,b:22}};
+function trendMax(t0){ if(S.tm!=='lat') return 100; let mx=50; for(const id of S.trendIds||[]) for(const q of tSeries(id)) if(q[0]>=t0&&q[1]!=null&&q[1]>mx) mx=q[1];
+  const step=[50,100,200,500,1000,2000,5000,10000,30000,60000].find(s=>s>=mx*1.12)||Math.ceil(mx*1.12/60000)*60000; return step; }
+function drawTrend(){
+  const [g,W,H]=fit($('trend')); g.clearRect(0,0,W,H);
+  const p=TR.p, t1=nowT(), t0=t1-WINDOW, ymax=trendMax(t0), x=t=>p.l+(t-t0)/WINDOW*(W-p.l-p.r), y=v=>p.t+(H-p.t-p.b)*(1-Math.min(v,ymax)/ymax); TR.x=x; TR.t0=t0; TR.W=W;
+  g.font='10.5px Consolas,monospace'; g.fillStyle='#5B6B88'; g.textAlign='right';
+  for(let k=0;k<=5;k++){ const v=ymax*k/5; g.strokeStyle='#18233B'; g.beginPath(); g.moveTo(p.l,Math.round(y(v))+.5); g.lineTo(W-p.r,Math.round(y(v))+.5); g.stroke(); g.fillText(S.tm==='lat'?(v>=1000?(v/1000)+'s':Math.round(v)+''):Math.round(v),p.l-6,y(v)+4); }
+  const th=S.tm==='lat'?SLOW:S.settings['th_'+S.tm];
+  if(th<=ymax){ g.setLineDash([4,4]); g.strokeStyle=S.tm==='lat'?'rgba(245,158,11,.55)':'rgba(239,68,68,.5)'; g.beginPath(); g.moveTo(p.l,y(th)); g.lineTo(W-p.r,y(th)); g.stroke(); g.setLineDash([]); }
+  g.textAlign='center'; { const ax=[]; for(let k=0;k<=10;k+=2){ const t=t0+k*60; ax.push([fmtT(t).slice(0,5),x(t)]); } axisRow(g,ax,H-6,W); }
+  (S.trendIds||[]).slice().reverse().forEach(id=>{ const i=S.trendIds.indexOf(id), a=tSeries(id).filter(q=>q[1]!=null&&q[0]>=t0); if(!a.length) return;
+    const pts=a.map(q=>[x(q[0]),y(Math.max(0,q[1]))]);
+    const gr=g.createLinearGradient(0,p.t,0,H-p.b); gr.addColorStop(0,TC[i]+'40'); gr.addColorStop(1,TC[i]+'00');
+    g.fillStyle=gr; g.beginPath(); g.moveTo(pts[0][0],H-p.b); for(const q of pts) g.lineTo(q[0],q[1]); g.lineTo(pts[pts.length-1][0],H-p.b); g.closePath(); g.fill();
+    g.strokeStyle=TC[i]; g.lineWidth=1.8; g.shadowColor=TC[i]; g.shadowBlur=REDUCED?0:6; g.beginPath(); pts.forEach((q,j)=>j?g.lineTo(q[0],q[1]):g.moveTo(q[0],q[1])); g.stroke(); g.shadowBlur=0;
+    const q=pts[pts.length-1]; g.fillStyle=TC[i]; g.beginPath(); g.arc(q[0],q[1],3.2,0,7); g.fill(); });
+  if(TR.hx!=null&&TR.hx>=p.l&&TR.hx<=W-p.r){ g.strokeStyle='rgba(230,237,247,.45)'; g.setLineDash([3,3]); g.beginPath(); g.moveTo(TR.hx,p.t); g.lineTo(TR.hx,H-p.b); g.stroke(); g.setLineDash([]); }
+}
+function trendTip(e){
+  const r=$('trend').getBoundingClientRect(), hx=e.clientX-r.left; TR.hx=hx; const tip=$('tip');
+  if(!TR.x||!(S.trendIds||[]).length){tip.hidden=true;return}
+  const t=TR.t0+(hx-TR.p.l)/(TR.W-TR.p.l-TR.p.r)*WINDOW;
+  const rows=S.trendIds.map((id,i)=>{ let best=null; for(const q of tSeries(id)) if(q[1]!=null&&(!best||Math.abs(q[0]-t)<Math.abs(best[0]-t))) best=q;
+    return best&&Math.abs(best[0]-t)<90?`<span style="color:${esc(TC[i])}">●</span> ${esc(S.byId[id].name)} <b>${esc(tFmt(best[1]))}</b>`:''; }).filter(Boolean);
+  if(!rows.length){tip.hidden=true;return}
+  tip.innerHTML=`<b>${esc(fmtT(t))} · ${esc(TMET[S.tm][1])}</b><br>`+rows.join('<br>'); tip.hidden=false;
+  tip.style.left=Math.min(innerWidth-220,e.clientX+14)+'px'; tip.style.top=(e.clientY+14)+'px';
+}
+$('trend').addEventListener('mouseleave',()=>{TR.hx=null;$('tip').hidden=true});
+
+// ── 19차 서버 현황 타일(상태색 · CPU/메모리/디스크 막대 · 10분 추이선 · 응답 · 부하) — [목록]은 15차 이퀄라이저 그대로 ──
+S.tf=''; S.tsort='risk'; S.tview='tile';
+try{ const a=localStorage.getItem('lt.live.tview'), b=localStorage.getItem('lt.live.tsort'); if(a==='list') S.tview='list'; if(b==='name') S.tsort='name'; }catch(e){}
+$('tsort').value=S.tsort;
+const STK=t=>{ const s=statusOf(t); return s==='up'?'정상':s==='down'?'장애':s==='off'?'사용 안 함':t.status==='suspect'?'장애 의심':t.status==='recovering'?'복구 확인 중':'확인 중'; };
+const thArr=()=>[S.settings.th_cpu,S.settings.th_mem,S.settings.th_disk];
+const lvOf=(v,k)=>{ const th=thArr(); return v==null?'na':v>=th[k]?'crit':v>=th[k]-15?'warn':''; };
+function usageLive(t){ const u=t.usage; return !!(u&&!u.stale&&[u.cpu,u.mem,u.disk].some(v=>v!=null)); }
+function riskOf(t){ const s=statusOf(t), u=t.usage||{}, th=thArr(); const r=usageLive(t)?Math.max(0,...[u.cpu,u.mem,u.disk].map((v,k)=>v==null?0:v/Math.max(1,th[k]))):0;
+  return (s==='down'?3:s==='warn'?2:s==='off'?-1:0)+Math.min(.99,r); }
+function sparkSvg(vals,w,hh,col,fixed){ const v=vals.filter(x=>x!=null); if(v.length<2) return `<svg width="${num(w)}" height="${num(hh)}" aria-hidden="true"></svg>`;
+  const mx=fixed||Math.max(...v)*1.1||1, n=vals.length-1, pts=[]; vals.forEach((x,i)=>{ if(x!=null) pts.push((i/n*w).toFixed(1)+','+(hh-1-Math.min(1,x/mx)*(hh-2)).toFixed(1)); });
+  return `<svg width="${num(w)}" height="${num(hh)}" viewBox="0 0 ${num(w)} ${num(hh)}" aria-hidden="true"><polyline fill="none" stroke="${esc(col)}" stroke-width="1.6" stroke-linejoin="round" points="${esc(pts.join(' '))}"/></svg>`; }
+function barRow(l,v,k){ const c=lvOf(v,k); return `<div class="br"><span>${esc(l)}</span><span class="tr"><b class="${esc(c)}" style="width:${esc(v==null?'0':Math.max(1,Math.min(100,v)).toFixed(0))}%"></b></span><em class="${esc(c)}">${esc(v==null?'—':Math.round(v)+'%')}</em></div>`; }
+function tileHtml(t){
+  const s=statusOf(t), u=t.usage||{}, live=usageLive(t), ser=(S.series[t.id]||[]).slice(-60).map(q=>q[1]);
+  const lat=(S.lat||{})[t.id]; const sp=live?sparkSvg(ser,72,22,'#5AA2FF',100):sparkSvg((lat||[]).slice(-40).map(q=>q[1]),72,22,'#A78BFA',0);
+  const bars=live?barRow('CPU',u.cpu,0)+barRow('메모리',u.mem,1)+barRow('디스크',u.disk,2)
+    :`<div class="na">${esc(!t.metrics||t.metrics==='none'?'사용률 수집 안 함 — 가용성만 감시':t.usage&&t.usage.stale?'사용률 보고 끊김 · '+fmtAgo(u.at):'사용률 수집 대기 중')}</div>`;
+  return `<div class="th"><i class="${esc(s)}"></i><b title="${esc(t.name)}">${esc(t.name)}</b><small>${esc(STK(t))}</small>${sp}</div>`
+    +`<div class="tb"><div class="bars">${bars}</div><div class="side">응답<b class="${esc(s==='down'?'bad':'')}">${esc(s==='down'?'실패':fmtMs(t.latency))}</b>${live&&u.load1!=null?'부하<b>'+esc(Number(u.load1).toFixed(2))+'</b>':''}</div></div>`;
+}
+function renderTiles(){
+  if(S.tm!=='lat'){ const L={}; for(const s of S.samples) if(s[2]==='up'&&s[3]!=null) (L[s[0]]||(L[s[0]]=[])).push([s[1],s[3]]); S.lat=L; }
+  const all=S.targets.filter(t=>t.enabled), cnt={'':all.length,up:0,warn:0,down:0};
+  for(const t of all) cnt[statusOf(t)]=(cnt[statusOf(t)]||0)+1;
+  const CH=[['','전체'],['up','정상'],['warn','주의'],['down','장애']];
+  $('tchips').innerHTML=CH.map(([k,l])=>`<button type="button" data-f="${esc(k)}" class="${S.tf===k?'on':''}" aria-pressed="${S.tf===k?'true':'false'}">${esc(l)}<b>${num(cnt[k]||0)}</b></button>`).join('');
+  for(const b of $('tview').children) b.classList.toggle('on',b.dataset.v===S.tview);
+  const list=all.filter(t=>!S.tf||statusOf(t)===S.tf).sort(S.tsort==='name'?(a,b)=>a.name.localeCompare(b.name):(a,b)=>riskOf(b)-riskOf(a)||a.name.localeCompare(b.name));
+  S.tileOrder=list.map(t=>t.id);
+  $('tilecount').textContent='('+all.length+')';
+  const isList=S.tview==='list'; $('tiles').hidden=isList; $('eq').hidden=!isList; $('eqlegend').hidden=!isList;
+  if(isList) return;
+  const box=$('tiles');
+  if(!list.length){ box.innerHTML='<div class="eqempty">'+(all.length?'이 상태의 서버가 없습니다':'감시 항목이 없습니다 — [감시 항목으로]에서 등록하십시오')+'</div>'; return; }
+  box.querySelectorAll('.eqempty').forEach(x=>x.remove());
+  const have={}; box.querySelectorAll('.tile').forEach(el=>{ have[el.dataset.open]=el; });
+  const order=[...box.querySelectorAll('.tile')].map(el=>el.dataset.open).join('|');
+  for(const t of list){ let el=have[t.id];
+    if(!el){ el=document.createElement('div'); el.dataset.open=t.id; el.setAttribute('role','button'); el.tabIndex=0; box.appendChild(el); }
+    el.className='tile '+statusOf(t)+(D.id===t.id?' cur':''); el.setAttribute('aria-label',t.name+' — '+STK(t)+' · 눌러서 상세');
+    const html=tileHtml(t); if(el._h!==html){ el.innerHTML=html; el._h=html; } delete have[t.id]; }
+  for(const k in have) have[k].remove();
+  if(order!==list.map(t=>t.id).join('|')) for(const t of list) box.appendChild(box.querySelector('.tile[data-open="'+CSS.escape(t.id)+'"]'));   // 순서가 바뀔 때만 옮긴다(초점 유지)
+  box.querySelectorAll('.lane').forEach(x=>x.remove());   // 21차 트리아지 보드: 위험순이면 상태별 줄 머리(타일은 그대로 — 초점 유지)
+  if(S.tsort!=='name'){ const LN={down:'위급',warn:'주의',up:'정상',off:'감시 중지'}, n={}; for(const t of list) n[statusOf(t)]=(n[statusOf(t)]||0)+1; let prev=null;
+    for(const t of list){ const k=statusOf(t); if(k===prev) continue; prev=k; const hd=document.createElement('div'); hd.className='lane '+k; hd.setAttribute('role','heading'); hd.setAttribute('aria-level','3');   // GPT 156: 화면 낭독기도 위급 · 주의 · 정상 묶음을 듣게
+      hd.innerHTML=`<b>${esc(LN[k]||k)}</b><span>${num(n[k])}대</span>`; box.insertBefore(hd,box.querySelector('.tile[data-open="'+CSS.escape(t.id)+'"]')); } }
+}
+$('tchips').addEventListener('click',e=>{ const b=e.target.closest('button[data-f]'); if(!b) return; S.tf=b.dataset.f; renderTiles(); });
+$('tsort').addEventListener('change',()=>{ S.tsort=$('tsort').value; try{localStorage.setItem('lt.live.tsort',S.tsort)}catch(x){} renderTiles(); });
+$('tview').addEventListener('click',e=>{ const b=e.target.closest('button[data-v]'); if(!b) return; S.tview=b.dataset.v; try{localStorage.setItem('lt.live.tview',S.tview)}catch(x){} renderTiles(); });
+
+// ── 19차 서버 상세(오른쪽) — 지표 6 · 기간별 추이(1시간~7일) · 볼륨별 디스크 · 상위 프로세스 · 최근 가용성 검사 120회 ──
+//    값은 이미 저장된 수집값만(지어내지 않음). 검사 결과의 상세 글은 주소가 섞일 수 있어 보이지 않는다.
+const D={id:null,range:3600,rows:[],procs:null,hist:[],at:0,busy:false,opener:null,hx:null};
+let HASH0=''; try{ const m=/^#srv=(.+)$/.exec(location.hash); if(m) HASH0=decodeURIComponent(m[1]); }catch(e){}
+const RANGES=[[3600,'1시간'],[21600,'6시간'],[86400,'24시간'],[604800,'7일']];
+const METK={none:'수집 안 함',local:'이 LogTriage 서버 자체',agent:'에이전트',snmp:'SNMP'};
+function fmtBps(v){ if(v==null||isNaN(v)) return '—'; const u=['B/s','KB/s','MB/s','GB/s']; let i=0; v=Number(v); while(v>=1024&&i<3){v/=1024;i++} return (v>=100||i===0?Math.round(v):v.toFixed(1))+' '+u[i]; }
+function openDetail(id,from){ if(!S.byId[id]) return; if(D.id!==id){ D.rows=[]; D.procs=null; D.hist=[]; D.at=0; } D.opener=from||document.activeElement; D.id=id; HASH0='';
+  $('det').hidden=false; try{history.replaceState(null,'','#srv='+encodeURIComponent(id))}catch(e){}
+  renderDetail(); loadDetail(true); renderTiles(); const c=$('detclose'); if(c) c.focus(); }
+function closeDetail(){ $('det').hidden=true; D.id=null; try{history.replaceState(null,'',location.pathname+location.search)}catch(e){} renderTiles();
+  if(D.opener&&D.opener.isConnected&&D.opener.focus) D.opener.focus(); }
+function stepDetail(k){ const o=(S.tileOrder&&S.tileOrder.length?S.tileOrder:S.targets.map(t=>t.id)); if(!o.length) return; const i=o.indexOf(D.id); openDetail(o[(i+k+o.length)%o.length],D.opener); }
+async function loadDetail(force){ if(!D.id||D.busy) return; const now=Date.now(), id=D.id;
+  if(!force&&now-D.at<(D.range>21600?60000:Math.max(4000,S.every*1000))) return; D.busy=true;
+  try{ const q=encodeURIComponent(id);
+    const [m,pr,hs]=await Promise.all([api('metrics?id='+q+'&range='+D.range).catch(()=>({rows:[]})), api('procs?id='+q).catch(()=>null), api('history?id='+q).catch(()=>[])]);
+    if(D.id!==id) return; D.rows=(m&&m.rows)||[]; D.procs=pr&&!pr.error?pr:null; D.hist=Array.isArray(hs)?hs:[]; D.at=now; renderDetail(); }
+  finally{ D.busy=false; } }
+function mcard(k,v,unit,sub,cls,vals,fixed){ return `<div class="mc ${esc(cls)}"><span class="k">${esc(k)}</span><span class="v${String(v).length>9?' sm':''}" title="${esc(String(v)+(unit||''))}">${esc(v)}${unit?'<small>'+esc(unit)+'</small>':''}</span><span class="s" title="${esc(sub)}">${esc(sub)}</span>${sparkSvg(vals,96,34,'currentColor',fixed)}</div>`; }
+function renderDetail(){
+  const t=S.byId[D.id]; if(!t) return; const s=statusOf(t), u=t.usage||{}, live=usageLive(t), by=((S.avail&&S.avail.by)||{})[t.id]||[0,0,0], n=by[0]+by[1];
+  const addr=t.address&&!/^\(/.test(t.address)?t.address:'';
+  $('dethead').innerHTML=`<div class="dh"><i class="sd ${esc(s)}"></i><span class="dn">${esc(t.name)}</span><span class="pill ${esc(s)}">${esc(STK(t))}</span>
+      <span class="sp"></span><button type="button" id="detprev" title="이전 서버(←)">‹ 이전</button><button type="button" id="detnext" title="다음 서버(→)">다음 ›</button><button type="button" id="detclose" title="닫기(Esc)">✕ 닫기</button></div>
+    <div class="di"><span>수집 방식<b>${esc(METK[t.metrics||'none']||t.metrics)}</b></span><span>마지막 보고<b>${esc(t.metrics&&t.metrics!=='none'?fmtAgo(u.at):'—')}</b></span>
+      <span>마지막 검사<b>${esc(fmtAgo(t.last_check))}${t.latency!=null&&s!=='down'?' · '+esc(fmtMs(t.latency)):''}</b></span>${addr?`<span>주소<b>${esc(addr)}</b></span>`:''}${u.uptime?`<span>가동<b>${esc(String(u.uptime))}</b></span>`:''}
+      <span class="av">24시간 검사 성공률<b>${esc(n?(100*by[0]/n).toFixed(2)+'%':'측정 불가')}</b></span></div>`;
+  const R=D.rows, col=k=>R.map(r=>r[k]), dw=(u.disks||[]).slice().sort((a,b)=>b.pct-a.pct)[0];
+  const cards=live||u.at?[
+    mcard('CPU',u.cpu==null?'—':Math.round(u.cpu),u.cpu==null?'':'%','임계치 '+S.settings.th_cpu+'%',lvOf(u.cpu,0)||'ok',col('cpu'),100),
+    mcard('메모리',u.mem==null?'—':Math.round(u.mem),u.mem==null?'':'%','임계치 '+S.settings.th_mem+'%',lvOf(u.mem,1)||'ok',col('mem'),100),
+    mcard('디스크 최대',u.disk==null?'—':Math.round(u.disk),u.disk==null?'':'%',dw?dw.path:'임계치 '+S.settings.th_disk+'%',lvOf(u.disk,2)||'ok',col('disk'),100),
+    mcard('부하 (1분)',u.load1==null?'—':Number(u.load1).toFixed(2),'',u.load1==null?'이 수집 방식은 보내지 않음':'load average',u.load1==null?'na':'',col('load1'),0),
+    mcard('네트워크 수신 / 송신',u.rx==null&&u.tx==null?'—':fmtBps(u.rx)+' / '+fmtBps(u.tx),'',u.rx==null?'이 수집 방식은 보내지 않음':'초당 바이트',u.rx==null?'na':'',col('rx'),0),
+    mcard('프로세스 수',u.pcount==null?'—':String(u.pcount),'',u.pusers!=null?'계정 '+u.pusers+'개':'프로세스 수집 꺼짐',u.pcount==null?'na':'',col('pcount'),0)].join('')
+    :`<div class="dnone" style="grid-column:1/-1">${esc(!t.metrics||t.metrics==='none'?'이 서버는 사용률(CPU·메모리·디스크)을 수집하지 않습니다 — 가용성(응답) 검사만 합니다.':'아직 사용률 보고가 없습니다.')} 위 [⚙ 수집 설정]에서 수집 방식을 고르면 여기에 지표가 나타납니다.</div>`;
+  const disks=(u.disks||[]).slice().sort((a,b)=>b.pct-a.pct);
+  const dtab=disks.length?`<table><thead><tr><th>경로</th><th>사용률</th><th style="text-align:right">사용 / 전체</th></tr></thead><tbody>${disks.slice(0,12).map(d=>{ const c=lvOf(d.pct,2);
+      return `<tr><td class="m" title="${esc(d.path)}">${esc(d.path)}</td><td><span class="tr"><b class="${esc(c)}" style="width:${esc(Math.max(1,Math.min(100,d.pct)).toFixed(0))}%"></b></span><b class="m">${esc(Math.round(d.pct)+'%')}</b></td><td class="n">${esc((d.used_gb==null?'—':d.used_gb)+' / '+(d.total_gb==null?'—':d.total_gb)+' GB')}</td></tr>`; }).join('')}</tbody></table>`
+    :`<div class="dnone">${esc(live?'볼륨별 값이 없습니다(이 수집 방식은 가장 높은 값 하나만 보냅니다).':'—')}</div>`;
+  const P=D.procs, top=P&&Array.isArray(P.top)?P.top.slice(0,10):[], users=P&&Array.isArray(P.users)?P.users.slice(0,8):[];
+  const ptab=P?(users.length?`<div class="ugrp">${users.map(x=>`<span title="CPU ${esc(String(x.cpu))}% · ${esc(String(x.mem_mb))} MB">${esc(x.user)} ${num(x.count)}</span>`).join('')}</div>`:'')
+      +(top.length?`<table><thead><tr><th>PID</th><th>계정</th><th>이름</th><th style="text-align:right">CPU</th><th style="text-align:right">메모리</th></tr></thead><tbody>${top.map(x=>`<tr><td class="m">${esc(String(x.pid))}</td><td>${esc(x.user)}</td><td class="m" title="${esc(x.name)}">${esc(x.name)}</td><td class="n">${esc(Number(x.cpu).toFixed(1))}%</td><td class="n">${esc(Math.round(x.mem_mb))} MB</td></tr>`).join('')}</tbody></table>`
+        :`<div class="dnone">상위 프로세스 목록은 수집하지 않도록 설정돼 있습니다(계정별 집계만).</div>`)+`<div class="note" style="margin-top:4px">${esc(fmtAgo(P.at))} 기준 · 전체 ${num(P.total)}개</div>`
+    :`<div class="dnone">${esc(t.metrics==='agent'||t.metrics==='local'?'아직 프로세스 정보가 없습니다(수집 설정에서 프로세스 수집이 꺼져 있을 수 있습니다).':'이 수집 방식은 프로세스 정보를 보내지 않습니다.')}</div>`;
+  const hs=D.hist.slice(-120), cnt={up:0,down:0,error:0}, ok=[];
+  for(const r of hs){ cnt[r.result]=(cnt[r.result]||0)+1; if(r.result==='up'&&r.latency!=null) ok.push(r.latency); }
+  const cells=Array.from({length:120},(_,i)=>{ const r=hs[i-(120-hs.length)]; if(!r) return '<i class="none"></i>';
+      const c=r.result==='down'?'down':r.result!=='up'?'error':r.latency!=null&&r.latency>=SLOW?'slow':''; return `<i class="${esc(c)}" title="${esc(fmtT(r.at)+' · '+fmtRes(r.result)+(r.latency!=null?' · '+fmtMs(r.latency):''))}"></i>`; }).join('');
+  const avg=ok.length?ok.reduce((a,b)=>a+b,0)/ok.length:null;
+  /* 캔버스는 화면 소독기(Trusted Types 허용 목록)가 innerHTML 로는 만들지 않는다 — 추이 칸은 고정 마크업에 두고 값·표만 다시 그린다 */
+  $('dcards').innerHTML=cards;
+  $('drange').innerHTML=RANGES.map(([v,l])=>`<button type="button" data-r="${num(v)}" class="${D.range===v?'on':''}">${esc(l)}</button>`).join('');
+  $('dleg').textContent=R.length?R.length+'점'+(D.range>10800?' (구간 평균)':''):'이 기간 수집값 없음';
+  $('dgrid').innerHTML=`<div class="dsec"><h3>볼륨별 디스크 <small>${esc(disks.length?disks.length+'개':'')}</small></h3>${dtab}</div><div class="dsec"><h3>상위 프로세스 <small>CPU 높은 순</small></h3>${ptab}</div>`;
+  $('dhist').innerHTML=`<h3>최근 가용성 검사 <small>최근 ${num(hs.length)}회 · 왼쪽이 오래된 것</small><span class="r note">정상 ${num(cnt.up)} · 실패 ${num(cnt.down)} · 수집 오류 ${num(cnt.error)}${avg!=null?' · 평균 '+esc(fmtMs(avg))+' · 최대 '+esc(fmtMs(Math.max(...ok))):''}</span></h3>
+      <div class="strip">${cells}</div><div class="legend" style="padding:6px 0 0"><span><i style="background:var(--ok)"></i>정상</span><span><i style="background:#EAB308"></i>느림(500 ms 이상)</span><span><i style="background:var(--crit)"></i>실패</span><span><i style="background:var(--warn)"></i>수집 오류</span></div>`;
+}
+$('det').addEventListener('click',e=>{ const b=e.target.closest('button'); if(!b) return;
+  if(b.id==='detclose') closeDetail(); else if(b.id==='detprev') stepDetail(-1); else if(b.id==='detnext') stepDetail(1);
+  else if(b.dataset.r){ D.range=Number(b.dataset.r); D.rows=[]; renderDetail(); loadDetail(true); } });
+function drawDetail(){
+  const cv=$('dchart'); if(!D.id||!cv) return; const [g,W,H]=fit(cv); g.clearRect(0,0,W,H);
+  const p={l:36,r:10,t:10,b:22}, now=nowT(), t0=now-D.range, x=t=>p.l+(t-t0)/D.range*(W-p.l-p.r), y=v=>p.t+(H-p.t-p.b)*(1-Math.max(0,Math.min(100,v))/100);
+  g.font='10.5px Consolas,monospace'; g.fillStyle='#5B6B88'; g.textAlign='right';
+  for(const v of [0,25,50,75,100]){ g.strokeStyle='#18233B'; g.beginPath(); g.moveTo(p.l,Math.round(y(v))+.5); g.lineTo(W-p.r,Math.round(y(v))+.5); g.stroke(); g.fillText(v,p.l-6,y(v)+4); }
+  g.textAlign='center'; { const ax=[]; for(let k=0;k<=6;k++){ const t=t0+D.range*k/6, d=new Date(t*1000), pd=n=>String(n).padStart(2,'0');
+    ax.push([D.range>86400?(d.getMonth()+1)+'-'+pd(d.getDate())+' '+pd(d.getHours())+'시':pd(d.getHours())+':'+pd(d.getMinutes()),x(t)]); } axisRow(g,ax,H-6,W); }
+  const SER=[['cpu','#5AA2FF',S.settings.th_cpu],['mem','#A78BFA',S.settings.th_mem],['disk','#22C55E',S.settings.th_disk]];
+  for(const [k,c,th] of SER){ g.setLineDash([4,4]); g.strokeStyle=c+'88'; g.beginPath(); g.moveTo(p.l,y(th)); g.lineTo(W-p.r,y(th)); g.stroke(); g.setLineDash([]); }
+  const gap=Math.max(180,D.range/240);
+  for(const [k,c] of SER){ g.strokeStyle=c; g.lineWidth=1.7; g.beginPath(); let prev=null;
+    for(const r of D.rows){ if(r[k]==null||r.at<t0) { prev=null; continue; } const xx=x(r.at), yy=y(r[k]); if(prev==null||r.at-prev>gap) g.moveTo(xx,yy); else g.lineTo(xx,yy); prev=r.at; } g.stroke(); }
+  if(D.hx!=null&&D.hx>=p.l&&D.hx<=W-p.r){ g.strokeStyle='rgba(230,237,247,.45)'; g.setLineDash([3,3]); g.beginPath(); g.moveTo(D.hx,p.t); g.lineTo(D.hx,H-p.b); g.stroke(); g.setLineDash([]); }
+  D.cx={p,t0,W};
+}
+addEventListener('mousemove',e=>{ if(e.target!==$('dchart')||!D.cx) { if(D.hx!=null&&e.target!==$('dchart')){D.hx=null;} return; }
+  const r=e.target.getBoundingClientRect(), hx=e.clientX-r.left, c=D.cx; D.hx=hx; const t=c.t0+(hx-c.p.l)/(c.W-c.p.l-c.p.r)*D.range;
+  let best=null; for(const q of D.rows) if(!best||Math.abs(q.at-t)<Math.abs(best.at-t)) best=q; const tip=$('tip');
+  if(!best||Math.abs(best.at-t)>Math.max(120,D.range/120)){ tip.hidden=true; return; }
+  tip.innerHTML=`<b>${esc(new Date(best.at*1000).toLocaleString())}</b><br>CPU <b>${esc(num(best.cpu))}%</b> · 메모리 <b>${esc(num(best.mem))}%</b> · 디스크 <b>${esc(num(best.disk))}%</b>${best.load1!=null?' · 부하 <b>'+esc(Number(best.load1).toFixed(2))+'</b>':''}`;
+  tip.hidden=false; tip.style.left=Math.min(innerWidth-300,e.clientX+14)+'px'; tip.style.top=(e.clientY+14)+'px'; });
+
+// ── 자원 사용률 수집 설정(14차 마스터: '수집을 설정할 수 있게, 갱신해서 볼 수 있게') ──
+function renderRejects(list){ const box=$('drej'); list=list||[]; if(!list.length){box.hidden=true;return}
+  box.innerHTML='<b>⚠ 받지 못한 에이전트 보고 '+list.length+'곳(최근 1시간)</b>'+list.slice(0,6).map(r=>`<div>· ${esc(fmtT(r.at))} · 보낸 곳 <b>${esc(r.address||'?')}</b>${r.hostname?' · 호스트명 <b>'+esc(r.hostname)+'</b>':''} — ${esc(r.reason)}</div>`).join(''); box.hidden=false; }
+function renderDrawer(force){
+  const box=$('drows'); if(!force&&box.contains(document.activeElement)&&document.activeElement.tagName==='SELECT') return;
+  const list=S.targets.slice().sort((a,b)=>a.name.localeCompare(b.name));
+  if(!list.length){ box.innerHTML='<tr><td colspan="5" class="note">감시 항목이 없습니다 — [감시 항목으로]에서 먼저 등록하십시오.</td></tr>'; return; }
+  box.innerHTML=list.map(t=>{ const u=t.usage||{}, m=t.metrics||'none', iv=t.metrics_interval||0, msg=(S.msg||{})[t.id]||['',''];
+    const mo=MET.map(([v,l])=>`<option value="${esc(v)}"${v===m?' selected':''}${v==='snmp'&&!t.snmp_has_community&&m!=='snmp'?' disabled':''}>${esc(l)}${v==='snmp'&&!t.snmp_has_community?' (편집에서 커뮤니티 필요)':''}</option>`).join('');
+    const io=INT.map(([v,l])=>`<option value="${num(v)}"${v===iv?' selected':''}>${esc(l)}</option>`).join('')+(INT.some(([v])=>v===iv)?'':`<option value="${num(iv)}" selected>${num(iv)}초</option>`);
+    const val=m==='none'?'—':u.at?`${num(u.cpu)}/${num(u.mem)}/${num(u.disk)}`:'수집 대기';
+    return `<tr data-id="${esc(t.id)}"><td><b>${esc(t.name)}</b><span class="msg">${esc(t.enabled?(statusOf(t)==='up'?'정상':statusOf(t)==='down'?'장애':'주의'):'사용 안 함')}</span></td>
+      <td><select data-k="metrics" aria-label="수집 방식">${mo}</select></td>
+      <td><select data-k="metrics_interval" aria-label="수집 주기"${m==='none'?' disabled':''}>${io}</select><span class="msg">${esc(m==='none'?'':every(t)+'초마다')}</span></td>
+      <td><span class="m">${esc(val)}</span><span class="msg">${esc(m==='none'?'':u.at?fmtAgo(u.at):'')}${esc(u.error?' · '+u.error:'')}</span></td>
+      <td><button type="button" data-now${m==='none'||!t.enabled?' disabled':''}>지금 갱신</button><span class="msg ${esc(msg[0])}">${esc(msg[1])}</span></td></tr>`; }).join('');
+}
+$('drows').addEventListener('change',async e=>{ const sel=e.target.closest('select[data-k]'); if(!sel) return; const id=sel.closest('tr').dataset.id;
+  const body={id}; body[sel.dataset.k]=sel.dataset.k==='metrics_interval'?Number(sel.value):sel.value;
+  S.msg=S.msg||{};
+  try{ const r=await api('usage',body); S.msg[id]=['ok','적용 — '+(r.metrics==='none'?'수집 안 함':r.every+'초마다')+(r.metrics==='agent'?' · 에이전트 설치 필요':'')]; }
+  catch(err){ S.msg[id]=['err',err.message]; }
+  await tick(); renderDrawer(true); setTimeout(()=>{tick().then(()=>renderDrawer(true))},1800); });
+$('drows').addEventListener('click',async e=>{ const b=e.target.closest('button[data-now]'); if(!b) return; const id=b.closest('tr').dataset.id; S.msg=S.msg||{}; b.disabled=true;
+  try{ const r=await api('collect',{id}); S.msg[id]=[r.ok?'ok':'err',r.note]; }catch(err){ S.msg[id]=['err',err.message]; }
+  renderDrawer(true); setTimeout(()=>{tick().then(()=>renderDrawer(true))},1800); });
+$('drefresh').addEventListener('click',async()=>{ S.msg=S.msg||{}; const ids=S.targets.filter(t=>t.enabled&&t.metrics&&t.metrics!=='none').map(t=>t.id);
+  await Promise.all(ids.map(id=>api('collect',{id}).then(r=>{S.msg[id]=[r.ok?'ok':'err',r.note]}).catch(err=>{S.msg[id]=['err',err.message]})));
+  renderDrawer(true); setTimeout(()=>{tick().then(()=>renderDrawer(true))},1800); });
+$('cfg').addEventListener('click',()=>{ $('drawer').hidden=false; renderDrawer(true); });
+$('dclose').addEventListener('click',()=>{ $('drawer').hidden=true; });
+
+function frame(){ drawGauge(); drawXView(); drawEq(); drawTrend(); drawDetail(); requestAnimationFrame(frame); }
+function clock(){ const d=new Date(),p=x=>String(x).padStart(2,'0'); $('clock').textContent=d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds()); }
+$('every').addEventListener('click',e=>{ const b=e.target.closest('button[data-s]'); if(!b) return; S.every=Number(b.dataset.s);
+  for(const x of $('every').children) x.classList.toggle('on',x===b); try{localStorage.setItem('lt.live.every',String(S.every))}catch(x){} schedule(); });
+$('pause').addEventListener('click',e=>{ S.paused=!S.paused; S.pauseAt=Date.now()/1000; const b=e.currentTarget; b.classList.toggle('on',S.paused); b.setAttribute('aria-pressed',String(S.paused));
+  b.textContent=S.paused?'▶ 다시 시작':'❚❚ 일시정지'; if(!S.paused) tick(); else { $('note').textContent='일시정지됨'; $('livedot').className='dot off'; } });
+$('full').addEventListener('click',()=>{ if(document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen?.().catch(()=>{}); });
+document.addEventListener('fullscreenchange',()=>{ $('full').textContent=document.fullscreenElement?'⛶ 전체 화면 끝':'⛶ 전체 화면'; });
+$('back').addEventListener('click',()=>{ try{ if(window.opener&&!window.opener.closed&&window.opener.location.pathname==='/nms'){ window.opener.focus(); window.close(); return; } }catch(e){} location.href='/nms'; });   // 새 창으로 열렸으면 원래 창으로
+$('evf').addEventListener('change',renderEvents);
+$('xvf').addEventListener('change',()=>{ S.keep=null; });
+document.addEventListener('visibilitychange',()=>{ if(!document.hidden) tick(); });
+clock(); setInterval(clock,1000); tick(); schedule(); requestAnimationFrame(frame);
+</script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+product: oracle
+title: Oracle Database 운영 참고 (GPT 수집 — 벤더 문서 대조 필요)
+sections:
+- heading: 로그 위치
+  body: ADR 기본 경로는 DIAGNOSTIC_DEST 아래 diag/rdbms/<db>/<instance>/trace/alert_<SID>.log이며
+    리스너 로그도 ADR에서 관리한다. adrci의 show homes로 실제 ADR Home을 확인한다.
+- heading: 장애 시 수집 방법
+  body: adrci에서 show alert -tail 200과 incident/trace를 수집하고 가능하면 AHF의 tfactl diagcollect로
+    DB·리스너·OS 진단자료를 묶어 보존한다.
+- heading: 대표 장애 신호
+  body: ORA-00600/07445 내부오류, ORA-04030/04031 메모리, ORA-00060 교착, ORA-00257 아카이브, ORA-01652/01653
+    공간, ORA-12541 접속 실패를 우선 본다.
+- heading: 1차 확인 명령
+  body: sqlplus / as sysdba 후 select instance_name,status from v$instance; select
+    open_mode from v$database; 실행, OS에서는 lsnrctl status와 adrci 상태를 확인한다.

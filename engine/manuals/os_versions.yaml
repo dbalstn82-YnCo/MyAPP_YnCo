@@ -1,0 +1,780 @@
+# OS 제품 버전 카탈로그 — 코드 조회 › 제품 › [버전] 탭. 룰·코드의 versions 필드가 가리키는 기준 표.
+# 출처: 각 행 source. 날짜는 YYYY-MM-DD(월만 확인된 경우 -01). 검증일 2026-09-11 (Claude 웹 대조 + GPT 교차 수집)
+products:
+  linux:
+    title: Linux 배포판 버전별 수명주기·로그 체계
+    updated: '2026-09-11'
+    note: 'EOS 가 지난 버전도 현장에 남아 있어 로그 형식·메시지를 계속 수집한다. RHEL 계열(CentOS·Rocky·Alma)은 같은 major 의 RHEL 과 커널·로그 체계가 동일. 커널 메시지 형식은 배포판 커널 버전(base kernel)에 따른다. 일반지원 종료 = 제조사 유지보수(보안 패치) 종료일, 확장지원 = 유료 ELS/ESM/LTSS. GPT 교차 수집(collect/verify/resp_linux_versions_2026-09-11.txt)
+      21행과 대조: 날짜 일치, RHEL 5 OOM 문구는 커널 2.6.18 소스(''Out of Memory: Killed process'') 기준 유지.'
+    columns:
+    - distro
+    - version
+    - released
+    - support_end
+    - extended_end
+    - kernel
+    - init
+    - syslog
+    - syslog_path
+    - auth_path
+    - pkg_log
+    - mac
+    - firewall
+    - cgroup
+    - oom_msg
+    - source
+    labels:
+      distro: 배포판
+      version: 버전
+      released: 출시
+      support_end: 유지보수(보안) 지원 종료
+      extended_end: 확장지원 종료
+      kernel: 기본 커널
+      init: init
+      syslog: 로그 데몬
+      syslog_path: 시스템 로그
+      auth_path: 인증 로그
+      pkg_log: 패키지 로그
+      mac: MAC
+      firewall: 방화벽
+      cgroup: cgroup
+      oom_msg: OOM 메시지
+      source: 출처
+    versions:
+    - distro: RHEL
+      version: '5'
+      released: '2007-03-15'
+      support_end: '2017-03-31'
+      extended_end: '2020-11-30'
+      kernel: 2.6.18
+      init: sysvinit
+      syslog: syslog(sysklogd)
+      syslog_path: /var/log/messages
+      auth_path: /var/log/secure
+      pkg_log: /var/log/yum.log
+      mac: SELinux
+      firewall: iptables
+      cgroup: 없음
+      oom_msg: 'Out of Memory: Killed process N (name)'
+      source: https://access.redhat.com/articles/4038291
+    - distro: RHEL
+      version: '6'
+      released: '2010-11-10'
+      support_end: '2020-11-30'
+      extended_end: 2024-06-30 (ELS, Long-Life 2030-12-31 공개)
+      kernel: 2.6.32
+      init: upstart
+      syslog: rsyslog
+      syslog_path: /var/log/messages
+      auth_path: /var/log/secure
+      pkg_log: /var/log/yum.log
+      mac: SELinux
+      firewall: iptables
+      cgroup: v1
+      oom_msg: 'Out of memory: kill process N (name) score S or a child / Killed process N (name)'
+      source: https://access.redhat.com/articles/4038291
+    - distro: RHEL
+      version: '7'
+      released: '2014-06-09'
+      support_end: '2024-06-30'
+      extended_end: 2029-05-31 (ELS)
+      kernel: '3.10'
+      init: systemd
+      syslog: rsyslog + journald
+      syslog_path: /var/log/messages (+journalctl)
+      auth_path: /var/log/secure
+      pkg_log: /var/log/yum.log
+      mac: SELinux
+      firewall: firewalld(iptables)
+      cgroup: v1
+      oom_msg: 'Out of memory: Kill process N (name) score S or sacrifice child / Killed process N (name) total-vm:…'
+      source: https://access.redhat.com/articles/4038291 ; Full support 종료 2019-08-06
+    - distro: RHEL
+      version: '8'
+      released: '2019-05-07'
+      support_end: '2029-05-31'
+      extended_end: 2033-05-31 (ELS)
+      kernel: '4.18'
+      init: systemd
+      syslog: rsyslog + journald
+      syslog_path: /var/log/messages (+journalctl)
+      auth_path: /var/log/secure
+      pkg_log: /var/log/dnf.log
+      mac: SELinux
+      firewall: firewalld(nftables)
+      cgroup: v1(기본)/v2 선택
+      oom_msg: 'Out of memory: Killed process N (name) total-vm:… (backport, ''Kill process … sacrifice child'' 도 존재)'
+      source: https://endoflife.date/rhel ; Full support 종료 2024-05-31
+    - distro: RHEL
+      version: '9'
+      released: '2022-05-18'
+      support_end: '2032-05-31'
+      extended_end: 2036-05-31 (ELS)
+      kernel: '5.14'
+      init: systemd
+      syslog: rsyslog + journald
+      syslog_path: /var/log/messages (+journalctl)
+      auth_path: /var/log/secure
+      pkg_log: /var/log/dnf.log
+      mac: SELinux
+      firewall: firewalld(nftables)
+      cgroup: v2
+      oom_msg: 'Out of memory: Killed process N (name) total-vm:… UID:…'
+      source: https://endoflife.date/rhel ; Full support 종료 2027-05-31
+    - distro: RHEL
+      version: '10'
+      released: '2025-05-20'
+      support_end: '2035-05-31'
+      extended_end: 2039-05-31 (ELS)
+      kernel: '6.12'
+      init: systemd
+      syslog: rsyslog + journald
+      syslog_path: /var/log/messages (+journalctl)
+      auth_path: /var/log/secure
+      pkg_log: /var/log/dnf.log (dnf5)
+      mac: SELinux
+      firewall: firewalld(nftables)
+      cgroup: v2
+      oom_msg: 'Out of memory: Killed process N (name) total-vm:… UID:…'
+      source: https://endoflife.date/rhel ; Full support 종료 2030-05-31
+    - distro: CentOS
+      version: '6'
+      released: '2011-07-10'
+      support_end: '2017-05-10'
+      extended_end: '2020-11-30'
+      kernel: 2.6.32
+      init: upstart
+      syslog: rsyslog
+      syslog_path: /var/log/messages
+      auth_path: /var/log/secure
+      pkg_log: /var/log/yum.log
+      mac: SELinux
+      firewall: iptables
+      cgroup: v1
+      oom_msg: RHEL 6 과 동일
+      source: https://endoflife.date/centos
+    - distro: CentOS
+      version: '7'
+      released: '2014-07-07'
+      support_end: '2020-08-06'
+      extended_end: '2024-06-30'
+      kernel: '3.10'
+      init: systemd
+      syslog: rsyslog + journald
+      syslog_path: /var/log/messages
+      auth_path: /var/log/secure
+      pkg_log: /var/log/yum.log
+      mac: SELinux
+      firewall: firewalld
+      cgroup: v1
+      oom_msg: RHEL 7 과 동일
+      source: https://endoflife.date/centos
+    - distro: CentOS Stream
+      version: '8'
+      released: '2019-09-24'
+      support_end: '2024-05-31'
+      extended_end: '-'
+      kernel: '4.18'
+      init: systemd
+      syslog: rsyslog + journald
+      syslog_path: /var/log/messages
+      auth_path: /var/log/secure
+      pkg_log: /var/log/dnf.log
+      mac: SELinux
+      firewall: firewalld(nftables)
+      cgroup: v1
+      oom_msg: RHEL 8 과 동일
+      source: https://endoflife.date/centos
+    - distro: CentOS Stream
+      version: '9'
+      released: 2021-12-03 (미러 제공 2021-09-30)
+      support_end: '2027-05-31'
+      extended_end: '-'
+      kernel: '5.14'
+      init: systemd
+      syslog: rsyslog + journald
+      syslog_path: /var/log/messages
+      auth_path: /var/log/secure
+      pkg_log: /var/log/dnf.log
+      mac: SELinux
+      firewall: firewalld(nftables)
+      cgroup: v2
+      oom_msg: RHEL 9 와 동일
+      source: https://endoflife.date/centos
+    - distro: Rocky Linux
+      version: '8'
+      released: '2021-05-01'
+      support_end: '2024-05-31'
+      extended_end: '2029-05-31'
+      kernel: '4.18'
+      init: systemd
+      syslog: rsyslog + journald
+      syslog_path: /var/log/messages
+      auth_path: /var/log/secure
+      pkg_log: /var/log/dnf.log
+      mac: SELinux
+      firewall: firewalld(nftables)
+      cgroup: v1
+      oom_msg: RHEL 8 과 동일
+      source: https://endoflife.date/rocky-linux
+    - distro: Rocky Linux
+      version: '9'
+      released: '2022-07-14'
+      support_end: '2027-05-31'
+      extended_end: '2032-05-31'
+      kernel: '5.14'
+      init: systemd
+      syslog: rsyslog + journald
+      syslog_path: /var/log/messages
+      auth_path: /var/log/secure
+      pkg_log: /var/log/dnf.log
+      mac: SELinux
+      firewall: firewalld(nftables)
+      cgroup: v2
+      oom_msg: RHEL 9 와 동일
+      source: https://endoflife.date/rocky-linux
+    - distro: AlmaLinux
+      version: '8'
+      released: '2021-03-30'
+      support_end: '2024-05-31'
+      extended_end: '2029-05-31'
+      kernel: '4.18'
+      init: systemd
+      syslog: rsyslog + journald
+      syslog_path: /var/log/messages
+      auth_path: /var/log/secure
+      pkg_log: /var/log/dnf.log
+      mac: SELinux
+      firewall: firewalld(nftables)
+      cgroup: v1
+      oom_msg: RHEL 8 과 동일
+      source: https://endoflife.date/almalinux
+    - distro: AlmaLinux
+      version: '9'
+      released: '2022-05-26'
+      support_end: '2027-05-31'
+      extended_end: '2032-05-31'
+      kernel: '5.14'
+      init: systemd
+      syslog: rsyslog + journald
+      syslog_path: /var/log/messages
+      auth_path: /var/log/secure
+      pkg_log: /var/log/dnf.log
+      mac: SELinux
+      firewall: firewalld(nftables)
+      cgroup: v2
+      oom_msg: RHEL 9 와 동일
+      source: https://endoflife.date/almalinux
+    - distro: Ubuntu
+      version: 16.04 LTS
+      released: '2016-04-21'
+      support_end: '2021-04-30'
+      extended_end: 2026-05-31 (ESM)
+      kernel: '4.4'
+      init: systemd
+      syslog: rsyslog + journald
+      syslog_path: /var/log/syslog
+      auth_path: /var/log/auth.log
+      pkg_log: /var/log/apt/history.log, /var/log/dpkg.log
+      mac: AppArmor
+      firewall: ufw(iptables) 기본 비활성
+      cgroup: v1
+      oom_msg: 'Out of memory: Kill process N (name) score S or sacrifice child / Killed process N (name) total-vm:…'
+      source: https://ubuntu.com/about/release-cycle
+    - distro: Ubuntu
+      version: 18.04 LTS
+      released: '2018-04-26'
+      support_end: '2023-05-31'
+      extended_end: 2028-05-31 (ESM)
+      kernel: '4.15'
+      init: systemd
+      syslog: rsyslog + journald
+      syslog_path: /var/log/syslog
+      auth_path: /var/log/auth.log
+      pkg_log: /var/log/apt/history.log, /var/log/dpkg.log
+      mac: AppArmor
+      firewall: ufw(iptables) 기본 비활성
+      cgroup: v1
+      oom_msg: 'Out of memory: Kill process N (name) score S or sacrifice child / Killed process N (name) total-vm:…'
+      source: https://ubuntu.com/about/release-cycle
+    - distro: Ubuntu
+      version: 20.04 LTS
+      released: '2020-04-23'
+      support_end: '2025-05-31'
+      extended_end: 2030-05-31 (ESM)
+      kernel: '5.4'
+      init: systemd
+      syslog: rsyslog + journald
+      syslog_path: /var/log/syslog
+      auth_path: /var/log/auth.log
+      pkg_log: /var/log/apt/history.log, /var/log/dpkg.log
+      mac: AppArmor
+      firewall: ufw(iptables/nftables) 기본 비활성
+      cgroup: v1
+      oom_msg: 'Out of memory: Killed process N (name) total-vm:… UID:…'
+      source: https://ubuntu.com/about/release-cycle
+    - distro: Ubuntu
+      version: 22.04 LTS
+      released: '2022-04-21'
+      support_end: '2027-05-31'
+      extended_end: 2032-05-31 (ESM)
+      kernel: '5.15'
+      init: systemd
+      syslog: rsyslog + journald
+      syslog_path: /var/log/syslog
+      auth_path: /var/log/auth.log
+      pkg_log: /var/log/apt/history.log, /var/log/dpkg.log
+      mac: AppArmor
+      firewall: ufw(nftables) 기본 비활성
+      cgroup: v2
+      oom_msg: 'Out of memory: Killed process N (name) total-vm:… UID:…'
+      source: https://ubuntu.com/about/release-cycle
+    - distro: Ubuntu
+      version: 24.04 LTS
+      released: '2024-04-25'
+      support_end: '2029-05-31'
+      extended_end: 2034-05-31 (ESM)
+      kernel: '6.8'
+      init: systemd
+      syslog: journald(rsyslog 기본 미설치 — /var/log/syslog 없음)
+      syslog_path: journalctl
+      auth_path: journalctl (auth.log 없음)
+      pkg_log: /var/log/apt/history.log, /var/log/dpkg.log
+      mac: AppArmor
+      firewall: ufw(nftables) 기본 비활성
+      cgroup: v2
+      oom_msg: 'Out of memory: Killed process N (name) total-vm:… UID:…'
+      source: https://ubuntu.com/about/release-cycle
+    - distro: SLES
+      version: 12 (SP5)
+      released: 2014-10-27 (SP5 2019-12-09)
+      support_end: '2024-10-31'
+      extended_end: 2027-10-31 (LTSS)
+      kernel: 3.12 (GA) / 4.12 (SP5)
+      init: systemd
+      syslog: rsyslog + journald
+      syslog_path: /var/log/messages
+      auth_path: /var/log/messages (pam)
+      pkg_log: /var/log/zypp/history, /var/log/zypper.log
+      mac: AppArmor
+      firewall: SuSEfirewall2(iptables)
+      cgroup: v1
+      oom_msg: 'Out of memory: Kill process N (name) score S or sacrifice child / Killed process N (name) total-vm:…'
+      source: https://www.suse.com/lifecycle
+    - distro: SLES
+      version: 15 (SP7)
+      released: 2018-07-16 (SP7 2025-06-17)
+      support_end: '2031-07-31'
+      extended_end: 2034-07-31 (LTSS)
+      kernel: 4.12 (GA~SP2) / 5.14 (SP3~5) / 6.4 (SP6+)
+      init: systemd
+      syslog: rsyslog + journald
+      syslog_path: /var/log/messages
+      auth_path: /var/log/messages (pam)
+      pkg_log: /var/log/zypp/history, /var/log/zypper.log
+      mac: AppArmor
+      firewall: firewalld(nftables)
+      cgroup: v2 (SP3+)
+      oom_msg: 'SP3 이후 ''Out of memory: Killed process'' / 이전 ''Kill process … sacrifice child'''
+      source: https://www.suse.com/lifecycle
+  aix:
+    title: AIX 버전별 수명주기·로그 체계
+    updated: '2026-09-11'
+    note: 'IBM 은 릴리스가 아니라 TL(Technology Level) 단위로 fix 지원을 종료한다. errpt 형식·LABEL/IDENTIFIER 는 5.3~7.3 동일하므로 코드 사전은 전 버전 공통. EOS 지난 5.3/6.1/7.1 도 수집 대상. GPT 교차(collect/verify/resp_aix_versions_2026-09-11.txt): errpt LABEL/IDENTIFIER/Class/Type 구조 7.1~7.3
+      IBM 문서로 동일 확인, 5.3/6.1 은 공개 문서 미확인(형식 변경 기록 없음).'
+    columns:
+    - version
+    - released
+    - last_tl
+    - support_end
+    - extended_end
+    - errlog
+    - syslog_path
+    - auth_path
+    - audit_path
+    - dump_path
+    - cluster_log
+    - source
+    labels:
+      version: 버전
+      released: 출시(GA)
+      last_tl: 마지막 TL
+      support_end: 유지보수(SP) 지원 종료
+      extended_end: 확장지원 종료
+      errlog: 오류 로그(errpt)
+      syslog_path: 시스템 로그
+      auth_path: su·로그인 실패
+      audit_path: 감사
+      dump_path: 시스템 덤프
+      cluster_log: 클러스터 로그
+      source: 출처
+    versions:
+    - version: '5.3'
+      released: 2004-08 (Wikipedia 08-13 / IBM 공지 07-13, 미확정)
+      last_tl: TL12 (2009-10)
+      support_end: '2012-04-30'
+      extended_end: 2015-04-30 (IBM Service Extension; 2016-04-30·2017-06-30 은 하드웨어별 post-lifecycle 계약)
+      cluster_log: 'HACMP 5.x: /tmp/hacmp.out, /usr/es/adm/cluster.log'
+      source: https://unixhealthcheck.com/blog?id=272 ; https://mainline.com/power-systems-april-announcements-new-extended-support-aix-5-3/
+      errlog: /var/adm/ras/errlog (errpt -a — LABEL·IDENTIFIER·Class H/S/O/U·Type PERM/TEMP/PERF/PEND/INFO/UNKN, 5.3~7.3 동일)
+      syslog_path: /etc/syslog.conf 지정 파일(기본 미기록) — 관례 /var/adm/messages·/var/log/syslog; 7.3 은 rsyslog 전환 시 syslog_ssw -r
+      auth_path: /var/adm/sulog, /etc/security/failedlogin (who -a 로 조회), /var/adm/wtmp
+      audit_path: /audit/bin1,/audit/bin2 → /audit/trail (audit 활성 시)
+      dump_path: sysdumpdev 기본 primary /dev/hd6 · secondary /dev/sysdumpnull (4GB+ 메모리 /dev/lg_dumplv) → 복사 /var/adm/ras/vmcore.n
+    - version: '6.1'
+      released: '2007-11-09'
+      last_tl: TL9 (2013-11-30)
+      support_end: '2017-04-30'
+      extended_end: 2020-04-30 (Service Extension)
+      cluster_log: 'PowerHA 6.1/7.1: /var/hacmp/log/hacmp.out, /var/hacmp/adm/cluster.log'
+      source: https://endoflife.date/aix
+      errlog: /var/adm/ras/errlog (errpt -a — LABEL·IDENTIFIER·Class H/S/O/U·Type PERM/TEMP/PERF/PEND/INFO/UNKN, 5.3~7.3 동일)
+      syslog_path: /etc/syslog.conf 지정 파일(기본 미기록) — 관례 /var/adm/messages·/var/log/syslog; 7.3 은 rsyslog 전환 시 syslog_ssw -r
+      auth_path: /var/adm/sulog, /etc/security/failedlogin (who -a 로 조회), /var/adm/wtmp
+      audit_path: /audit/bin1,/audit/bin2 → /audit/trail (audit 활성 시)
+      dump_path: sysdumpdev 기본 primary /dev/hd6 · secondary /dev/sysdumpnull (4GB+ 메모리 /dev/lg_dumplv) → 복사 /var/adm/ras/vmcore.n
+    - version: '7.1'
+      released: '2010-09-10'
+      last_tl: TL5 (2017-10-31)
+      support_end: '2023-04-30'
+      extended_end: 2027-04-30 (Service Extension)
+      cluster_log: 'PowerHA 7.x: /var/hacmp/log/hacmp.out'
+      source: https://endoflife.date/aix ; https://www.ibm.com/support/pages/aix-support-lifecycle-information
+      errlog: /var/adm/ras/errlog (errpt -a — LABEL·IDENTIFIER·Class H/S/O/U·Type PERM/TEMP/PERF/PEND/INFO/UNKN, 5.3~7.3 동일)
+      syslog_path: /etc/syslog.conf 지정 파일(기본 미기록) — 관례 /var/adm/messages·/var/log/syslog; 7.3 은 rsyslog 전환 시 syslog_ssw -r
+      auth_path: /var/adm/sulog, /etc/security/failedlogin (who -a 로 조회), /var/adm/wtmp
+      audit_path: /audit/bin1,/audit/bin2 → /audit/trail (audit 활성 시)
+      dump_path: sysdumpdev 기본 primary /dev/hd6 · secondary /dev/sysdumpnull (4GB+ 메모리 /dev/lg_dumplv) → 복사 /var/adm/ras/vmcore.n
+    - version: '7.2'
+      released: 2015-12-04 (TL0)
+      last_tl: TL5 (2020-11-30)
+      support_end: 미정(TL5 fix support 'to be determined', 2026-12 SP 예정)
+      extended_end: '-'
+      cluster_log: 'PowerHA 7.2: /var/hacmp/log/hacmp.out'
+      source: https://www.ibm.com/support/pages/aix-support-lifecycle-information
+      errlog: /var/adm/ras/errlog (errpt -a — LABEL·IDENTIFIER·Class H/S/O/U·Type PERM/TEMP/PERF/PEND/INFO/UNKN, 5.3~7.3 동일)
+      syslog_path: /etc/syslog.conf 지정 파일(기본 미기록) — 관례 /var/adm/messages·/var/log/syslog; 7.3 은 rsyslog 전환 시 syslog_ssw -r
+      auth_path: /var/adm/sulog, /etc/security/failedlogin (who -a 로 조회), /var/adm/wtmp
+      audit_path: /audit/bin1,/audit/bin2 → /audit/trail (audit 활성 시)
+      dump_path: sysdumpdev 기본 primary /dev/hd6 · secondary /dev/sysdumpnull (4GB+ 메모리 /dev/lg_dumplv) → 복사 /var/adm/ras/vmcore.n
+    - version: '7.3'
+      released: 2021-12-10 (TL0)
+      last_tl: TL4 (2025-12-06)
+      support_end: TL2 2026-11-30 · TL3 2027-12-31 · TL4 2028-12-31 (릴리스 종료 미발표)
+      extended_end: '-'
+      cluster_log: 'PowerHA 7.2.7+/7.3: /var/hacmp/log/hacmp.out'
+      source: https://www.ibm.com/support/pages/aix-support-lifecycle-information ; https://endoflife.date/aix
+      errlog: /var/adm/ras/errlog (errpt -a — LABEL·IDENTIFIER·Class H/S/O/U·Type PERM/TEMP/PERF/PEND/INFO/UNKN, 5.3~7.3 동일)
+      syslog_path: /etc/syslog.conf 지정 파일(기본 미기록) — 관례 /var/adm/messages·/var/log/syslog; 7.3 은 rsyslog 전환 시 syslog_ssw -r
+      auth_path: /var/adm/sulog, /etc/security/failedlogin (who -a 로 조회), /var/adm/wtmp
+      audit_path: /audit/bin1,/audit/bin2 → /audit/trail (audit 활성 시)
+      dump_path: sysdumpdev 기본 primary /dev/hd6 · secondary /dev/sysdumpnull (4GB+ 메모리 /dev/lg_dumplv) → 복사 /var/adm/ras/vmcore.n
+  hpux:
+    title: HP-UX 11i 버전별 수명주기·로그 체계
+    updated: '2026-09-11'
+    note: '11i v1/v2 는 EOS, v3 도 2025-12-31 종료. syslog.log 형식은 세 버전 동일. v3 에서 PVLinks→네이티브 멀티패스, STM→SysFaultMgmt 로 바뀌어 일부 문구가 달라진다. GPT 교차(HPE AR2505 OE Update Release 공지, collect/verify/resp_hpux_solaris_windows_versions_2026-09-11.txt): v1/v2 Standard
+      2013-12-31·Extended 2015-12-31·Prior Version Support 2025-12-31, v3 Standard 2025-12-31·Mature 2028-12-31.'
+    columns:
+    - version
+    - released
+    - support_end
+    - extended_end
+    - hardware
+    - syslog_path
+    - ems_log
+    - auth_path
+    - audit_path
+    - dump_path
+    - cluster_log
+    - diag
+    - source
+    labels:
+      version: 버전
+      released: 출시
+      support_end: 지원 종료
+      hardware: 하드웨어
+      syslog_path: 시스템 로그
+      ems_log: EMS 이벤트
+      auth_path: su·로그인 실패
+      audit_path: 감사
+      dump_path: 크래시 덤프
+      cluster_log: Serviceguard
+      diag: 진단 도구
+      source: 출처
+      extended_end: 확장지원 종료
+    versions:
+    - version: 11i v1 (B.11.11)
+      released: '2000-12-01'
+      support_end: 2013-12-31 (Standard Support)
+      hardware: HP 9000 (PA-RISC)
+      syslog_path: /var/adm/syslog/syslog.log (OLDsyslog.log)
+      ems_log: /var/opt/resmon/log/event.log(HP EMS Hardware Monitors User Guide 기본 TEXTLOG)
+      auth_path: /var/adm/sulog, /var/adm/btmp(lastb), /var/adm/wtmp
+      audit_path: /.secure/etc/audit (Trusted Mode)
+      dump_path: /var/adm/crash
+      cluster_log: /var/adm/cmcluster/log, syslog.log(cmcld)
+      diag: STM(cstm/mstm), Online Diagnostics
+      source: https://en.wikipedia.org/wiki/HP-UX ; https://www.hpe.com/global/softwarereleases/releases-media2/HPEredesign/latest/AR2505/AR2505_OEUR_Letter_English.pdf
+      extended_end: 2015-12-31 (Extended Support) · 2025-12-31 (Prior Version Support)
+    - version: 11i v2 (B.11.23)
+      released: 2003-09
+      support_end: 2013-12-31 (Standard Support)
+      hardware: HP 9000 · Integrity(Itanium)
+      syslog_path: /var/adm/syslog/syslog.log
+      ems_log: /var/opt/resmon/log/event.log(HP EMS Hardware Monitors User Guide 기본 TEXTLOG)
+      auth_path: /var/adm/sulog, /var/adm/btmp, /var/adm/wtmp
+      audit_path: /.secure/etc/audit
+      dump_path: /var/adm/crash
+      cluster_log: /var/adm/cmcluster/log
+      diag: STM, vPars A.03/A.04
+      source: https://en.wikipedia.org/wiki/HP-UX ; https://www.hpe.com/global/softwarereleases/releases-media2/HPEredesign/latest/AR2505/AR2505_OEUR_Letter_English.pdf
+      extended_end: 2015-12-31 (Extended Support) · 2025-12-31 (Prior Version Support)
+    - version: 11i v3 (B.11.31)
+      released: '2007-02-01'
+      support_end: 2025-12-31 Integrity (HP 9000 은 2021-03-31) — Standard Support
+      hardware: Integrity(Itanium)
+      syslog_path: /var/adm/syslog/syslog.log
+      ems_log: /var/opt/resmon/log/event.log(HP EMS Hardware Monitors User Guide 기본 TEXTLOG), /var/opt/sfm/log(SysFaultMgmt)
+      auth_path: /var/adm/sulog, /var/adm/btmp, /var/adm/wtmps
+      audit_path: /var/.audit (Standard Mode Security Extensions)
+      dump_path: /var/adm/crash
+      cluster_log: /var/adm/cmcluster/log
+      diag: SysFaultMgmt(SFM)/EVWEB, STM 병행, 네이티브 멀티패스(PVLink 대체)
+      source: https://en.wikipedia.org/wiki/HP-UX ; https://www.hpe.com/global/softwarereleases/releases-media2/HPEredesign/latest/AR2505/AR2505_OEUR_Letter_English.pdf
+      extended_end: 2028-12-31 (Mature Product Support)
+  solaris:
+    title: Solaris 버전별 수명주기·로그 체계
+    updated: '2026-09-11'
+    note: '8/9 는 EOS, 10 은 Extended Support 2027-01. SMF·FMA·Zones·DTrace 는 10 도입, ZFS 는 10 6/06 이후(11 은 ZFS 루트 필수). /var/adm/messages 의 ''[ID nnnnn facility.level]'' 접두 형식은 8~11.4 동일. GPT 교차(Oracle Lifetime Support Policy): 날짜 일치, /var/adm/loginlog 는
+      기본 미생성(생성 시 기록).'
+    columns:
+    - version
+    - released
+    - support_end
+    - extended_end
+    - syslog_path
+    - auth_path
+    - smf_log
+    - fma
+    - audit_path
+    - dump_path
+    - features
+    - source
+    labels:
+      version: 버전
+      released: 출시
+      support_end: Premier 종료
+      extended_end: Extended 종료
+      syslog_path: 시스템 로그
+      auth_path: 인증·로그인 실패
+      smf_log: SMF 로그
+      fma: FMA
+      audit_path: 감사
+      dump_path: 크래시 덤프
+      features: 주요 기능
+      source: 출처
+    versions:
+    - version: '8'
+      released: '2000-02-01'
+      support_end: 2009-03-31 (Premier)
+      extended_end: 2012-03-31 (Extended) · Sustaining 무기한
+      syslog_path: /var/adm/messages
+      auth_path: /var/adm/sulog, /var/adm/loginlog, /var/adm/authlog(설정 시)
+      smf_log: 없음(init.d)
+      fma: 없음
+      audit_path: /etc/security/audit 기본(BSM, 저장 위치 audit_binfile 설정)
+      dump_path: /var/crash/<host>
+      features: IPMP, MPxIO(패치), RBAC, DiskSuite
+      source: https://en.wikipedia.org/wiki/Oracle_Solaris ; https://endoflife.date/solaris ; https://www.oracle.com/a/ocom/docs/support/advanced-customer-support/solaris-linux-vm-lsp.pdf
+    - version: '9'
+      released: 2002-05-28 (Oracle 표기 2002-03)
+      support_end: 2011-10-31 (Premier)
+      extended_end: 2014-10-31 (Extended) · Sustaining 무기한
+      syslog_path: /var/adm/messages
+      auth_path: /var/adm/sulog, /var/adm/loginlog
+      smf_log: 없음(init.d)
+      fma: 없음
+      audit_path: /etc/security/audit 기본(BSM, 저장 위치 audit_binfile 설정)
+      dump_path: /var/crash/<host>
+      features: SVM(md), rctl 자원 제어
+      source: https://en.wikipedia.org/wiki/Oracle_Solaris ; https://www.oracle.com/a/ocom/docs/support/advanced-customer-support/solaris-linux-vm-lsp.pdf
+    - version: '10'
+      released: '2005-01-31'
+      support_end: '2018-01-31'
+      extended_end: 2027-01-31 (endoflife.date 기준, Oracle 재연장) · Sustaining 무기한
+      syslog_path: /var/adm/messages
+      auth_path: /var/adm/sulog, /var/adm/loginlog
+      smf_log: /var/svc/log/*.log (svcs -x)
+      fma: fmdump / fmadm faulty (SUNW-MSG-ID)
+      audit_path: /etc/security/audit 기본(BSM, 저장 위치 audit_binfile 설정)
+      dump_path: /var/crash/<host>
+      features: SMF, FMA, DTrace, Zones, ZFS(6/06+), LDoms(11/06+), MPxIO 기본
+      source: https://en.wikipedia.org/wiki/Oracle_Solaris ; https://endoflife.date/solaris ; https://www.oracle.com/a/ocom/docs/support/advanced-customer-support/solaris-linux-vm-lsp.pdf
+    - version: '11.3'
+      released: '2015-10-26'
+      support_end: '2021-01-31'
+      extended_end: 2027-01-31 · Sustaining 무기한
+      syslog_path: /var/adm/messages (rsyslog 선택)
+      auth_path: /var/adm/sulog, /var/log/authlog
+      smf_log: /var/svc/log/*.log
+      fma: fmdump / fmadm
+      audit_path: /var/audit (audit)
+      dump_path: /var/crash
+      features: ZFS 루트, IPS, Kernel Zones, 통합 아카이브
+      source: https://endoflife.date/solaris ; https://www.oracle.com/a/ocom/docs/support/advanced-customer-support/solaris-linux-vm-lsp.pdf
+    - version: '11.4'
+      released: '2018-08-28'
+      support_end: '2031-11-30'
+      extended_end: 2037-11-30 · Sustaining 무기한
+      syslog_path: /var/adm/messages (rsyslog 선택)
+      auth_path: /var/adm/sulog, /var/log/authlog
+      smf_log: /var/svc/log/*.log
+      fma: fmdump / fmadm, sstore 분석
+      audit_path: /var/audit
+      dump_path: /var/crash
+      features: SRU 누적 갱신, Web Dashboard, ZFS 장치 제거
+      source: https://endoflife.date/solaris ; https://www.oracle.com/a/ocom/docs/support/advanced-customer-support/solaris-linux-vm-lsp.pdf
+  windows:
+    title: Windows Server 버전별 수명주기·이벤트 로그 체계
+    updated: '2026-09-11'
+    note: '2003 은 .evt 로그와 5xx 대 보안 이벤트 ID(529 로그온 실패·644 잠금·517 감사 로그 삭제)를 쓰고, 2008/Vista 이후 .evtx 와 4xxx 대(4625·4740·1102)로 바뀌었다. 코드 사전의 ID 는 2008+ 기준이며 2003 차이는 version_note 에 표기. CSV 내보내기(Get-WinEvent)는 2008 R2 이상 기본, 2003/2008 은 PowerShell 2.0 설치
+      또는 wevtutil. GPT 교차(Microsoft Learn 수명주기·PowerShell 지원 문서): 날짜 일치, 2003/2008 은 기본 PowerShell 없음(WMF 2.0 별도).'
+    columns:
+    - version
+    - released
+    - support_end
+    - extended_end
+    - esu_end
+    - log_format
+    - export
+    - security_ids
+    - source
+    labels:
+      version: 버전
+      released: 출시
+      support_end: 일반지원 종료
+      extended_end: 연장지원 종료
+      esu_end: ESU 종료
+      log_format: 로그 형식
+      export: 내보내기 방법
+      security_ids: 보안 이벤트 ID 체계
+      source: 출처
+    versions:
+    - version: 2003 (SP2)
+      released: 2003-05-28 (GA, SP2 2007-03-13)
+      support_end: '2010-07-13'
+      extended_end: '2015-07-14'
+      esu_end: '-'
+      log_format: .evt (System/Application/Security)
+      export: eventquery.vbs, 이벤트 뷰어 CSV 저장 / Get-EventLog(WMF 2.0 설치 시)
+      security_ids: 5xx (529 로그온 실패, 644 계정 잠금, 517 감사 로그 삭제, 528/540 로그온)
+      source: https://endoflife.date/windows-server ; https://learn.microsoft.com/ko-kr/lifecycle/products/
+    - version: 2008 (SP2)
+      released: 2008-05-06 (GA, SP2 2009-04-29)
+      support_end: '2015-01-13'
+      extended_end: '2020-01-14'
+      esu_end: 2023-01-10 (Azure 전용 4년차 2024-01-09)
+      log_format: .evtx
+      export: wevtutil / PowerShell 1.0 선택 설치(Get-WinEvent 은 WMF 2.0 설치 후)
+      security_ids: 4xxx (4625, 4740, 1102, 4624)
+      source: https://endoflife.date/windows-server ; https://learn.microsoft.com/ko-kr/lifecycle/products/
+    - version: 2008 R2 (SP1)
+      released: 2009-10-22 (SP1 2011-02-22)
+      support_end: '2015-01-13'
+      extended_end: '2020-01-14'
+      esu_end: 2023-01-10 (Azure 전용 4년차 2024-01-09)
+      log_format: .evtx
+      export: Get-WinEvent 기본(PS 2.0 내장)
+      security_ids: 4xxx
+      source: https://endoflife.date/windows-server ; https://learn.microsoft.com/ko-kr/lifecycle/products/
+    - version: '2012'
+      released: '2012-10-30'
+      support_end: '2018-10-09'
+      extended_end: '2023-10-10'
+      esu_end: '2026-10-13'
+      log_format: .evtx
+      export: Get-WinEvent(PS 3.0)
+      security_ids: 4xxx
+      source: https://endoflife.date/windows-server ; https://learn.microsoft.com/ko-kr/lifecycle/products/
+    - version: 2012 R2
+      released: '2013-11-25'
+      support_end: '2018-10-09'
+      extended_end: '2023-10-10'
+      esu_end: '2026-10-13'
+      log_format: .evtx
+      export: Get-WinEvent(PS 4.0)
+      security_ids: 4xxx (Disk 153 도입)
+      source: https://endoflife.date/windows-server ; https://learn.microsoft.com/ko-kr/lifecycle/products/
+    - version: '2016'
+      released: '2016-10-15'
+      support_end: '2022-01-11'
+      extended_end: '2027-01-12'
+      esu_end: '2030-01-12'
+      log_format: .evtx
+      export: Get-WinEvent(PS 5.1)
+      security_ids: 4xxx
+      source: https://endoflife.date/windows-server ; https://learn.microsoft.com/ko-kr/lifecycle/products/
+    - version: '2019'
+      released: '2018-11-13'
+      support_end: '2024-01-09'
+      extended_end: '2029-01-09'
+      esu_end: '-'
+      log_format: .evtx
+      export: Get-WinEvent(PS 5.1)
+      security_ids: 4xxx
+      source: https://endoflife.date/windows-server ; https://learn.microsoft.com/ko-kr/lifecycle/products/
+    - version: '2022'
+      released: '2021-08-18'
+      support_end: '2026-10-13'
+      extended_end: '2031-10-14'
+      esu_end: '-'
+      log_format: .evtx
+      export: Get-WinEvent(PS 5.1)
+      security_ids: 4xxx
+      source: https://endoflife.date/windows-server ; https://learn.microsoft.com/ko-kr/lifecycle/products/
+    - version: '2025'
+      released: '2024-11-01'
+      support_end: '2029-11-13'
+      extended_end: '2034-11-14'
+      esu_end: '-'
+      log_format: .evtx
+      export: Get-WinEvent(PS 5.1)
+      security_ids: 4xxx
+      source: https://endoflife.date/windows-server ; https://learn.microsoft.com/ko-kr/lifecycle/products/
+  auditd:
+    title: Linux auditd 감사 로그
+    updated: '2026-09-11'
+    note: 'audit.log 레코드 형식(type=… msg=audit(…): …)은 auditd 1.x(RHEL 5)~3.x(RHEL 9/10) 동일. Linux 배포판 버전 표는 ''linux'' 참조.'
+    columns:
+    - version
+    - released
+    - support_end
+    - audit_path
+    - note
+    - source
+    labels:
+      version: auditd
+      released: 포함 배포판
+      support_end: 배포판 지원 종료
+      audit_path: 경로
+      note: 비고
+      source: 출처
+    versions:
+    - version: 1.x
+      released: RHEL 5
+      support_end: 2020-11-30 (RHEL 5 ELS)
+      audit_path: /var/log/audit/audit.log
+      note: ANOM_ABEND 미지원
+      source: https://access.redhat.com/articles/4038291
+    - version: 2.x
+      released: RHEL 6·7, Ubuntu 16.04~20.04
+      support_end: RHEL 7 2024-06-30
+      audit_path: /var/log/audit/audit.log
+      note: ANOM_ABEND·SERVICE_START/STOP(systemd, RHEL 7+)
+      source: https://access.redhat.com/articles/4038291
+    - version: 3.x
+      released: RHEL 8·9·10, Ubuntu 22.04+
+      support_end: RHEL 8 2029-05-31
+      audit_path: /var/log/audit/audit.log
+      note: 동일 형식
+      source: https://endoflife.date/rhel

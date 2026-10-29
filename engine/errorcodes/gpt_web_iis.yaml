@@ -1,0 +1,230 @@
+product: iis
+layer: web
+note: GPT 협업 수집분 — 벤더 공식 문서와 대조 후 확정
+codes:
+- code: '500.19'
+  severity: critical
+  category: internal
+  title: 구성 데이터 오류
+  immediate:
+  - '`Select-String -Path ''C:\inetpub\logs\LogFiles\W3SVC<사이트ID>\u_ex*.log'' -Pattern '' 500 19 '' | Select-Object -Last 20` 로 발생 URL·시각 확인 (IIS 7.5+, 기본 W3C 필드 순서 기준)'
+  - '`%windir%\system32\inetsrv\appcmd list config "<사이트명>/"` (cmd) 로 구성 읽기 시험 — 오류가 나면 출력의 Filename·Line Number 가 원인 위치, 상세 오류의 HRESULT(0x8007000d 구문·모듈 누락, 0x80070021 섹션 잠금, 0x80070005 권한) 기록'
+  short:
+  - XML 구문과 섹션 잠금 및 모듈 설정과 파일 권한을 점검
+  mid:
+  - 잘못된 구성을 수정하고 환경별 설정 기준을 표준화
+  long:
+  - 배포 전 IIS 구성검사와 자동 롤백을 적용
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/developer/webapps/iis/health-diagnostic-performance/http-status-code)
+  vendor_cause: ApplicationHost.config/Web.config의 잘못된 XML, 잠금, 권한 부족, 중복 항목, 누락 모듈 등 구성 데이터가 잘못됐다.
+  vendor_action: 오류의 HRESULT를 확인해 해당 원인별로 XML·잠금·권한·중복 항목·모듈 또는 경로 설정을 수정한다.
+  vendor_url: https://learn.microsoft.com/en-us/troubleshoot/developer/webapps/iis/site-behavior-performance/http-error-500-19-webpage
+  versions:
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: HTTP 하위 상태 코드(sc-substatus)는 IIS 7.0 이후 체계 — IIS 6.0 은 일부 코드만 존재·의미 상이
+- code: '500.21'
+  severity: critical
+  category: internal
+  title: 모듈 인식 실패
+  immediate:
+  - '상세 오류의 Module·Handler 이름 기록 후 `%windir%\system32\inetsrv\appcmd list modules | findstr /i "<모듈명>"` (cmd) 로 등록 여부 확인 — 결과가 없으면 미설치·미등록 확정 (IIS 7.5+)'
+  - '`Get-WindowsFeature Web-Asp-Net*, Web-Net-Ext*, Web-CGI | Format-Table Name, InstallState` 로 IIS 기능 설치 확인, ASP.NET Core 면 `appcmd list modules | findstr /i AspNetCore` 결과로 Hosting Bundle 설치 판단 (Windows Server 2012+)'
+  short:
+  - Modules 설정과 ASP.NET 및 Hosting Bundle 설치 상태를 점검
+  mid:
+  - 필수 모듈 버전과 서버 역할 구성을 표준화
+  long:
+  - 배포 전 모듈 의존성 및 서버 역할 검사를 자동화
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/developer/webapps/iis/health-diagnostic-performance/http-status-code)
+  vendor_cause: 요청 처리에 지정된 IIS 모듈을 서버가 인식하지 못한다.
+  vendor_action: ''
+  vendor_url: https://learn.microsoft.com/en-us/troubleshoot/developer/webapps/iis/health-diagnostic-performance/http-status-code
+  versions:
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: HTTP 하위 상태 코드(sc-substatus)는 IIS 7.0 이후 체계 — IIS 6.0 은 일부 코드만 존재·의미 상이
+- code: '502.1'
+  severity: error
+  category: upstream
+  title: CGI 실행 시간초과
+  immediate:
+  - '`%windir%\system32\inetsrv\appcmd list config "<사이트명>" -section:system.webServer/cgi` (cmd) 로 timeout 값 확인 후, `Select-String -Path ''C:\inetpub\logs\LogFiles\W3SVC<사이트ID>\u_ex*.log'' -Pattern '' 502 1 '' | Select-Object -Last 20` 의 time-taken 이 이 값에 닿았는지 확인 (IIS 7.5+)'
+  - '`Get-Process | Sort-Object CPU -Descending | Select-Object -First 10 Name, Id, CPU` 로 CGI 실행 파일·w3wp 의 CPU 점유 확인 — 특정 CGI 가 오래 점유하면 처리 지연 확정'
+  short:
+  - CGI timeout과 외부 의존 서비스 및 장기 작업을 분석
+  mid:
+  - 처리 로직을 개선하고 적절한 실행시간 제한을 재설정
+  long:
+  - CGI 응답시간과 timeout 발생률을 지속 모니터링
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/developer/webapps/iis/health-diagnostic-performance/http-status-code)
+  vendor_cause: CGI 애플리케이션이 허용된 실행 시간 안에 완료되지 않았다.
+  vendor_action: ''
+  vendor_url: https://learn.microsoft.com/en-us/troubleshoot/developer/webapps/iis/health-diagnostic-performance/http-status-code
+  versions:
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: HTTP 하위 상태 코드(sc-substatus)는 IIS 7.0 이후 체계 — IIS 6.0 은 일부 코드만 존재·의미 상이
+- code: '502.2'
+  severity: error
+  category: upstream
+  title: 게이트웨이 프로세스 조기 종료
+  immediate:
+  - '`Get-WinEvent -LogName Application -MaxEvents 300 | Where-Object { $_.Id -in 1000,1026 } | Select-Object -First 10 TimeCreated, Id, Message` 로 같은 시각 프로세스 크래시(1000 Application Error·1026 .NET Runtime) 확인 (Windows Server 2008 R2+)'
+  - '`Select-String -Path ''C:\inetpub\logs\LogFiles\W3SVC<사이트ID>\u_ex*.log'' -Pattern '' 502 2 '' | Select-Object -Last 20` 로 URL·시각 확인 — 특정 URL 에 몰리면 해당 CGI·게이트웨이 프로그램 결함'
+  short:
+  - 프로세스 크래시와 응답 전 종료 및 의존 서비스 오류를 분석
+  mid:
+  - 애플리케이션 결함을 수정하고 프로세스 복구 정책을 개선
+  long:
+  - 프로세스 종료와 502 발생의 상관분석 및 자동복구를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/developer/webapps/iis/health-diagnostic-performance/http-status-code)
+  note: 개별 게이트웨이 요청 처리 실패이므로 서비스 전체 중단을 뜻하는 critical보다 error가 타당함
+  vendor_cause: 게이트웨이 또는 CGI 프로세스가 요청 처리를 완료하기 전에 조기 종료됐다.
+  vendor_action: ''
+  vendor_url: https://learn.microsoft.com/en-us/troubleshoot/developer/webapps/iis/health-diagnostic-performance/http-status-code
+  versions:
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: HTTP 하위 상태 코드(sc-substatus)는 IIS 7.0 이후 체계 — IIS 6.0 은 일부 코드만 존재·의미 상이
+- code: '502.3'
+  severity: error
+  category: upstream
+  title: ARR 전달 연결 오류
+  immediate:
+  - '`Select-String -Path ''C:\inetpub\logs\LogFiles\W3SVC<사이트ID>\u_ex*.log'' -Pattern '' 502 3 '' | Select-Object -Last 20` 로 sc-win32-status 확인 — 12002 시간 초과, 12029 연결 불가, 12030 연결 오류(WinHTTP) (IIS 7.5+ ARR)'
+  - '`Test-NetConnection <멤버 서버> -Port <port>` 로 ARR 서버에서 멤버 서버 도달 확인 — TcpTestSucceeded False 면 네트워크·백엔드 문제 (Windows Server 2012 R2+)'
+  - '`Get-ChildItem ''C:\inetpub\logs\FailedReqLogFiles'' -Recurse | Sort-Object LastWriteTime -Descending | Select-Object -First 5` 로 실패 요청 추적(FREB) 파일 확인 — 추적 규칙이 설정된 경우만 생성'
+  short:
+  - 프록시 타임아웃과 TLS 및 DNS와 방화벽을 점검
+  mid:
+  - ARR 서버팜과 연결 설정 및 장애전환 구성을 개선
+  long:
+  - 백엔드 연결률과 ARR 오류 및 노드 상태를 통합 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/developer/webapps/iis/application-request-routing/troubleshooting-502-errors-in-arr)
+  note: ARR이 업스트림 요청을 완료하지 못한 개별 기능 실패이므로 critical보다 error가 타당함
+  vendor_cause: ARR과 멤버 서버 간 연결이 중간에 종료되거나 전달 과정에서 연결·응답 오류가 발생했다.
+  vendor_action: Failed Request Tracing과 HTTPERR 로그를 확인하고 필요하면 ARR 서버에서 네트워크 추적을 수집해 연결 종료 원인을 조사한다.
+  vendor_url: https://learn.microsoft.com/en-us/troubleshoot/developer/webapps/iis/application-request-routing/troubleshooting-502-errors-in-arr
+  versions:
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: HTTP 하위 상태 코드(sc-substatus)는 IIS 7.0 이후 체계 — IIS 6.0 은 일부 코드만 존재·의미 상이
+- code: '502.4'
+  severity: critical
+  category: upstream
+  title: ARR 가용서버 없음
+  immediate:
+  - '`%windir%\system32\inetsrv\appcmd list config -section:webFarms` (cmd) 로 서버 팜 멤버 주소·enabled 확인 (ARR 설치 서버, IIS 7.5+)'
+  - '각 멤버에 `Test-NetConnection <멤버 서버> -Port <port>` — 전부 실패면 백엔드 전체 장애·네트워크 문제, IIS 관리자 서버 팜 > Monitoring and Management 의 Health Status 도 확인 (Windows Server 2012 R2+)'
+  short:
+  - 서버팜 구성과 노드 활성 상태 및 네트워크 장애를 분석
+  mid:
+  - 백엔드 다중화와 헬스체크 및 장애복귀 정책을 개선
+  long:
+  - 가용 노드 수와 전체 서버팜 장애를 즉시 경보
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/developer/webapps/iis/health-diagnostic-performance/http-status-code)
+  vendor_cause: ARR 팜의 모든 멤버 서버가 오프라인이거나 접근 불가능해 요청을 전달할 적절한 서버가 없다.
+  vendor_action: IIS Manager의 서버 팜 Servers 노드에서 멤버 서버가 온라인인지 확인한다.
+  vendor_url: https://learn.microsoft.com/en-us/troubleshoot/developer/webapps/iis/application-request-routing/troubleshooting-502-errors-in-arr
+  versions:
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: HTTP 하위 상태 코드(sc-substatus)는 IIS 7.0 이후 체계 — IIS 6.0 은 일부 코드만 존재·의미 상이
+- code: '503.0'
+  severity: critical
+  category: internal
+  title: 앱풀 사용 불가
+  immediate:
+  - '`Get-WebAppPoolState -Name ''<앱풀>''` 또는 `%windir%\system32\inetsrv\appcmd list apppool "<앱풀>"` (cmd) 로 상태 확인 — Stopped 면 확정 (WebAdministration 모듈, IIS 7.5+)'
+  - '`Get-WinEvent -LogName System -MaxEvents 300 | Where-Object { $_.ProviderName -like ''*WAS*'' } | Select-Object -First 10 TimeCreated, Id, Message` 로 원인 확인 — 5002 Rapid-Fail 자동 비활성, 5021·5057 앱풀 ID 계정 문제, 5009·5011 작업자 프로세스 비정상 종료'
+  short:
+  - '(2차·승인 후, 롤백: 없음 — 기동 확인으로 대체) 원인(계정·크래시) 해결 뒤 `Start-WebAppPool -Name ''<앱풀>''` 로 기동하고 `Get-WebAppPoolState` 가 Started 인지 확인'
+  - Rapid-Fail Protection과 계정 권한 및 프로세스 크래시를 분석
+  mid:
+  - 애플리케이션 결함과 앱풀 구성을 수정하고 복구 정책을 검증
+  long:
+  - 앱풀 상태와 반복 중단 및 프로세스 크래시를 상시 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/developer/webapps/iis/health-diagnostic-performance/http-status-code)
+  vendor_cause: 요청 대상 애플리케이션 풀이 현재 중지됐거나 비활성화돼 있다.
+  vendor_action: 대상 애플리케이션 풀이 시작됐는지 확인하고 이벤트 로그에서 풀 중지·비활성화 원인을 확인한다.
+  vendor_url: https://learn.microsoft.com/en-us/troubleshoot/developer/webapps/iis/health-diagnostic-performance/http-status-code
+  versions:
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: HTTP 하위 상태 코드(sc-substatus)는 IIS 7.0 이후 체계 — IIS 6.0 은 일부 코드만 존재·의미 상이
+- code: '503.2'
+  severity: error
+  category: capacity
+  title: 동시 요청 한도 초과
+  immediate:
+  - '`%windir%\system32\inetsrv\appcmd list config -section:system.webServer/serverRuntime` (cmd) 로 appConcurrentRequestLimit 확인 — 값이 보이지 않으면 기본 5000 (IIS 7.5+)'
+  - '`Get-Counter ''\Web Service(_Total)\Current Connections''` 와 `%windir%\system32\inetsrv\appcmd list requests` 로 현재 연결·실행 중 요청 확인 — 한도 근접이면 확정, 오래 남은 URL 이 있으면 처리 지연이 원인(list requests 는 Request Monitor 기능 필요)'
+  short:
+  - '(2차·승인 후, 롤백: LB 가중치·설정 원복) 과부하 시 LB 가중치 하향으로 분산, appConcurrentRequestLimit 상향은 메모리·스레드 여유 확인 뒤'
+  - 요청 처리시간과 큐 및 애플리케이션 병목을 분석
+  mid:
+  - 처리량에 맞게 동시 요청 한도와 서버 용량을 재산정
+  long:
+  - 동시 요청률과 포화 임계치 및 부하시험을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/developer/webapps/iis/health-diagnostic-performance/http-status-code)
+  note: 한도를 초과한 요청이 거부되는 기능 실패로 단독 상태는 전체 서비스 중단을 의미하지 않아 error가 타당함
+  vendor_cause: 현재 동시 요청 수가 appConcurrentRequestLimit에 설정된 값보다 많다.
+  vendor_action: ''
+  vendor_url: https://learn.microsoft.com/en-us/troubleshoot/developer/webapps/iis/health-diagnostic-performance/http-status-code
+  versions:
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: HTTP 하위 상태 코드(sc-substatus)는 IIS 7.0 이후 체계 — IIS 6.0 은 일부 코드만 존재·의미 상이
+- code: '503.3'
+  severity: critical
+  category: capacity
+  title: ASP.NET 큐 포화
+  immediate:
+  - '`Get-Counter ''\ASP.NET\Requests Queued'',''\ASP.NET\Requests Current''` 로 대기·처리 중 요청 수 확인 — Requests Queued 가 계속 늘면 확정'
+  - '`%windir%\system32\inetsrv\appcmd list requests /elapsed:10000` (cmd) 로 10초 넘게 실행 중인 요청 URL 확인 — 특정 URL 이 쌓이면 DB·외부 API 지연 확인 대상 (Request Monitor 기능 필요, IIS 7.5+)'
+  short:
+  - 장기 요청과 DB 및 외부 API 지연과 큐 설정을 분석
+  mid:
+  - 애플리케이션 병목과 큐 및 서버 용량을 개선
+  long:
+  - 큐 사용률과 요청 지연 및 503 발생률을 통합 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/developer/webapps/iis/health-diagnostic-performance/http-status-code)
+  vendor_cause: ASP.NET 요청 대기열이 가득 찼다.
+  vendor_action: ''
+  vendor_url: https://learn.microsoft.com/en-us/troubleshoot/developer/webapps/iis/health-diagnostic-performance/http-status-code
+  versions:
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: HTTP 하위 상태 코드(sc-substatus)는 IIS 7.0 이후 체계 — IIS 6.0 은 일부 코드만 존재·의미 상이
+- code: '503.4'
+  severity: critical
+  category: capacity
+  title: FastCGI 큐 포화
+  immediate:
+  - '`%windir%\system32\inetsrv\appcmd list config -section:system.webServer/fastCgi` (cmd) 로 maxInstances·queueLength·activityTimeout 확인 (IIS 7.5+)'
+  - '`(Get-Process php-cgi -ErrorAction SilentlyContinue).Count` 와 `Get-Counter ''\Processor(_Total)\% Processor Time''` 로 FastCGI 프로세스 수·CPU 확인 — maxInstances 에 닿고 CPU 가 높으면 포화 확정(php-cgi 외 실행 파일은 이름을 바꿔 확인)'
+  short:
+  - FastCGI 인스턴스 수와 장기 처리 요청을 분석
+  mid:
+  - 프로세스 풀과 큐 크기 및 서버 용량을 재산정
+  long:
+  - FastCGI 큐 길이와 프로세스 포화를 지속 모니터링
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/developer/webapps/iis/health-diagnostic-performance/http-status-code)
+  vendor_cause: FastCGI 요청 대기열이 가득 찼다.
+  vendor_action: ''
+  vendor_url: https://learn.microsoft.com/en-us/troubleshoot/developer/webapps/iis/health-diagnostic-performance/http-status-code
+  versions:
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: HTTP 하위 상태 코드(sc-substatus)는 IIS 7.0 이후 체계 — IIS 6.0 은 일부 코드만 존재·의미 상이

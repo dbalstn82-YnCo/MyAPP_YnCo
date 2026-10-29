@@ -1,0 +1,2435 @@
+# 근거 매뉴얼·작성 기준 (아이디어 3 — '같은 제품·유형' 연결을 판정 전용으로 승급, WAS 묶음, 2026-10-16 · knowledge_spec 5차 GPT 45차 관문)
+# - Apache Tomcat 9.0 Documentation(tomcat.apache.org/tomcat-9.0-doc): Configuration Reference 'The HTTP Connector'(connectionTimeout·asyncTimeout)·'The HTTP2 Upgrade Protocol'
+#   · 'Cluster'(cluster-howto, McastService·NioReceiver)·'The Valve Component'·'The Jar Scanner Component'(scanManifest)·'The Manager Component'(pathname — 세션 영속화)
+#   · 'Monitoring and Managing Tomcat'(JMX 원격 포트는 CATALINA_OPTS)·'WebSocket How-To'·'Manager App How-To'
+# - TmaxSoft JEUS 8/9/21 Reference 'jeusadmin 콘솔 툴'(server-info·application-info·thread-info·connection-pool-info — connection-pool-info 는 JEUS 8/9/21 문서에서만 확인, JEUS 7 은 verify_note)
+#   · JEUS Server Guide '로깅'(SERVER_HOME/logs: JeusServer.log·JeusLauncher.log) · JEUS Domain Guide 'MASTER·Managed Server·INDEPENDENT 모드'
+# - Red Hat JBoss EAP 7.4 Configuration Guide·Management CLI Guide(jboss-cli read-resource·jndi-view·take-snapshot·reload) · JBoss EAP 7.4 Log Message Reference(WFLY·IJ·AMQ·JGRP·ISPN)
+#   · EAP 7.4 Security Architecture(관리 인터페이스 http-authentication-factory·감사 로그 file-handler)
+# - Oracle WebLogic Server 12.2.1/14.1.1: 'WLST Command Reference'(connect userConfigFile·domainRuntime·serverConfig·state·shutdown)·'Administering Clusters'(unicast/multicast)
+#   · 'Administering Server Startup and Shutdown'(boot.properties)·'Configuring Server Environments'(Muxer·NativeIOEnabled·socket reader)·Error Messages Reference(BEA-)
+# - IBM WebSphere Application Server 8.5.5/9.0 Knowledge Center: wsadmin AdminConfig/AdminControl/AdminTask(modifyServerPort·getActiveSecuritySettings)·dumpNameSpace
+#   · 'Core group discovery and failure detection'(DCS)·'Transaction recovery'·'Virtual hosts' · 메시지 참조(SRVE·WSVR·J2CA·DSRA·DCSV·HMGR·CHFW·TCPC·SECJ·JSAS·JMSCC·CWSJY)
+# 작성 기준: 1차=읽기 전용(재기동·정리·설정 변경 없음, 스택은 -B/-A 문맥 + head 로 자르고 grep -E 로 줄을 버리지 않는다), 2차=사전조건·영향·승인·백업/롤백 + 성공/실패 판단,
+#           3차=민감정보 마스킹·전달 승인. 비밀번호는 명령줄에 쓰지 않는다(jeusadmin·jboss-cli 는 프롬프트, WLST 는 userConfigFile, wsadmin 은 soap.client.props·프롬프트).
+#           nc 는 nc -zvw3 형식만. WLST 는 관리 서버에 접속해 domainRuntime() → cd('ServerRuntimes/<server>/…') 로 대상 서버 런타임을 본다.
+# 제조사 문서로 확인하지 못한 명령·옵션은 해당 단계에 verify_note 로 표시했다.
+procedures:
+- id: TOMCAT-PROC-R6-CLIENT-IO
+  scope: id
+  products: [tomcat]
+  category: connection
+  match: [TOMCAT-BROKEN-PIPE, TOMCAT-CLIENT-ABORT, TOMCAT-CONNECTION-RESET, TOMCAT-SOCKET-TIMEOUT, WAS-TC-015]
+  title: 클라이언트·앞단 연결 끊김·소켓 시간 초과·잘못된 HTTP 요청 (Tomcat)
+  source: "Apache Tomcat 9.0 Configuration Reference 'The HTTP Connector'(connectionTimeout·keepAliveTimeout·maxKeepAliveRequests) — tomcat.apache.org/tomcat-9.0-doc/config/http.html · 'The Valve Component'(AccessLogValve %D·%b) — config/valve.html"
+  stages:
+  - stage: 1
+    steps:
+    - do: 발생 빈도와 시간대 확인 (읽기 전용)
+      cmd: |
+        grep -c -E 'ClientAbortException|Broken pipe|Connection reset|SocketTimeoutException' $CATALINA_BASE/logs/catalina.out
+        grep -E 'ClientAbortException|Broken pipe|Connection reset|SocketTimeoutException' $CATALINA_BASE/logs/catalina.out | cut -c1-16 | sort | uniq -c | tail -24
+        grep -n -B2 -A3 -E 'Invalid character found|Error parsing HTTP request header' $CATALINA_BASE/logs/catalina.out | tail -30
+      check: "산발(시간당 수 건)이면 사용자 이탈·브라우저 취소로 장애 아님. 특정 시간대 급증이면 앞단(LB·웹서버) 시간 초과나 응답 지연 동반 의심. 'Invalid character found' 는 HTTPS 를 HTTP 포트로 보냈거나 스캐너 — Tomcat 은 첫 건만 INFO 로 남기고 이후는 DEBUG 라 건수로 판단하지 않는다"
+      note: "적용: Tomcat 7.0~10.1(catalina.out 은 startup.sh 기동 시 — systemd 기동이면 journalctl -u <service>) · 권한: 로그 읽기"
+    - do: 상대가 클라이언트인지 후단(JDBC·HTTP 클라이언트)인지 스택으로 구분
+      cmd: |
+        grep -n -B2 -A20 -E 'SocketTimeoutException|Connection reset' $CATALINA_BASE/logs/catalina.out | head -80
+      check: "스택에 org.apache.catalina.connector.(CoyoteOutputStream|InputBuffer) 가 있으면 클라이언트 쪽 연결(요청 본문 읽기·응답 쓰기), oracle.jdbc·java.net.SocketInputStream.socketRead 아래 업무 클래스면 후단 연동 시간 초과 → 해당 연동 담당"
+      note: "적용: Tomcat 7.0~10.1 · 권한: 로그 읽기 · 스택은 줄을 거르지 않고 문맥째 본다"
+    - do: 느리거나 큰 응답·앞단 시간 초과 값 확인
+      cmd: |
+        grep -n -A3 'AccessLogValve' $CATALINA_BASE/conf/server.xml
+        grep -n -o -E '(connectionTimeout|keepAliveTimeout|maxKeepAliveRequests)="[0-9-]*"' $CATALINA_BASE/conf/server.xml
+        grep -n -i -E 'ProxyTimeout|proxy_read_timeout|proxy_send_timeout|timeout' <웹서버 설정 파일> | head -20
+      check: "접근 로그 pattern 에 %D(밀리초)·%T 가 있으면 같은 시각 처리 시간이 앞단 시간 초과(예: 60초)에 닿는 요청이 원인. 앞단 시간 초과 < 앱 처리 시간이면 Broken pipe·ClientAbort 가 반복된다"
+      note: "적용: Tomcat 7.0~10.1, 앞단 Apache httpd 2.4(ProxyTimeout)·nginx(proxy_read_timeout)·WebtoB · 권한: 설정 파일 읽기 · <웹서버 설정 파일> 은 실제 운영 경로로"
+  - stage: 2
+    steps:
+    - do: 앞단·Tomcat 시간 초과 정렬 (앱 처리 시간이 정상적으로 긴 업무만)
+      config:
+        file: $CATALINA_BASE/conf/server.xml (해당 Connector) · 앞단 웹서버/LB 시간 초과
+        snippet: |
+          <Connector port="<port>" protocol="org.apache.coyote.http11.Http11NioProtocol"
+                     connectionTimeout="20000" keepAliveTimeout="20000" />
+          # 앞단: httpd ProxyTimeout / nginx proxy_read_timeout 을 업무 최장 처리 시간보다 길게
+        note: "사전조건: 느린 요청 URI·업무 최장 정상 처리 시간을 업무 담당과 확인, 느린 원인이 DB·연동이면 그 해소가 우선 · 영향: 재기동 동안 해당 인스턴스 중단, 시간 초과를 늘리면 연결 점유 증가 · 승인: WAS 담당·웹서버 담당·변경관리 · 백업/롤백: server.xml·웹서버 설정을 날짜 붙여 복사, 문제 시 복원 후 재기동"
+      cmd: |
+        cp -p $CATALINA_BASE/conf/server.xml $CATALINA_BASE/conf/server.xml.bak.$(date +%Y%m%d%H%M)
+        $CATALINA_HOME/bin/shutdown.sh ; sleep 10 ; $CATALINA_HOME/bin/startup.sh
+      check: "성공: 기동 로그 'Server startup in' 후 해당 시간대 ClientAbort·Broken pipe 건수가 평소 수준으로 감소 · 실패: 기동 오류(SEVERE) 또는 연결 수 급증 → server.xml.bak 복원 후 재기동"
+      note: "사전조건: LB 에서 인스턴스 우회 · 영향: 재기동 수십 초 서비스 중단 · 승인: WAS 담당 · 백업/롤백: 첫 줄의 server.xml.bak 으로 복원 · 적용: Tomcat 7.0~10.1"
+    - do: 잘못된 요청 출처 차단·교정 (WAS-TC-015 반복 시)
+      config:
+        file: LB·방화벽 정책 또는 클라이언트 설정
+        snippet: |
+          # HTTPS 를 HTTP 포트로 보내는 클라이언트·LB 헬스체크면 대상 포트/프로토콜 교정
+          # 등록되지 않은 스캐너 IP 반복이면 보안 담당이 방화벽·WAF 에서 차단
+        note: "사전조건: 접근 로그·catalina.out 에서 출처 IP 와 포트 확인, 내부 점검 도구인지 보안 담당 확인 · 영향: 잘못 차단하면 정상 사용자·연계 시스템 접속 불가 · 승인: 보안 담당·네트워크 담당 · 백업/롤백: 변경 전 정책 내보내기, 오차단 시 해당 규칙 삭제로 원복"
+      check: "성공: 해당 출처에서 'Invalid character found' 미발생·정상 요청 영향 없음 · 실패: 정상 연계가 막히면 즉시 규칙 원복"
+  - stage: 3
+    steps:
+    - do: 유지보수사·앞단 담당 전달 자료
+      cmd: |
+        grep -n -B2 -A20 -E 'ClientAbortException|Broken pipe|Connection reset|SocketTimeoutException' $CATALINA_BASE/logs/catalina.out | tail -400 > tomcat_clientio_$(date +%Y%m%d).txt
+        $CATALINA_HOME/bin/version.sh >> tomcat_clientio_$(date +%Y%m%d).txt 2>&1
+      check: "예외 문맥·시간대 분포·접근 로그 발췌(같은 시각)·앞단 시간 초과 값·Tomcat/JDK 버전"
+      note: "민감정보 마스킹: 접근 로그의 클라이언트 IP·쿼리 문자열·쿠키·세션 ID, 로그의 호스트명·사용자 ID 가림 · 전달 승인: 보안 담당 승인 후 유지보수사·웹서버 담당에게만"
+
+- id: TOMCAT-PROC-R6-CLUSTER
+  scope: id
+  products: [tomcat]
+  category: connection
+  match: [TOMCAT-CLUSTER-MEMBER-LOST, TOMCAT-CLUSTER-SEND-FAIL]
+  title: 클러스터 멤버 이탈·세션 복제 전송 실패 (Tomcat SimpleTcpCluster)
+  source: "Apache Tomcat 9.0 'Clustering/Session Replication How-To'(McastService 기본 228.0.0.4:45564, NioReceiver 기본 4000~4100) — tomcat.apache.org/tomcat-9.0-doc/cluster-howto.html · Configuration Reference 'Cluster'(config/cluster.html)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 이탈·전송 실패 시각과 대상 노드 확인 (읽기 전용)
+      cmd: |
+        grep -n -i -E 'memberDisappeared|memberAdded|Unable to send|ChannelException|Verification complete' $CATALINA_BASE/logs/catalina.out | tail -30
+      check: "같은 노드가 반복 이탈·재합류하면 네트워크·GC 정지, 한 번 이탈 후 미복귀면 그 노드 중단. 이탈 시각이 계획 재기동과 같으면 정상"
+      note: "적용: Tomcat 7.0~10.1 SimpleTcpCluster · 권한: 로그 읽기"
+    - do: 클러스터 설정과 상대 노드 수신 포트 확인
+      cmd: |
+        grep -n -A30 '<Cluster' $CATALINA_BASE/conf/server.xml | grep -n -E 'Membership|address=|port=|Receiver|Sender|StaticMember|Manager'
+        nc -zvw3 <peer_host> <receiver_port>
+        ss -uln | grep -E ':45564\b' ; ip maddr show | grep -E '228\.0\.0\.4'
+      check: "상대 수신 포트(기본 4000) 접속 실패면 상대 미기동·방화벽. 멀티캐스트 그룹 가입(ip maddr)이 없거나 스위치가 멀티캐스트를 막으면 멤버 탐지 실패 — 기본값(228.0.0.4·45564)과 다른 값이면 server.xml 값으로 확인"
+      note: "적용: Linux(ss·ip), Tomcat 7.0~10.1 · 권한: 일반 사용자 · <receiver_port> 는 Receiver port(기본 4000, autoBind 범위 4000~4100)"
+    - do: 이탈 시각의 GC 정지 여부 확인
+      cmd: |
+        jstat -gcutil <PID> 5000 6
+        grep -n -E 'Pause Full|Full GC' $CATALINA_BASE/logs/gc*.log 2>/dev/null | tail -10
+      check: "Full GC 정지가 멤버 탐지 시간 초과(McastService dropTime 기본 3000ms)보다 길면 GC 가 원인 → 메모리 절차(TOMCAT-PROC-MEMORY)"
+      note: "적용: JDK 8/11/17 · 권한: Tomcat 실행 계정(jstat attach) · GC 로그는 설정한 경우만"
+  - stage: 2
+    steps:
+    - do: 네트워크·방화벽 조치 또는 정적 멤버십 전환
+      config:
+        file: $CATALINA_BASE/conf/server.xml (Cluster › Channel)
+        snippet: |
+          <!-- 멀티캐스트가 막힌 망: StaticMembershipInterceptor 로 상대 노드를 명시 -->
+          <Interceptor className="org.apache.catalina.tribes.group.interceptors.StaticMembershipInterceptor">
+            <Member className="org.apache.catalina.tribes.membership.StaticMember" host="<peer_host>" port="4000" uniqueId="{0,1,2,3,4,5,6,7,8,9,0,1,2,3,4,1}"/>
+          </Interceptor>
+        note: "사전조건: 네트워크 담당과 수신 포트·멀티캐스트 허용 여부 확인, 모든 노드에 같은 변경을 적용할 일정 · 영향: 노드별 재기동 동안 세션 복제 중단(세션 유실 가능) · 승인: WAS 담당·네트워크 담당·변경관리 · 백업/롤백: server.xml 을 날짜 붙여 복사, 문제 시 모든 노드 원복 후 재기동"
+      cmd: |
+        cp -p $CATALINA_BASE/conf/server.xml $CATALINA_BASE/conf/server.xml.bak.$(date +%Y%m%d%H%M)
+        $CATALINA_HOME/bin/shutdown.sh ; sleep 10 ; $CATALINA_HOME/bin/startup.sh
+      check: "성공: 재기동 후 catalina.out 에 상대 노드 memberAdded, 세션 복제 오류 미발생 · 실패: 멤버가 보이지 않거나 기동 오류 → server.xml.bak 복원 후 재기동, 네트워크 경로 재확인"
+      note: "사전조건: LB 에서 해당 노드 우회 후 한 대씩 진행 · 영향: 재기동 중 그 노드 세션 이전 · 승인: WAS 담당 · 백업/롤백: server.xml.bak 복원 · 적용: Tomcat 7.0~10.1(StaticMember 속성은 판별 config/cluster-interceptor.html 확인)"
+      verify_note: "미검증 — StaticMember uniqueId 형식·속성 이름을 사용 중인 Tomcat 판의 cluster-interceptor 문서로 확인하지 못함"
+  - stage: 3
+    steps:
+    - do: 유지보수사 의뢰 자료
+      cmd: |
+        grep -n -i -E 'member|cluster|tribes|replicat' $CATALINA_BASE/logs/catalina.out | tail -500 > tomcat_cluster_$(date +%Y%m%d).txt
+        grep -v -i -E 'password|secret|keystorePass' $CATALINA_BASE/conf/server.xml > server_xml_masked.txt
+      check: "모든 노드의 클러스터 로그 발췌·비밀값 뺀 server.xml·GC 로그·네트워크 구성(멀티캐스트 허용 여부)"
+      note: "민감정보 마스킹: 노드 호스트명·IP·세션 ID, server.xml 의 비밀번호·secret 가림 · 전달 승인: 보안 담당 승인 후 유지보수사에게만"
+
+- id: TOMCAT-PROC-R6-UPGRADE
+  scope: id
+  products: [tomcat]
+  category: connection
+  match: [TOMCAT-HTTP2-FAIL, TOMCAT-WEBSOCKET-FAIL]
+  title: HTTP/2·WebSocket 프로토콜 업그레이드 실패 (Tomcat)
+  source: "Apache Tomcat 9.0 Configuration Reference 'The HTTP2 Upgrade Protocol'(UpgradeProtocol Http2Protocol, TLS ALPN) — tomcat.apache.org/tomcat-9.0-doc/config/http2.html · 'WebSocket How-To' — web-socket-howto.html"
+  stages:
+  - stage: 1
+    steps:
+    - do: 커넥터 설정과 실패 예외 확인 (읽기 전용)
+      cmd: |
+        grep -n -B3 -A2 'UpgradeProtocol' $CATALINA_BASE/conf/server.xml
+        grep -n -B2 -A15 -i -E 'http2|ALPN|websocket|WsServerContainer|upgrade' $CATALINA_BASE/logs/catalina.out | tail -60
+        java -version 2>&1
+      check: "HTTP/2 는 TLS 커넥터에 UpgradeProtocol(Http2Protocol)이 있고 ALPN 이 되는 JDK(9+ 또는 8u252+)·OpenSSL 이어야 함. WebSocket 예외에 엔드포인트 클래스가 보이면 앱, 'Unable to complete the upgrade' 류면 요청 헤더(Upgrade·Connection) 누락"
+      note: "적용: Tomcat 8.5/9.0/10.1(HTTP/2), Tomcat 7.0.47+(WebSocket) · 권한: 설정·로그 읽기"
+    - do: 직접 접속으로 업그레이드 응답 확인
+      cmd: |
+        curl -sv --http2 -k https://localhost:<ssl_port>/ -o /dev/null 2>&1 | grep -i -E 'ALPN|HTTP/2|HTTP/1.1'
+        curl -sv -k -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' http://localhost:<port>/<app>/<endpoint> -o /dev/null --max-time 5 2>&1 | grep -E '^< HTTP'
+      check: "Tomcat 직접 접속에서 'ALPN, server accepted to use h2'·'HTTP/2 200', WebSocket 은 'HTTP/1.1 101' 이면 Tomcat 정상 → 앞단(LB·웹서버)이 Upgrade 헤더를 전달하지 않는 것. 직접 접속도 실패면 Tomcat 설정·앱"
+      note: "적용: curl 7.47+(--http2) · 권한: 일반 사용자 · 101 응답은 연결을 열었다가 --max-time 으로 닫는다(서비스 영향 없음)"
+    - do: 앞단 프록시의 업그레이드 전달 설정 확인
+      cmd: |
+        grep -n -i -E 'proxy_http_version|Upgrade|Connection|wstunnel|upgrade=websocket|Protocols' <웹서버 설정 파일> | head -20
+      check: "nginx 는 proxy_http_version 1.1 과 Upgrade·Connection 헤더 전달, httpd 는 mod_proxy_wstunnel 또는 2.4.47+ ProxyPass upgrade=websocket 이 있어야 WebSocket 통과"
+      note: "적용: nginx 1.3.13+, Apache httpd 2.4 · 권한: 설정 파일 읽기"
+  - stage: 2
+    steps:
+    - do: Tomcat 커넥터 또는 앞단 프록시 설정 보완
+      config:
+        file: $CATALINA_BASE/conf/server.xml (TLS Connector) · 앞단 웹서버 설정
+        snippet: |
+          <Connector port="8443" protocol="org.apache.coyote.http11.Http11NioProtocol" SSLEnabled="true">
+            <UpgradeProtocol className="org.apache.coyote.http2.Http2Protocol" />
+            <SSLHostConfig> ... </SSLHostConfig>
+          </Connector>
+          # nginx: proxy_http_version 1.1; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection "upgrade";
+        note: "사전조건: 직접 접속 결과로 Tomcat·앞단 중 어느 쪽인지 확정, 클라이언트 호환성(HTTP/2 미지원 구형 클라이언트) 확인 · 영향: Tomcat·웹서버 재기동 동안 서비스 중단 · 승인: WAS 담당·웹서버 담당·변경관리 · 백업/롤백: server.xml·웹서버 설정 날짜 붙여 복사, 문제 시 복원 후 재기동"
+      cmd: |
+        cp -p $CATALINA_BASE/conf/server.xml $CATALINA_BASE/conf/server.xml.bak.$(date +%Y%m%d%H%M)
+        $CATALINA_HOME/bin/shutdown.sh ; sleep 10 ; $CATALINA_HOME/bin/startup.sh
+      check: "성공: 1차 curl 이 앞단 주소에서도 HTTP/2 200 또는 101 응답, catalina.out 에 업그레이드 예외 없음 · 실패: 기동 오류·전 요청 실패 → server.xml.bak·웹서버 설정 원복 후 재기동"
+      note: "사전조건: LB 우회 · 영향: 재기동 중 중단 · 승인: WAS 담당 · 백업/롤백: server.xml.bak 복원 · 적용: Tomcat 8.5/9.0/10.1"
+  - stage: 3
+    steps:
+    - do: 유지보수사 의뢰 자료
+      cmd: |
+        grep -n -B2 -A20 -i -E 'http2|websocket|upgrade' $CATALINA_BASE/logs/catalina.out | tail -300 > tomcat_upgrade_$(date +%Y%m%d).txt
+        $CATALINA_HOME/bin/version.sh >> tomcat_upgrade_$(date +%Y%m%d).txt 2>&1 ; java -version 2>> tomcat_upgrade_$(date +%Y%m%d).txt
+      check: "예외 문맥·curl -v 결과·비밀값 뺀 server.xml·앞단 프록시 설정·Tomcat/JDK/OpenSSL 버전"
+      note: "민감정보 마스킹: curl 출력의 쿠키·Authorization 헤더, 설정의 비밀번호·인증서 경로 밖 키 값, 호스트명·IP 가림 · 전달 승인: 보안 담당 승인 후 유지보수사에게만"
+
+- id: TOMCAT-PROC-R6-JMX-PORT
+  scope: id
+  products: [tomcat]
+  category: connection
+  match: [TOMCAT-JMX-BIND-FAIL]
+  title: JMX 원격 포트 바인드 실패 (Tomcat)
+  source: "Apache Tomcat 9.0 'Monitoring and Managing Tomcat'(com.sun.management.jmxremote.port 는 CATALINA_OPTS 에 — JAVA_OPTS 에 두면 shutdown 명령도 같은 포트를 열려 함) — tomcat.apache.org/tomcat-9.0-doc/monitoring.html"
+  stages:
+  - stage: 1
+    steps:
+    - do: 설정된 JMX 포트와 지정 위치 확인 (읽기 전용)
+      cmd: |
+        ps -ef | grep '[c]atalina' | grep -o -E 'jmxremote\.(rmi\.)?port=[0-9]+'
+        grep -n -E 'jmxremote|JAVA_OPTS|CATALINA_OPTS' $CATALINA_BASE/bin/setenv.sh 2>/dev/null
+      check: "jmxremote.port 가 JAVA_OPTS 에 있으면 shutdown.sh·version.sh 실행 때도 같은 포트를 열려다 실패하는 알려진 구성 오류. 같은 장비 여러 인스턴스가 같은 포트를 쓰면 두 번째부터 실패"
+      note: "적용: Tomcat 7.0~10.1, JDK 8/11/17 · 권한: 일반 사용자"
+    - do: 포트 점유 프로세스 확인
+      cmd: |
+        ss -ltnp | grep -E ':<jmx_port>\b'
+        grep -n -B2 -A5 -E 'Port already in use|jmxremote|BindException' $CATALINA_BASE/logs/catalina.out | tail -20
+      check: "다른 PID(다른 인스턴스·잔존 프로세스)가 포트를 잡고 있으면 충돌 확정. 실패 시각이 shutdown.sh 실행 시각이면 JAVA_OPTS 지정 문제"
+      note: "적용: Linux · 권한: ss -p 의 PID 표시는 root"
+  - stage: 2
+    steps:
+    - do: JMX 옵션을 CATALINA_OPTS 로 옮기거나 인스턴스별 포트 분리
+      config:
+        file: $CATALINA_BASE/bin/setenv.sh
+        snippet: |
+          CATALINA_OPTS="$CATALINA_OPTS -Dcom.sun.management.jmxremote.port=<jmx_port> -Dcom.sun.management.jmxremote.rmi.port=<jmx_port>"
+          # 인증·SSL 옵션(jmxremote.authenticate·access.file)은 기존 값 유지
+        note: "사전조건: 모니터링 도구 담당과 새 포트·접속 방법 합의, 같은 장비 다른 인스턴스 포트 목록 확인 · 영향: 재기동 동안 서비스 중단, 포트를 바꾸면 모니터링 접속 정보 변경 · 승인: WAS 담당·모니터링 담당·변경관리 · 백업/롤백: setenv.sh 날짜 붙여 복사, 문제 시 복원 후 재기동"
+      cmd: |
+        cp -p $CATALINA_BASE/bin/setenv.sh $CATALINA_BASE/bin/setenv.sh.bak.$(date +%Y%m%d%H%M)
+        $CATALINA_HOME/bin/shutdown.sh ; sleep 10 ; $CATALINA_HOME/bin/startup.sh
+      check: "성공: 기동 후 ss 에서 <jmx_port> 가 Tomcat PID 하나에만 묶이고 shutdown.sh 실행 시 BindException 없음 · 실패: 기동 실패·모니터링 접속 불가 → setenv.sh.bak 복원 후 재기동"
+      note: "사전조건: LB 우회 · 영향: 재기동 중 중단 · 승인: WAS 담당 · 백업/롤백: setenv.sh.bak 복원 · 적용: Tomcat 7.0~10.1"
+  - stage: 3
+    steps:
+    - do: 유지보수사 의뢰 자료
+      cmd: |
+        grep -v -i -E 'password|pass=' $CATALINA_BASE/bin/setenv.sh > setenv_masked.txt
+        ss -ltnp > ss_$(date +%Y%m%d%H%M).txt ; tail -300 $CATALINA_BASE/logs/catalina.out > catalina_tail.txt
+      check: "비밀값 뺀 setenv.sh·포트 점유 목록·catalina.out 발췌·Tomcat/JDK 버전"
+      note: "민감정보 마스킹: JMX 인증 파일 경로·계정, 호스트명·IP 가림(jmxremote.password 파일은 보내지 않음) · 전달 승인: 보안 담당 승인 후 유지보수사에게만"
+
+- id: TOMCAT-PROC-R6-APP
+  scope: id
+  products: [tomcat]
+  category: internal
+  match: [TOMCAT-JAR-SCAN-FAIL, TOMCAT-JSP-COMPILE-FAIL, TOMCAT-RESPONSE-COMMITTED]
+  title: 애플리케이션 결함 — JSP 컴파일 실패·응답 커밋 후 처리·JAR 스캔 실패 (Tomcat)
+  source: "Apache Tomcat 9.0 'Jasper 2 JSP Engine How-To'(work 디렉터리·compilerSourceVM) — tomcat.apache.org/tomcat-9.0-doc/jasper-howto.html · Configuration Reference 'The Jar Scanner Component'(scanManifest) — config/jar-scanner.html · catalina.properties tomcat.util.scan.StandardJarScanFilter.jarsToSkip"
+  stages:
+  - stage: 1
+    steps:
+    - do: 실패 JSP·서블릿과 원인 줄 확인 (읽기 전용, 스택은 문맥째)
+      cmd: |
+        grep -n -A20 -E 'Unable to compile class for JSP|JasperException|response has been committed|Cannot forward after response' $CATALINA_BASE/logs/localhost.$(date +%Y-%m-%d).log | head -80
+        grep -n -A5 'Failed to scan' $CATALINA_BASE/logs/catalina.out | tail -30
+      check: "JSP 는 'An error occurred at line: N in the jsp file' 의 파일·줄 → 개발 담당. 응답 커밋 오류는 스택의 첫 업무 클래스가 원인(forward·sendError·헤더 설정을 출력 뒤에 호출). JAR 스캔 실패는 대상 JAR 이름 기록"
+      note: "적용: Tomcat 7.0~10.1(localhost.<날짜>.log 는 기본 logging.properties 기준) · 권한: 로그 읽기"
+    - do: 배포본·JDK·JAR 상태 확인
+      cmd: |
+        ls -lt $CATALINA_BASE/webapps/ | head ; ls -l $CATALINA_BASE/webapps/<app>/WEB-INF/lib | head -50
+        ls -l <jar경로> ; unzip -tq <jar경로>
+        java -version 2>&1 ; grep -n -E 'compilerSourceVM|compilerTargetVM' $CATALINA_BASE/conf/web.xml
+      check: "최근 배포 시각과 오류 시작 시각이 같으면 배포 결함. JAR 이 없거나 unzip 오류면 손상·매니페스트 Class-Path 가 가리키는 없는 JAR(경고성). JSP 문법이 JDK·compilerSourceVM 판과 맞지 않으면 컴파일 실패"
+      note: "적용: Tomcat 7.0~10.1 · 권한: 배포 디렉터리 읽기 · 파일을 고치거나 지우지 않는다"
+  - stage: 2
+    steps:
+    - do: 수정본 배포 또는 직전 정상본 롤백 (Manager)
+      cmd: |
+        cp -p $CATALINA_BASE/webapps/<app>.war <보관경로>/<app>.war.bak.$(date +%Y%m%d%H%M)
+        curl -u <manager-user> -T <수정본>.war "http://localhost:<port>/manager/text/deploy?path=/<app>&update=true"
+        curl -u <manager-user> "http://localhost:<port>/manager/text/list"
+      check: "성공: 'OK - Deployed application', list 에서 /<app>:running, 같은 JSP·서블릿 오류 미발생 · 실패: 'FAIL -' 또는 오류 반복 → 보관한 직전 war 로 같은 deploy 재실행"
+      note: "사전조건: 개발 담당이 검증계에서 수정본 확인, 직전 정상 war 보관 · 영향: 재배포 중 해당 앱 중단·세션 소실 · 승인: 애플리케이션 담당·WAS 담당·변경관리 · 백업/롤백: 첫 줄 보관본으로 재배포 · 비밀번호는 curl 이 묻게 한다(-u <manager-user> 만) · 적용: Tomcat 7.0~10.1(/manager/text, manager-script 역할)"
+    - do: 없는 JAR 을 가리키는 매니페스트 스캔 끄기 (JAR 스캔 경고가 기동 지연·로그 폭증을 일으킬 때)
+      config:
+        file: $CATALINA_BASE/conf/context.xml (또는 앱 META-INF/context.xml)
+        snippet: |
+          <Context>
+            <JarScanner scanManifest="false" />
+          </Context>
+        note: "사전조건: 대상 JAR 이 실제로 필요 없는(매니페스트만 가리키는) 것인지 개발 담당 확인 · 영향: 재기동 필요, 매니페스트로만 불러오던 TLD·어노테이션이 있으면 기능 누락 · 승인: WAS 담당·애플리케이션 담당 · 백업/롤백: context.xml 날짜 붙여 복사, 기능 이상 시 복원 후 재기동"
+      cmd: |
+        cp -p $CATALINA_BASE/conf/context.xml $CATALINA_BASE/conf/context.xml.bak.$(date +%Y%m%d%H%M)
+      check: "성공: 재기동 후 'Failed to scan' 미발생·앱 기능 정상 · 실패: JSP 태그 라이브러리 누락 등 기능 오류 → context.xml.bak 복원"
+  - stage: 3
+    steps:
+    - do: 개발 담당·유지보수사 전달 자료
+      cmd: |
+        grep -n -A40 -E 'JasperException|response has been committed|Failed to scan' $CATALINA_BASE/logs/localhost.$(date +%Y-%m-%d).log $CATALINA_BASE/logs/catalina.out | head -400 > tomcat_app_$(date +%Y%m%d).txt
+        ls -l $CATALINA_BASE/webapps/<app>/WEB-INF/lib > app_lib_list.txt
+      check: "예외 문맥·JSP 파일과 줄 번호·배포 시각·WEB-INF/lib 목록·Tomcat/JDK 버전"
+      note: "민감정보 마스킹: 스택·요청 파라미터의 개인정보·세션 ID·사용자 ID, 호스트명·IP 가림 · 전달 승인: 보안 담당 승인 후 개발 담당·유지보수사에게만"
+
+- id: TOMCAT-PROC-R6-SESSION
+  scope: id
+  products: [tomcat]
+  category: internal
+  match: [TOMCAT-SESSION-EXPIRE-FAIL, TOMCAT-SESSION-PERSIST-FAIL]
+  title: 세션 만료 처리·세션 영속화(SESSIONS.ser) 실패 (Tomcat)
+  source: "Apache Tomcat 9.0 Configuration Reference 'The Manager Component'(StandardManager pathname — 빈 값이면 재기동 시 세션 저장 안 함) — tomcat.apache.org/tomcat-9.0-doc/config/manager.html · 'Manager App How-To'(/manager/text/sessions)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 예외와 관련 리스너·속성 클래스 확인 (읽기 전용)
+      cmd: |
+        grep -n -A20 -E 'NotSerializableException|Cannot serialize session|SESSIONS.ser|sessionDestroyed|SessionListener' $CATALINA_BASE/logs/catalina.out $CATALINA_BASE/logs/localhost.$(date +%Y-%m-%d).log | head -80
+      check: "NotSerializableException 의 클래스 이름이 세션 속성으로 넣은 업무 객체 → 개발 담당. sessionDestroyed 리스너 예외가 반복되면 만료 정리가 중간에 끊겨 세션이 쌓일 수 있음"
+      note: "적용: Tomcat 7.0~10.1 · 권한: 로그 읽기"
+    - do: 활성 세션 수 추이와 영속화 파일 확인
+      cmd: |
+        curl -s -u <manager-user> "http://localhost:<port>/manager/text/sessions?path=/<app>"
+        ls -l $CATALINA_BASE/work/Catalina/localhost/<app>/SESSIONS.ser 2>/dev/null
+        jstat -gcutil <PID> 5000 3
+      check: "세션 수가 시간이 지나도 줄지 않고 Old 사용률이 오르면 만료 실패가 힙에 영향 → 메모리 절차 병행. SESSIONS.ser 는 정상 종료 때 생기고 기동 때 읽힘 — 기동 시 역직렬화 오류면 그 세션은 버려진다"
+      note: "적용: Tomcat 7.0~10.1, Manager 앱 manager-script 역할(비밀번호는 curl 이 묻게) · 권한: Tomcat 실행 계정(jstat)"
+  - stage: 2
+    steps:
+    - do: 세션 영속화 끄기 또는 직렬화 가능한 속성으로 수정 배포
+      config:
+        file: $CATALINA_BASE/conf/context.xml (또는 앱 META-INF/context.xml)
+        snippet: |
+          <Context>
+            <Manager pathname="" />   <!-- 재기동 시 세션 저장·복원 안 함 -->
+          </Context>
+        note: "사전조건: 재기동 후 세션 유지가 업무상 필요 없는지 업무 담당 확인(필요하면 개발 담당이 속성 클래스에 Serializable 구현) · 영향: 재기동 때 사용자 재로그인 필요 · 승인: WAS 담당·업무 담당·변경관리 · 백업/롤백: context.xml 날짜 붙여 복사, 원복은 복사 후 재기동"
+      cmd: |
+        cp -p $CATALINA_BASE/conf/context.xml $CATALINA_BASE/conf/context.xml.bak.$(date +%Y%m%d%H%M)
+      check: "성공: 다음 재기동 때 NotSerializableException·SESSIONS.ser 오류 미발생 · 실패: 세션 유실 민원·다른 앱 영향 → context.xml.bak 복원"
+    - do: 세션 리스너 결함 수정본 배포
+      cmd: |
+        cp -p $CATALINA_BASE/webapps/<app>.war <보관경로>/<app>.war.bak.$(date +%Y%m%d%H%M)
+        curl -u <manager-user> -T <수정본>.war "http://localhost:<port>/manager/text/deploy?path=/<app>&update=true"
+      check: "성공: 배포 후 sessionDestroyed 예외 미발생·활성 세션 수가 타임아웃 주기로 감소 · 실패: 오류 반복 → 보관본으로 재배포"
+      note: "사전조건: 개발 담당 수정본·검증계 확인 · 영향: 재배포 중 앱 중단·세션 소실 · 승인: 애플리케이션 담당·WAS 담당 · 백업/롤백: 첫 줄 보관본으로 재배포 · 적용: Tomcat 7.0~10.1"
+  - stage: 3
+    steps:
+    - do: 개발 담당·유지보수사 전달 자료
+      cmd: |
+        grep -n -A30 -E 'NotSerializableException|sessionDestroyed|SessionListener' $CATALINA_BASE/logs/catalina.out $CATALINA_BASE/logs/localhost.*.log | head -300 > tomcat_session_$(date +%Y%m%d).txt
+      check: "예외 문맥·세션 수 추이·context.xml(비밀값 제외)·앱 버전"
+      note: "민감정보 마스킹: 세션 ID·세션 속성 값·사용자 ID·IP 가림, SESSIONS.ser 파일은 개인정보가 들어 있어 보내지 않음 · 전달 승인: 보안 담당 승인 후 개발 담당에게만"
+
+- id: TOMCAT-PROC-R6-PIPELINE
+  scope: id
+  products: [tomcat]
+  category: internal
+  match: [TOMCAT-NIO-SELECTOR-FAIL, TOMCAT-VALVE-ERROR]
+  title: 요청 처리 파이프라인 오류 — NIO 셀렉터·Valve 예외 (Tomcat)
+  source: "Apache Tomcat 9.0 Configuration Reference 'The Valve Component' — tomcat.apache.org/tomcat-9.0-doc/config/valve.html · 'The HTTP Connector'(NIO 커넥터) — config/http.html · Tomcat Changelog(셀렉터 관련 수정은 판별 변경 이력)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 예외 종류와 Valve 클래스 확인 (읽기 전용, 스택 문맥째)
+      cmd: |
+        grep -n -B2 -A15 -i -E 'selector|Valve' $CATALINA_BASE/logs/catalina.out | head -80
+        grep -n '<Valve' $CATALINA_BASE/conf/server.xml $CATALINA_BASE/conf/context.xml
+        ls -l --time-style=long-iso $CATALINA_BASE/conf/ $CATALINA_BASE/lib/ | head -40
+      check: "Too many open files 면 FD 고갈(TOMCAT-PROC-R5-CAPACITY), CancelledKeyException 단발은 클라이언트 끊김으로 경고성. Valve 예외의 클래스가 org.apache.catalina.valves 밖(사내·3rd party)이면 그 Valve 결함, 설정·lib 변경 시각과 오류 시작이 같으면 최근 변경"
+      note: "적용: Tomcat 7.0~10.1 · 권한: 설정·로그 읽기"
+    - do: FD·JDK·Tomcat 판 기록
+      cmd: |
+        ls /proc/<PID>/fd | wc -l ; grep 'Max open files' /proc/<PID>/limits
+        $CATALINA_HOME/bin/version.sh 2>/dev/null | head -8
+      check: "FD 사용이 한도의 90% 이상이면 FD 고갈 확정. 셀렉터 예외가 특정 Tomcat 판에서 반복되면 Changelog 의 수정 판과 대조"
+      note: "적용: Linux · 권한: root 또는 Tomcat 실행 계정"
+  - stage: 2
+    steps:
+    - do: 문제 Valve 비활성 또는 Tomcat 패치 판 적용
+      config:
+        file: $CATALINA_BASE/conf/server.xml 또는 context.xml (문제 Valve 줄)
+        snippet: |
+          <!-- <Valve className="com.example.CustomValve" ... /> -->   주석 처리 또는 수정본 jar 교체
+        note: "사전조건: Valve 의 역할(인증·로깅·IP 제한)을 담당자와 확인 — 보안 기능 Valve 는 대체 수단 없이 끄지 않는다, 패치 판은 검증계 확인 · 영향: 재기동 동안 중단, Valve 기능 정지 · 승인: WAS 담당·보안 담당(보안 Valve 일 때)·변경관리 · 백업/롤백: server.xml·context.xml·lib 의 jar 날짜 붙여 복사, 문제 시 복원 후 재기동"
+      cmd: |
+        cp -p $CATALINA_BASE/conf/server.xml $CATALINA_BASE/conf/server.xml.bak.$(date +%Y%m%d%H%M)
+        cp -p $CATALINA_BASE/conf/context.xml $CATALINA_BASE/conf/context.xml.bak.$(date +%Y%m%d%H%M)
+        $CATALINA_HOME/bin/shutdown.sh ; sleep 10 ; $CATALINA_HOME/bin/startup.sh
+      check: "성공: 재기동 후 Valve·셀렉터 예외 미발생, 요청 정상 · 실패: 기동 오류나 기능 누락 → .bak 복원 후 재기동"
+      note: "사전조건: LB 우회 · 영향: 재기동 중 중단 · 승인: WAS 담당 · 백업/롤백: .bak 복원 · 적용: Tomcat 7.0~10.1"
+  - stage: 3
+    steps:
+    - do: 유지보수사 의뢰 자료
+      cmd: |
+        grep -n -B2 -A30 -i -E 'selector|Valve' $CATALINA_BASE/logs/catalina.out | tail -400 > tomcat_pipeline_$(date +%Y%m%d).txt
+        $CATALINA_HOME/bin/version.sh >> tomcat_pipeline_$(date +%Y%m%d).txt 2>&1
+      check: "예외 문맥·Valve 설정 줄·FD 수/한도·Tomcat/JDK 판"
+      note: "민감정보 마스킹: 설정의 비밀번호·secret, 로그의 클라이언트 IP·요청 URI 파라미터·세션 ID 가림 · 전달 승인: 보안 담당 승인 후 유지보수사에게만"
+
+- id: TOMCAT-PROC-R6-ASYNC
+  scope: id
+  products: [tomcat]
+  category: thread
+  match: [TOMCAT-ASYNC-TIMEOUT]
+  title: 비동기(Servlet async) 요청 시간 초과 (Tomcat)
+  source: "Apache Tomcat 9.0 Configuration Reference 'The HTTP Connector'(asyncTimeout 기본 30000ms) — tomcat.apache.org/tomcat-9.0-doc/config/http.html · Servlet 3.0+ AsyncContext.setTimeout"
+  stages:
+  - stage: 1
+    steps:
+    - do: 시간 초과 URI·서블릿과 설정값 확인 (읽기 전용)
+      cmd: |
+        grep -n -B2 -A15 -i -E 'async.*timeout|AsyncContext|onTimeout' $CATALINA_BASE/logs/localhost.$(date +%Y-%m-%d).log | head -60
+        grep -n -o -E 'asyncTimeout="[0-9]*"' $CATALINA_BASE/conf/server.xml
+      check: "asyncTimeout 이 없으면 기본 30초. 시간 초과 URI 가 특정 외부 연동·장기 작업이면 그 후단 지연이 원인"
+      note: "적용: Tomcat 7.0~10.1(Servlet 3.0+) · 권한: 로그·설정 읽기"
+    - do: 비동기 작업 스레드가 어디서 기다리는지 스레드 덤프로 확인
+      cmd: |
+        for i in 1 2 3; do jcmd <PID> Thread.print > $CATALINA_BASE/logs/td_$(date +%H%M%S)_$i.txt; sleep 10; done
+        grep -c 'java.lang.Thread.State: WAITING' $CATALINA_BASE/logs/td_*_1.txt
+      check: "업무 스레드 풀·외부 HTTP/DB 대기 스택이 반복되면 그 지점이 병목 → 연동·DB 담당. 요청 스레드(http-nio-*-exec) 고갈이 함께면 TOMCAT-PROC-THREAD"
+      note: "적용: JDK 8/11/17(jcmd 없으면 kill -3 <PID> — 스레드 덤프, 프로세스는 유지) · 권한: Tomcat 실행 계정 · 로그 폴더 여유 확인"
+  - stage: 2
+    steps:
+    - do: 후단 지연 해소 후 비동기 시간 초과 값 정렬
+      config:
+        file: $CATALINA_BASE/conf/server.xml (Connector) 또는 앱 코드 AsyncContext.setTimeout
+        snippet: |
+          <Connector port="<port>" protocol="org.apache.coyote.http11.Http11NioProtocol" asyncTimeout="60000" />
+        note: "사전조건: 비동기 작업의 업무상 최장 정상 시간 확인, 후단 지연 원인 조치가 먼저 · 영향: 재기동 동안 중단, 값을 늘리면 대기 요청·스레드 점유 증가 · 승인: WAS 담당·애플리케이션 담당·변경관리 · 백업/롤백: server.xml 날짜 붙여 복사, 문제 시 복원 후 재기동"
+      cmd: |
+        cp -p $CATALINA_BASE/conf/server.xml $CATALINA_BASE/conf/server.xml.bak.$(date +%Y%m%d%H%M)
+        $CATALINA_HOME/bin/shutdown.sh ; sleep 10 ; $CATALINA_HOME/bin/startup.sh
+      check: "성공: 해당 URI 비동기 시간 초과 미발생·스레드 수 안정 · 실패: 대기 요청 누적·OOM 징후 → server.xml.bak 복원 후 재기동, 후단 조치로 전환"
+      note: "사전조건: LB 우회 · 영향: 재기동 중 중단 · 승인: WAS 담당 · 백업/롤백: server.xml.bak 복원 · 적용: Tomcat 7.0~10.1"
+  - stage: 3
+    steps:
+    - do: 개발 담당·유지보수사 전달 자료
+      cmd: |
+        tar czf tomcat_async_$(date +%Y%m%d).tgz $CATALINA_BASE/logs/td_*.txt $CATALINA_BASE/logs/localhost.$(date +%Y-%m-%d).log
+      check: "스레드 덤프 3회·localhost 로그·asyncTimeout 값·앱 버전"
+      note: "민감정보 마스킹: 스레드 덤프·로그의 요청 URL 파라미터·세션 ID·SQL 바인드 값·사용자 ID 가림 · 전달 승인: 보안 담당 승인 후 개발 담당·유지보수사에게만"
+
+- id: JEUS-PROC-R6-MASTER-LINK
+  scope: id
+  products: [jeus]
+  category: connection
+  match: [DOMAIN-0101]
+  title: MASTER(DAS) 통신 복구 통지 후 설정 재동기화 확인 (JEUS)
+  source: "TmaxSoft JEUS 8/9/21 Domain Guide 'MASTER 와 Managed Server'·'INDEPENDENT 모드'(MASTER 장애 중 로컬 설정으로 기동·복구 후 재동기화) / Reference 'jeusadmin server-info'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 끊김~복구~재동기화 흐름 확인 (읽기 전용)
+      cmd: |
+        grep -n -E 'DOMAIN-0101|LAUNCHER-0052|LAUNCHER-0054|SERVER-0249|SERVER-0308|INDEPENDENT' $DOMAIN_HOME/servers/<server>/logs/JeusServer.log | tail -30
+        tail -n 100 $DOMAIN_HOME/servers/<server>/logs/JeusLauncher.log
+      check: "DOMAIN-0101 뒤에 SERVER-0308(재동기화 완료)이 있으면 정상 복구. 끊긴 동안 INDEPENDENT(SERVER-0249·LAUNCHER-0054)로 기동했는데 SERVER-0308 이 없으면 MASTER 설정 변경이 반영되지 않은 상태"
+      note: "적용: JEUS 7/8/9/21 도메인 구조 · 권한: JEUS 실행 OS 계정(로그 읽기)"
+    - do: MASTER 응답과 서버별 상태 확인
+      cmd: |
+        nc -zvw3 <master_host> <base_port>
+        $JEUS_HOME/bin/jeusadmin -host <master_host>:<base_port> -u <user> "server-info"
+      check: "MASTER 접속 성공·모든 서버 RUNNING 이면 정상. 다시 접속 실패면 MASTER 장애 재발 → JEUS-PROC-INTERNAL(MASTER 통신 실패) 절차"
+      note: "적용: JEUS 7+(jeusadmin), base_port 기본 9736 · 권한: JEUS 관리자 계정(조회) — -p 를 쓰지 않으면 비밀번호를 묻는다"
+  - stage: 2
+    steps:
+    - do: 재동기화되지 않은 서버를 정상 모드로 재기동
+      cmd: |
+        $JEUS_HOME/bin/jeusadmin -host <master_host>:<base_port> -u <user> "stop-server <server>"
+        $JEUS_HOME/bin/jeusadmin -host <master_host>:<base_port> -u <user> "start-server <server>"
+      check: "성공: JeusServer.log 에 RUNNING 통지(SERVER-0248)·INDEPENDENT 표시 없음, server-info 상태 RUNNING · 실패: 기동 실패·STANDBY 유지 → JEUS-PROC-INTERNAL 1차부터 다시"
+      note: "사전조건: MASTER 정상 응답 확인, INDEPENDENT 로 떠 있던 동안 MASTER 쪽 설정 변경 여부를 변경관리 기록으로 확인, 클러스터면 다른 서버가 부하를 받을 수 있는지 · 영향: stop~start 동안 해당 서버 서비스 중단·세션 이전 · 승인: WAS 담당·변경관리 · 백업/롤백: 재기동 전 $DOMAIN_HOME/config/domain.xml 을 날짜 붙여 복사, 기동 실패 시 그 사본과 MASTER 설정 비교 후 이전 모드로 기동 · 적용: JEUS 7/8/9/21"
+  - stage: 3
+    steps:
+    - do: TmaxSoft 의뢰 자료
+      cmd: |
+        tar czf jeus_master_$(date +%Y%m%d).tgz $DOMAIN_HOME/servers/<server>/logs/JeusServer.log* $DOMAIN_HOME/servers/<server>/logs/JeusLauncher.log* $DOMAIN_HOME/servers/<master_server>/logs/JeusServer.log*
+      check: "MS·MASTER 로그(끊김~복구 구간)·domain.xml·JEUS Fix 레벨"
+      note: "민감정보 마스킹: 로그·domain.xml 의 호스트명·IP·계정·데이터소스 비밀번호(암호화 값 포함) 가림 · 전달 승인: 보안 담당 승인 후 TmaxSoft 에 반출"
+
+- id: JEUS-PROC-R6-SESSION
+  scope: id
+  products: [jeus]
+  category: connection
+  match: [JEUS-CLUSTER-MEMBER-LOST, JEUS-SESSION-REPL-FAIL, LEG-JEUS-DSESSION, LEG-JEUS-NET-SESSION, LEG-JEUS-SESSION-CLOSE]
+  title: 분산 세션·클러스터 멤버 연결 끊김 (D_SESSION·세션 복제, JEUS)
+  source: "TmaxSoft JEUS 8/9/21 Session Management Guide '분산 세션 서버(Distributed Session Server)'·'세션 클러스터링' / Server Guide '로깅' / Reference 'jeusadmin server-info'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 끊김 시각과 상대 서버를 서버 종료 시각과 대조 (읽기 전용)
+      cmd: |
+        grep -n -E 'D_SESSION-[0-9]{4}|NET-0907|NET-020[0-9]' $DOMAIN_HOME/servers/<server>/logs/JeusServer.log | tail -30
+        grep -n -B3 -A10 -i -E 'session.*(backup|replicat|cluster)' $DOMAIN_HOME/servers/<server>/logs/JeusServer.log | head -60
+      check: "끊김 시각이 상대 서버의 계획 종료·재기동 시각과 같으면 정상(D_SESSION 연결 종료는 종료 때 항상 남음). 운영 중 반복이면 상대 서버 장애·네트워크·GC 정지"
+      note: "적용: JEUS 7/8/9/21 · 권한: JEUS 실행 OS 계정(로그 읽기)"
+    - do: 상대 서버 생존·도달성 확인
+      cmd: |
+        $JEUS_HOME/bin/jeusadmin -host <host>:<base_port> -u <user> "server-info -server <peer_server> -state"
+        nc -zvw3 <peer_host> <peer_base_port>
+      check: "상대 RUNNING·포트 접속 성공이면 일시 끊김. 상대가 RUNNING 이 아니면 그 서버 장애 → JEUS-PROC-INTERNAL, 포트 실패면 네트워크 담당"
+      note: "적용: JEUS 7+ · 권한: JEUS 관리자 계정(조회, 비밀번호는 프롬프트)"
+    - do: 끊김 시각의 GC 정지 확인
+      cmd: |
+        jstat -gcutil <PID> 5000 6
+        grep -n -E 'Pause Full|Full GC' $DOMAIN_HOME/servers/<server>/logs/gc*.log 2>/dev/null | tail -10
+      check: "Full GC 가 수 초 이상이고 끊김 시각과 겹치면 메모리 원인 → JEUS-PROC-MEMORY"
+      note: "적용: JDK 8/11/17 · 권한: JEUS 실행 OS 계정(jstat attach) · GC 로그는 설정한 경우만"
+  - stage: 2
+    steps:
+    - do: 멈춘 상대 서버 기동 (계획 외 종료일 때)
+      cmd: |
+        $JEUS_HOME/bin/jeusadmin -host <host>:<base_port> -u <user> "start-server <peer_server>"
+      check: "성공: server-info 상태 RUNNING, 양쪽 로그에 새 D_SESSION 연결 오류 없음 · 실패: 기동 실패 → JEUS-PROC-INTERNAL 1차(원인 줄) 후 조치"
+      note: "사전조건: 상대 서버가 왜 멈췄는지(hs_err·OOM·운영자 종료) 1차 기록, 같은 서버가 다른 곳에서 떠 있지 않은지 확인 · 영향: 기동 중 세션 재분배 부하 · 승인: WAS 담당 · 백업/롤백: 설정 변경 없음 — 기동 실패 시 이전 상태(중지) 유지하고 원인 조치 · 적용: JEUS 7/8/9/21"
+    - do: 분산 세션 연결 설정 점검·조정 (반복 끊김일 때)
+      config:
+        file: $DOMAIN_HOME/config/domain.xml (세션 클러스터·분산 세션 설정 구역)
+        snippet: |
+          # 현재 값 확인: grep -n -i -A15 'session' $DOMAIN_HOME/config/domain.xml | head -60
+          # 연결·응답 대기 시간·백업 대상 설정을 TmaxSoft 권고값으로 조정(WebAdmin 사용 권장)
+        note: "사전조건: 네트워크·GC 원인을 먼저 배제, TmaxSoft 권고값 확인 · 영향: 반영에 서버 재기동이 필요할 수 있고 세션 유실 가능 · 승인: WAS 담당·변경관리 · 백업/롤백: domain.xml 을 날짜 붙여 복사, 이상 시 복원 후 재기동"
+      check: "성공: 변경 후 운영 시간 중 D_SESSION 연결 오류 재발 없음 · 실패: 세션 유실·기동 오류 → domain.xml 사본 복원"
+      verify_note: "미검증 — 분산 세션 설정의 domain.xml 요소 이름과 동적 반영 여부를 JEUS 판별 Session Management Guide 원문에서 확인하지 못함"
+  - stage: 3
+    steps:
+    - do: TmaxSoft 의뢰 자료
+      cmd: |
+        tar czf jeus_session_$(date +%Y%m%d).tgz $DOMAIN_HOME/servers/<server>/logs/JeusServer.log* $DOMAIN_HOME/servers/<peer_server>/logs/JeusServer.log* $DOMAIN_HOME/config/domain.xml
+      check: "양쪽 서버 로그(같은 구간)·domain.xml·GC 로그·JEUS Fix 레벨"
+      note: "민감정보 마스킹: 세션 ID·사용자 ID·호스트명·IP, domain.xml 의 계정·비밀번호 가림 · 전달 승인: 보안 담당 승인 후 TmaxSoft 에 반출"
+
+- id: JEUS-PROC-R6-NETWORK
+  scope: id
+  products: [jeus]
+  category: connection
+  match: [NETWORK-0403, NETWORK-0708, NETWORK-0907, WAS-JEUS-HUB-002, LEG-JEUS-NET-ERR]
+  title: 원격 연결 거부·소켓 스트림 끊김 (Network-0403/0708/0907·NET-, JEUS)
+  source: "TmaxSoft JEUS 8/9/21 메시지 참조(Network-·NET- 코드) / Server Guide '가상 호스트·리스너(base-port)' / Reference 'jeusadmin server-info'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 상대 주소·포트와 직전 예외 확인 (읽기 전용, 스택 문맥째)
+      cmd: |
+        grep -n -B3 -A8 -E 'Network-0403|Network-0708|Network-0907|NET-0[29][0-9]{2}' $DOMAIN_HOME/servers/<server>/logs/JeusServer.log | tail -80
+      check: "메시지의 상대 IP:포트 기록. Connection refused(0708)면 상대 미기동·주소 오류, disconnected/reset(0403·0907)이면 상대 재기동·방화벽 유휴 끊김. 상대가 WebtoB(JSV 포트)면 JEUS-PROC-UPSTREAM"
+      note: "적용: JEUS 7/8/9/21 · 권한: JEUS 실행 OS 계정(로그 읽기)"
+    - do: 상대 포트 도달성과 현재 연결 상태
+      cmd: |
+        nc -zvw3 <peer_host> <peer_port>
+        ss -tanp | grep -E '<peer_host>:<peer_port>\b' | awk '{print $1}' | sort | uniq -c
+      check: "nc 실패면 상대 프로세스 LISTEN 여부·방화벽 확인 요청. ESTAB 이 있고 간헐 끊김이면 방화벽/L4 유휴 시간 초과 의심(끊김 간격이 일정)"
+      note: "적용: Linux(ss) · 권한: 일반 사용자(ss -p 의 PID 표시는 root)"
+    - do: 상대 서버가 같은 시각 재기동했는지 확인
+      cmd: |
+        $JEUS_HOME/bin/jeusadmin -host <host>:<base_port> -u <user> "server-info"
+      check: "상대가 JEUS 서버면 상태·기동 시각이 끊김 시각과 같으면 정상 범위(재기동 영향)"
+      note: "적용: JEUS 7+ · 권한: JEUS 관리자 계정(조회, 비밀번호는 프롬프트)"
+  - stage: 2
+    steps:
+    - do: 상대 기동·방화벽 유휴 시간 조정 또는 잘못된 원격 주소 교정
+      config:
+        file: 방화벽/L4 세션 유휴 시간 · $DOMAIN_HOME/config/domain.xml(원격 주소를 쓰는 설정)
+        snippet: |
+          # 방화벽 유휴 시간 > 애플리케이션 연결 유지 주기 가 되도록 네트워크 담당이 조정
+          # 원격 주소가 바뀐 경우: domain.xml 의 해당 주소를 현행 주소로 수정(WebAdmin 사용 권장)
+        note: "사전조건: 상대 담당·네트워크 담당과 원인 합의, 현재 값 기록 · 영향: 주소 변경은 서버 재기동 필요, 방화벽 변경은 같은 구간 다른 시스템에도 적용 · 승인: WAS 담당·네트워크 담당·변경관리 · 백업/롤백: domain.xml 을 날짜 붙여 복사·방화벽 정책 내보내기, 이상 시 둘 다 원복"
+      check: "성공: 같은 상대에 대한 Network-0708/0907 이 운영 시간 중 재발 없음 · 실패: 연결 오류 지속 또는 다른 연계 영향 → 원복 후 3차"
+  - stage: 3
+    steps:
+    - do: TmaxSoft·네트워크 담당 전달 자료
+      cmd: |
+        grep -n -B3 -A8 -E 'Network-0[0-9]{3}|NET-[0-9]{4}' $DOMAIN_HOME/servers/<server>/logs/JeusServer.log | tail -500 > jeus_net_$(date +%Y%m%d).txt
+        ss -tan > ss_$(date +%Y%m%d%H%M).txt
+      check: "오류 문맥(상대 주소·시각)·연결 상태·JEUS Fix 레벨"
+      note: "민감정보 마스킹: 호스트명·IP·포트 구성, 로그의 사용자 계정·세션 ID 가림 · 전달 승인: 보안 담당 승인 후 TmaxSoft·네트워크 담당에게만"
+
+- id: JEUS-PROC-R6-PORT
+  scope: id
+  products: [jeus]
+  category: connection
+  match: [JEUS-PORT-BIND-FAIL]
+  title: 리스너·base-port 바인드 실패 (Address already in use, JEUS)
+  source: "TmaxSoft JEUS 8/9/21 Server Guide '리스너 설정(base-port 9736·HTTP 리스너 포트)' / Domain Guide 'domain.xml'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 충돌 포트와 예외 확인 (읽기 전용)
+      cmd: |
+        grep -n -B2 -A8 -E 'BindException|Address already in use' $DOMAIN_HOME/servers/<server>/logs/JeusServer.log $DOMAIN_HOME/servers/<server>/logs/JeusLauncher.log | tail -40
+        grep -n -E 'base-port|listen-port|<port>' $DOMAIN_HOME/config/domain.xml | head -30
+      check: "예외에 찍힌 포트가 domain.xml 의 어느 서버·리스너 것인지 확정. 같은 장비 다른 서버와 겹치면 설정 충돌"
+      note: "적용: JEUS 7/8/9/21 · 권한: JEUS 실행 OS 계정"
+    - do: 점유 프로세스 확인
+      cmd: |
+        ss -ltnp | grep -E ':<port>\b'
+        ps -ef | grep '[j]eus' | grep -- '-server <server>'
+      check: "같은 JEUS 서버의 이전 프로세스가 남아 있으면 잔존 프로세스(중복 기동), 다른 제품 PID 면 포트 충돌"
+      note: "적용: Linux · 권한: ss -p 의 PID 표시는 root · 프로세스를 종료하지 않는다(2차)"
+  - stage: 2
+    steps:
+    - do: 잔존 프로세스 정리 또는 포트 변경 후 기동
+      cmd: |
+        jcmd <잔존PID> Thread.print > $DOMAIN_HOME/servers/<server>/logs/td_stale_$(date +%H%M%S).txt
+        kill <잔존PID>   # 같은 JEUS 서버의 잔존 프로세스일 때만(승인 후)
+        $JEUS_HOME/bin/jeusadmin -host <host>:<base_port> -u <user> "start-server <server>"
+      check: "성공: ss 에서 포트가 새 서버 PID 하나에만 묶이고 server-info 상태 RUNNING · 실패: kill 후에도 잔존·다른 서비스가 포트 사용 → domain.xml 포트 변경(WebAdmin) 후 기동"
+      note: "사전조건: 잔존 PID 가 같은 서버인지 ps -fp <잔존PID> 로 확인(다른 서비스면 kill 금지), 스레드 덤프 보존 · 영향: 잔존 프로세스가 처리 중이던 요청 실패, 포트 변경 시 WebtoB·L4·방화벽 설정도 변경 · 승인: WAS 담당·해당 서버 담당·변경관리 · 백업/롤백: 포트 변경 전 domain.xml 날짜 붙여 복사, 이상 시 복원 · 적용: JEUS 7/8/9/21"
+  - stage: 3
+    steps:
+    - do: TmaxSoft 의뢰 자료
+      cmd: |
+        ss -ltnp > ss_$(date +%Y%m%d%H%M).txt
+        tar czf jeus_port_$(date +%Y%m%d).tgz $DOMAIN_HOME/servers/<server>/logs/JeusLauncher.log* $DOMAIN_HOME/servers/<server>/logs/JeusServer.log* ss_*.txt
+      check: "포트 점유 목록·기동 로그·domain.xml 포트 구성"
+      note: "민감정보 마스킹: 호스트명·IP, domain.xml 의 계정·비밀번호 가림 · 전달 승인: 보안 담당 승인 후 TmaxSoft 에 반출"
+
+- id: JEUS-PROC-R6-JMS-CONN
+  scope: id
+  products: [jeus]
+  category: connection
+  match: [JEUS-JMS-CONNECT-FAIL]
+  title: JMS 서버 연결 실패 (JEUS JMS)
+  source: "TmaxSoft JEUS 8/9/21 JMS Guide 'JMS 서버·연결 팩토리·클라이언트 접속(base-port 가상 리스너)' / Reference 'jeusadmin server-info'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 접속 대상과 예외 확인 (읽기 전용, 스택 문맥째)
+      cmd: |
+        grep -n -B2 -A15 -E 'JMSException|JMS-[0-9]{4}' $DOMAIN_HOME/servers/<server>/logs/JeusServer.log | head -60
+      check: "예외의 연결 팩토리·대상 서버·사유(연결 거부·인증·대상 없음) 기록"
+      note: "적용: JEUS 7/8/9/21 · 권한: JEUS 실행 OS 계정"
+    - do: JMS 서버를 가진 JEUS 서버 상태와 포트 도달성
+      cmd: |
+        $JEUS_HOME/bin/jeusadmin -host <host>:<base_port> -u <user> "server-info -server <jms_server> -state"
+        nc -zvw3 <jms_host> <jms_port>
+      check: "JMS 서버 측 JEUS 가 RUNNING 이 아니거나 포트 접속 실패면 그 서버 장애·네트워크. 정상인데 실패면 팩토리 설정·인증"
+      note: "적용: JEUS 7+ · 권한: JEUS 관리자 계정(조회, 비밀번호는 프롬프트)"
+  - stage: 2
+    steps:
+    - do: JMS 서버 측 기동 또는 연결 팩토리 주소 교정
+      cmd: |
+        $JEUS_HOME/bin/jeusadmin -host <host>:<base_port> -u <user> "start-server <jms_server>"
+      check: "성공: JMS 서버 RUNNING 후 클라이언트 측 JMSException 미발생·메시지 송수신 재개 · 실패: 기동 실패 → JEUS-PROC-INTERNAL, 주소 오류면 domain.xml 의 팩토리 설정 교정"
+      note: "사전조건: JMS 서버가 멈춘 원인(디스크·저장소·OOM) 1차 확인, 저장소 디스크 부족이면 JEUS-PROC-R5-DISK 먼저 · 영향: 기동 중 적체 메시지 일괄 처리로 부하 · 승인: WAS 담당·업무 담당 · 백업/롤백: 팩토리 주소 변경 시 domain.xml 날짜 붙여 복사 후 변경, 이상 시 복원 · 적용: JEUS 7/8/9/21"
+  - stage: 3
+    steps:
+    - do: TmaxSoft 의뢰 자료
+      cmd: |
+        tar czf jeus_jmsconn_$(date +%Y%m%d).tgz $DOMAIN_HOME/servers/<server>/logs/JeusServer.log* $DOMAIN_HOME/servers/<jms_server>/logs/JeusServer.log* $DOMAIN_HOME/config/domain.xml
+      check: "클라이언트·JMS 서버 양쪽 로그·domain.xml(JMS 설정)·JEUS Fix 레벨"
+      note: "민감정보 마스킹: 메시지 본문·사용자 계정·호스트명·IP, domain.xml 비밀번호 가림 · 전달 승인: 보안 담당 승인 후 TmaxSoft 에 반출"
+
+- id: JEUS-PROC-R6-JMS
+  scope: id
+  products: [jeus]
+  category: internal
+  match: [LEG-JEUS-JMS-001-E160, WAS-JEUS-HUB-003]
+  title: JMS 처리 오류·프로토콜 불일치 접속(invalid magic number) (JEUS JMS)
+  source: "TmaxSoft JEUS 8/9/21 JMS Guide 'JMS 엔진·목적지(큐·토픽)·클라이언트 라이브러리 버전' / 메시지 참조(JMS- 코드)"
+  stages:
+  - stage: 1
+    steps:
+    - do: JMS 오류 번호·목적지와 접속 출처 확인 (읽기 전용)
+      cmd: |
+        grep -n -B2 -A15 -E 'JMS-[0-9]{4}' $DOMAIN_HOME/servers/<server>/logs/JeusServer.log | head -60
+        grep -n -i -B2 -A3 'invalid magic number' $DOMAIN_HOME/servers/<server>/logs/JeusServer.log | tail -20
+      check: "JMS 오류 번호·대상 큐/토픽 기록. invalid magic number 는 JEUS JMS 가 아닌 클라이언트(다른 판 라이브러리·포트 스캐너·HTTP 요청)가 JMS 포트에 붙은 것 — 출처 IP 기록"
+      note: "적용: JEUS 7/8/9/21 · 권한: JEUS 실행 OS 계정"
+    - do: 출처 IP 의 현재 연결과 클라이언트 라이브러리 판 확인
+      cmd: |
+        ss -tanp | grep -E ':<jms_port>\b' | grep '<source_ip>'
+        ls -l $JEUS_HOME/lib/client/ 2>/dev/null | head
+      check: "등록되지 않은 IP 면 보안 담당 통보. 사내 클라이언트면 그 클라이언트의 jeus 클라이언트 jar 판이 서버 JEUS 판과 같은지 대조"
+      note: "적용: Linux(ss) · 권한: 일반 사용자 · 클라이언트 jar 경로는 설치본에서 확인"
+  - stage: 2
+    steps:
+    - do: 잘못된 클라이언트 라이브러리 교체 또는 출처 차단
+      config:
+        file: 해당 클라이언트 애플리케이션 클래스패스 · 방화벽 정책
+        snippet: |
+          # 클라이언트: 서버와 같은 JEUS 판의 클라이언트 jar 로 교체 후 클라이언트 재기동
+          # 스캐너·미등록 IP: 보안 담당이 JMS 포트 접근 제어
+        note: "사전조건: 출처 시스템 담당 확인, 교체 jar 는 검증계에서 송수신 확인 · 영향: 클라이언트 재기동 동안 해당 연계 중단, 차단 오적용 시 정상 연계 중단 · 승인: WAS 담당·연계 담당·보안 담당 · 백업/롤백: 기존 jar·방화벽 정책 보관, 이상 시 원복"
+      check: "성공: invalid magic number·JMS 오류 재발 없음, 연계 메시지 정상 · 실패: 연계 오류 발생 → 기존 jar·정책 원복"
+  - stage: 3
+    steps:
+    - do: TmaxSoft 의뢰 자료
+      cmd: |
+        grep -n -B2 -A20 -E 'JMS-[0-9]{4}|invalid magic number' $DOMAIN_HOME/servers/<server>/logs/JeusServer.log | tail -400 > jeus_jms_$(date +%Y%m%d).txt
+      check: "JMS 오류 문맥·목적지 이름·클라이언트 판·JEUS Fix 레벨"
+      note: "민감정보 마스킹: 메시지 본문·출처 IP·호스트명·계정 가림 · 전달 승인: 보안 담당 승인 후 TmaxSoft 에 반출"
+
+- id: JEUS-PROC-R6-WEBAPP
+  scope: id
+  products: [jeus]
+  category: internal
+  match: [JEUS-CLASSLOADER-FAIL, JEUS-CONTEXT-INIT-FAIL, JEUS-JSP-COMPILE-FAIL, JEUS-SERVLET-EXCEPTION, JEUS-WEBAPP-RELOAD-FAIL, LEG-JEUS-SERVLET-ERR, LEG-JEUS-WEB-001-6CF5, LEG-JEUS-EJB-001-866C]
+  title: 애플리케이션 예외 — 클래스 로딩·컨텍스트 초기화·JSP·서블릿·EJB·리로드 실패 (JEUS)
+  source: "TmaxSoft JEUS 8/9/21 Web Engine Guide '웹 애플리케이션 배포·자동 리로드·JSP 엔진' / Application Guide '클래스 로더' / Reference 'jeusadmin application-info·deploy·undeploy'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 예외와 첫 업무 클래스 확인 (읽기 전용, 스택은 문맥째 잘라 본다)
+      cmd: |
+        grep -n -B5 -A30 -E 'ClassNotFoundException|NoClassDefFoundError|LinkageError|contextInitialized|JspException|ServletException|WEB-[0-9]{4}|EJB-[0-9]{3,4}' $DOMAIN_HOME/servers/<server>/logs/JeusServer.log | head -120
+      check: "Caused by 의 마지막 예외와 첫 업무 패키지 줄 기록. 클래스 누락이면 jar 누락·중복, 초기화 실패면 DB·JNDI·설정 파일, JSP 는 파일·줄 번호 → 개발 담당"
+      note: "적용: JEUS 7/8/9/21 · 권한: JEUS 실행 OS 계정 · grep 으로 스택 줄을 버리지 않는다(head 로만 자름)"
+    - do: 애플리케이션 상태·배포본·라이브러리 확인
+      cmd: |
+        $JEUS_HOME/bin/jeusadmin -host <host>:<base_port> -u <user> "application-info"
+        ls -lt <배포 경로>/WEB-INF/lib | head -40
+        ls <배포 경로>/WEB-INF/lib | sed -E 's/-[0-9][0-9.]*.*\.jar$//' | sort | uniq -d
+      check: "앱 상태가 RUNNING 이 아니면 기동 실패. 최근 배포 시각과 오류 시작이 같으면 배포 결함, 같은 라이브러리가 판만 다르게 둘 이상이면 클래스 충돌"
+      note: "적용: JEUS 7+(application-info) · 권한: JEUS 관리자 계정(조회, 비밀번호는 프롬프트)·배포 경로 읽기"
+    - do: 리로드 반복 시 Metaspace 확인
+      cmd: |
+        jstat -gcutil <PID> 5000 3
+      check: "M(Metaspace) 90% 이상이 리로드마다 오르면 클래스로더 누수 — 운영 중 자동 리로드 중단 대상(2차)"
+      note: "적용: JDK 8/11/17 · 권한: JEUS 실행 OS 계정"
+  - stage: 2
+    steps:
+    - do: 수정본 재배포 또는 직전 정상본 롤백
+      cmd: |
+        $JEUS_HOME/bin/jeusadmin -host <host>:<base_port> -u <user> "undeploy <appid>"
+        $JEUS_HOME/bin/jeusadmin -host <host>:<base_port> -u <user> "deploy <appid> -servers <server>"
+        # 직전 정상 버전 롤백: install-application -file <이전 war 경로> -id <appid> 후 deploy <appid>
+      check: "성공: application-info 상태 RUNNING, 같은 예외 미발생 · 실패: 같은 예외 반복 → 직전 정상본으로 롤백(주석 명령) 후 개발 담당 이관"
+      note: "사전조건: 개발 담당 수정본·검증계 확인, 직전 정상 배포본 위치 확인 · 영향: undeploy~deploy 동안 앱 중단·세션 소실 · 승인: 애플리케이션 담당·WAS 담당·변경관리 · 백업/롤백: 현재·직전 배포본 보관, 실패 시 install-application 으로 직전 판 재배포 · 적용: JEUS 7/8/9/21"
+    - do: 운영 서버 자동 리로드 끄기 (리로드 실패·Metaspace 증가 시)
+      config:
+        file: 앱 jeus-web-dd.xml 또는 도메인 웹 엔진 설정
+        snippet: |
+          # 운영 서버는 자동 리로드(클래스 변경 감시)를 끄고, 반영은 재배포로만
+        note: "사전조건: 개발·운영 담당이 재배포 절차로 반영하기로 합의 · 영향: 클래스 교체가 즉시 반영되지 않음, 반영에 재배포 필요 · 승인: WAS 담당·애플리케이션 담당 · 백업/롤백: 설정 파일 날짜 붙여 복사, 필요 시 복원 후 재배포"
+      check: "성공: 리로드 실패·Metaspace 증가 재발 없음 · 실패: 배포 반영 누락 민원 → 설정 원복"
+      verify_note: "미검증 — 자동 리로드 설정 요소 이름(jeus-web-dd.xml)과 적용 범위를 JEUS 판별 Web Engine Guide 원문에서 확인하지 못함"
+  - stage: 3
+    steps:
+    - do: 개발 담당·TmaxSoft 전달 자료
+      cmd: |
+        grep -n -B5 -A40 -E 'Exception|Error|WEB-[0-9]{4}|EJB-[0-9]{3,4}' $DOMAIN_HOME/servers/<server>/logs/JeusServer.log | tail -600 > jeus_app_$(date +%Y%m%d).txt
+        ls -l <배포 경로>/WEB-INF/lib > app_lib_list.txt
+      check: "예외 문맥·배포 시각·WEB-INF/lib 목록·JEUS Fix 레벨·JDK 판"
+      note: "민감정보 마스킹: 요청 파라미터·세션 ID·사용자 ID·SQL 바인드 값·호스트명·IP 가림 · 전달 승인: 보안 담당 승인 후 개발 담당·TmaxSoft 에만"
+
+- id: JEUS-PROC-R6-JNDI
+  scope: id
+  products: [jeus]
+  category: internal
+  match: [JEUS-JNDI-LOOKUP-FAIL, LEG-JEUS-JNDI-ERROR]
+  title: JNDI 조회 실패 (NameNotFoundException — 데이터소스·EJB 등록 누락, JEUS)
+  source: "TmaxSoft JEUS 8/9/21 JNDI Guide 'JNDI 네이밍 서버(JNSS)' / JDBC Guide '데이터소스 export-name·서버 등록' / Reference 'jeusadmin connection-pool-info·application-info'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 조회 실패한 JNDI 이름과 호출 클래스 확인 (읽기 전용)
+      cmd: |
+        grep -n -B3 -A15 -E 'NameNotFoundException|NamingException|JNSS-[0-9]{4}' $DOMAIN_HOME/servers/<server>/logs/JeusServer.log | head -60
+      check: "실패한 이름(jdbc/…·ejb/…)과 첫 업무 클래스 기록. 서버 간 통신 오류(NET-) 동반이면 JEUS-PROC-R6-NETWORK"
+      note: "적용: JEUS 7/8/9/21 · 권한: JEUS 실행 OS 계정"
+    - do: 그 이름이 해당 서버에 등록돼 있는지 확인
+      cmd: |
+        $JEUS_HOME/bin/jeusadmin -host <host>:<base_port> -u <user> "connection-pool-info -server <server>"
+        grep -n -E 'export-name|data-source-id|<data-source>' $DOMAIN_HOME/config/domain.xml | head -40
+        $JEUS_HOME/bin/jeusadmin -host <host>:<base_port> -u <user> "application-info"
+      check: "데이터소스 export-name 이 domain.xml 에 있는데 그 서버의 data-sources 목록에 없으면 서버 미등록. EJB 이름이면 대상 앱이 RUNNING 인지 확인"
+      note: "적용: connection-pool-info 는 JEUS 8/9/21 공식 레퍼런스 기준(JEUS 7 은 미검증), application-info 는 JEUS 7+ · 권한: JEUS 관리자 계정(조회, 비밀번호는 프롬프트)"
+      verify_note: "미검증 — JEUS 7 jeusadmin 의 connection-pool-info 명령 지원 여부를 JEUS 7 공식 레퍼런스에서 확인하지 못함"
+  - stage: 2
+    steps:
+    - do: 데이터소스를 대상 서버에 등록하거나 앱의 조회 이름 교정
+      config:
+        file: $DOMAIN_HOME/config/domain.xml (서버의 data-sources 목록) 또는 앱 jeus-web-dd.xml 의 res-ref 매핑
+        snippet: |
+          # 서버 data-sources 에 해당 data-source-id 추가(WebAdmin 사용 권장) 또는 앱이 쓰는 이름을 export-name 과 일치시키고 재배포
+        note: "사전조건: 이름 불일치인지 등록 누락인지 1차로 확정, DB 담당과 풀 크기 영향 확인 · 영향: 데이터소스 추가는 DB 연결 증가, 앱 설정 변경은 재배포 필요 · 승인: WAS 담당·애플리케이션 담당·변경관리 · 백업/롤백: domain.xml·배포본 날짜 붙여 보관, 이상 시 복원·직전 배포본 재배포"
+      check: "성공: NameNotFoundException 미발생, connection-pool-info 에 해당 풀 표시 · 실패: 등록 후에도 같은 오류 → 이름 오타·대소문자 확인, 원복 후 3차"
+  - stage: 3
+    steps:
+    - do: TmaxSoft 의뢰 자료
+      cmd: |
+        grep -n -B3 -A20 -E 'NameNotFoundException|NamingException|JNSS-' $DOMAIN_HOME/servers/<server>/logs/JeusServer.log | tail -300 > jeus_jndi_$(date +%Y%m%d).txt
+      check: "예외 문맥·domain.xml(데이터소스 구역)·앱 DD(res-ref)·JEUS Fix 레벨"
+      note: "민감정보 마스킹: domain.xml 의 DB 계정·비밀번호·접속 URL, 로그의 호스트명·IP·사용자 ID 가림 · 전달 승인: 보안 담당 승인 후 TmaxSoft 에 반출"
+
+- id: JEUS-PROC-R6-LIFECYCLE
+  scope: id
+  products: [jeus]
+  category: internal
+  match: [JMX-0011, JMX-0019, LAUNCHER-0042, SERVER-0248, SERVER-0308, LEG-JEUS-BOOT-OK, LEG-JEUS-NORMAL-SHUTDOWN, LEG-JEUS-RESTART, LEG-JEUS-SERVER-001-73A6, LEG-JEUS-SERVER-LIFECYCLE, LEG-JEUS-WEB-LIFECYCLE, DEPLOY-0124]
+  title: 서버 기동·종료·상태 전이 통지와 운영 작업 통지 — 계획 작업 여부 확인 (JEUS)
+  source: "TmaxSoft JEUS 8/9/21 Server Guide '서버 상태(STANDBY·STARTING·RUNNING·SHUTDOWN)·기동/종료' / Reference 'jeusadmin server-info·application-info·start-server' / 메시지 참조(SERVER-·LAUNCHER-·JMX-·WEB-·DEPLOY-)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 현재 상태와 상태 전이 흐름 확인 (읽기 전용)
+      cmd: |
+        $JEUS_HOME/bin/jeusadmin -host <host>:<base_port> -u <user> "server-info -server <server> -state"
+        grep -n -E 'SERVER-0(130|248|249|250|308)|LAUNCHER-00[45][0-9]|JMX-00(11|19)|WEB-1[05][0-9]{2}' $DOMAIN_HOME/servers/<server>/logs/JeusServer.log | tail -40
+      check: "RUNNING 이고 기동·종료 시각이 작업 계획과 같으면 정상(조치 없음). STANDBY 에 머물거나(LAUNCHER-0042·SERVER-0248 STANDBY) 계획 외 종료면 2차"
+      note: "적용: JEUS 7/8/9/21 · 권한: JEUS 관리자 계정(조회, 비밀번호는 프롬프트)·JEUS 실행 OS 계정"
+    - do: 누가 종료·기동했는지와 비정상 종료 흔적 확인
+      cmd: |
+        grep -n -i -E 'stop-server|start-server|local-shutdown|shutdown' $DOMAIN_HOME/servers/<master_server>/logs/JeusServer.log | tail -20
+        ls -lt $DOMAIN_HOME/servers/<server>/hs_err_pid*.log $JEUS_HOME/bin/hs_err_pid*.log 2>/dev/null | head -3
+        dmesg -T 2>/dev/null | grep -i -E 'killed process|out of memory' | tail -5
+      check: "MASTER 로그에 운영자 stop-server 가 있으면 계획 종료. hs_err·OOM killer 흔적이 있으면 비정상 종료 → JEUS-PROC-R5-HARDWARE"
+      note: "적용: Linux(dmesg -T), JEUS 7+ · 권한: dmesg 는 root 필요할 수 있음"
+    - do: STANDBY 원인·저장소 작업 통지 확인
+      cmd: |
+        grep -n -B2 -A10 -E 'SERVER-0522|DEPLOY-[0-9]{4}|Exception' $DOMAIN_HOME/servers/<server>/logs/JeusServer.log | tail -60
+        $JEUS_HOME/bin/jeusadmin -host <host>:<base_port> -u <user> "application-info"
+      check: "STANDBY 가 배포 실패·설정 오류 때문이면 JEUS-PROC-INTERNAL. DEPLOY-0124(실행 중 앱의 저장소 제거)면 RUNNING 앱의 배포 파일이 그대로 있는지 확인 — 그 파일은 손대지 않는다"
+      note: "적용: JEUS 7+ · 권한: JEUS 관리자 계정(조회)"
+  - stage: 2
+    steps:
+    - do: 계획 외 종료·STANDBY 서버 기동
+      cmd: |
+        $JEUS_HOME/bin/jeusadmin -host <host>:<base_port> -u <user> "start-server <server>"
+        # STANDBY 에서 RUNNING 으로만 올릴 때: jeusadmin 의 resume 계열 명령(판별 help 로 확인)
+      check: "성공: server-info 상태 RUNNING, JeusServer.log 에 RUNNING 통지 · 실패: 다시 STANDBY·기동 실패 → JEUS-PROC-INTERNAL 1차(원인 줄)부터"
+      note: "사전조건: 1차에서 종료 원인(hs_err·OOM·운영자 종료) 기록, 같은 서버가 다른 곳에서 떠 있지 않은지 확인 · 영향: 기동 중 부하 집중·클러스터 세션 재분배 · 승인: WAS 담당·변경관리 · 백업/롤백: 설정 변경 없음 — 기동 실패 시 중지 상태 유지 후 원인 조치, 저장소 작업은 RUNNING 앱 파일을 백업한 뒤에만 · 적용: JEUS 7/8/9/21"
+      verify_note: "미검증 — STANDBY→RUNNING 전환 명령(resume 계열) 이름을 JEUS 판별 레퍼런스에서 확인하지 못함"
+  - stage: 3
+    steps:
+    - do: TmaxSoft 의뢰 자료
+      cmd: |
+        tar czf jeus_lifecycle_$(date +%Y%m%d).tgz $DOMAIN_HOME/servers/<server>/logs/JeusServer.log* $DOMAIN_HOME/servers/<server>/logs/JeusLauncher.log* $DOMAIN_HOME/servers/<master_server>/logs/JeusServer.log*
+      check: "서버·MASTER 로그(상태 전이 구간)·hs_err(있으면)·JEUS Fix 레벨"
+      note: "민감정보 마스킹: 호스트명·IP·운영자 계정·세션 ID 가림 · 전달 승인: 보안 담당 승인 후 TmaxSoft 에 반출"
+
+- id: JEUS-PROC-R6-UNKNOWN
+  scope: id
+  products: [jeus]
+  category: internal
+  match: [NETWORK-1001, TM-5120, WEB-3321, WEB-3381, LEG-JEUS-NET-001-5806]
+  title: 의미 미확인 메시지 — 동반 상위 오류로 판단 (Network-1001·TM-5120·WEB-3321/3381·NET-, JEUS)
+  source: "TmaxSoft JEUS 메시지 참조(코드별 원문 미확인 — 동반 오류의 공식 절차를 따른다) / Reference 'jeusadmin server-info'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 같은 시각 전후 상위 오류 확인 (읽기 전용)
+      cmd: |
+        grep -n -B5 -A5 -E 'Network-1001|TM-5120|WEB-3321|WEB-3381|NET-0[0-9]{2}\b' $DOMAIN_HOME/servers/<server>/logs/JeusServer.log | tail -60
+      check: "Network-0708·WEB-3346(WebtoB 연동)·TM-6112(트랜잭션 시간 초과) 등 상위 오류가 함께 있으면 그 코드의 절차로 넘긴다. 동반 오류가 없으면 정보성 — 단독으로 장애 판정하지 않는다"
+      note: "적용: JEUS 7/8/9/21 · 권한: JEUS 실행 OS 계정"
+    - do: 평소 대비 건수 비교
+      cmd: |
+        grep -c -E 'Network-1001|TM-5120|WEB-3321|WEB-3381' $DOMAIN_HOME/servers/<server>/logs/JeusServer.log
+        ls -1 $DOMAIN_HOME/servers/<server>/logs/JeusServer*.log* | tail -3 | while read f; do echo "$f $(grep -c -E 'Network-1001|TM-5120|WEB-3321|WEB-3381' $f)"; done
+      check: "지난 로그 대비 급증하고 서비스 이상(응답 지연·오류)이 함께일 때만 2차로 넘긴다"
+      note: "적용: Linux · 권한: JEUS 실행 OS 계정 · 압축(.gz) 로그는 zgrep 사용"
+  - stage: 2
+    steps:
+    - do: 동반 상위 오류 절차의 2차 수행 (WebtoB 연동이면 JEUS-PROC-UPSTREAM, 트랜잭션이면 JEUS-PROC-UNDO, 원격 연결이면 JEUS-PROC-R6-NETWORK)
+      check: "성공: 상위 오류 조치 후 이 메시지 건수도 평소 수준 · 실패: 상위 오류 없이 급증 지속 → 3차(TmaxSoft 에 메시지 의미 문의)"
+      note: "이 메시지만으로는 설정 변경·재기동을 하지 않는다 · 사전조건: 1차에서 동반 오류 확정 · 승인: 해당 절차의 승인자 · 백업/롤백: 해당 절차의 백업/롤백을 따른다"
+  - stage: 3
+    steps:
+    - do: TmaxSoft 메시지 의미 문의 자료
+      cmd: |
+        grep -n -B5 -A5 -E 'Network-1001|TM-5120|WEB-3321|WEB-3381|NET-0[0-9]{2}\b' $DOMAIN_HOME/servers/<server>/logs/JeusServer.log | tail -300 > jeus_unknown_$(date +%Y%m%d).txt
+      check: "메시지 원문과 전후 문맥·건수 추이·JEUS Fix 레벨"
+      note: "민감정보 마스킹: 호스트명·IP·사용자 계정·세션 ID·요청 파라미터 가림 · 전달 승인: 보안 담당 승인 후 TmaxSoft 에 반출"
+
+- id: JEUS-PROC-R6-REMOTE
+  scope: id
+  products: [jeus]
+  category: upstream
+  match: [JNDI.CONTEXT-0073, LEG-JEUS-CONN-BACKEND, LEG-JEUS-JNDI-ALL, LEG-JEUS-JNDI-CODES]
+  title: JNDI·원격(RMI/EJB) 호출과 백엔드 연결 실패 (JNSS·JNDI.CONTEXT, JEUS)
+  source: "TmaxSoft JEUS 8/9/21 JNDI Guide 'JNDI 네이밍 서버(JNSS)·원격 조회' / EJB Guide '원격 호출' / Reference 'jeusadmin application-info·server-info'"
+  stages:
+  - stage: 1
+    steps:
+    - do: JNSS 코드 분포와 조회 대상 확인 (읽기 전용)
+      cmd: |
+        grep -o -E 'JNSS-[0-9]{4}' $DOMAIN_HOME/servers/<server>/logs/JeusServer.log | sort | uniq -c | sort -rn | head
+        grep -n -B5 -A15 -E 'JNDI.CONTEXT-0073|JNSS-[0-9]{4}' $DOMAIN_HOME/servers/<server>/logs/JeusServer.log | head -60
+      check: "JNSS-0402 등 종료 통지만 있으면 정상 종료 흔적. 조회 실패면 대상 이름·대상 서버 기록 — 대상 EJB 앱이 아직 시작 전(DISTRIBUTED)이면 기동 순서 문제"
+      note: "적용: JEUS 7/8/9/21 · 권한: JEUS 실행 OS 계정"
+    - do: 대상 앱·서버·백엔드 도달성 확인
+      cmd: |
+        $JEUS_HOME/bin/jeusadmin -host <host>:<base_port> -u <user> "application-info"
+        $JEUS_HOME/bin/jeusadmin -host <host>:<base_port> -u <user> "server-info"
+        nc -zvw3 <backend_host> <port>
+      check: "대상 앱이 RUNNING 이 아니거나 대상 서버가 내려가 있으면 그쪽 기동이 필요. nc 거부면 대상 미기동, 시간 초과면 방화벽·경로"
+      note: "적용: JEUS 7+ · 권한: JEUS 관리자 계정(조회, 비밀번호는 프롬프트)"
+  - stage: 2
+    steps:
+    - do: 대상 서버·앱 기동 또는 원격 주소 교정
+      cmd: |
+        $JEUS_HOME/bin/jeusadmin -host <host>:<base_port> -u <user> "start-server <target_server>"
+        $JEUS_HOME/bin/jeusadmin -host <host>:<base_port> -u <user> "start-application <appid>"
+      check: "성공: application-info 에서 대상 앱 RUNNING, 호출 측 JNDI·연결 오류 미발생 · 실패: 기동 실패 → JEUS-PROC-INTERNAL, 원격 주소 오류면 호출 측 설정(jeus-web-dd·domain.xml)을 교정"
+      note: "사전조건: 대상이 왜 내려갔는지 1차 기록, 기동 순서(호출 대상 먼저)를 운영 담당과 확인 · 영향: 기동 중 대상 서비스 부하 · 승인: WAS 담당·연계 담당 · 백업/롤백: 주소 변경 시 설정 파일 날짜 붙여 보관 후 변경, 이상 시 복원 · 적용: JEUS 7/8/9/21"
+      verify_note: "미검증 — jeusadmin start-application 명령 이름·옵션을 JEUS 판별 레퍼런스에서 확인하지 못함(없으면 WebAdmin 에서 애플리케이션 시작)"
+  - stage: 3
+    steps:
+    - do: TmaxSoft·연계 담당 전달 자료
+      cmd: |
+        grep -n -B5 -A20 -E 'JNSS-[0-9]{4}|JNDI.CONTEXT-|ConnectException|RemoteException' $DOMAIN_HOME/servers/<server>/logs/JeusServer.log | tail -400 > jeus_remote_$(date +%Y%m%d).txt
+      check: "오류 문맥·대상 이름/주소·application-info 출력·JEUS Fix 레벨"
+      note: "민감정보 마스킹: 호스트명·IP·계정·요청 파라미터 가림 · 전달 승인: 보안 담당 승인 후 TmaxSoft·연계 담당에게만"
+
+- id: EAP-PROC-R6-EJB-POOL
+  scope: id
+  products: [jboss]
+  category: capacity
+  match: [WFLYEJB0227]
+  title: EJB 인스턴스 풀 고갈 — 빈 획득 대기 시간 초과 (JBoss EAP/WildFly)
+  source: "Red Hat JBoss EAP 7.4 Developing EJB Applications 'Bean Pools(strict-max-bean-instance-pool: max-pool-size·derive-size·timeout)' / Management CLI Guide 'read-resource(include-runtime)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 대상 빈·대기 시간과 풀 설정 확인 (읽기 전용)
+      cmd: |
+        grep -n -A10 'WFLYEJB0227' $JBOSS_HOME/standalone/log/server.log | tail -30
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/subsystem=ejb3:read-children-resources(child-type=strict-max-bean-instance-pool,include-runtime=true)"
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/subsystem=ejb3:read-attribute(name=default-slsb-instance-pool)"
+      check: "대상 빈이 쓰는 풀의 max-pool-size(또는 derive-size 결과)와 timeout 기록. 같은 빈이 반복이면 그 빈의 처리 지연·과다 호출"
+      note: "적용: EAP 7.x/8.0·WildFly 10+ · 권한: jboss-cli 관리 사용자(Monitor 이상, 로컬 접속은 자동 인증)"
+    - do: 빈 처리 스레드가 어디서 기다리는지 확인 (프로세스 유지)
+      cmd: |
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/core-service=platform-mbean/type=threading:dump-all-threads(locked-monitors=true,locked-synchronizers=true)" > $JBOSS_HOME/standalone/log/td_$(date +%H%M%S).txt
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/deployment=<app>/subsystem=ejb3/stateless-session-bean=<Bean>:read-resource(include-runtime=true)"
+      check: "빈 메서드 안에서 DB·외부 호출 대기 스택이 다수면 후단 지연이 풀 고갈 원인(풀 크기 증가만으로 해결 안 됨). 통계 속성은 ejb3 statistics-enabled=true 일 때만 값이 나온다"
+      note: "적용: EAP 7.x/8.0 · 권한: jboss-cli 관리 사용자 · 대안: kill -3 <PID> (스레드 덤프, 프로세스는 유지)"
+  - stage: 2
+    steps:
+    - do: 후단 지연 해소 후 풀 크기·대기 시간 조정
+      cmd: |
+        $JBOSS_HOME/bin/jboss-cli.sh -c ":take-snapshot"
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/subsystem=ejb3/strict-max-bean-instance-pool=<pool>:write-attribute(name=max-pool-size,value=<새값>)"
+        $JBOSS_HOME/bin/jboss-cli.sh -c ":read-attribute(name=server-state)"
+      check: "성공: 응답이 success, server-state 가 running 또는 reload-required(그때는 계획 시간에 :reload) 후 WFLYEJB0227 미발생 · 실패: 오류 응답·DB 세션 한도 초과 → 이전 값으로 write-attribute, 스냅샷으로 원복"
+      note: "사전조건: 1차 스레드 덤프로 후단 지연 원인 조치 또는 배제, 풀을 늘렸을 때 데이터소스 풀·DB 세션 여유 확인 · 영향: 빈 인스턴스 증가로 메모리·DB 연결 증가, reload 시 전체 배포 재시작 · 승인: WAS 담당·애플리케이션 담당·변경관리 · 백업/롤백: 첫 줄 :take-snapshot(standalone_xml_history/snapshot), 이상 시 이전 값 재설정 · 적용: EAP 7.x/8.0(derive-size 를 쓰는 풀은 max-pool-size 대신 derive-size 값 확인)"
+  - stage: 3
+    steps:
+    - do: Red Hat 케이스 자료
+      cmd: |
+        $JBOSS_HOME/bin/jdr.sh
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/subsystem=ejb3:read-resource(recursive=true)" > ejb3_$(date +%Y%m%d).txt
+      check: "JDR·ejb3 설정·스레드 덤프·WFLYEJB0227 전후 로그"
+      note: "민감정보 마스킹: 로그·스레드 덤프의 사용자 ID·요청 파라미터·SQL 바인드 값·호스트명·IP 가림, JDR 안 설정 파일 비밀번호 마스킹 여부 확인 · 전달 승인: 보안 담당 승인 후 Red Hat 케이스에만"
+
+- id: EAP-PROC-R6-MESSAGING
+  scope: id
+  products: [jboss]
+  category: connection
+  match: [AMQ224088, WFLYMSGAMQ0040]
+  title: 메시징(ActiveMQ Artemis) 연결 실패·핸드셰이크 시간 초과 (JBoss EAP/WildFly)
+  source: "Red Hat JBoss EAP 7.4 Configuring Messaging 'Acceptors and Connectors(http/remote acceptor·connector)'·'Configuring Messaging Connection Factories' / AMQ Log Message Reference(AMQ224088)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 상대 주소·동반 오류 확인 (읽기 전용)
+      cmd: |
+        grep -n -B2 -A12 -E 'AMQ224088|WFLYMSGAMQ0040' $JBOSS_HOME/standalone/log/server.log | tail -60
+        grep -o -E 'AMQ22[0-9]{4}' $JBOSS_HOME/standalone/log/server.log | sort | uniq -c | sort -rn | head
+      check: "AMQ224088 의 상대 주소가 LB·모니터링 장비면 TCP 헬스체크가 연결만 열고 닫는 것(장애 아님). 실제 클라이언트·원격 브로커면 네트워크 지연·TLS 불일치. WFLYMSGAMQ0040 은 동반 AMQ 코드로 원인 판단"
+      note: "적용: EAP 7.x/8.0·WildFly 10+(messaging-activemq) · 권한: 로그 읽기"
+    - do: 메시징 서버 기동 상태·acceptor/connector·원격 도달성
+      cmd: |
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/subsystem=messaging-activemq/server=default:read-attribute(name=started)"
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/subsystem=messaging-activemq/server=default:read-children-names(child-type=remote-connector)"
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/socket-binding-group=standard-sockets:read-children-names(child-type=remote-destination-outbound-socket-binding)"
+        nc -zvw3 <remote_host> <remote_port>
+      check: "started=false 면 메시징 서버 미기동(저널 디스크 → EAP-PROC-R5-DISK). 원격 브로커 포트 nc 실패면 원격 장애·방화벽"
+      note: "적용: EAP 7.x/8.0(standalone-full) · 권한: jboss-cli 관리 사용자"
+  - stage: 2
+    steps:
+    - do: 헬스체크 대상 교정 또는 원격 연결 주소 수정
+      cmd: |
+        $JBOSS_HOME/bin/jboss-cli.sh -c ":take-snapshot"
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/socket-binding-group=standard-sockets/remote-destination-outbound-socket-binding=<name>:write-attribute(name=host,value=<remote_host>)"
+        $JBOSS_HOME/bin/jboss-cli.sh -c ":reload"
+      check: "성공: reload 후 server-state running, 메시징 연결 오류 미발생·큐 소비 재개 · 실패: reload 후 WFLYCTL0013·AMQ 오류 → 스냅샷으로 설정 원복 후 reload"
+      note: "사전조건: LB 헬스체크면 네트워크 담당이 HTTP 헬스체크(관리 포트 아님)로 바꾸는 것이 우선 — 서버 설정 변경 불필요, 원격 주소 변경은 원격 브로커 담당과 확인 · 영향: reload 동안 전체 배포 재시작·처리 중 메시지 재전송 가능 · 승인: WAS 담당·연계 담당·변경관리 · 백업/롤백: 첫 줄 :take-snapshot, 이상 시 이전 host 값 재설정 · 적용: EAP 7.x/8.0"
+  - stage: 3
+    steps:
+    - do: Red Hat 케이스 자료
+      cmd: |
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/subsystem=messaging-activemq/server=default:read-resource(recursive=true,include-runtime=true)" > amq_$(date +%Y%m%d).txt
+        $JBOSS_HOME/bin/jdr.sh
+      check: "메시징 설정·런타임·AMQ 오류 전후 로그·JDR"
+      note: "민감정보 마스킹: 메시지 본문·클러스터 password·연결 계정·호스트명·IP 가림 · 전달 승인: 보안 담당 승인 후 Red Hat 케이스에만"
+
+- id: EAP-PROC-R6-CLUSTER
+  scope: id
+  products: [jboss]
+  category: connection
+  match: [JGRP000029, JGRP000032]
+  title: JGroups 클러스터 메시지 전송 실패·물리 주소 없음 (JBoss EAP/WildFly HA)
+  source: "Red Hat JBoss EAP 7.4 Configuration Guide 'Cluster Communication with JGroups(stack udp/tcp, 기본 포트 jgroups-udp 55200·jgroups-mping 45700·jgroups-tcp 7600)' / JGroups Log Message Reference"
+  stages:
+  - stage: 1
+    steps:
+    - do: 대상 노드와 원인 확인 (읽기 전용)
+      cmd: |
+        grep -n -A3 -E 'JGRP000029|JGRP000032' $JBOSS_HOME/standalone/log/server.log | tail -40
+        grep -n -E 'ISPN000094|ISPN000093|new cluster view|Received new cluster view' $JBOSS_HOME/standalone/log/server.log | tail -10
+      check: "대상 노드가 이미 내려간(뷰에서 빠진) 노드면 일시적. 살아 있는 노드에 계속 실패하면 네트워크·방화벽. JGRP000032 가 반복되면 노드 탐지(discovery) 실패"
+      note: "적용: EAP 7.x/8.0·WildFly 10+(ha·full-ha 프로파일) · 권한: 로그 읽기"
+    - do: 클러스터 뷰·스택과 상대 포트 확인
+      cmd: |
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/subsystem=jgroups/channel=ee:read-attribute(name=view)"
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/subsystem=jgroups:read-attribute(name=default-stack)"
+        nc -zvw3 <peer_host> 7600
+        ss -uln | grep -E ':(55200|45688|45700)\b'
+      check: "view 에 모든 노드가 있으면 정상. tcp 스택인데 7600 접속 실패, udp 스택인데 멀티캐스트 차단이면 통신 불가 — 포트는 socket-binding 값(port-offset 포함)으로 확인"
+      note: "적용: EAP 7.x/8.0(channel=ee) · 권한: jboss-cli 관리 사용자·일반 사용자"
+  - stage: 2
+    steps:
+    - do: 네트워크 허용 또는 TCP 스택 전환
+      cmd: |
+        $JBOSS_HOME/bin/jboss-cli.sh -c ":take-snapshot"
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/subsystem=jgroups/channel=ee:write-attribute(name=stack,value=tcp)"
+        $JBOSS_HOME/bin/jboss-cli.sh -c ":reload"
+      check: "성공: 모든 노드 reload 후 view 에 전 노드 표시, JGRP000029/032 미발생 · 실패: 뷰가 쪼개지거나(split) 기동 오류 → 스냅샷 원복 후 reload, 네트워크 담당과 멀티캐스트 허용 재협의"
+      note: "사전조건: 멀티캐스트 차단이 원인인지 네트워크 담당 확인(허용이 가능하면 설정 변경 불필요), tcp 스택 discovery(MPING 또는 TCPPING initial_hosts) 설정 확인, 모든 노드를 같은 스택으로 · 영향: reload 동안 배포 재시작·세션 복제 일시 중단 · 승인: WAS 담당·네트워크 담당·변경관리 · 백업/롤백: 첫 줄 :take-snapshot, 이상 시 stack 값 원복 · 적용: EAP 7.x/8.0"
+  - stage: 3
+    steps:
+    - do: Red Hat 케이스 자료
+      cmd: |
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/subsystem=jgroups:read-resource(recursive=true,include-runtime=true)" > jgroups_$(date +%Y%m%d).txt
+        $JBOSS_HOME/bin/jdr.sh
+      check: "모든 노드의 JGroups 설정·뷰·같은 구간 server.log·JDR"
+      note: "민감정보 마스킹: 노드 호스트명·IP·클러스터 인증 값(AUTH 프로토콜 secret) 가림 · 전달 승인: 보안 담당 승인 후 Red Hat 케이스에만"
+
+- id: EAP-PROC-R6-ORA
+  scope: id
+  products: [jboss]
+  category: connection
+  match: [LEG-WFLY-ORA-JDBC]
+  title: Oracle JDBC 오류 코드 분류 — 연결 계열과 SQL·데이터 계열 구분 (JBoss EAP/WildFly)
+  source: "Oracle Database Error Messages Reference(ORA- 코드) / Red Hat JBoss EAP 7.4 Configuration Guide 'Datasource Management(test-connection-in-pool·OracleValidConnectionChecker·background-validation)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: ORA 코드별 건수와 시각 확인 (읽기 전용)
+      cmd: |
+        grep -o -E 'ORA-[0-9]{5}' $JBOSS_HOME/standalone/log/server.log | sort | uniq -c | sort -rn | head
+        grep -n -B3 -A20 'ORA-<코드>' $JBOSS_HOME/standalone/log/server.log | head -60
+      check: "연결 계열(ORA-17002·ORA-12541·ORA-12514·ORA-03113·ORA-03114)이면 DB·네트워크·풀 문제, SQL·데이터 계열(ORA-00001·ORA-00942·ORA-01722·ORA-01400 등)이면 애플리케이션·데이터 → 개발 담당"
+      note: "적용: Oracle JDBC(ojdbc6/7/8/11) · 권한: 로그 읽기"
+    - do: 연결 계열이면 풀에서 DB 연결 시험
+      cmd: |
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/subsystem=datasources/data-source=<DS>:test-connection-in-pool"
+        nc -zvw3 <DB_HOST> <DB_PORT>
+      check: "test-connection 실패·포트 실패면 DB/네트워크 → DB 담당 통보. 성공인데 간헐 오류면 끊어진 연결을 풀이 계속 쓰는 것(검증 설정 부재)"
+      note: "적용: EAP 7.x/8.0 · 권한: jboss-cli 관리 사용자"
+  - stage: 2
+    steps:
+    - do: 연결 검증 설정 보완 (연결 계열 간헐 오류일 때)
+      cmd: |
+        $JBOSS_HOME/bin/jboss-cli.sh -c ":take-snapshot"
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/subsystem=datasources/data-source=<DS>:write-attribute(name=valid-connection-checker-class-name,value=org.jboss.jca.adapters.jdbc.extensions.oracle.OracleValidConnectionChecker)"
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/subsystem=datasources/data-source=<DS>:write-attribute(name=background-validation,value=true)"
+        $JBOSS_HOME/bin/jboss-cli.sh -c ":reload"
+      check: "성공: reload 후 ORA-17002/03113 이 DB 재기동 직후 몇 건 외에 반복되지 않음 · 실패: reload 후 데이터소스 기동 오류(WFLYJCA) → 스냅샷 원복 후 reload"
+      note: "사전조건: DB 자체 장애가 아님을 1차로 확인, SQL·데이터 계열이면 이 단계가 아니라 개발 담당 이관 · 영향: reload 동안 전체 배포 재시작, 검증 쿼리로 DB 부하 소폭 증가 · 승인: WAS 담당·DBA·변경관리 · 백업/롤백: 첫 줄 :take-snapshot, 이상 시 속성 원복(undefine-attribute) · 적용: EAP 7.x/8.0"
+  - stage: 3
+    steps:
+    - do: DB 담당·Red Hat 전달 자료
+      cmd: |
+        grep -n -B3 -A20 -E 'ORA-[0-9]{5}' $JBOSS_HOME/standalone/log/server.log | tail -400 > ora_$(date +%Y%m%d).txt
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/subsystem=datasources/data-source=<DS>:read-resource" > ds_$(date +%Y%m%d).txt
+      check: "ORA 코드별 건수·문맥·데이터소스 설정·JDBC 드라이버 판·DB 판"
+      note: "민감정보 마스킹: 데이터소스 user-name·password·connection-url 의 호스트, 로그의 SQL 바인드 값·업무 데이터 가림 · 전달 승인: 보안 담당 승인 후 DB 담당·Red Hat 에만"
+
+- id: EAP-PROC-R6-PORT
+  scope: id
+  products: [jboss]
+  category: connection
+  match: [WAS-JB-013]
+  title: HTTP 수신 리스너 기동 실패 — 포트 충돌·바인드 주소 오류 (JBoss EAP/WildFly)
+  source: "Red Hat JBoss EAP 7.4 Configuration Guide 'Network and Port Configuration(socket-binding-group·port-offset·-b 바인드 주소)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 실패 리스너·포트·예외 확인 (읽기 전용)
+      cmd: |
+        grep -n -B2 -A10 -E 'Address already in use|BindException|Cannot assign requested address|jboss.undertow.listener' $JBOSS_HOME/standalone/log/server.log | tail -40
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/socket-binding-group=standard-sockets/socket-binding=http:read-resource(include-runtime=true)"
+      check: "Address already in use 면 포트 점유, Cannot assign requested address 면 바인드 주소(-b)가 이 장비에 없는 IP"
+      note: "적용: EAP 7.x/8.0·WildFly 10+ · 권한: 로그 읽기·jboss-cli 관리 사용자"
+    - do: 점유 프로세스·기동 인수 확인
+      cmd: |
+        ss -ltnp | grep -E ':<port>\b'
+        ps -ef | grep '[j]boss-modules' | grep -o -E 'jboss.socket.binding.port-offset=[0-9]+|-b [^ ]+|jboss.bind.address=[^ ]+'
+        ip -4 addr show | grep inet
+      check: "같은 EAP 의 이전 프로세스가 남았으면 중복 기동, 다른 인스턴스와 port-offset 이 같으면 설정 충돌, -b 주소가 ip 목록에 없으면 주소 오류"
+      note: "적용: Linux · 권한: ss -p 의 PID 표시는 root · 프로세스를 종료하지 않는다(2차)"
+  - stage: 2
+    steps:
+    - do: 잔존 프로세스 정리 또는 port-offset·바인드 주소 교정 후 기동
+      cmd: |
+        jcmd <잔존PID> Thread.print > /var/tmp/td_stale_$(date +%H%M%S).txt
+        kill <잔존PID>   # 같은 EAP 인스턴스의 잔존 프로세스일 때만(승인 후)
+        cp -p $JBOSS_HOME/bin/standalone.conf $JBOSS_HOME/bin/standalone.conf.bak.$(date +%Y%m%d%H%M)
+        systemctl start <service>   # 또는 운영 기동 스크립트
+      check: "성공: server.log 에 WFLYUT0006 리스너 시작·WFLYSRV0025 기동 완료, ss 에서 포트가 새 PID 하나 · 실패: 같은 바인드 오류 → standalone.conf 의 port-offset·-b 값을 교정, 이상 시 .bak 복원"
+      note: "사전조건: 잔존 PID 가 같은 인스턴스인지 ps -fp <잔존PID> 로 확인(다른 서비스면 kill 금지), 인스턴스별 port-offset 목록 확인 · 영향: 잔존 프로세스의 처리 중 요청 실패, 포트 변경 시 LB·방화벽 설정 변경 · 승인: WAS 담당·해당 서버 담당·변경관리 · 백업/롤백: standalone.conf 사본으로 복원 · 적용: EAP 7.x/8.0(RPM 설치 서비스 이름은 eap7-standalone 등)"
+  - stage: 3
+    steps:
+    - do: Red Hat 케이스 자료
+      cmd: |
+        ss -ltnp > ss_$(date +%Y%m%d%H%M).txt
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/socket-binding-group=standard-sockets:read-resource(recursive=true,include-runtime=true)" > sockets_$(date +%Y%m%d).txt
+      check: "포트 점유 목록·소켓 바인딩·기동 인수·server.log 기동 구간"
+      note: "민감정보 마스킹: 호스트명·IP·기동 인수의 비밀번호성 시스템 속성 가림 · 전달 승인: 보안 담당 승인 후 Red Hat 케이스에만"
+
+- id: EAP-PROC-R6-DEPENDENCY
+  scope: id
+  products: [jboss]
+  category: internal
+  match: [WFLYCTL0412, WFLYSRV0021, WFLYSRV0026, WAS-JB-011, LEG-JBOSS-MSC001-D453]
+  title: 필수 서비스 누락·의존성 미충족으로 배포·서비스 기동 실패 (JBoss EAP/WildFly)
+  source: "Red Hat JBoss EAP 7.4 Configuration Guide 'Deploying Applications'·'Datasource Management' / Management CLI Guide(read-boot-errors·naming jndi-view) / EAP 7.4 Log Message Reference(WFLYCTL0412·WFLYCTL0180·WFLYSRV0021·WFLYSRV0026·MSC000001)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 누락·실패 서비스 이름 확인 (읽기 전용, 스택 문맥째)
+      cmd: |
+        grep -n -A20 -E 'WFLYCTL0412|WFLYCTL0180|WFLYCTL0186|WFLYSRV0021|WFLYSRV0026|MSC000001' $JBOSS_HOME/standalone/log/server.log | head -100
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/core-service=management:read-boot-errors"
+      check: "누락 서비스 이름(jboss.naming.context.java.…·jboss.data-source.…·jboss.deployment.unit.…)과 그 서비스를 요구한 배포 기록. 첫 원인 예외(MSC000001 의 Caused by)가 진짜 원인"
+      note: "적용: EAP 7.x/8.0·WildFly 10+(read-boot-errors 는 EAP 7+) · 권한: 로그 읽기·jboss-cli 관리 사용자"
+    - do: 그 이름의 데이터소스·JNDI 정의 존재 확인
+      cmd: |
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/subsystem=datasources:read-children-names(child-type=data-source)"
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/subsystem=datasources/data-source=<DS>:read-attribute(name=enabled)"
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/subsystem=naming:jndi-view" | grep -n -i '<jndi 이름 일부>' | head
+        $JBOSS_HOME/bin/jboss-cli.sh -c "deployment-info"
+      check: "데이터소스가 없거나 enabled=false, JNDI 이름이 jndi-view 에 없으면 정의 누락. 다른 배포(공유 jar·EJB 모듈)에 의존하면 그 배포의 STATUS 확인"
+      note: "적용: EAP 7.x/8.0 · 권한: jboss-cli 관리 사용자(Monitor 이상)"
+  - stage: 2
+    steps:
+    - do: 누락 데이터소스 활성화·정의 또는 배포 롤백
+      cmd: |
+        $JBOSS_HOME/bin/jboss-cli.sh -c ":take-snapshot"
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/subsystem=datasources/data-source=<DS>:write-attribute(name=enabled,value=true)"
+        $JBOSS_HOME/bin/jboss-cli.sh -c ":reload"
+        $JBOSS_HOME/bin/jboss-cli.sh -c "deployment-info --name=<app>"
+      check: "성공: reload 후 deployment-info STATUS OK, read-boot-errors 비어 있음 · 실패: 같은 WFLYCTL0412 → 이름 오타·정의 누락이면 개발·WAS 담당이 정의 추가, 아니면 직전 정상 war 로 deploy --force 롤백 후 스냅샷 원복"
+      note: "사전조건: 누락 이름이 의도한 정의(운영 데이터소스)인지 개발 담당과 확인, DB 계정은 credential-store 또는 보안 담당이 입력 — 명령줄에 비밀번호를 쓰지 않는다 · 영향: reload 동안 전체 배포 재시작 · 승인: WAS 담당·애플리케이션 담당·변경관리 · 백업/롤백: 첫 줄 :take-snapshot·현재 war 보관, 이상 시 스냅샷 복원·직전 war 재배포 · 적용: EAP 7.x/8.0"
+  - stage: 3
+    steps:
+    - do: Red Hat 케이스 자료
+      cmd: |
+        $JBOSS_HOME/bin/jdr.sh
+        grep -n -A30 -E 'WFLYCTL0412|WFLYCTL0180|MSC000001' $JBOSS_HOME/standalone/log/server.log | head -300 > dependency_$(date +%Y%m%d).txt
+      check: "JDR·누락 서비스 문맥·배포 목록·데이터소스 정의"
+      note: "민감정보 마스킹: 데이터소스 계정·비밀번호·접속 URL, 로그의 호스트명·IP 가림, JDR 안 설정 비밀번호 마스킹 확인 · 전달 승인: 보안 담당 승인 후 Red Hat 케이스에만"
+
+- id: EAP-PROC-R6-BOOT-ENV
+  scope: id
+  products: [jboss]
+  category: internal
+  match: [WFLYCTL0003, WFLYCTL0008]
+  title: 기동·설정 저장 환경 문제 — 기동 스레드 스택 부족·구성 파일 저장 실패 (JBoss EAP/WildFly)
+  source: "Red Hat JBoss EAP 7.4 Configuration Guide 'Server Management(standalone.conf JAVA_OPTS·--read-only-server-config)' / EAP 7.4 Log Message Reference(WFLYCTL0003·WFLYCTL0008)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 오류 문구·속성 이름·원인 예외 확인 (읽기 전용)
+      cmd: |
+        grep -n -A15 -E 'WFLYCTL0003|WFLYCTL0008' $JBOSS_HOME/standalone/log/server.log | tail -60
+        grep -n -E 'jboss.boot.thread.stack.size|Xss' $JBOSS_HOME/bin/standalone.conf
+      check: "WFLYCTL0003 은 메시지의 스택 크기·속성 이름과 StackOverflowError 동반 여부 기록. WFLYCTL0008 은 Caused by(No space left·Permission denied·Read-only) 기록"
+      note: "적용: EAP 7.x/8.0·WildFly 10+ · 권한: 로그·설정 읽기"
+    - do: 구성 디렉터리 공간·권한·읽기 전용 기동 여부
+      cmd: |
+        df -k $JBOSS_HOME/standalone/configuration
+        ls -ld $JBOSS_HOME/standalone/configuration ; ls -l $JBOSS_HOME/standalone/configuration/ | head
+        ps -ef | grep '[j]boss-modules' | grep -o -E -- '--read-only-server-config[^ ]*|--server-config[^ ]*'
+      check: "사용률 100%·소유자가 EAP 실행 계정이 아님·--read-only-server-config 기동이면 저장 실패 원인 확정(읽기 전용 기동은 의도된 운영일 수 있음 — 담당 확인)"
+      note: "적용: Linux · 권한: 일반 사용자"
+  - stage: 2
+    steps:
+    - do: 공간·권한 바로잡기 또는 기동 스택 크기 상향 후 재기동
+      config:
+        file: $JBOSS_HOME/bin/standalone.conf (JAVA_OPTS) · 구성 디렉터리 권한
+        snippet: |
+          JAVA_OPTS="$JAVA_OPTS -D<메시지에 나온 속성 이름>=<상향 값>"
+          # 권한: chown -R <eap_user>:<eap_group> $JBOSS_HOME/standalone/configuration
+        note: "사전조건: 디스크 정리 대상은 오래된 로그·덤프만(구성 이력 standalone_xml_history 는 보존), 스택 상향 값은 메시지·Red Hat 문서 권고 확인 · 영향: 재기동 동안 전체 서비스 중단 · 승인: WAS 담당·시스템 담당·변경관리 · 백업/롤백: standalone.conf 와 구성 디렉터리를 날짜 붙여 복사(tar), 이상 시 복원 후 재기동"
+      cmd: |
+        cp -p $JBOSS_HOME/bin/standalone.conf $JBOSS_HOME/bin/standalone.conf.bak.$(date +%Y%m%d%H%M)
+        tar czf /var/tmp/eap_config_$(date +%Y%m%d%H%M).tgz -C $JBOSS_HOME/standalone configuration
+        $JBOSS_HOME/bin/jboss-cli.sh -c ":shutdown(restart=true)"
+      check: "성공: 기동 완료(WFLYSRV0025)·관리 변경 저장 시 WFLYCTL0008 미발생 · 실패: 기동 실패 → standalone.conf.bak·구성 tar 복원 후 재기동"
+      note: "사전조건: LB 우회 · 영향: 재기동 중 중단 · 승인: WAS 담당 · 백업/롤백: 위 사본·tar 복원 · 적용: EAP 7.x/8.0"
+      verify_note: "미검증 — WFLYCTL0003 메시지가 안내하는 속성 이름(jboss.boot.thread.stack.size 여부)과 권고 값을 EAP 판별 Log Message Reference 원문에서 확인하지 못함"
+  - stage: 3
+    steps:
+    - do: Red Hat 케이스 자료
+      cmd: |
+        $JBOSS_HOME/bin/jdr.sh
+        df -k > df_$(date +%Y%m%d).txt ; ls -lR $JBOSS_HOME/standalone/configuration > config_ls.txt
+      check: "JDR·공간·권한 목록·WFLYCTL 오류 문맥"
+      note: "민감정보 마스킹: 구성 파일의 비밀번호·키스토어 경로 밖 값·호스트명·IP 가림(키스토어·*.properties 사용자 파일은 보내지 않음) · 전달 승인: 보안 담당 승인 후 Red Hat 케이스에만"
+
+- id: EAP-PROC-R6-CONTENT
+  scope: id
+  products: [jboss]
+  category: internal
+  match: [WFLYSRV0057, WFLYSRV0068]
+  title: 배포 내용 저장소(content repository)에 해시 내용 없음 — ADMIN-ONLY 기동 (JBoss EAP 도메인 모드)
+  source: "Red Hat JBoss EAP 7.4 Configuration Guide 'Managed Domain — Deploying Applications(content repository data/content)'·'Deployment Overlays' / EAP 7.4 Log Message Reference(WFLYSRV0057·WFLYSRV0068)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 누락 해시·배포 이름 확인 (읽기 전용)
+      cmd: |
+        grep -n -E 'WFLYSRV0057|WFLYSRV0068' $JBOSS_HOME/domain/log/host-controller.log | tail -10
+        ls -l $JBOSS_HOME/domain/data/content/<해시 앞 2자리>/<해시 나머지>/
+        df -k $JBOSS_HOME/domain/data
+      check: "해당 해시 폴더·content 파일이 없으면 저장소 손실(디스크 정리·복사 누락). 공간 100% 면 저장 실패"
+      note: "적용: EAP 7.x/8.0 도메인 모드(호스트 컨트롤러) · 권한: EAP 실행 계정"
+    - do: 도메인 컨트롤러의 배포 정의 확인
+      cmd: |
+        $JBOSS_HOME/bin/jboss-cli.sh -c --controller=<dc_host>:9990 "deployment-info --server-group=<group>"
+        $JBOSS_HOME/bin/jboss-cli.sh -c --controller=<dc_host>:9990 ":read-children-names(child-type=deployment-overlay)"
+      check: "배포 정의는 있는데 내용이 없으면 원본 war/오버레이 파일로 다시 올려야 함"
+      note: "적용: EAP 7.x/8.0 도메인 모드 · 권한: 관리 사용자(비밀번호는 CLI 가 묻는다)"
+  - stage: 2
+    steps:
+    - do: 원본 아카이브로 배포 내용 다시 올리기
+      cmd: |
+        $JBOSS_HOME/bin/jboss-cli.sh -c --controller=<dc_host>:9990 ":take-snapshot"
+        $JBOSS_HOME/bin/jboss-cli.sh -c --controller=<dc_host>:9990 "deploy <원본경로>/<app>.war --name=<app>.war --server-groups=<group> --force"
+      check: "성공: host-controller 정상 기동(ADMIN-ONLY 아님) 후 deployment-info 에서 STATUS OK · 실패: 같은 해시 누락 반복 → 원본 판이 정의와 다른지 확인, 스냅샷 원복 후 3차"
+      note: "사전조건: 운영 배포본과 같은 판의 원본 아카이브 확보(판 불일치 시 다른 판이 올라감), 디스크 여유 확보 · 영향: 해당 서버 그룹 배포 재시작 · 승인: WAS 담당·애플리케이션 담당·변경관리 · 백업/롤백: 첫 줄 :take-snapshot, 이상 시 스냅샷 복원·직전 원본 재배포 · 적용: EAP 7.x/8.0 도메인 모드"
+      verify_note: "미검증 — 도메인 모드에서 deploy --force 와 --server-groups 동시 사용 가능 여부, 오버레이 내용(WFLYSRV0068) 재업로드 명령을 EAP 판별 CLI Guide 원문에서 확인하지 못함"
+  - stage: 3
+    steps:
+    - do: Red Hat 케이스 자료
+      cmd: |
+        tail -1000 $JBOSS_HOME/domain/log/host-controller.log > hc_tail_$(date +%Y%m%d).txt
+        ls -lR $JBOSS_HOME/domain/data/content > content_ls.txt
+      check: "host-controller 로그·저장소 목록·배포 정의·공간"
+      note: "민감정보 마스킹: 호스트명·IP·관리 계정 가림, 배포 아카이브 자체는 보내지 않음 · 전달 승인: 보안 담당 승인 후 Red Hat 케이스에만"
+
+- id: EAP-PROC-R6-LIFECYCLE
+  scope: id
+  products: [jboss]
+  category: internal
+  match: [WFLYSRV0027, WFLYSRV0028, WFLYSRV0050, WFLYCLINF0003]
+  title: 배포 시작·중지·서버 중지·캐시 중지 통지 — 계획 작업 여부 확인 (JBoss EAP/WildFly)
+  source: "Red Hat JBoss EAP 7.4 Configuration Guide 'Server Management'·'Management Audit Logging' / EAP 7.4 Log Message Reference(WFLYSRV0027·0028·0050·WFLYCLINF0003)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 시작·중지 흐름과 현재 상태 확인 (읽기 전용)
+      cmd: |
+        grep -n -E 'WFLYSRV00(09|10|25|26|27|28|50)|WFLYCLINF0003' $JBOSS_HOME/standalone/log/server.log | tail -30
+        $JBOSS_HOME/bin/jboss-cli.sh -c ":read-attribute(name=server-state)"
+        $JBOSS_HOME/bin/jboss-cli.sh -c "deployment-info"
+      check: "중지 뒤 다시 시작·배포 완료(WFLYSRV0010)가 이어지고 상태 running·STATUS OK 면 정상(재배포·재기동 과정). 중지 후 다시 올라오지 않았거나 시작만 있고 완료가 없으면 2차"
+      note: "적용: EAP 7.x/8.0·WildFly 10+ · 권한: 로그 읽기·jboss-cli 관리 사용자"
+    - do: 누가 중지했는지·비정상 종료 흔적 확인
+      cmd: |
+        ls -l $JBOSS_HOME/standalone/data/audit-log.log 2>/dev/null && grep -n -i -E 'undeploy|shutdown|remove' $JBOSS_HOME/standalone/data/audit-log.log | tail -10
+        ls -lt $JBOSS_HOME/bin/hs_err_pid*.log $JBOSS_HOME/hs_err_pid*.log 2>/dev/null | head -3
+        dmesg -T 2>/dev/null | grep -i -E 'killed process|out of memory' | tail -5
+      check: "감사 로그에 관리 작업이 있으면 계획 작업(작업자 확인). hs_err·OOM killer 흔적이면 비정상 종료 → JVM 크래시 절차(WASC-PROC-R5-INTERNAL)"
+      note: "적용: 감사 로그는 활성화한 경우만(기본 비활성), Linux dmesg · 권한: EAP 실행 계정·dmesg 는 root 필요할 수 있음"
+  - stage: 2
+    steps:
+    - do: 계획 외 중지된 배포·서버 다시 올리기
+      cmd: |
+        $JBOSS_HOME/bin/jboss-cli.sh -c "deploy --name=<app>"
+        $JBOSS_HOME/bin/jboss-cli.sh -c "deployment-info --name=<app>"
+        # 서버 자체가 내려갔으면: systemctl start <service> 또는 운영 기동 스크립트
+      check: "성공: deployment-info STATUS OK, server.log 에 WFLYSRV0010 Deployed · 실패: 배포 오류 → EAP-PROC-INTERNAL 의 롤백 단계"
+      note: "사전조건: 중지 원인(운영자 작업·크래시) 1차 기록, 운영자가 의도적으로 내린 것이 아닌지 작업자 확인 · 영향: 배포 시작 중 해당 앱 부하 · 승인: WAS 담당·애플리케이션 담당 · 백업/롤백: 설정 변경 없음 — 시작 실패 시 비활성 상태로 되돌리고(undeploy --keep-content) 원인 조치 · 적용: EAP 7.x/8.0"
+  - stage: 3
+    steps:
+    - do: Red Hat 케이스 자료
+      cmd: |
+        grep -n -E 'WFLYSRV|WFLYCLINF|ERROR' $JBOSS_HOME/standalone/log/server.log | tail -300 > lifecycle_$(date +%Y%m%d).txt
+      check: "시작·중지 흐름·감사 로그 발췌·hs_err(있으면)"
+      note: "민감정보 마스킹: 관리 작업자 계정·호스트명·IP·세션 ID 가림 · 전달 승인: 보안 담당 승인 후 Red Hat 케이스에만"
+
+- id: EAP-PROC-R6-CACHE
+  scope: id
+  products: [jboss]
+  category: internal
+  match: [ISPN000136]
+  title: Infinispan 캐시 명령 실행 오류 (세션·2차 캐시, JBoss EAP/WildFly)
+  source: "Red Hat JBoss EAP 7.4 Configuration Guide 'Infinispan(cache-container web·distributed-cache·remote-timeout·locking)' / Infinispan Log Message Reference(ISPN000136·ISPN000299)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 실패 명령·원인 예외 확인 (읽기 전용, 스택 문맥째)
+      cmd: |
+        grep -n -A25 'ISPN000136' $JBOSS_HOME/standalone/log/server.log | head -80
+        grep -c -E 'ISPN000299|SuspectException|TimeoutException' $JBOSS_HOME/standalone/log/server.log
+      check: "Caused by 가 ISPN000299(잠금 시간 초과)면 EAP-PROC-R5-LOCK, SuspectException·원격 응답 시간 초과면 클러스터 통신(EAP-PROC-R6-CLUSTER), 그 밖은 직렬화 등 앱"
+      note: "적용: EAP 7.x/8.0·WildFly 10+ · 권한: 로그 읽기"
+    - do: 클러스터 뷰와 캐시 설정 확인
+      cmd: |
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/subsystem=jgroups/channel=ee:read-attribute(name=view)"
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/subsystem=infinispan/cache-container=web:read-resource(recursive=true)" | grep -n -E 'remote-timeout|acquire-timeout|owners|mode' | head -20
+      check: "뷰에서 노드가 자주 빠지면 통신 문제. remote-timeout 이 기본값(17500ms)보다 작게 설정됐으면 원격 응답 대기 부족"
+      note: "적용: EAP 7.x/8.0 · 권한: jboss-cli 관리 사용자"
+  - stage: 2
+    steps:
+    - do: 원인별 조치 — 통신 복구 후 원격 응답 대기 시간 조정
+      cmd: |
+        $JBOSS_HOME/bin/jboss-cli.sh -c ":take-snapshot"
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/subsystem=infinispan/cache-container=web/distributed-cache=<cache>:write-attribute(name=remote-timeout,value=<밀리초>)"
+        $JBOSS_HOME/bin/jboss-cli.sh -c ":reload"
+      check: "성공: reload 후 ISPN000136 미발생·세션 복제 정상 · 실패: 오류 지속·응답 지연 → 스냅샷 원복 후 reload, 원인 예외에 맞는 절차로"
+      note: "사전조건: 원인 예외 확정(잠금이면 EAP-PROC-R5-LOCK 우선), 모든 노드에 같은 값 · 영향: reload 동안 배포 재시작·세션 일시 불가, 대기 시간 증가는 장애 시 응답 지연 증가 · 승인: WAS 담당·변경관리 · 백업/롤백: 첫 줄 :take-snapshot, 이상 시 원래 값으로 write-attribute · 적용: EAP 7.x/8.0(캐시 종류가 replicated-cache 면 그 경로로)"
+  - stage: 3
+    steps:
+    - do: Red Hat 케이스 자료
+      cmd: |
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/subsystem=infinispan:read-resource(recursive=true)" > ispn_$(date +%Y%m%d).txt
+        $JBOSS_HOME/bin/jdr.sh
+      check: "모든 노드의 ISPN 오류 문맥·캐시 설정·JGroups 뷰·JDR"
+      note: "민감정보 마스킹: 캐시 키(세션 ID·사용자 ID)·호스트명·IP 가림 · 전달 승인: 보안 담당 승인 후 Red Hat 케이스에만"
+
+- id: EAP-PROC-R6-APP
+  scope: id
+  products: [jboss]
+  category: internal
+  match: [WFLYEJB0034, LEG-WFLY-IBATIS-ALL, LEG-WFLY-IBATIS-ERR, LEG-WFLY-SERVLET-ERR, LEG-WFLY-SPRING-JDBC, WFLYSRV0059]
+  title: 애플리케이션 예외 — EJB 호출·서블릿·Spring·MyBatis/iBatis 매핑·MANIFEST Class-Path (JBoss EAP/WildFly)
+  source: "Red Hat JBoss EAP 7.4 Development Guide 'Class Loading and Modules(MANIFEST Class-Path)' / Configuration Guide 'Deploying Applications' / EAP 7.4 Log Message Reference(WFLYEJB0034·WFLYSRV0059·UT0)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 근본 예외와 첫 업무 클래스 확인 (읽기 전용, 스택은 문맥째 잘라 본다)
+      cmd: |
+        grep -n -B5 -A40 -E 'WFLYEJB0034|UT0[0-9]{5}|NestedServletException|The error occurred in|The error may involve' $JBOSS_HOME/standalone/log/server.log | head -150
+        grep -c -E 'WFLYEJB0034|NestedServletException|PersistenceException' $JBOSS_HOME/standalone/log/server.log
+      check: "마지막 Caused by·nested exception 과 첫 업무 패키지 줄, MyBatis 는 매퍼 XML·SQL ID 기록 → 개발 담당. ORA-·SQLState 가 연결 계열이면 EAP-PROC-R6-ORA"
+      note: "적용: EAP 6/7/8·WildFly · 권한: 로그 읽기 · grep 으로 스택 줄을 버리지 않는다(head 로만 자름)"
+    - do: 배포 판·라이브러리·MANIFEST 확인
+      cmd: |
+        $JBOSS_HOME/bin/jboss-cli.sh -c "deployment-info"
+        unzip -l <원본경로>/<app>.war | grep -E 'WEB-INF/lib/.*\.jar' | head -60
+        unzip -p <원본경로>/<app>.war META-INF/MANIFEST.MF | grep -A3 'Class-Path'
+        grep -n 'WFLYSRV0059' $JBOSS_HOME/standalone/log/server.log | tail -5
+      check: "최근 배포 시각과 오류 시작이 같으면 배포 결함. WFLYSRV0059 는 MANIFEST Class-Path 가 jar 가 아닌 항목을 가리킨다는 경고 — 해당 항목이 실제로 필요한지 개발 담당 확인(대부분 기능 영향 없음)"
+      note: "적용: EAP 7.x/8.0 · 권한: 원본 아카이브 읽기"
+  - stage: 2
+    steps:
+    - do: 수정본 배포 또는 직전 정상본 롤백
+      cmd: |
+        cp -p <원본경로>/<app>.war <보관경로>/<app>.war.bak.$(date +%Y%m%d%H%M)
+        $JBOSS_HOME/bin/jboss-cli.sh -c "deploy <수정본경로>/<app>.war --force"
+        $JBOSS_HOME/bin/jboss-cli.sh -c "deployment-info --name=<app>.war"
+      check: "성공: STATUS OK, 같은 예외 미발생 · 실패: 오류 반복 → 보관한 직전 war 로 deploy --force 재실행(롤백) 후 개발 담당 이관"
+      note: "사전조건: 개발 담당 수정본·검증계 확인, 직전 정상 war 보관 · 영향: 재배포 중 앱 중단·세션 소실 · 승인: 애플리케이션 담당·WAS 담당·변경관리 · 백업/롤백: 첫 줄 보관본으로 deploy --force · 적용: EAP 7.x/8.0(EAP 6 도 deploy --force 지원)"
+  - stage: 3
+    steps:
+    - do: 개발 담당·Red Hat 전달 자료
+      cmd: |
+        grep -n -B5 -A40 -E 'Exception|WFLYEJB0034|UT0[0-9]{5}' $JBOSS_HOME/standalone/log/server.log | tail -600 > app_exception_$(date +%Y%m%d).txt
+      check: "예외 문맥·SQL ID/매퍼·배포 판·WEB-INF/lib 목록"
+      note: "민감정보 마스킹: SQL 바인드 값·요청 파라미터·세션 ID·사용자 ID·업무 데이터·호스트명·IP 가림 · 전달 승인: 보안 담당 승인 후 개발 담당·Red Hat 에만"
+
+- id: EAP-PROC-R6-EAP6
+  scope: id
+  products: [jboss]
+  category: internal
+  match: [LEG-JBOSS-JBAS001-A67E]
+  title: JBoss EAP 6 메시지(JBAS 계열) — 코드 분류 후 해당 절차로 (EAP 6.x)
+  source: "Red Hat JBoss EAP 6.4 Administration and Configuration Guide 'Management CLI(관리 포트 9999)'·'Deploy Applications' / EAP 6 로그 메시지(JBAS 코드)"
+  stages:
+  - stage: 1
+    steps:
+    - do: JBAS 코드 분포와 첫 오류 확인 (읽기 전용)
+      cmd: |
+        grep -o -E 'JBAS[0-9]{6}' $JBOSS_HOME/standalone/log/server.log | sort | uniq -c | sort -rn | head
+        grep -n -B2 -A25 -E 'ERROR.*JBAS[0-9]{6}' $JBOSS_HOME/standalone/log/server.log | head -80
+      check: "가장 이른 ERROR 의 JBAS 코드와 Caused by 가 원인. 배포 실패(JBAS014671·JBAS015870 등)면 배포 절차, 데이터소스(JBAS010…)면 연결 절차로 분류"
+      note: "적용: EAP 6.x · 권한: 로그 읽기"
+    - do: 서버·배포 상태 확인
+      cmd: |
+        $JBOSS_HOME/bin/jboss-cli.sh -c --controller=localhost:9999 ":read-attribute(name=server-state)"
+        $JBOSS_HOME/bin/jboss-cli.sh -c --controller=localhost:9999 "/deployment=*:read-attribute(name=status)"
+        ls $JBOSS_HOME/standalone/deployments/*.failed 2>/dev/null
+      check: "server-state running·배포 status OK 이고 .failed 마커가 없으면 경고성. 아니면 2차"
+      note: "적용: EAP 6.x(관리 포트 9999 native) · 권한: 관리 사용자(로컬 자동 인증 또는 CLI 가 묻는다)"
+      verify_note: "미검증 — 예시로 든 JBAS 코드 번호의 분류(배포·데이터소스)를 EAP 6.4 메시지 원문에서 하나하나 확인하지 못함"
+  - stage: 2
+    steps:
+    - do: 배포 실패면 재배포·롤백, 설정 상태 이상이면 reload
+      cmd: |
+        cp -p <원본경로>/<app>.war <보관경로>/<app>.war.bak.$(date +%Y%m%d%H%M)
+        $JBOSS_HOME/bin/jboss-cli.sh -c --controller=localhost:9999 "deploy <원본경로>/<app>.war --force"
+        $JBOSS_HOME/bin/jboss-cli.sh -c --controller=localhost:9999 ":reload"
+      check: "성공: server-state running·배포 status OK·.failed 마커 없음 · 실패: 같은 JBAS 오류 → 보관본으로 재배포, standalone_xml_history 의 standalone.last.xml 로 설정 원복 검토 후 3차"
+      note: "사전조건: 원인 코드 분류 완료, 직전 정상 war·설정 이력 확인 · 영향: 재배포·reload 동안 서비스 중단 · 승인: WAS 담당·애플리케이션 담당·변경관리 · 백업/롤백: 첫 줄 war 보관·standalone.xml 사본, 이상 시 복원 · 적용: EAP 6.x"
+  - stage: 3
+    steps:
+    - do: Red Hat 케이스 자료
+      cmd: |
+        $JBOSS_HOME/bin/jdr.sh
+        grep -n -B2 -A30 -E 'JBAS[0-9]{6}' $JBOSS_HOME/standalone/log/server.log | tail -500 > jbas_$(date +%Y%m%d).txt
+      check: "JDR·JBAS 오류 문맥·EAP 6 패치 판"
+      note: "민감정보 마스킹: 호스트명·IP·계정·데이터소스 비밀번호·세션 ID 가림 · 전달 승인: 보안 담당 승인 후 Red Hat 케이스에만"
+
+- id: EAP-PROC-R6-AUTH
+  scope: id
+  products: [jboss]
+  category: security
+  match: [WAS-JB-016, LEG-WFLY-SPRING-ERR]
+  title: 인증 처리 예외 — 보안 영역(LDAP·DB) 연동·Spring Security 요청 실패 (JBoss EAP/WildFly)
+  source: "Red Hat JBoss EAP 7.4 How to Configure Identity Management(Elytron ldap-realm·jdbc-realm·dir-context) / Security Architecture / EAP 7.4 Log Message Reference(ELY·WFLYSEC)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 인증 예외와 원인 확인 (읽기 전용, 스택 문맥째)
+      cmd: |
+        grep -n -B3 -A30 -E 'ELY[0-9]{5}|WFLYSEC|AuthenticationException|AccessDeniedException|NestedServletException' $JBOSS_HOME/standalone/log/server.log | head -100
+      check: "LDAP·DB 연결 예외(CommunicationException·SQLException)면 연동 장애, 잘못된 자격 증명 반복이면 계정 문제·공격 의심(보안 담당), AccessDenied 면 권한 매핑. Spring 예외가 DB 오류를 감싸면 그 원인 쪽 절차"
+      note: "적용: EAP 7.x/8.0(Elytron), EAP 7.0 legacy security · 권한: 로그 읽기"
+    - do: 보안 도메인·영역 설정과 연동 대상 도달성
+      cmd: |
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/subsystem=elytron:read-children-names(child-type=security-domain)"
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/subsystem=elytron:read-children-names(child-type=dir-context)"
+        nc -zvw3 <ldap_host> <ldap_port>
+      check: "앱이 쓰는 도메인의 영역(ldap-realm·jdbc-realm)과 dir-context url 확인. LDAP 포트 실패면 LDAP 장애·방화벽"
+      note: "적용: EAP 7.1+(Elytron) — legacy 는 /subsystem=security · 권한: jboss-cli 관리 사용자"
+  - stage: 2
+    steps:
+    - do: 연동 주소 교정 또는 대체 LDAP 지정
+      cmd: |
+        $JBOSS_HOME/bin/jboss-cli.sh -c ":take-snapshot"
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/subsystem=elytron/dir-context=<name>:write-attribute(name=url,value=ldap://<ldap_host>:<ldap_port>)"
+        $JBOSS_HOME/bin/jboss-cli.sh -c ":reload"
+      check: "성공: reload 후 로그인 정상, ELY 연결 예외 미발생 · 실패: 전 사용자 로그인 실패 → 스냅샷 원복 후 reload, LDAP 담당과 재확인"
+      note: "사전조건: LDAP 담당과 주소·인증서 확인, 바인드 계정 비밀번호는 credential-store 로만(명령줄에 쓰지 않음) · 영향: reload 동안 전체 서비스 중단, 잘못된 주소면 전 사용자 로그인 불가 · 승인: WAS 담당·보안 담당·변경관리 · 백업/롤백: 첫 줄 :take-snapshot, 이상 시 이전 url 재설정 · 적용: EAP 7.1+"
+  - stage: 3
+    steps:
+    - do: Red Hat 케이스 자료
+      cmd: |
+        $JBOSS_HOME/bin/jdr.sh
+        grep -n -B3 -A30 -E 'ELY[0-9]{5}|WFLYSEC|AuthenticationException' $JBOSS_HOME/standalone/log/server.log | tail -300 > auth_$(date +%Y%m%d).txt
+      check: "인증 예외 문맥·보안 도메인 설정·JDR"
+      note: "민감정보 마스킹: 사용자 ID·바인드 DN·자격 증명·토큰·세션 ID·호스트명·IP 가림 · 전달 승인: 보안 담당 승인 후 Red Hat 케이스에만"
+
+- id: EAP-PROC-R6-AUDIT
+  scope: id
+  products: [jboss]
+  category: security
+  match: [WFLYCTL0035, WFLYCTL0036]
+  title: 관리 작업 감사 로그 기록 실패·연속 실패로 감사 중단 (JBoss EAP/WildFly)
+  source: "Red Hat JBoss EAP 7.4 Configuration Guide 'Management Audit Logging(file-handler·syslog-handler·max-failure-count·recycle)' / EAP 7.4 Log Message Reference(WFLYCTL0035·WFLYCTL0036)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 첫 실패·중단 시각과 원인 예외 기록 (읽기 전용)
+      cmd: |
+        grep -n -A10 -E 'WFLYCTL0035|WFLYCTL0036' $JBOSS_HOME/standalone/log/server.log | tail -40
+      check: "WFLYCTL0036 이후는 감사 기록 공백 구간 — 시각을 보안 담당에 통보. 원인 예외(디스크·권한·syslog 연결)를 기록"
+      note: "적용: EAP 7.x/8.0·WildFly 10+ · 권한: 로그 읽기"
+    - do: 감사 처리기 상태·공간·권한 확인
+      cmd: |
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/core-service=management/access=audit:read-resource(recursive=true,include-runtime=true)"
+        df -k $JBOSS_HOME/standalone/data ; ls -l $JBOSS_HOME/standalone/data/audit-log.log
+      check: "처리기의 disabled-due-to-failure=true·failure-count 증가면 중단 상태 확정. 공간 100%·소유자 불일치면 원인 확정, syslog 처리기면 수신 서버 도달성 확인"
+      note: "적용: EAP 7.x/8.0 · 권한: jboss-cli 관리 사용자(감사 설정 조회는 Auditor 역할이 필요할 수 있음)"
+  - stage: 2
+    steps:
+    - do: 원인 해소 후 감사 처리기 재가동(recycle)
+      cmd: |
+        cp -p $JBOSS_HOME/standalone/data/audit-log.log <보관경로>/audit-log.log.$(date +%Y%m%d%H%M) 2>/dev/null
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/core-service=management/access=audit/file-handler=<handler>:recycle"
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/core-service=management/access=audit/file-handler=<handler>:read-resource(include-runtime=true)"
+      check: "성공: disabled-due-to-failure=false, 다음 관리 작업이 감사 로그에 기록됨 · 실패: 다시 WFLYCTL0035 → 공간·권한 재확인, 보관본으로 원래 파일 복원"
+      note: "사전조건: 디스크·권한 원인 먼저 조치(정리 대상은 감사 로그가 아닌 파일), 보안 담당에 공백 구간 통보 · 영향: 설정 변경 없음, 처리기 재가동만 · 승인: 보안 담당·WAS 담당 · 백업/롤백: 첫 줄로 기존 감사 로그 보관 — 감사 로그는 지우지 않는다, 이상 시 보관본 복원 · 적용: EAP 7.x/8.0"
+  - stage: 3
+    steps:
+    - do: Red Hat·보안 담당 전달 자료
+      cmd: |
+        grep -n -A10 -E 'WFLYCTL0035|WFLYCTL0036' $JBOSS_HOME/standalone/log/server.log > audit_fail_$(date +%Y%m%d).txt
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/core-service=management/access=audit:read-resource(recursive=true)" >> audit_fail_$(date +%Y%m%d).txt
+      check: "실패·중단 시각, 처리기 설정, 공간·권한 정보"
+      note: "민감정보 마스킹: 감사 로그 내용(관리자 계정·작업 내용)은 보내지 않고 시각만, 호스트명·IP 가림 · 전달 승인: 보안 담당 승인 후 Red Hat 케이스에만"
+
+- id: EAP-PROC-R6-MGMT-AUTH
+  scope: id
+  products: [jboss]
+  category: security
+  match: [WFLYSRV0034, WFLYSRV0035]
+  title: 관리 인터페이스(native·HTTP) 무인증 노출 (JBoss EAP/WildFly)
+  source: "Red Hat JBoss EAP 7.4 How to Configure Server Security 'Secure the Management Interfaces(http-authentication-factory·sasl-authentication-factory, legacy security-realm=ManagementRealm)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 관리 인터페이스 인증 설정과 바인드 주소 확인 (읽기 전용)
+      cmd: |
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/core-service=management/management-interface=http-interface:read-resource"
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/core-service=management/management-interface=native-interface:read-resource"
+        ss -ltnp | grep -E ':(9990|9999)\b'
+      check: "http-authentication-factory·sasl-authentication-factory·security-realm 이 모두 비어 있으면 무인증 — 9990/9999 가 0.0.0.0·외부 IP 에 열려 있으면 긴급(보안 담당 즉시 통보)"
+      note: "적용: EAP 7.x/8.0(EAP 6 은 security-realm 만) · 권한: 로컬 jboss-cli(자동 인증)·ss -p 는 root"
+  - stage: 2
+    steps:
+    - do: 관리 인터페이스에 인증 적용
+      cmd: |
+        $JBOSS_HOME/bin/jboss-cli.sh -c ":take-snapshot"
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/core-service=management/management-interface=http-interface:write-attribute(name=http-authentication-factory,value=management-http-authentication)"
+        $JBOSS_HOME/bin/jboss-cli.sh -c ":reload"
+      check: "성공: reload 후 원격 관리 콘솔·CLI 가 인증을 요구하고 WFLYSRV0034/0035 미발생 · 실패: 관리 접속 불가(로컬 CLI 도 실패) → standalone_xml_history 의 스냅샷으로 원복(서버 중지 후 복사) 후 기동"
+      note: "사전조건: 관리 사용자(add-user.sh)가 있는지 확인, 기본 팩토리(management-http-authentication) 존재 확인 — EAP 7.0·legacy 구성은 security-realm=ManagementRealm, native 는 sasl-authentication-factory=management-sasl-authentication · 영향: reload 동안 서비스 중단, 인증 없는 자동화 스크립트가 실패 · 승인: 보안 담당·WAS 담당·변경관리 · 백업/롤백: 첫 줄 :take-snapshot, 이상 시 스냅샷 복원 · 적용: EAP 7.1+"
+  - stage: 3
+    steps:
+    - do: Red Hat·보안 담당 전달 자료
+      cmd: |
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/core-service=management:read-resource(recursive=true)" > mgmt_$(date +%Y%m%d).txt
+      check: "관리 인터페이스 설정·바인드 주소·노출 기간(로그 첫 경고 시각)"
+      note: "민감정보 마스킹: 관리 사용자 이름·호스트명·IP 가림(mgmt-users.properties 는 보내지 않음) · 전달 승인: 보안 담당 승인 후 Red Hat 케이스에만"
+
+- id: WLS-PROC-R6-CLUSTER
+  scope: id
+  products: [weblogic]
+  category: connection
+  match: [BEA-000110, BEA-000115, BEA-000137]
+  title: 클러스터 멀티캐스트 수신 오류·메시지 유실·전송 실패 (WebLogic)
+  source: "Oracle WebLogic Server 12.2.1/14.1.1 'Administering Clusters — Communications in a Cluster(unicast·multicast, ClusterMessagingMode)' / WLST Command Reference(connect userConfigFile·domainRuntime) / ClusterRuntimeMBean(AliveServerCount·MulticastMessagesLostCount·ResendRequestsCount)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 발생 시각·반복 여부 확인 (읽기 전용)
+      cmd: |
+        grep -n -A10 -E 'BEA-000110|BEA-000115|BEA-000137' $DOMAIN_HOME/servers/<server>/logs/<server>.log | tail -60
+      check: "서버 기동(클러스터 합류) 직후 1~2건이면 정상 범위. 운영 중 반복이면 네트워크(멀티캐스트 차단·패킷 유실)·GC 정지·과부하"
+      note: "적용: WebLogic 10.3.6/12c/14c · 권한: 도메인 로그 읽기"
+    - do: 클러스터 런타임·통신 방식 확인 (WLST 읽기 전용)
+      cmd: |
+        . $DOMAIN_HOME/bin/setDomainEnv.sh ; java weblogic.WLST <<'EOF'
+        connect(userConfigFile='<path>/wls.ucf', userKeyFile='<path>/wls.key', url='t3://<admin_host>:<admin_port>')
+        cd('/Clusters/<cluster>'); print 'Mode',get('ClusterMessagingMode'),'Mcast',get('MulticastAddress'),get('MulticastPort')
+        domainRuntime(); cd('ServerRuntimes/<server>/ClusterRuntime/<cluster>')
+        print 'Alive',get('AliveServerCount'),'Lost',get('MulticastMessagesLostCount'),'Resend',get('ResendRequestsCount')
+        exit()
+        EOF
+      check: "Alive 가 멤버 수보다 적으면 멤버 이탈. multicast 모드에서 Lost·Resend 가 계속 늘면 망의 멀티캐스트 유실 — unicast 전환 검토 대상"
+      note: "적용: 12c/14c(ClusterMessagingMode 는 12.1.2+ 기본 unicast), 10.3.6 은 multicast 기본 · 권한: Monitor 이상 관리 계정(userConfigFile 로 — 비밀번호를 명령줄에 쓰지 않는다)"
+    - do: NIC 오류·GC 정지 확인
+      cmd: |
+        ip -s link show <nic> | head -12
+        jstat -gcutil <PID> 5000 6
+      check: "RX errors·dropped 증가면 네트워크, Full GC 정지가 하트비트 주기를 넘으면 GC 원인 → WLS-PROC-R6-MEMORY"
+      note: "적용: Linux · 권한: 일반 사용자, jstat 은 WebLogic 실행 계정"
+  - stage: 2
+    steps:
+    - do: 네트워크 조치 또는 unicast 통신 전환
+      cmd: |
+        . $DOMAIN_HOME/bin/setDomainEnv.sh ; java weblogic.WLST <<'EOF'
+        connect(userConfigFile='<path>/wls.ucf', userKeyFile='<path>/wls.key', url='t3://<admin_host>:<admin_port>')
+        edit(); startEdit(); cd('/Clusters/<cluster>'); set('ClusterMessagingMode','unicast'); save(); activate(block='true')
+        exit()
+        EOF
+      check: "성공: 모든 멤버 재기동 후 AliveServerCount = 멤버 수, BEA-000110/115/137 미발생 · 실패: activate 오류·멤버 미합류 → 같은 절차로 이전 모드(multicast)로 되돌리고 재기동"
+      note: "사전조건: 네트워크 담당과 멀티캐스트 허용 가능 여부 먼저 확인(허용 가능하면 설정 변경 불필요), 모든 멤버 순차 재기동 일정 · 영향: 반영에 클러스터 멤버 재기동 필요·세션 복제 일시 중단 · 승인: WAS 담당·네트워크 담당·변경관리 · 백업/롤백: 변경 전 $DOMAIN_HOME/config/config.xml 날짜 붙여 복사(configArchive 도 확인), 이상 시 이전 모드로 set 후 activate · 적용: 10.3.4+ (unicast 지원)"
+  - stage: 3
+    steps:
+    - do: Oracle SR 자료
+      cmd: |
+        tar czf wls_cluster_$(date +%Y%m%d).tgz $DOMAIN_HOME/servers/<server>/logs/<server>.log* $DOMAIN_HOME/config/config.xml
+        java weblogic.version 2>/dev/null | head -3
+      check: "모든 멤버 로그(같은 구간)·config.xml·NIC 통계·WLS 판/PSU"
+      note: "민감정보 마스킹: config.xml 의 암호화 비밀번호({AES})·호스트명·IP, 로그의 사용자 계정·세션 ID 가림 · 전달 승인: 보안 담당 승인 후 Oracle SR 에만"
+
+- id: WLS-PROC-R6-SOCKET
+  scope: id
+  products: [weblogic]
+  category: connection
+  match: [BEA-000141, BEA-000403, BEA-000429, BEA-000449, BEA-000503, BEA-000504, BEA-002637]
+  title: 서버 간·클라이언트 소켓 I/O 오류 — T3/RJVM 연결 끊김·유휴 종료·메시지 손상 (WebLogic)
+  source: "Oracle WebLogic Server 12.2.1/14.1.1 'Configuring Server Environments — Network Resources(IdleConnectionTimeout·CompleteMessageTimeout·MaxMessageSize)' / Error Messages Reference(BEA-000141·000403·000429·000449·000503·000504·002637)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 상대 주소와 예외 문구 확인 (읽기 전용, 스택 문맥째)
+      cmd: |
+        grep -n -A12 -E 'BEA-000141|BEA-000403|BEA-000429|BEA-000449|BEA-000503|BEA-000504|BEA-002637' $DOMAIN_HOME/servers/<server>/logs/<server>.log | tail -80
+        grep -c -E 'BEA-000403|BEA-000429|BEA-000449|BEA-000503|BEA-000504' $DOMAIN_HOME/servers/<server>/logs/<server>.log
+      check: "상대가 같은 도메인 서버면 그 서버 재기동·장애 시각과 대조, 외부 클라이언트면 클라이언트 판·LB 헬스체크. BEA-000449 는 유휴 연결 정리(정보성), BEA-002637 은 기동 중 1회면 정상. 000503/504 가 특정 IP 에서만 반복이면 T3 가 아닌 트래픽·판 불일치"
+      note: "적용: WebLogic 10.3.6/12c/14c · 권한: 도메인 로그 읽기"
+    - do: 상대 도달성·연결 상태와 시간 초과 설정 확인
+      cmd: |
+        nc -zvw3 <peer_host> <peer_port>
+        ss -tanp | grep -E '<peer_host>' | awk '{print $1}' | sort | uniq -c
+        grep -n -E 'idle-connection-timeout|complete-message-timeout|max-message-size' $DOMAIN_HOME/config/config.xml
+      check: "nc 실패면 상대 미기동·방화벽. config.xml 에 값이 없으면 기본값(유휴 65초·완료 대기 60초 — 판별 문서 확인). 방화벽 유휴 끊김 시간이 WebLogic 유휴 시간보다 짧으면 끊김 반복"
+      note: "적용: Linux · 권한: 일반 사용자"
+  - stage: 2
+    steps:
+    - do: 방화벽 유휴 시간 정렬 또는 서버 시간 초과 값 조정
+      cmd: |
+        . $DOMAIN_HOME/bin/setDomainEnv.sh ; java weblogic.WLST <<'EOF'
+        connect(userConfigFile='<path>/wls.ucf', userKeyFile='<path>/wls.key', url='t3://<admin_host>:<admin_port>')
+        edit(); startEdit(); cd('/Servers/<server>'); set('CompleteMessageTimeout',<초>); save(); activate(block='true')
+        exit()
+        EOF
+      check: "성공: activate 완료(재기동 필요 표시면 계획 재기동) 후 같은 상대의 BEA-000403/429 감소 · 실패: activate 오류·다른 연결 지연 → 이전 값으로 set 후 activate"
+      note: "사전조건: 상대 담당·네트워크 담당과 원인 합의(방화벽 유휴 시간 조정이 우선), 판 불일치 클라이언트는 클라이언트 쪽 교정 · 영향: 시간 초과를 늘리면 비정상 연결 점유 증가, 일부 속성은 재기동 필요 · 승인: WAS 담당·네트워크 담당·변경관리 · 백업/롤백: 변경 전 config.xml 날짜 붙여 복사, 이상 시 이전 값으로 activate · 적용: 10.3.6/12c/14c"
+  - stage: 3
+    steps:
+    - do: Oracle SR 자료
+      cmd: |
+        grep -n -A20 -E 'BEA-0004[0-9]{2}|BEA-0005[0-9]{2}|BEA-000141|BEA-002637' $DOMAIN_HOME/servers/<server>/logs/<server>.log | tail -500 > wls_socket_$(date +%Y%m%d).txt
+        ss -tan > ss_$(date +%Y%m%d%H%M).txt ; java weblogic.version 2>/dev/null | head -3
+      check: "오류 문맥(상대 주소·시각)·연결 상태·config.xml 네트워크 설정·WLS 판"
+      note: "민감정보 마스킹: 호스트명·IP·사용자 계정·세션 ID 가림 · 전달 승인: 보안 담당 승인 후 Oracle SR 에만"
+
+- id: WLS-PROC-R6-LISTEN
+  scope: id
+  products: [weblogic]
+  category: connection
+  match: [BEA-002619, WAS-WLS-014]
+  title: 수신 포트(채널) 열기 실패 — 주소 오류·포트 충돌 (WebLogic)
+  source: "Oracle WebLogic Server 12.2.1/14.1.1 'Configuring Network Resources(ListenAddress·ListenPort·Network Channels)' / Error Messages Reference(BEA-002619·BEA-002606)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 실패한 주소·포트·채널 확인 (읽기 전용)
+      cmd: |
+        grep -n -B2 -A8 -E 'BEA-002619|BEA-002606|BEA-002616|Address already in use|Cannot assign requested address' $DOMAIN_HOME/servers/<server>/logs/<server>.log | tail -40
+        grep -n -E 'listen-address|listen-port|network-access-point|<name>' $DOMAIN_HOME/config/config.xml | head -40
+      check: "Address already in use 면 포트 점유, Cannot assign requested address 면 listen-address 가 이 장비에 없는 IP(IP 변경). 비필수 채널 하나만 실패면 그 채널 이용 서비스만 영향"
+      note: "적용: WebLogic 10.3.6/12c/14c · 권한: 도메인 읽기"
+    - do: 점유 프로세스·장비 IP 확인
+      cmd: |
+        ss -ltnp | grep -E ':<port>\b'
+        ip -4 addr show | grep inet
+        ps -ef | grep '[w]eblogic.Name=<server>'
+      check: "같은 서버의 이전 JVM 이 남았으면 중복 기동, 다른 PID 면 충돌, listen-address 가 ip 목록에 없으면 주소 교정 대상"
+      note: "적용: Linux · 권한: ss -p 의 PID 표시는 root · 프로세스를 종료하지 않는다(2차)"
+  - stage: 2
+    steps:
+    - do: 잔존 프로세스 정리 또는 listen-address 교정 후 기동
+      cmd: |
+        jcmd <잔존PID> Thread.print > $DOMAIN_HOME/servers/<server>/logs/td_stale_$(date +%H%M%S).txt
+        kill <잔존PID>   # 같은 서버의 잔존 JVM 일 때만(승인 후)
+        . $DOMAIN_HOME/bin/setDomainEnv.sh ; java weblogic.WLST <<'EOF'
+        connect(userConfigFile='<path>/wls.ucf', userKeyFile='<path>/wls.key', url='t3://<admin_host>:<admin_port>')
+        edit(); startEdit(); cd('/Servers/<server>'); set('ListenAddress','<현행 IP 또는 호스트명>'); save(); activate(block='true')
+        exit()
+        EOF
+      check: "성공: 재기동 후 BEA-000360 RUNNING·BEA-002619 미발생, ss 에서 포트가 새 PID 하나 · 실패: 같은 바인드 오류 → 이전 ListenAddress 로 되돌리고 3차"
+      note: "사전조건: 잔존 PID 가 같은 서버인지 ps -fp <잔존PID> 로 확인(다른 서비스면 kill 금지), IP 변경 이력 확인 · 영향: 잔존 JVM 의 처리 중 요청 실패, ListenAddress 변경은 재기동·LB·클라이언트 URL 영향 · 승인: WAS 담당·네트워크 담당·변경관리 · 백업/롤백: config.xml 날짜 붙여 복사, 이상 시 이전 값으로 activate · 적용: 10.3.6/12c/14c"
+  - stage: 3
+    steps:
+    - do: Oracle SR 자료
+      cmd: |
+        ss -ltnp > ss_$(date +%Y%m%d%H%M).txt ; ip -4 addr show > ip_$(date +%Y%m%d).txt
+        tar czf wls_listen_$(date +%Y%m%d).tgz $DOMAIN_HOME/servers/<server>/logs/<server>.log* $DOMAIN_HOME/config/config.xml ss_*.txt ip_*.txt
+      check: "포트 점유·IP 목록·config.xml 네트워크 설정·기동 로그"
+      note: "민감정보 마스킹: config.xml 암호화 비밀번호·호스트명·IP 가림 · 전달 승인: 보안 담당 승인 후 Oracle SR 에만"
+
+- id: WLS-PROC-R6-SHUTDOWN
+  scope: id
+  products: [weblogic]
+  category: internal
+  match: [BEA-000144, BEA-000366, BEA-000371, BEA-000622]
+  title: 서버 정지·종료 과정의 오류와 종료 실패 (WebLogic)
+  source: "Oracle WebLogic Server 12.2.1/14.1.1 'Administering Server Startup and Shutdown(Graceful/Force shutdown)' / WLST Command Reference(state·shutdown·start) / Error Messages Reference(BEA-000144·000366·000371·000622)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 종료 흐름·예외와 계획 작업 여부 확인 (읽기 전용)
+      cmd: |
+        grep -n -A30 -E 'BEA-000144|BEA-000366|BEA-000371|BEA-000622|BEA-000365' $DOMAIN_HOME/servers/<server>/logs/<server>.log | tail -80
+        grep -n -i -E 'shutdown|suspend' $DOMAIN_HOME/servers/AdminServer/logs/AdminServer.log | tail -10
+      check: "운영자 정지(관리 서버 로그·작업 계획과 시각 일치)면 정상. BEA-000622 가 종료·redeploy 중이면 정상 범위, RUNNING 중 반복이면 앱이 닫힌 풀에 자원 반환(결함). BEA-000366·000371 은 종료 실패 예외와 모듈 기록"
+      note: "적용: WebLogic 10.3.6/12c/14c · 권한: 도메인 로그 읽기"
+    - do: 현재 상태와 JVM 잔존 여부
+      cmd: |
+        . $DOMAIN_HOME/bin/setDomainEnv.sh ; java weblogic.WLST <<'EOF'
+        connect(userConfigFile='<path>/wls.ucf', userKeyFile='<path>/wls.key', url='t3://<admin_host>:<admin_port>')
+        print state('<server>','Server')
+        exit()
+        EOF
+        ps -ef | grep '[w]eblogic.Name=<server>'
+      check: "상태가 SHUTDOWN 인데 JVM 이 남아 있거나 FORCE_SHUTTING_DOWN·SHUTTING_DOWN 에 오래 머물면 종료 정지 → 스레드 덤프 후 2차"
+      note: "적용: 10.3.6/12c/14c · 권한: Monitor 이상 관리 계정(userConfigFile)"
+    - do: 종료가 멈춘 JVM 의 스레드 덤프 (프로세스 유지)
+      cmd: |
+        jcmd <PID> Thread.print > $DOMAIN_HOME/servers/<server>/logs/td_shutdown_$(date +%H%M%S).txt
+      check: "종료 스레드가 기다리는 지점(앱 스레드·JDBC·JMS) 기록 — 2차·개발 담당 전달"
+      note: "적용: JDK 7/8/11(JDK 6 은 kill -3 <PID> — 스레드 덤프, 프로세스는 유지) · 권한: WebLogic 실행 계정"
+  - stage: 2
+    steps:
+    - do: 멈춘 종료를 강제 종료로 마무리하고(계획 외 정지면) 다시 기동
+      cmd: |
+        . $DOMAIN_HOME/bin/setDomainEnv.sh ; java weblogic.WLST <<'EOF'
+        connect(userConfigFile='<path>/wls.ucf', userKeyFile='<path>/wls.key', url='t3://<admin_host>:<admin_port>')
+        shutdown('<server>','Server',force='true',block='true')
+        start('<server>','Server')
+        exit()
+        EOF
+      check: "성공: state 가 RUNNING, 로그에 BEA-000360 · 실패: 강제 종료 후에도 JVM 잔존 → 노드매니저 nmKill 또는 OS 담당 조치(승인), 기동 실패면 WLS-PROC-INTERNAL"
+      note: "사전조건: 1차 스레드 덤프 보존, 계획 정지가 아닌지 운영 담당 확인, start 는 Node Manager 연결 필요 · 영향: force 는 진행 중 요청·트랜잭션 중단·세션 소실 · 승인: WAS 담당·서비스 담당 · 백업/롤백: 설정 변경 없음 — 기동 실패 시 원인 조치 후 재시도 · 적용: 10.3.6/12c/14c"
+  - stage: 3
+    steps:
+    - do: Oracle SR 자료
+      cmd: |
+        tar czf wls_shutdown_$(date +%Y%m%d).tgz $DOMAIN_HOME/servers/<server>/logs/<server>.log* $DOMAIN_HOME/servers/<server>/logs/td_shutdown_*.txt $DOMAIN_HOME/servers/<server>/logs/<server>.out*
+      check: "종료 구간 로그·스레드 덤프·관리 서버 로그·WLS 판/PSU"
+      note: "민감정보 마스킹: 호스트명·IP·관리자 계정·세션 ID·요청 파라미터 가림 · 전달 승인: 보안 담당 승인 후 Oracle SR 에만"
+
+- id: WLS-PROC-R6-MUXER
+  scope: id
+  products: [weblogic]
+  category: internal
+  match: [BEA-000437, BEA-000446]
+  title: 소켓 Muxer(네이티브 I/O·NIO) 구성 확인 (WebLogic)
+  source: "Oracle WebLogic Server 12.2.1/14.1.1 'Tuning Performance — Tuning the Muxer(NativeIOEnabled, weblogic.MuxerClass)' / Error Messages Reference(BEA-000437·000438·000446)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 기동 시 Muxer 메시지와 지정 방식 확인 (읽기 전용)
+      cmd: |
+        grep -n -B2 -A5 -E 'BEA-000437|BEA-000438|BEA-000446|Muxer' $DOMAIN_HOME/servers/<server>/logs/<server>.log | tail -30
+        ps -ef | grep '[w]eblogic.Name=<server>' | grep -i -o -E 'muxerclass=[^ ]*'
+        grep -n 'native-io-enabled' $DOMAIN_HOME/config/config.xml
+      check: "BEA-000446(네이티브 I/O 활성)만 있으면 정상·조치 없음. BEA-000438(네이티브 라이브러리 로드 실패)이면 Java Muxer 로 떨어져 성능 저하. BEA-000437 이 SSL 과 NIO Muxer 조합 문구면 해당 판에서 SSL 리스너 기동 불가"
+      note: "적용: 10.3.6/12c/14c(Muxer 기본값·SSL 지원 범위는 판별 상이) · 권한: 도메인 읽기"
+  - stage: 2
+    steps:
+    - do: Muxer 강제 지정 제거 또는 네이티브 I/O 활성
+      cmd: |
+        cp -p $DOMAIN_HOME/bin/setUserOverrides.sh $DOMAIN_HOME/bin/setUserOverrides.sh.bak.$(date +%Y%m%d%H%M) 2>/dev/null
+        . $DOMAIN_HOME/bin/setDomainEnv.sh ; java weblogic.WLST <<'EOF'
+        connect(userConfigFile='<path>/wls.ucf', userKeyFile='<path>/wls.key', url='t3://<admin_host>:<admin_port>')
+        edit(); startEdit(); cd('/Servers/<server>'); set('NativeIOEnabled','true'); save(); activate(block='true')
+        exit()
+        EOF
+      check: "성공: 재기동 후 BEA-000446 기록·BEA-000437/438 미발생, SSL 리스너 정상 · 실패: 기동 실패·SSL 포트 미기동 → setUserOverrides.sh.bak 복원·이전 값으로 activate 후 재기동"
+      note: "사전조건: -Dweblogic.MuxerClass 를 넣은 이유(성능 튜닝 이력)를 담당자와 확인, 네이티브 라이브러리 경로(LD_LIBRARY_PATH) 확인 · 영향: 반영에 서버 재기동 필요 · 승인: WAS 담당·변경관리 · 백업/롤백: setUserOverrides.sh·config.xml 날짜 붙여 복사, 이상 시 복원 후 재기동 · 적용: 12.1.2+(setUserOverrides.sh), 10.3.6 은 setDomainEnv.sh·서버 시작 인수"
+      verify_note: "미검증 — BEA-000437 문구별 판 적용 범위(10.3.6 의 NIO Muxer SSL 미지원, 12.2.1+ 지원 여부)를 Oracle 공식 문서에서 확인하지 못함"
+  - stage: 3
+    steps:
+    - do: Oracle SR 자료
+      cmd: |
+        grep -n -B2 -A10 -E 'BEA-00043[0-9]|BEA-000446|Muxer' $DOMAIN_HOME/servers/<server>/logs/<server>.log > wls_muxer_$(date +%Y%m%d).txt
+        java weblogic.version 2>/dev/null | head -3 ; java -version 2>> wls_muxer_$(date +%Y%m%d).txt
+      check: "Muxer 메시지·기동 인수·config.xml 해당 줄·WLS/JDK 판"
+      note: "민감정보 마스킹: 기동 인수의 비밀번호성 시스템 속성·호스트명·IP 가림 · 전달 승인: 보안 담당 승인 후 Oracle SR 에만"
+
+- id: WLS-PROC-R6-APP
+  scope: id
+  products: [weblogic]
+  category: internal
+  match: [BEA-000802, BEA-101019, BEA-101104, BEA-001155]
+  title: 애플리케이션 요청 처리 예외 — ExecuteRequest·서블릿 실행·서블릿 IOException·JDBC 예외 (WebLogic)
+  source: "Oracle WebLogic Server 12.2.1/14.1.1 Error Messages Reference(BEA-000802·BEA-101019·BEA-101104·BEA-001155) / 'Deploying Applications(weblogic.Deployer -userconfigfile)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 예외 클래스·웹앱·첫 업무 클래스 확인 (읽기 전용, 스택은 문맥째)
+      cmd: |
+        grep -n -A40 -E 'BEA-000802|BEA-101019|BEA-101104|BEA-001155' $DOMAIN_HOME/servers/<server>/logs/<server>.log | head -150
+        grep -c -E 'BEA-000802|BEA-101019|BEA-101104|BEA-001155' $DOMAIN_HOME/servers/<server>/logs/<server>.log
+      check: "BEA-101019 가 Broken pipe·Connection reset 이면 클라이언트 중단(경고성). BEA-101104·000802 는 마지막 Caused by 와 첫 업무 패키지 줄 → 개발 담당. BEA-001155 는 뒤따르는 ORA-·SQLState 가 연결 계열이면 WLS-PROC-CONNECTION, SQL·데이터 계열이면 개발 담당"
+      note: "적용: WebLogic 10.3.6/12c/14c · 권한: 도메인 로그 읽기 · grep 으로 스택 줄을 버리지 않는다(head 로만 자름)"
+    - do: 배포 시각·판 확인
+      cmd: |
+        grep -n -E 'BEA-149[0-9]{3}' $DOMAIN_HOME/servers/<server>/logs/<server>.log | tail -10
+        ls -lt <배포 경로> | head
+      check: "최근 배포·재배포 직후부터 오류가 시작됐으면 배포 결함 → 롤백 후보"
+      note: "적용: 10.3.6/12c/14c · 권한: 도메인·배포 경로 읽기"
+  - stage: 2
+    steps:
+    - do: 수정본 재배포 또는 직전 정상본 롤백
+      cmd: |
+        cp -p <배포 경로>/<app>.war <보관경로>/<app>.war.bak.$(date +%Y%m%d%H%M)
+        . $DOMAIN_HOME/bin/setDomainEnv.sh
+        java weblogic.Deployer -adminurl t3://<admin_host>:<admin_port> -userconfigfile <path>/wls.ucf -userkeyfile <path>/wls.key -redeploy -name <app> -source <수정본경로>/<app>.war -targets <server>
+      check: "성공: 서버 로그 BEA-149xxx 배포 완료·같은 예외 미발생 · 실패: BEA-149265 등 배포 실패·오류 반복 → 보관본으로 같은 -redeploy 재실행(롤백) 후 개발 담당 이관"
+      note: "사전조건: 개발 담당 수정본·검증계 확인, 직전 정상본 보관 · 영향: 재배포 중 앱 중단·세션 소실(운영 재배포 기능을 쓰지 않을 때) · 승인: 애플리케이션 담당·WAS 담당·변경관리 · 백업/롤백: 첫 줄 보관본으로 재배포 · 비밀번호는 -userconfigfile 로(명령줄 -password 금지) · 적용: 10.3.6/12c/14c"
+  - stage: 3
+    steps:
+    - do: 개발 담당·Oracle SR 전달 자료
+      cmd: |
+        grep -n -A40 -E 'BEA-000802|BEA-101019|BEA-101104|BEA-001155' $DOMAIN_HOME/servers/<server>/logs/<server>.log | tail -600 > wls_app_$(date +%Y%m%d).txt
+      check: "예외 문맥·배포 판·WLS 판/PSU"
+      note: "민감정보 마스킹: 요청 URL 파라미터·세션 ID·사용자 ID·SQL 바인드 값·호스트명·IP 가림 · 전달 승인: 보안 담당 승인 후 개발 담당·Oracle SR 에만"
+
+- id: WLS-PROC-R6-JMS
+  scope: id
+  products: [weblogic]
+  category: internal
+  match: [BEA-040123]
+  title: JMS 서버 시작 실패 — 저장소·JNDI 이름 충돌 (WebLogic JMS)
+  source: "Oracle WebLogic Server 12.2.1/14.1.1 'Administering JMS Resources(JMS Server·Persistent Store·대상 지정)' / Error Messages Reference(BEA-040123) / WLST Command Reference"
+  stages:
+  - stage: 1
+    steps:
+    - do: JMS 서버 이름과 원인 예외 확인 (읽기 전용, 스택 문맥째)
+      cmd: |
+        grep -n -A25 'BEA-040123' $DOMAIN_HOME/servers/<server>/logs/<server>.log | head -60
+        grep -n -E 'BEA-2800[0-9]{2}|BEA-2801[0-9]{2}|NameAlreadyBoundException' $DOMAIN_HOME/servers/<server>/logs/<server>.log | tail -10
+      check: "저장소(BEA-2800xx) 오류가 원인이면 WLS-PROC-R5-STORAGE, JNDI 이름 충돌이면 같은 이름을 쓰는 다른 JMS 모듈·대상 지정 확인"
+      note: "적용: WebLogic 10.3.6/12c/14c · 권한: 도메인 로그 읽기"
+    - do: JMS 서버 런타임과 저장소 공간 확인
+      cmd: |
+        df -h $DOMAIN_HOME/servers/<server>/data/store
+        . $DOMAIN_HOME/bin/setDomainEnv.sh ; java weblogic.WLST <<'EOF'
+        connect(userConfigFile='<path>/wls.ucf', userKeyFile='<path>/wls.key', url='t3://<admin_host>:<admin_port>')
+        domainRuntime(); cd('ServerRuntimes/<server>/JMSRuntime'); ls()
+        exit()
+        EOF
+      check: "JMSRuntime 아래 대상 JMS 서버가 없으면 미기동. 저장소 파일시스템 100% 면 공간 원인"
+      note: "적용: 12c/14c · 권한: Monitor 이상 관리 계정(userConfigFile)"
+      verify_note: "미검증 — JMSRuntime 하위 MBean 이름(<server>.jms·JMSServers 경로)을 판별 WLST 문서에서 확인하지 못해 ls() 로 확인하도록 함"
+  - stage: 2
+    steps:
+    - do: 원인 해소 후 JMS 모듈 대상 재지정 또는 서버 재기동
+      cmd: |
+        cp -p $DOMAIN_HOME/config/config.xml $DOMAIN_HOME/config/config.xml.bak.$(date +%Y%m%d%H%M)
+        . $DOMAIN_HOME/bin/setDomainEnv.sh ; java weblogic.WLST <<'EOF'
+        connect(userConfigFile='<path>/wls.ucf', userKeyFile='<path>/wls.key', url='t3://<admin_host>:<admin_port>')
+        shutdown('<server>','Server',block='true'); start('<server>','Server')
+        exit()
+        EOF
+      check: "성공: 기동 후 BEA-040123 미발생, JMSRuntime 에 JMS 서버 표시·메시지 송수신 정상 · 실패: 같은 오류 → config.xml.bak 과 대조해 최근 변경 원복, 저장소 손상이면 3차"
+      note: "사전조건: JNDI 충돌이면 중복 이름 정리 방안을 업무 담당과 합의, 저장소 공간 확보 · 영향: 재기동 동안 서비스 중단·처리 중 메시지 지연 · 승인: WAS 담당·연계 담당·변경관리 · 백업/롤백: 첫 줄 config.xml 사본·저장소 디렉터리 tar 보관, 이상 시 복원 · 적용: 10.3.6/12c/14c(start 는 Node Manager 필요)"
+  - stage: 3
+    steps:
+    - do: Oracle SR 자료
+      cmd: |
+        tar czf wls_jms_$(date +%Y%m%d).tgz $DOMAIN_HOME/servers/<server>/logs/<server>.log* $DOMAIN_HOME/config/jms/ $DOMAIN_HOME/config/config.xml
+      check: "JMS 오류 문맥·JMS 모듈 설정·저장소 목록·WLS 판"
+      note: "민감정보 마스킹: 메시지 본문·config 암호화 비밀번호·호스트명·IP 가림(저장소 파일 자체는 업무 데이터라 보내지 않음) · 전달 승인: 보안 담당 승인 후 Oracle SR 에만"
+
+- id: WLS-PROC-R6-MEMORY
+  scope: id
+  products: [weblogic]
+  category: memory
+  match: [BEA-310002, WAS-WLS-012]
+  title: 힙 여유 메모리 부족 경고 (BEA-310002·310003, WebLogic)
+  source: "Oracle WebLogic Server 12.2.1/14.1.1 Error Messages Reference(BEA-310002·BEA-310003) / JVMRuntimeMBean(HeapFreePercent·HeapSizeCurrent·HeapSizeMax) / 'Administering Server Startup and Shutdown(setUserOverrides.sh USER_MEM_ARGS)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 여유 메모리 추세 확인 (읽기 전용)
+      cmd: |
+        grep -n -E 'BEA-31000[23]' $DOMAIN_HOME/servers/<server>/logs/<server>.log | tail -20
+        . $DOMAIN_HOME/bin/setDomainEnv.sh ; java weblogic.WLST <<'EOF'
+        connect(userConfigFile='<path>/wls.ucf', userKeyFile='<path>/wls.key', url='t3://<admin_host>:<admin_port>')
+        domainRuntime(); cd('ServerRuntimes/<server>/JVMRuntime/<server>')
+        print 'FreePct',get('HeapFreePercent'),'Cur',get('HeapSizeCurrent'),'Max',get('HeapSizeMax')
+        exit()
+        EOF
+      check: "여유 비율이 계속 내려가 10% 미만이 유지되면 OOM 임박. 대량 배치·요청 시간대에만 일시 하락 후 회복이면 일시 부하"
+      note: "적용: WebLogic 10.3.6/12c/14c · 권한: Monitor 이상 관리 계정(userConfigFile)"
+    - do: GC 상태와 스레드 덤프 기록 (재기동 전)
+      cmd: |
+        jstat -gcutil <PID> 5000 6
+        jcmd <PID> Thread.print > $DOMAIN_HOME/servers/<server>/logs/td_$(date +%H%M%S).txt
+      check: "O(Old) 95% 이상 유지·FGC 증가면 메모리 고갈 진행 중. 힙 덤프는 2차"
+      note: "적용: JDK 7/8/11(JDK 6 은 kill -3 <PID> — 스레드 덤프, 프로세스는 유지) · 권한: WebLogic 실행 계정"
+  - stage: 2
+    steps:
+    - do: 힙 덤프 채취 (디스크 여유·부하 승인 후)
+      cmd: |
+        df -h $DOMAIN_HOME/servers/<server>/logs
+        jcmd <PID> GC.heap_dump $DOMAIN_HOME/servers/<server>/logs/heap_$(date +%Y%m%d_%H%M%S).hprof
+      check: "성공: hprof 생성('Heap dump file created') · 실패: 디스크 부족·권한 오류면 다른 경로, 덤프 중 프로세스가 죽으면 기동 후 원인 확인"
+      note: "사전조건: 해당 서버 LB 제외 또는 이미 서비스 불능, 디스크 여유가 -Xmx 이상 · 영향: 덤프 중 전체 정지(stop-the-world), hprof 에 개인정보 포함 · 승인: WAS 담당·보안 담당 · 백업/롤백: 설정 변경 없음 — 분석 후 hprof 는 보안 규정대로 삭제·암호화 보관 · 적용: JDK 7+"
+    - do: 힙 크기 조정 후 재기동
+      config:
+        file: $DOMAIN_HOME/bin/setUserOverrides.sh (12.1.2+) 또는 콘솔 서버 시작 인수(Node Manager 기동)
+        snippet: |
+          if [ "${SERVER_NAME}" = "<server>" ]; then
+            USER_MEM_ARGS="-Xms4g -Xmx4g -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=${DOMAIN_HOME}/servers/<server>/logs"
+          fi
+        note: "사전조건: 힙 덤프 분석으로 누수가 아님을 확인(누수면 개발 담당 이관이 우선), 같은 장비 모든 JVM 의 -Xmx 합이 물리 메모리 안 · 영향: 재기동 동안 서비스 중단 · 승인: WAS 담당·변경관리 · 백업/롤백: setUserOverrides.sh 날짜 붙여 복사, 기동 실패 시 복원 후 재기동"
+      cmd: |
+        cp -p $DOMAIN_HOME/bin/setUserOverrides.sh $DOMAIN_HOME/bin/setUserOverrides.sh.bak.$(date +%Y%m%d%H%M) 2>/dev/null
+      check: "성공: 재기동 후 HeapSizeMax 가 새 값, BEA-310003 미발생·Old 사용률 안정 · 실패: 기동 실패('Could not reserve enough space')·경고 지속 → .bak 복원, 누수 분석으로"
+  - stage: 3
+    steps:
+    - do: Oracle SR·개발 담당 자료
+      cmd: |
+        tar czf wls_mem_$(date +%Y%m%d).tgz $DOMAIN_HOME/servers/<server>/logs/<server>.log* $DOMAIN_HOME/servers/<server>/logs/td_*.txt $DOMAIN_HOME/servers/<server>/logs/gc*.log 2>/dev/null
+      check: "BEA-3100xx 추세·스레드 덤프·GC 로그·힙 덤프 분석 결과(MAT 보고서)·WLS/JDK 판"
+      note: "민감정보 마스킹: 로그·덤프의 사용자 ID·세션 ID·요청 파라미터 가림 — hprof 원본은 개인정보 포함이라 별도 보안 승인 없이는 반출하지 않음 · 전달 승인: 보안 담당 승인 후 Oracle SR·개발 담당에만"
+
+- id: WLS-PROC-R6-BOOT-ID
+  scope: id
+  products: [weblogic]
+  category: security
+  match: [WAS-WLS-015]
+  title: 기동 계정(boot.properties) 인증 실패 — 서버 기동 불가 (WebLogic)
+  source: "Oracle WebLogic Server 12.2.1/14.1.1 'Administering Server Startup and Shutdown — Provide User Credentials Using a Boot Identity File(boot.properties)' / Error Messages Reference(BEA-090402)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 인증 실패 메시지와 파일 상태 확인 (읽기 전용 — 내용은 열지 않는다)
+      cmd: |
+        grep -n -B2 -A5 -E 'BEA-090402|Boot identity not valid|BEA-000386' $DOMAIN_HOME/servers/<server>/logs/<server>.log | tail -20
+        ls -l $DOMAIN_HOME/servers/<server>/security/boot.properties
+      check: "BEA-090402 면 boot.properties 의 계정·비밀번호가 현재 관리자 계정과 다름. 파일 수정 시각이 관리자 비밀번호 변경 전이면 갱신 누락"
+      note: "적용: WebLogic 10.3.6/12c/14c · 권한: WebLogic 실행 계정 · 파일 내용 열람·복사 금지(암호화돼 있어도)"
+    - do: 관리자 계정 변경 이력·잠금 확인
+      cmd: |
+        grep -n -E 'BEA-090078|BEA-090082|locked' $DOMAIN_HOME/servers/AdminServer/logs/AdminServer.log | tail -10
+      check: "같은 계정 잠금(BEA-090078) 동반이면 반복 실패로 잠긴 것 — WLS-PROC-SECURITY 의 잠금 해제 단계 병행"
+      note: "적용: 10.3.6/12c/14c · 권한: 도메인 로그 읽기"
+  - stage: 2
+    steps:
+    - do: boot.properties 재작성 후 기동
+      config:
+        file: $DOMAIN_HOME/servers/<server>/security/boot.properties
+        snippet: |
+          username=<기동 계정>
+          password=<보안 담당이 직접 입력>
+          # 다음 기동 때 WebLogic 이 두 값을 암호화해 다시 쓴다 — 평문이 남지 않았는지 기동 후 확인
+        note: "사전조건: 현재 유효한 관리자 계정·비밀번호를 보안 담당이 확인·직접 입력(작업자·티켓·채팅에 남기지 않음), 파일 권한 600 · 영향: 기동 전까지 평문 파일이 디스크에 존재 — 기동 직후 암호화 확인 · 승인: 보안 담당·WAS 담당 · 백업/롤백: 기존 boot.properties 를 boot.properties.bak.<날짜> 로 보관(권한 600), 기동 실패 시 원인 확인 후 재작성"
+      cmd: |
+        cp -p $DOMAIN_HOME/servers/<server>/security/boot.properties $DOMAIN_HOME/servers/<server>/security/boot.properties.bak.$(date +%Y%m%d%H%M)
+      check: "성공: 기동 로그 BEA-000360 RUNNING, boot.properties 의 값이 {AES} 로 암호화됨 · 실패: 다시 BEA-090402 → 계정 잠금·내장 LDAP 상태 확인, .bak 은 지우지 말고 보관"
+  - stage: 3
+    steps:
+    - do: Oracle SR 자료
+      cmd: |
+        grep -n -B2 -A10 -E 'BEA-0904[0-9]{2}|BEA-000386|BEA-0900[0-9]{2}' $DOMAIN_HOME/servers/<server>/logs/<server>.log > wls_bootid_$(date +%Y%m%d).txt
+      check: "인증 실패 문맥·기동 로그·WLS 판"
+      note: "민감정보 마스킹: 계정 이름·호스트명·IP 가림, boot.properties·SerializedSystemIni.dat 는 절대 보내지 않음 · 전달 승인: 보안 담당 승인 후 Oracle SR 에만"
+
+- id: WLS-PROC-R6-THREAD-INFO
+  scope: id
+  products: [weblogic]
+  category: thread
+  match: [BEA-000236, BEA-002903]
+  title: 실행 스레드 중지·Work Manager 생성 통지 — 계획 작업 여부 확인 (WebLogic)
+  source: "Oracle WebLogic Server 12.2.1/14.1.1 'Administering Server Environments — Using Work Managers' / Error Messages Reference(BEA-000236·BEA-002903) / WLST state"
+  stages:
+  - stage: 1
+    steps:
+    - do: 통지 시각과 종료·배포 흐름 대조 (읽기 전용)
+      cmd: |
+        grep -n -E 'BEA-000236|BEA-000365|BEA-002903|BEA-149[0-9]{3}' $DOMAIN_HOME/servers/<server>/logs/<server>.log | tail -30
+      check: "BEA-000236 이 종료 순서(BEA-000365 SHUTTING_DOWN) 안이면 정상 종료. BEA-002903 이 앱 배포·기동 시각과 같으면 정상. 운영 중 예고 없는 BEA-000236 이면 계획 외 종료 → 2차"
+      note: "적용: WebLogic 10.3.6/12c/14c · 권한: 도메인 로그 읽기"
+    - do: 현재 서버 상태 확인
+      cmd: |
+        . $DOMAIN_HOME/bin/setDomainEnv.sh ; java weblogic.WLST <<'EOF'
+        connect(userConfigFile='<path>/wls.ucf', userKeyFile='<path>/wls.key', url='t3://<admin_host>:<admin_port>')
+        print state('<server>','Server')
+        exit()
+        EOF
+      check: "RUNNING 이면 조치 없음. SHUTDOWN 이고 계획 작업이 아니면 2차"
+      note: "적용: 10.3.6/12c/14c · 권한: Monitor 이상 관리 계정(userConfigFile)"
+  - stage: 2
+    steps:
+    - do: 계획 외 종료된 서버 기동
+      cmd: |
+        . $DOMAIN_HOME/bin/setDomainEnv.sh ; java weblogic.WLST <<'EOF'
+        connect(userConfigFile='<path>/wls.ucf', userKeyFile='<path>/wls.key', url='t3://<admin_host>:<admin_port>')
+        start('<server>','Server')
+        exit()
+        EOF
+      check: "성공: state RUNNING·BEA-000360 · 실패: 기동 오류 → WLS-PROC-INTERNAL 1차부터"
+      note: "사전조건: 종료 원인(운영자 작업·OOM·크래시) 1차 기록, 운영 담당 확인 · 영향: 기동 중 부하 집중 · 승인: WAS 담당 · 백업/롤백: 설정 변경 없음 — 기동 실패 시 중지 상태 유지 후 원인 조치 · 적용: 10.3.6/12c/14c(Node Manager 필요)"
+  - stage: 3
+    steps:
+    - do: Oracle SR 자료
+      cmd: |
+        grep -n -E 'BEA-000236|BEA-000365|BEA-002903|<Error>|<Critical>' $DOMAIN_HOME/servers/<server>/logs/<server>.log | tail -200 > wls_threadinfo_$(date +%Y%m%d).txt
+      check: "종료·배포 흐름·서버 상태"
+      note: "민감정보 마스킹: 호스트명·IP·관리자 계정 가림 · 전달 승인: 보안 담당 승인 후 Oracle SR 에만"
+
+- id: WLS-PROC-R6-SOCKET-READER
+  scope: id
+  products: [weblogic]
+  category: thread
+  match: [BEA-000402]
+  title: 소켓 리더 스레드 부족 — 활성 소켓 대비 리더 수 부족 (WebLogic)
+  source: "Oracle WebLogic Server 12.2.1/14.1.1 'Tuning Performance — Tuning the Muxer / Socket Readers(ThreadPoolPercentSocketReaders·SocketReaders·NativeIOEnabled)' / Error Messages Reference(BEA-000402)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 반복 건수·활성 소켓·리더 스레드 수 확인 (읽기 전용)
+      cmd: |
+        grep -c 'BEA-000402' $DOMAIN_HOME/servers/<server>/logs/<server>.log
+        ss -tan state established '( sport = :<listen_port> )' | wc -l
+        jcmd <PID> Thread.print | grep -c 'weblogic.socket.Muxer'
+      check: "활성 소켓이 리더 스레드보다 크게 많고 Native IO 를 쓰지 않으면(BEA-000446 없음) 확정. Native IO 사용 중이면 경고성"
+      note: "적용: 10.3.6/12c/14c · 권한: WebLogic 실행 계정(jcmd — 스레드 덤프, 프로세스는 유지)"
+    - do: 현재 설정값 확인 (WLST 읽기 전용)
+      cmd: |
+        . $DOMAIN_HOME/bin/setDomainEnv.sh ; java weblogic.WLST <<'EOF'
+        connect(userConfigFile='<path>/wls.ucf', userKeyFile='<path>/wls.key', url='t3://<admin_host>:<admin_port>')
+        cd('/Servers/<server>'); print 'NativeIO',get('NativeIOEnabled'),'PctReaders',get('ThreadPoolPercentSocketReaders'),'Readers',get('SocketReaders')
+        exit()
+        EOF
+      check: "NativeIOEnabled=false 이고 리더 비율이 기본(33%)이면 Native IO 활성이 우선 대책"
+      note: "적용: 10.3.6/12c/14c · 권한: Monitor 이상 관리 계정(userConfigFile)"
+  - stage: 2
+    steps:
+    - do: Native IO 활성 또는 소켓 리더 수 조정
+      cmd: |
+        cp -p $DOMAIN_HOME/config/config.xml $DOMAIN_HOME/config/config.xml.bak.$(date +%Y%m%d%H%M)
+        . $DOMAIN_HOME/bin/setDomainEnv.sh ; java weblogic.WLST <<'EOF'
+        connect(userConfigFile='<path>/wls.ucf', userKeyFile='<path>/wls.key', url='t3://<admin_host>:<admin_port>')
+        edit(); startEdit(); cd('/Servers/<server>'); set('NativeIOEnabled','true'); save(); activate(block='true')
+        exit()
+        EOF
+      check: "성공: 재기동 후 BEA-000446 기록·BEA-000402 미발생 · 실패: 네이티브 로드 실패(BEA-000438) → 이전 값으로 activate, SocketReaders 를 명시 값으로 늘리는 방안 검토"
+      note: "사전조건: 네이티브 라이브러리 경로 확인(WLS-PROC-R6-MUXER 1차), 재기동 일정 · 영향: 반영에 재기동 필요·리더 증가 시 스레드 증가 · 승인: WAS 담당·변경관리 · 백업/롤백: 첫 줄 config.xml 사본, 이상 시 이전 값으로 activate 후 재기동 · 적용: 10.3.6/12c/14c"
+  - stage: 3
+    steps:
+    - do: Oracle SR 자료
+      cmd: |
+        grep -n -E 'BEA-000402|BEA-00043[0-9]|BEA-000446' $DOMAIN_HOME/servers/<server>/logs/<server>.log > wls_reader_$(date +%Y%m%d).txt
+        ss -s >> wls_reader_$(date +%Y%m%d).txt
+      check: "BEA-000402 추세·활성 소켓 수·Muxer 설정·WLS 판"
+      note: "민감정보 마스킹: 호스트명·IP 가림 · 전달 승인: 보안 담당 승인 후 Oracle SR 에만"
+
+- id: WSP-PROC-R6-PORT
+  scope: id
+  products: [websphere]
+  category: connection
+  match: [CHFW0029E, TCPC0003E, TCPC0004E]
+  title: 채널 체인 초기화·TCP 포트 바인드 실패 (WebSphere)
+  source: "IBM WebSphere Application Server 8.5.5/9.0 Knowledge Center 'Transport chains'·'Port number settings(serverindex.xml endpoints)' / wsadmin AdminTask.modifyServerPort / 메시지 참조(CHFW0029E·TCPC0003E·TCPC0004E)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 실패 체인·호스트·포트 확인 (읽기 전용)
+      cmd: |
+        grep -n -A10 -E 'CHFW0029E|TCPC0003E|TCPC0004E' <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -40
+        grep -n -A3 'endPointName' <PROFILE_ROOT>/config/cells/<cell>/nodes/<node>/serverindex.xml | grep -E 'endPointName|port=' | head -60
+      check: "메시지의 포트가 serverindex.xml 의 어느 엔드포인트(WC_defaulthost·SOAP_CONNECTOR_ADDRESS 등)인지 확정. 같은 노드 다른 서버와 같은 포트면 설정 충돌"
+      note: "적용: WAS 8.5.5/9.0(traditional) · 권한: 프로파일 읽기(WAS 실행 계정)"
+    - do: 점유 프로세스 확인
+      cmd: |
+        ss -ltnp | grep -E ':<port>\b'
+        ps -ef | grep '[c]om.ibm.ws.runtime.WsServer' | grep -c ' <server>$'
+      check: "같은 서버의 이전 JVM 이 남았으면 중복 기동, 다른 제품 PID 면 포트 충돌"
+      note: "적용: Linux · 권한: ss -p 의 PID 표시는 root · 프로세스를 종료하지 않는다(2차)"
+  - stage: 2
+    steps:
+    - do: 잔존 프로세스 정리 또는 엔드포인트 포트 변경 후 재기동
+      cmd: |
+        <PROFILE_ROOT>/bin/backupConfig.sh /tmp/wasconfig_$(date +%Y%m%d%H%M).zip -nostop
+        <PROFILE_ROOT>/bin/wsadmin.sh -lang jython -c "AdminTask.modifyServerPort('<server>', '[-nodeName <node> -endPointName <endpoint> -port <새포트> -modifyShared true]'); AdminConfig.save()"
+        <PROFILE_ROOT>/bin/stopServer.sh <server> ; <PROFILE_ROOT>/bin/startServer.sh <server>
+      check: "성공: SystemOut 에 WSVR0001I, CHFW0019I(체인 시작)·TCPC0001I 해당 포트 수신, CHFW0029E 미발생 · 실패: 같은 바인드 오류·기동 실패 → 백업 zip 으로 restoreConfig 후 재기동"
+      note: "사전조건: 잔존 JVM 이면 ps -fp 로 같은 서버 확인 후 스레드 덤프 보존·승인 후 종료(다른 서비스면 종료 금지), 포트 변경은 웹서버 플러그인·LB·방화벽 영향 확인 · 영향: 재기동 동안 서비스 중단, 포트 변경 시 plugin-cfg.xml 재생성·전파 필요 · 승인: WAS 담당·네트워크 담당·변경관리 · 백업/롤백: 첫 줄 backupConfig, 이상 시 restoreConfig · 자격 증명은 soap.client.props(암호화) 또는 프롬프트 — 명령줄에 비밀번호를 쓰지 않는다 · 적용: WAS 8.5.5/9.0"
+  - stage: 3
+    steps:
+    - do: IBM Support 자료
+      cmd: |
+        ss -ltnp > ss_$(date +%Y%m%d%H%M).txt
+        tar czf was_port_$(date +%Y%m%d).tgz <PROFILE_ROOT>/logs/<server>/ <PROFILE_ROOT>/config/cells/<cell>/nodes/<node>/serverindex.xml ss_*.txt
+        <WAS_HOME>/bin/versionInfo.sh | head -20
+      check: "SystemOut·startServer.log·serverindex.xml·포트 점유 목록·WAS 판"
+      note: "민감정보 마스킹: 호스트명·IP·셀/노드 이름(필요 시) 가림 · 전달 승인: 보안 담당 승인 후 IBM Support 에만"
+
+- id: WSP-PROC-R6-DCS
+  scope: id
+  products: [websphere]
+  category: connection
+  match: [DCSV1113W, DCSV1115W, DCSV8030I, DCSV8031I, DCSV8104W, HMGR0122E]
+  title: 코어 그룹(DCS·HA 관리자) 멤버 연결 끊김·뷰 구성 실패 (WebSphere)
+  source: "IBM WebSphere Application Server 8.5.5/9.0 Knowledge Center 'Core group discovery and failure detection(IBM_CS_FD_PERIOD_SECS·IBM_CS_FD_CONSECUTIVE_MISSED)'·'DCS_UNICAST_ADDRESS' / 메시지 참조(DCSV·HMGR)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 끊긴 멤버·사유·시각 확인 (읽기 전용)
+      cmd: |
+        grep -n -A3 -E 'DCSV1113W|DCSV1115W|DCSV8030I|DCSV8031I|DCSV8104W|HMGR0122E|HMGR0152W' <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -60
+      check: "끊긴 멤버가 그 시각 재기동·종료했으면 정상 범위. HMGR0152W(스레드 스케줄 지연) 동반이면 CPU 기아·GC 정지 → WSP-PROC-R5-PERFORMANCE. 살아 있는 멤버와 반복이면 네트워크"
+      note: "적용: WAS 8.5.5/9.0(ND 셀) · 권한: 로그 읽기"
+    - do: 상대 멤버 DCS 포트 도달성 확인
+      cmd: |
+        grep -n -A3 'DCS_UNICAST_ADDRESS' <PROFILE_ROOT>/config/cells/<cell>/nodes/<peer_node>/serverindex.xml | grep -E 'port=' | head
+        nc -zvw3 <peer_host> <dcs_port>
+      check: "nc 실패면 상대 미기동·방화벽(DCS 포트는 서버마다 다름). 성공인데 간헐 끊김이면 방화벽 유휴 시간·패킷 유실"
+      note: "적용: WAS 8.5.5/9.0 · 권한: 프로파일 읽기·일반 사용자"
+  - stage: 2
+    steps:
+    - do: 네트워크 조치 후 고립 멤버 재기동 또는 실패 감지 주기 조정
+      cmd: |
+        <PROFILE_ROOT>/bin/backupConfig.sh /tmp/wasconfig_$(date +%Y%m%d%H%M).zip -nostop
+        <PROFILE_ROOT>/bin/stopServer.sh <peer_server> ; <PROFILE_ROOT>/bin/startServer.sh <peer_server>
+      check: "성공: 재기동 후 DCSV8050I(뷰 구성 완료)·멤버 수 정상, DCSV8104W 재발 없음 · 실패: 같은 끊김 반복 → 코어 그룹 실패 감지 사용자 정의 속성(IBM_CS_FD_PERIOD_SECS·IBM_CS_FD_CONSECUTIVE_MISSED) 조정 검토, 변경 시 backupConfig zip 으로 원복 가능"
+      note: "사전조건: 네트워크·CPU·GC 원인 먼저 확인, 재기동 대상이 맞는지 운영 담당 확인 · 영향: 재기동 동안 해당 서버 서비스 중단·싱글턴 서비스(트랜잭션 복구·메시징 엔진) 이동 · 승인: WAS 담당·변경관리 · 백업/롤백: 첫 줄 backupConfig, 속성 변경 시 restoreConfig 로 원복 · 자격 증명은 soap.client.props 또는 프롬프트 · 적용: WAS 8.5.5/9.0 ND"
+  - stage: 3
+    steps:
+    - do: IBM Support 자료 (MustGather — HA 관리자)
+      cmd: |
+        tar czf was_dcs_$(date +%Y%m%d).tgz <PROFILE_ROOT>/logs/<server>/ <PROFILE_ROOT>/logs/ffdc/
+        <WAS_HOME>/bin/versionInfo.sh | head -20
+      check: "관련 멤버 모두의 SystemOut(같은 구간)·ffdc·코어 그룹 설정·WAS 판"
+      note: "민감정보 마스킹: 호스트명·IP·셀/노드 이름(필요 시) 가림 · 전달 승인: 보안 담당 승인 후 IBM Support 에만"
+
+- id: WSP-PROC-R6-J2C-CONN
+  scope: id
+  products: [websphere]
+  category: connection
+  match: [J2CA0028E, J2CA0058E]
+  title: J2C 연결 관리 오류 — XA 리소스 어댑터 호출 예외·연결 핸들 재연결 실패 (WebSphere)
+  source: "IBM WebSphere Application Server 8.5.5/9.0 Knowledge Center 'Connection management(공유·비공유 연결, 연결 핸들)'·'Connection pool settings' / 메시지 참조(J2CA0028E·J2CA0058E)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 리소스·예외·호출 업무 클래스 확인 (읽기 전용, 스택 문맥째)
+      cmd: |
+        grep -n -B5 -A25 -E 'J2CA0028E|J2CA0058E' <PROFILE_ROOT>/logs/<server>/SystemOut.log | head -100
+        ls -lt <PROFILE_ROOT>/logs/ffdc/ | head -5
+      check: "J2CA0028E 는 XAException 오류 코드(XAER_RMFAIL 이면 DB 연결 끊김, XAER_NOTA 면 트랜잭션 없음) 기록. J2CA0058E 는 스택의 업무 클래스 — 트랜잭션 경계를 넘어 연결 핸들을 붙잡는 코드면 개발 담당"
+      note: "적용: WAS 8.5.5/9.0 · 권한: 로그 읽기"
+    - do: 풀 상태·DB 도달성 확인
+      cmd: |
+        <PROFILE_ROOT>/bin/wsadmin.sh -lang jython -c "print AdminControl.invoke(AdminControl.queryNames('type=J2CConnectionPool,process=<server>,*').splitlines()[0], 'showPoolContents')"
+        nc -zvw3 <DB_HOST> <DB_PORT>
+      check: "DB 포트 실패·showPoolContents 에 불량 연결 다수면 DB 장애 영향 → WAS-PROC-CONNECTION. DB 정상이면 애플리케이션 연결 사용 방식"
+      note: "적용: WAS 8.5.5/9.0 · 권한: wsadmin Monitor 이상(자격 증명은 soap.client.props 또는 프롬프트) · queryNames 결과 첫 번째 풀만 보므로 여러 풀이면 이름으로 좁힌다"
+  - stage: 2
+    steps:
+    - do: DB 복구 후 풀 정리 또는 연결 사용 코드 수정 배포
+      cmd: |
+        <PROFILE_ROOT>/bin/wsadmin.sh -lang jython -c "AdminControl.invoke(AdminControl.queryNames('type=J2CConnectionPool,process=<server>,*').splitlines()[0], 'purgePoolContents', 'normal')"
+      check: "성공: 정리 후 J2CA0028E·J2CA0058E 미발생, 새 연결 정상 · 실패: DB 정상인데 오류 반복 → 연결 핸들 사용 코드 수정(개발 담당) 또는 3차"
+      note: "사전조건: DB 정상 확인(1차 nc·DB 담당), XA 미완료 트랜잭션이 있으면 WSP-PROC-R5-UNDO 먼저 · 영향: normal 정리는 사용 중 연결은 반환 후 정리(immediate 는 사용 중 핸들 오류 유발 — 쓰지 않는다) · 승인: WAS 담당·DBA · 백업/롤백: 설정 변경 없음 — 정리는 되돌릴 대상이 없고 이상 시 서버 재기동 판단 · 적용: WAS 8.5.5/9.0"
+  - stage: 3
+    steps:
+    - do: IBM Support 자료 (MustGather — 연결 풀)
+      cmd: |
+        tar czf was_j2c_$(date +%Y%m%d).tgz <PROFILE_ROOT>/logs/<server>/ <PROFILE_ROOT>/logs/ffdc/ <PROFILE_ROOT>/config/cells/<cell>/resources.xml
+      check: "SystemOut·ffdc·resources.xml·JDBC 드라이버 판·DB 판"
+      note: "민감정보 마스킹: resources.xml 의 인증 별칭·DB URL 호스트, 로그의 SQL 바인드 값·사용자 ID 가림(security.xml 은 보내지 않음) · 전달 승인: 보안 담당 승인 후 IBM Support 에만"
+
+- id: WSP-PROC-R6-JMS
+  scope: id
+  products: [websphere]
+  category: connection
+  match: [JMSCC0033E]
+  title: IBM MQ 메시징 제공자 JMS 연결 실패 (MQRC 사유 코드, WebSphere)
+  source: "IBM WebSphere Application Server 8.5.5/9.0 Knowledge Center 'IBM MQ messaging provider connection factory' / IBM MQ 9.x 'Reason codes(2059 MQRC_Q_MGR_NOT_AVAILABLE·2035 MQRC_NOT_AUTHORIZED·2538 MQRC_HOST_NOT_AVAILABLE)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 문구와 MQ 사유 코드 확인 (읽기 전용, 스택 문맥째)
+      cmd: |
+        grep -n -A20 'JMSCC0033E' <PROFILE_ROOT>/logs/<server>/SystemOut.log | head -60
+        grep -o -E "reason code '[0-9]+'|MQRC_[A-Z_]+|AMQ[0-9]{4}[A-Z]?" <PROFILE_ROOT>/logs/<server>/SystemOut.log | sort | uniq -c | sort -rn | head
+      check: "2059·2538 이면 큐 관리자 미기동·리스너·네트워크, 2035 면 권한(채널 인증·CHLAUTH) — MQ 담당 이관, 2009 면 연결 끊김"
+      note: "적용: WAS 8.5.5/9.0 + IBM MQ 7.5~9.x · 권한: 로그 읽기"
+    - do: MQ 리스너 도달성 확인
+      cmd: |
+        nc -zvw3 <mq_host> <mq_port>
+      check: "실패면 큐 관리자·리스너 미기동 또는 방화벽 → MQ 담당(dspmq 로 상태 확인 요청)"
+      note: "적용: Linux · 권한: 일반 사용자"
+  - stage: 2
+    steps:
+    - do: MQ 측 조치 후 연결 팩토리 설정 교정·애플리케이션 재시작
+      cmd: |
+        <PROFILE_ROOT>/bin/backupConfig.sh /tmp/wasconfig_$(date +%Y%m%d%H%M).zip -nostop
+        <PROFILE_ROOT>/bin/wsadmin.sh -lang jython -c "print AdminConfig.list('MQConnectionFactory')"
+        <PROFILE_ROOT>/bin/wsadmin.sh -lang jython -c "AdminApplication.stopApplicationOnSingleServer('<app>','<node>','<server>'); AdminApplication.startApplicationOnSingleServer('<app>','<node>','<server>')"
+      check: "성공: 앱 재시작 후 JMSCC0033E 미발생·MDB 메시지 소비 재개 · 실패: 같은 사유 코드 → MQ 담당과 재확인, 팩토리 설정을 바꿨다면 backupConfig zip 으로 restoreConfig"
+      note: "사전조건: MQ 담당이 큐 관리자·채널·권한 정상 확인, 팩토리의 호스트·포트·채널·큐 관리자 이름이 MQ 설정과 같은지 대조 · 영향: 앱 재시작 동안 해당 업무 중단·메시지 처리 지연 · 승인: WAS 담당·MQ 담당·업무 담당 · 백업/롤백: 첫 줄 backupConfig, 이상 시 restoreConfig · 자격 증명은 soap.client.props 또는 프롬프트 · 적용: WAS 8.5.5/9.0"
+  - stage: 3
+    steps:
+    - do: IBM Support 자료 (MustGather — MQ 제공자)
+      cmd: |
+        tar czf was_mq_$(date +%Y%m%d).tgz <PROFILE_ROOT>/logs/<server>/ <PROFILE_ROOT>/logs/ffdc/ <PROFILE_ROOT>/config/cells/<cell>/resources.xml
+      check: "SystemOut·ffdc·연결 팩토리 설정·MQ 쪽 오류 로그(AMQERR01.LOG — MQ 담당 수집)·WAS/MQ 판"
+      note: "민감정보 마스킹: 메시지 본문·MQ 사용자 ID·호스트명·IP·채널 인증 정보 가림 · 전달 승인: 보안 담당 승인 후 IBM Support 에만"
+
+- id: WSP-PROC-R6-OUTBOUND
+  scope: id
+  products: [websphere]
+  category: connection
+  match: [WSWS3713E]
+  title: 웹서비스 호출 대상 연결 거부 (WebSphere JAX-RPC/JAX-WS 클라이언트)
+  source: "IBM WebSphere Application Server 8.5.5/9.0 Knowledge Center 'Web services client — endpoint URL·HTTP transport properties(proxy)' / 메시지 참조(WSWS3713E)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 대상 호스트·포트와 동반 예외 확인 (읽기 전용)
+      cmd: |
+        grep -n -A12 'WSWS3713E' <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -40
+      check: "Connection refused 면 대상 서비스 미기동·포트 오류, timeout 이면 방화벽·경로·프록시. 대상 주소가 바뀐 운영 주소인지 기록"
+      note: "적용: WAS 8.5.5/9.0 · 권한: 로그 읽기"
+    - do: 이름 해석·도달성·프록시 설정 확인
+      cmd: |
+        getent hosts <target_host>
+        nc -zvw3 <target_host> <target_port>
+        ps -ef | grep '[W]sServer' | grep -o -E 'https?\.proxy(Host|Port)=[^ ]+|https?\.nonProxyHosts=[^ ]+'
+      check: "이름 해석 실패면 DNS, nc 실패면 대상·방화벽, 프록시 지정이 있는데 대상이 nonProxyHosts 에 빠졌으면 프록시 경유 실패"
+      note: "적용: Linux · 권한: 일반 사용자"
+  - stage: 2
+    steps:
+    - do: 대상 담당 조치 또는 엔드포인트·프록시 설정 교정
+      cmd: |
+        <PROFILE_ROOT>/bin/backupConfig.sh /tmp/wasconfig_$(date +%Y%m%d%H%M).zip -nostop
+      config:
+        file: 관리 콘솔 '애플리케이션 › <app> › 웹 서비스 클라이언트 바인딩'(포트 정보 재정의 엔드포인트) 또는 앱 설정 파일 · JVM 사용자 정의 속성(http.proxyHost·http.nonProxyHosts)
+        snippet: |
+          # 재정의 엔드포인트 URL 을 현행 운영 주소로, 프록시 경유가 아니면 대상 호스트를 nonProxyHosts 에 추가
+        note: "사전조건: 대상 운영 주소 확인 · 영향: 앱 재시작 필요 · 승인: WAS 담당·연계 담당 · 백업/롤백: backupConfig zip 으로 restoreConfig"
+      check: "성공: 대상 복구 또는 엔드포인트 교정(관리 콘솔 '웹 서비스 클라이언트 바인딩'·앱 설정) 후 WSWS3713E 미발생 · 실패: 오류 지속 → backupConfig zip 으로 restoreConfig, 대상 담당과 재확인"
+      note: "사전조건: 대상 시스템 담당과 운영 주소·포트·방화벽 확인, 엔드포인트가 앱 내부 설정이면 개발 담당 · 영향: 바인딩 변경은 앱 재시작 필요 · 승인: WAS 담당·연계 담당·변경관리 · 백업/롤백: 첫 줄 backupConfig, 이상 시 restoreConfig · 적용: WAS 8.5.5/9.0"
+      verify_note: "미검증 — 웹 서비스 클라이언트 엔드포인트 재정의를 wsadmin 으로 하는 AdminApp 옵션을 확인하지 못해 관리 콘솔 경로로 안내함"
+  - stage: 3
+    steps:
+    - do: 연계 담당·IBM Support 자료
+      cmd: |
+        grep -n -A20 'WSWS37[0-9]{2}' <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -300 > was_ws_$(date +%Y%m%d).txt
+      check: "오류 문맥·대상 주소·프록시 설정·WAS 판"
+      note: "민감정보 마스킹: SOAP 본문·인증 헤더·호스트명·IP 가림 · 전달 승인: 보안 담당 승인 후 연계 담당·IBM Support 에만"
+
+- id: WSP-PROC-R6-J2C-XA
+  scope: id
+  products: [websphere]
+  category: internal
+  match: [J2CA0027E, DSRA0304E, J2CA0048E, J2CA0079E]
+  title: J2C·XA 리소스 내부 오류 — XA 메서드 예외·인바운드 RA 복구 설정 실패·ConnectionManager 오류 (WebSphere)
+  source: "IBM WebSphere Application Server 8.5.5/9.0 Knowledge Center 'Transaction service — XA recovery(tranlog)'·'Data source minimum required settings for XA' / 메시지 참조(J2CA0027E·DSRA0304E·J2CA0048E·J2CA0079E)"
+  stages:
+  - stage: 1
+    steps:
+    - do: XA 오류 코드·데이터소스·트랜잭션 확인 (읽기 전용, 스택 문맥째)
+      cmd: |
+        grep -n -B3 -A20 -E 'J2CA0027E|DSRA0304E|J2CA0048E|J2CA0079E' <PROFILE_ROOT>/logs/<server>/SystemOut.log | head -100
+        grep -o -E 'XAER_[A-Z]+|XA_RB[A-Z]+|XA_HEUR[A-Z]+' <PROFILE_ROOT>/logs/<server>/SystemOut.log | sort | uniq -c
+      check: "XAER_RMFAIL·RMERR 는 DB 연결·DB 측 XA 오류, XAER_NOTA 는 이미 끝난 트랜잭션(복구 중 흔함), XA_HEUR* 는 데이터 정합 확인 필요 → WSP-PROC-R5-UNDO. J2CA0048E 는 리소스 어댑터 이름·예외, J2CA0079E 는 IllegalStateException 상세 기록"
+      note: "적용: WAS 8.5.5/9.0 · 권한: 로그 읽기"
+    - do: 트랜잭션 로그·DB 도달성 확인
+      cmd: |
+        ls -l <PROFILE_ROOT>/tranlog/<cell>/<node>/<server>/transaction/tranlog/
+        nc -zvw3 <DB_HOST> <DB_PORT>
+      check: "tranlog 파일이 비정상적으로 크거나 DB 가 응답하지 않으면 복구 지연. DB 정상인데 XAER_RMERR 반복이면 DB 측 XA 권한·설정"
+      note: "적용: WAS 8.5.5/9.0(tranlog 기본 경로 — 사용자 지정 시 콘솔 '트랜잭션 서비스' 값) · 권한: 프로파일 읽기"
+  - stage: 2
+    steps:
+    - do: DB 측 XA 권한·설정 보완 후 복구 재시도(서버 재기동)
+      cmd: |
+        <PROFILE_ROOT>/bin/backupConfig.sh /tmp/wasconfig_$(date +%Y%m%d%H%M).zip -nostop
+        <PROFILE_ROOT>/bin/stopServer.sh <server> ; <PROFILE_ROOT>/bin/startServer.sh <server>
+      check: "성공: 기동 후 WTRN 복구 완료 메시지·XA 오류 미발생 · 실패: 같은 XAER 오류 → DBA 와 XA 권한(Oracle 은 DBA_PENDING_TRANSACTIONS 조회 등) 재확인, heuristic 결과면 WSP-PROC-R5-UNDO, 계속 실패면 3차"
+      note: "사전조건: DBA 가 XA 복구에 필요한 권한·DB 설정을 IBM 문서 기준으로 확인, tranlog 은 지우지 않는다(지우면 미완료 트랜잭션 데이터 정합 깨짐) · 영향: 재기동 동안 서비스 중단·복구 중 지연 · 승인: WAS 담당·DBA·변경관리 · 백업/롤백: 첫 줄 backupConfig·재기동 전 tranlog 디렉터리 tar 보관, 이상 시 restoreConfig · 자격 증명은 soap.client.props 또는 프롬프트 · 적용: WAS 8.5.5/9.0"
+      verify_note: "미검증 — DB 별 XA 복구 필수 권한 목록을 IBM 공식 문서 원문으로 대조하지 못함(DBA 확인 필요)"
+  - stage: 3
+    steps:
+    - do: IBM Support 자료 (MustGather — 트랜잭션)
+      cmd: |
+        tar czf was_xa_$(date +%Y%m%d).tgz <PROFILE_ROOT>/logs/<server>/ <PROFILE_ROOT>/logs/ffdc/ <PROFILE_ROOT>/config/cells/<cell>/resources.xml
+        <WAS_HOME>/bin/versionInfo.sh | head -20
+      check: "SystemOut·ffdc·resources.xml·tranlog 목록·JDBC 드라이버/DB 판"
+      note: "민감정보 마스킹: 인증 별칭·DB URL 호스트·트랜잭션 ID 와 연결된 업무 데이터·SQL 바인드 값 가림(tranlog 파일은 IBM 이 명시 요청하고 보안 승인 시에만) · 전달 승인: 보안 담당 승인 후 IBM Support 에만"
+
+- id: WSP-PROC-R6-NAMING
+  scope: id
+  products: [websphere]
+  category: internal
+  match: [CWNEN0030E]
+  title: 참조 객체(리소스 참조·EJB 참조) 인스턴스 획득 실패 (WebSphere 네이밍)
+  source: "IBM WebSphere Application Server 8.5.5/9.0 Knowledge Center 'Naming and directory — dumpNameSpace tool'·'Resource references(바인딩)' / 메시지 참조(CWNEN0030E)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 참조 이름과 원인 예외 확인 (읽기 전용, 스택 문맥째)
+      cmd: |
+        grep -n -A25 'CWNEN0030E' <PROFILE_ROOT>/logs/<server>/SystemOut.log | head -60
+      check: "참조 이름(java:comp/env/…)과 Caused by 기록. 대상 리소스 미정의·바인딩 누락이면 설정, 대상 DB·리소스 연결 오류면 그쪽 절차"
+      note: "적용: WAS 8.5.5/9.0 · 권한: 로그 읽기"
+    - do: 네임스페이스에 대상이 있는지 확인
+      cmd: |
+        <PROFILE_ROOT>/bin/dumpNameSpace.sh -host <host> -port <bootstrap_port> -report short | grep -n -i '<jndi 이름 일부>' | head
+        <PROFILE_ROOT>/bin/wsadmin.sh -lang jython -c "print AdminConfig.list('DataSource')"
+      check: "대상 JNDI 이름이 네임스페이스에 없으면 리소스 미정의·범위(셀/노드/서버) 불일치. 있는데 실패면 앱의 리소스 참조 바인딩이 다른 이름을 가리킴"
+      note: "적용: WAS 8.5.5/9.0 · 권한: 일반 사용자(dumpNameSpace)·wsadmin Monitor(자격 증명은 soap.client.props 또는 프롬프트)"
+  - stage: 2
+    steps:
+    - do: 리소스 정의 범위 교정 또는 앱 참조 바인딩 수정
+      cmd: |
+        <PROFILE_ROOT>/bin/backupConfig.sh /tmp/wasconfig_$(date +%Y%m%d%H%M).zip -nostop
+        <PROFILE_ROOT>/bin/wsadmin.sh -lang jython -c "print AdminApp.view('<app>', ['-MapResRefToEJB'])"
+      check: "성공: 관리 콘솔 '리소스 참조' 바인딩을 올바른 JNDI 이름으로 바꾸고 앱 재시작 후 CWNEN0030E 미발생 · 실패: 오류 지속·다른 참조 깨짐 → restoreConfig 로 원복"
+      note: "사전조건: 올바른 JNDI 이름·범위를 개발 담당과 확인 · 영향: 바인딩 변경은 앱 재시작 필요 · 승인: WAS 담당·애플리케이션 담당·변경관리 · 백업/롤백: 첫 줄 backupConfig, 이상 시 restoreConfig · 적용: WAS 8.5.5/9.0"
+  - stage: 3
+    steps:
+    - do: IBM Support 자료
+      cmd: |
+        <PROFILE_ROOT>/bin/dumpNameSpace.sh -host <host> -port <bootstrap_port> -report short > namespace_$(date +%Y%m%d).txt
+        tar czf was_naming_$(date +%Y%m%d).tgz <PROFILE_ROOT>/logs/<server>/ <PROFILE_ROOT>/logs/ffdc/ namespace_*.txt
+      check: "CWNEN0030E 문맥·네임스페이스 덤프·앱 바인딩 보기 결과"
+      note: "민감정보 마스킹: 호스트명·IP·셀/노드 이름(필요 시)·인증 별칭 가림 · 전달 승인: 보안 담당 승인 후 IBM Support 에만"
+
+- id: WSP-PROC-R6-APP
+  scope: id
+  products: [websphere]
+  category: internal
+  match: [SRVE0026E, SRVE0133E, SRVE8094W, WSWS3734W]
+  title: 애플리케이션 요청 처리 예외 — 서블릿 오류·매개변수 파싱·응답 커밋 후 헤더·웹서비스 디스패치 (WebSphere)
+  source: "IBM WebSphere Application Server 8.5.5/9.0 Knowledge Center 메시지 참조(SRVE0026E·SRVE0133E·SRVE8094W·WSWS3734W) / wsadmin AdminApp.update·AdminApplication"
+  stages:
+  - stage: 1
+    steps:
+    - do: 서블릿·근본 예외와 첫 업무 클래스 확인 (읽기 전용, 스택은 문맥째)
+      cmd: |
+        grep -n -A40 -E 'SRVE0026E|SRVE0133E|SRVE8094W|WSWS3734W' <PROFILE_ROOT>/logs/<server>/SystemOut.log | head -150
+        grep -c -E 'SRVE0026E|SRVE0133E|SRVE8094W|WSWS3734W' <PROFILE_ROOT>/logs/<server>/SystemOut.log
+      check: "Caused by 의 마지막 예외와 첫 업무 패키지 줄 기록 → 개발 담당. SRVE0133E 는 잘못된 인코딩·형식의 요청(공격·클라이언트 결함 구분), SRVE8094W 는 응답 출력 후 헤더 설정(앱 결함, 대개 기능 영향 적음)"
+      note: "적용: WAS 8.5.5/9.0 · 권한: 로그 읽기 · grep 으로 스택 줄을 버리지 않는다(head 로만 자름)"
+    - do: 배포 시각·앱 상태 확인
+      cmd: |
+        grep -n -E 'WSVR0221I|ADMA[0-9]{4}I' <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -10
+        ls -lt <PROFILE_ROOT>/logs/ffdc/ | head -5
+      check: "최근 앱 시작·갱신(ADMA·WSVR0221I) 직후부터면 배포 결함 → 롤백 후보"
+      note: "적용: WAS 8.5.5/9.0 · 권한: 로그 읽기"
+  - stage: 2
+    steps:
+    - do: 수정본 갱신 또는 직전 정상본 롤백
+      cmd: |
+        <PROFILE_ROOT>/bin/backupConfig.sh /tmp/wasconfig_$(date +%Y%m%d%H%M).zip -nostop
+        <PROFILE_ROOT>/bin/wsadmin.sh -lang jython -c "AdminApp.update('<app>','app',['-operation','update','-contents','<수정본경로>/<app>.ear']); AdminConfig.save()"
+      check: "성공: 앱 Started·같은 예외 미발생 · 실패: 오류 반복·기동 실패 → 직전 ear 로 같은 AdminApp.update(롤백) 후 개발 담당 이관"
+      note: "사전조건: 개발 담당 수정본·검증계 확인, 직전 정상 ear 보관 · 영향: 갱신 중 해당 앱 재시작·세션 소실 · 승인: 애플리케이션 담당·WAS 담당·변경관리 · 백업/롤백: 첫 줄 backupConfig·직전 ear, 이상 시 직전 ear 로 update · 자격 증명은 soap.client.props 또는 프롬프트 · 적용: WAS 8.5.5/9.0(ND 는 노드 동기화 필요)"
+  - stage: 3
+    steps:
+    - do: 개발 담당·IBM Support 자료
+      cmd: |
+        grep -n -A40 -E 'SRVE0026E|SRVE0133E|SRVE8094W|WSWS3734W' <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -600 > was_app_$(date +%Y%m%d).txt
+        tar czf was_app_ffdc_$(date +%Y%m%d).tgz <PROFILE_ROOT>/logs/ffdc/
+      check: "예외 문맥·ffdc·앱 판·WAS 판"
+      note: "민감정보 마스킹: 요청 파라미터·세션 ID·사용자 ID·SOAP 본문·호스트명·IP 가림 · 전달 승인: 보안 담당 승인 후 개발 담당·IBM Support 에만"
+
+- id: WSP-PROC-R6-ROUTING
+  scope: id
+  products: [websphere]
+  category: internal
+  match: [SRVE0190E, SRVE0255E]
+  title: 요청 경로·가상 호스트 매핑 오류 — 파일 없음(404)·정의되지 않은 웹그룹/가상 호스트 (WebSphere)
+  source: "IBM WebSphere Application Server 8.5.5/9.0 Knowledge Center 'Virtual hosts(host alias)'·'Web server plug-in configuration(plugin-cfg.xml 생성·전파)' / 메시지 참조(SRVE0190E·SRVE0255E)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 요청 호스트:포트·URI 확인 (읽기 전용)
+      cmd: |
+        grep -n -E 'SRVE0190E|SRVE0255E' <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -20
+        grep -o -E 'SRVE0190E: [^ ]+ [^ ]+' <PROFILE_ROOT>/logs/<server>/SystemOut.log | sort | uniq -c | sort -rn | head
+      check: "SRVE0190E 가 특정 파일만 반복이면 링크·배포 누락(앱), 무작위 경로 다수면 스캐너. SRVE0255E 는 요청의 host:port 가 가상 호스트 별칭에 없거나 컨텍스트 루트 불일치"
+      note: "적용: WAS 8.5.5/9.0 · 권한: 로그 읽기"
+    - do: 가상 호스트 별칭·앱 매핑 확인
+      cmd: |
+        <PROFILE_ROOT>/bin/wsadmin.sh -lang jython -c "for vh in AdminConfig.list('VirtualHost').splitlines(): print vh, AdminConfig.showAttribute(vh,'aliases')"
+        <PROFILE_ROOT>/bin/wsadmin.sh -lang jython -c "print AdminApp.view('<app>', ['-MapWebModToVH'])"
+      check: "요청 host:port 조합(예: *:443 앞단 포트)이 앱이 매핑된 가상 호스트 별칭에 없으면 SRVE0255E 원인 확정"
+      note: "적용: WAS 8.5.5/9.0 · 권한: wsadmin Monitor(자격 증명은 soap.client.props 또는 프롬프트)"
+  - stage: 2
+    steps:
+    - do: 가상 호스트 별칭 추가 후 플러그인 구성 재생성·전파
+      cmd: |
+        <PROFILE_ROOT>/bin/backupConfig.sh /tmp/wasconfig_$(date +%Y%m%d%H%M).zip -nostop
+        <PROFILE_ROOT>/bin/wsadmin.sh -lang jython -c "vh=AdminConfig.getid('/VirtualHost:<vhost>/'); AdminConfig.create('HostAlias', vh, [['hostname','<host 또는 *>'],['port','<port>']]); AdminConfig.save()"
+      check: "성공: 플러그인 재생성·전파(관리 콘솔 웹 서버) 후 SRVE0255E 미발생·정상 응답 · 실패: 다른 앱 라우팅 이상 → restoreConfig 로 원복"
+      note: "사전조건: 추가할 host:port 가 정상 업무 경로인지 확인(스캐너 요청이면 추가하지 않고 앞단 차단), SRVE0190E 단건 파일 누락은 개발 담당 배포 조치 · 영향: 별칭 반영에 앱 또는 서버 재시작이 필요할 수 있음, 플러그인 전파 시 웹서버 설정 갱신 · 승인: WAS 담당·웹서버 담당·변경관리 · 백업/롤백: 첫 줄 backupConfig, 이상 시 restoreConfig · 적용: WAS 8.5.5/9.0"
+      verify_note: "미검증 — 가상 호스트 별칭 변경이 서버 재시작 없이 반영되는 범위를 판별 IBM 문서에서 확인하지 못함"
+  - stage: 3
+    steps:
+    - do: IBM Support 자료
+      cmd: |
+        grep -n -E 'SRVE0190E|SRVE0255E' <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -300 > was_routing_$(date +%Y%m%d).txt
+        tar czf was_routing_$(date +%Y%m%d).tgz was_routing_*.txt <PROFILE_ROOT>/config/cells/<cell>/virtualhosts.xml
+      check: "오류 목록·virtualhosts.xml·plugin-cfg.xml·WAS 판"
+      note: "민감정보 마스킹: 요청 URI 파라미터·클라이언트 IP·호스트명 가림 · 전달 승인: 보안 담당 승인 후 IBM Support 에만"
+
+- id: WSP-PROC-R6-INFO
+  scope: id
+  products: [websphere]
+  category: internal
+  match: [WSVR0001I, WSVR0623W, CWSJY0003W]
+  title: 기동 완료·구성 경고·MQ 제공자 경고 통지 — 계획 작업·영향 여부 확인 (WebSphere)
+  source: "IBM WebSphere Application Server 8.5.5/9.0 Knowledge Center 메시지 참조(WSVR0001I·WSVR0623W·CWSJY0003W) / IBM MQ 'browse-with-mark(MARKINT)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 기동 시각·경고 내용 확인 (읽기 전용)
+      cmd: |
+        grep -n -E 'WSVR0001I|WSVR0024I|WSVR0623W|CWSJY0003W' <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -20
+        <PROFILE_ROOT>/bin/serverStatus.sh <server>
+      check: "WSVR0001I 가 계획 기동 시각이면 정상. 예고 없는 기동이면 직전 종료 원인(WSVR0024I 정상 종료 유무·hs_err·javacore) 확인. WSVR0623W 는 서비스 영향 없는 구성 경고. CWSJY0003W 는 업무 메시지 누락이 없으면 경고성"
+      note: "적용: WAS 8.5.5/9.0 · 권한: 로그 읽기·serverStatus(자격 증명은 soap.client.props 또는 프롬프트)"
+    - do: 경고의 출처 설정 확인
+      cmd: |
+        grep -n 'clearThreadLocal' <PROFILE_ROOT>/config/cells/<cell>/nodes/<node>/servers/<server>/server.xml
+        ls -lt <PROFILE_ROOT>/javacore.*.txt <PROFILE_ROOT>/hs_err_pid*.log 2>/dev/null | head -3
+      check: "WSVR0623W 의 사용자 정의 속성 위치 기록. 예고 없는 재기동인데 javacore·hs_err 가 있으면 비정상 종료 → WASC-PROC-R5-INTERNAL"
+      note: "적용: WAS 8.5.5/9.0 · 권한: 프로파일 읽기"
+  - stage: 2
+    steps:
+    - do: 폐지 예정 속성 정리 또는 MQ 측 조치 (영향이 확인된 경우만)
+      cmd: |
+        <PROFILE_ROOT>/bin/backupConfig.sh /tmp/wasconfig_$(date +%Y%m%d%H%M).zip -nostop
+      check: "성공: 관리 콘솔에서 해당 사용자 정의 속성을 제거·재기동 후 WSVR0623W 미발생·앱 정상, CWSJY0003W 는 MQ 담당 조치 후 메시지 누락 없음 · 실패: 앱 동작 이상 → restoreConfig 로 원복"
+      note: "사전조건: 속성을 넣은 이유(앱 호환성)를 애플리케이션 담당과 확인, CWSJY0003W 는 MQ 담당이 큐 관리자 MARKINT 등 설정 검토 · 영향: 속성 변경은 서버 재기동 필요 · 승인: WAS 담당·애플리케이션 담당(MQ 는 MQ 담당) · 백업/롤백: 첫 줄 backupConfig, 이상 시 restoreConfig · 적용: WAS 8.5.5/9.0"
+      verify_note: "미검증 — CWSJY0003W 에 대한 IBM 권고 조치(MARKINT 조정 등)를 IBM MQ 원문에서 확인하지 못함"
+  - stage: 3
+    steps:
+    - do: IBM Support 자료
+      cmd: |
+        tar czf was_info_$(date +%Y%m%d).tgz <PROFILE_ROOT>/logs/<server>/SystemOut.log <PROFILE_ROOT>/logs/<server>/SystemErr.log
+        <WAS_HOME>/bin/versionInfo.sh | head -20
+      check: "기동·종료 흐름·경고 문구·WAS 판"
+      note: "민감정보 마스킹: 호스트명·IP·사용자 ID 가림 · 전달 승인: 보안 담당 승인 후 IBM Support 에만"
+
+- id: WSP-PROC-R6-AUTH
+  scope: id
+  products: [websphere]
+  category: security
+  match: [SECJ0056E, JSAS0240I]
+  title: 사용자 인증 실패·CSIv2 인증 실패 — 사용자 레지스트리·LTPA 연동 (WebSphere)
+  source: "IBM WebSphere Application Server 8.5.5/9.0 Knowledge Center 'User registries(LDAP)'·'LTPA keys'·'CSIv2 inbound authentication' / wsadmin AdminTask.getActiveSecuritySettings / 메시지 참조(SECJ0056E·JSAS0240E)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 실패 사유·대상·빈도 확인 (읽기 전용)
+      cmd: |
+        grep -n -A5 -E 'SECJ0056E|JSAS0240' <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -40
+        grep -c -E 'SECJ0056E|JSAS0240' <PROFILE_ROOT>/logs/<server>/SystemOut.log
+      check: "같은 사용자 반복은 비밀번호 오류·잠금, 다수 사용자 동시 실패는 레지스트리(LDAP) 장애, JSAS0240 이 서버 간 호출에서 반복이면 LTPA 키 불일치·만료. 외부 IP 대량 시도는 보안 담당 통보"
+      note: "적용: WAS 8.5.5/9.0 · 권한: 로그 읽기 · 공유 시 사용자 ID 가림"
+    - do: 활성 레지스트리 종류·LDAP 도달성 확인
+      cmd: |
+        <PROFILE_ROOT>/bin/wsadmin.sh -lang jython -c "print AdminTask.getActiveSecuritySettings()"
+        nc -zvw3 <ldap_host> <ldap_port>
+      check: "레지스트리가 LDAP 인데 포트 실패면 LDAP 장애·방화벽 → LDAP 담당. 정상이면 계정·LTPA 쪽"
+      note: "적용: WAS 8.5.5/9.0 · 권한: wsadmin 관리자 또는 보안 관련 역할(자격 증명은 soap.client.props 또는 프롬프트)"
+  - stage: 2
+    steps:
+    - do: LDAP 연동 정보 교정 또는 LTPA 키 동기화
+      cmd: |
+        <PROFILE_ROOT>/bin/backupConfig.sh /tmp/wasconfig_$(date +%Y%m%d%H%M).zip -nostop
+      check: "성공: 관리 콘솔 '전역 보안 › 사용자 레지스트리' 의 LDAP 호스트·바인드 정보 교정 또는 셀 간 LTPA 키 교환·노드 동기화 후 SECJ0056E·JSAS0240 미발생 · 실패: 관리 콘솔 로그인 불가 등 → restoreConfig 로 원복(보안 비활성화는 최후 수단·보안 담당 승인)"
+      note: "사전조건: LDAP 담당과 주소·바인드 계정 확인(바인드 비밀번호는 콘솔에서 보안 담당이 입력 — 명령줄 금지), LTPA 키 파일은 보안 담당 보관 · 영향: 레지스트리 변경은 재기동 필요·잘못 설정 시 전 사용자 로그인 불가 · 승인: 보안 담당·WAS 담당·변경관리 · 백업/롤백: 첫 줄 backupConfig, 이상 시 restoreConfig · 적용: WAS 8.5.5/9.0"
+  - stage: 3
+    steps:
+    - do: IBM Support 자료 (MustGather — 보안)
+      cmd: |
+        tar czf was_auth_$(date +%Y%m%d).tgz <PROFILE_ROOT>/logs/<server>/ <PROFILE_ROOT>/logs/ffdc/
+        <WAS_HOME>/bin/versionInfo.sh | head -20
+      check: "인증 실패 문맥·ffdc·레지스트리 종류·WAS 판(security.xml·LTPA 키는 IBM 이 명시 요청하고 보안 승인 시에만)"
+      note: "민감정보 마스킹: 사용자 ID·바인드 DN·LTPA 토큰·출처 IP·호스트명 가림 · 전달 승인: 보안 담당 승인 후 IBM Support 에만"
+

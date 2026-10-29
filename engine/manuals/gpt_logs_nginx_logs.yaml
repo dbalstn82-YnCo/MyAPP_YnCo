@@ -1,0 +1,95 @@
+product: nginx
+layer: web
+title: nginx 로그 종류 카탈로그 (GPT 수집 — 벤더 문서 대조 필요)
+source: GPT 수집(벤더 문서 대조 필요)
+sources: []
+logtypes:
+- name: Access 로그
+  path: prefix/logs/access.log 기본 또는 access_log 지정
+  format: Combined·dd/MMM/yyyy:HH:mm:ss Z
+  check: 4xx·5xx·URI·client·referer·user-agent·bytes
+  sample: 127.0.0.1 - - [09/Sep/2026:12:00:00 +0900] "GET / HTTP/1.1" 200 1234 "-" "curl"
+- name: Error 로그
+  path: prefix/logs/error.log 기본 또는 error_log 지정
+  format: 텍스트·YYYY/MM/DD HH:mm:ss
+  check: '[emerg]·[alert]·[crit]·[error]·upstream·socket·SSL 오류'
+  sample: '2026/09/09 12:00:00 [error] 1234#1234: *1 connect() failed (111: Connection refused)'
+- name: JSON Error 로그
+  path: error_log <file> <level> json 지원 버전
+  format: JSON·ISO-8601 YYYY-MM-DDTHH:mm:ss.SSS±HH:mm
+  check: msg·errno·client·server·request·upstream 구조화 분석
+  sample: '{"level":"error","timestamp":"2026-05-13T10:30:15.042+00:00","msg":"connect() failed","errno":111}'
+- name: Debug 로그
+  path: error_log 지정 파일 또는 memory:<size>
+  format: 텍스트/JSON·error_log timestamp
+  check: event loop·socket·HTTP processing·selected debug_connection
+  sample: '2026/09/09 12:00:00 [debug] 1234#1234: *1 http process request line'
+- name: Rewrite 로그
+  path: error_log와 동일·rewrite_log on
+  format: error_log notice·YYYY/MM/DD HH:mm:ss
+  check: rewrite regex·URI 변경·internal redirect 분석
+  sample: '2026/09/09 12:00:00 [notice] 1234#1234: *1 "^/old/(.*)" matches "/old/a"'
+- name: Upstream 진단 Access
+  path: access_log 지정 경로·custom log_format
+  format: 텍스트/JSON custom·$time_local/$time_iso8601
+  check: $upstream_addr·status·connect/header/response/queue time
+  sample: 127.0.0.1 ... upstream=10.0.0.2:8080 status=502 rt=0.003
+- name: SSL 오류 로그
+  path: error_log와 동일
+  format: 텍스트/JSON·error_log timestamp
+  check: SSL_do_handshake·certificate verify·no shared cipher·495/496/497
+  sample: '2026/09/09 12:00:00 [error] 1234#1234: *1 SSL_do_handshake() failed ...'
+- name: SSL Key 로그
+  path: ssl_key_log <path> 지정·상용 구독 기능
+  format: SSLKEYLOGFILE·연결 secret 레코드
+  check: TLS 패킷 분석 전용·운영 상시 사용 주의
+  sample: CLIENT_HANDSHAKE_TRAFFIC_SECRET <client_random> <secret>
+- name: Syslog Access
+  path: access_log syslog:server=<addr>,...
+  format: RFC3164 syslog·syslog timestamp
+  check: 중앙 access 분석·상태코드·요청·트래픽
+  sample: '<PRI>Sep 9 12:00:00 host nginx: 127.0.0.1 - - ...'
+- name: Syslog Error
+  path: error_log syslog:server=<addr> <level>
+  format: RFC3164 syslog·syslog timestamp
+  check: emerg·alert·crit·error 중앙 장애 상관분석
+  sample: '<PRI>Sep 9 12:00:00 host nginx: connect() failed ...'
+- name: Not Found 오류 로그
+  path: error_log와 동일·log_not_found on 기본
+  format: error_log 형식·YYYY/MM/DD HH:mm:ss
+  check: 정적파일 404·잘못된 root/alias·권한/배포 누락
+  sample: '2026/09/09 12:00:00 [error] ... open() ".../file" failed (2: No such file or directory)'
+sections:
+- heading: 로그 종류 카탈로그 (전수)
+  body: 'Access 로그: prefix/logs/access.log 기본 또는 access_log 지정 · Error 로그: prefix/logs/error.log 기본 또는 error_log 지정 · JSON Error 로그: error_log <file> <level> json 지원 버전 · Debug 로그: error_log 지정 파일 또는 memory:<size>
+    · Rewrite 로그: error_log와 동일·rewrite_log on · Upstream 진단 Access: access_log 지정 경로·custom log_format · SSL 오류 로그: error_log와 동일 · SSL Key 로그: ssl_key_log <path> 지정·상용 구독 기능 · Syslog Access: access_log
+    syslog:server=<addr>,... · Syslog Error: error_log syslog:server=<addr> <level> · Not Found 오류 로그: error_log와 동일·log_not_found on 기본'
+- heading: '로그: Access 로그'
+  body: 경로 prefix/logs/access.log 기본 또는 access_log 지정 / 형식 Combined·dd/MMM/yyyy:HH:mm:ss Z / 확인 4xx·5xx·URI·client·referer·user-agent·bytes / 샘플 127.0.0.1 - - [09/Sep/2026:12:00:00 +0900] "GET / HTTP/1.1"
+    200 1234 "-" "curl"
+- heading: '로그: Error 로그'
+  body: '경로 prefix/logs/error.log 기본 또는 error_log 지정 / 형식 텍스트·YYYY/MM/DD HH:mm:ss / 확인 [emerg]·[alert]·[crit]·[error]·upstream·socket·SSL 오류 / 샘플 2026/09/09 12:00:00 [error] 1234#1234: *1 connect() failed
+    (111: Connection refused)'
+- heading: '로그: JSON Error 로그'
+  body: 경로 error_log <file> <level> json 지원 버전 / 형식 JSON·ISO-8601 YYYY-MM-DDTHH:mm:ss.SSS±HH:mm / 확인 msg·errno·client·server·request·upstream 구조화 분석 / 샘플 {"level":"error","timestamp":"2026-05-13T10:30:15.042+00:00","msg":"connect()
+    failed","errno":111}
+- heading: '로그: Debug 로그'
+  body: '경로 error_log 지정 파일 또는 memory:<size> / 형식 텍스트/JSON·error_log timestamp / 확인 event loop·socket·HTTP processing·selected debug_connection / 샘플 2026/09/09 12:00:00 [debug] 1234#1234: *1 http process
+    request line'
+- heading: '로그: Rewrite 로그'
+  body: '경로 error_log와 동일·rewrite_log on / 형식 error_log notice·YYYY/MM/DD HH:mm:ss / 확인 rewrite regex·URI 변경·internal redirect 분석 / 샘플 2026/09/09 12:00:00 [notice] 1234#1234: *1 "^/old/(.*)" matches "/old/a"'
+- heading: '로그: Upstream 진단 Access'
+  body: 경로 access_log 지정 경로·custom log_format / 형식 텍스트/JSON custom·$time_local/$time_iso8601 / 확인 $upstream_addr·status·connect/header/response/queue time / 샘플 127.0.0.1 ... upstream=10.0.0.2:8080 status=502
+    rt=0.003
+- heading: '로그: SSL 오류 로그'
+  body: '경로 error_log와 동일 / 형식 텍스트/JSON·error_log timestamp / 확인 SSL_do_handshake·certificate verify·no shared cipher·495/496/497 / 샘플 2026/09/09 12:00:00 [error] 1234#1234: *1 SSL_do_handshake() failed
+    ...'
+- heading: '로그: SSL Key 로그'
+  body: 경로 ssl_key_log <path> 지정·상용 구독 기능 / 형식 SSLKEYLOGFILE·연결 secret 레코드 / 확인 TLS 패킷 분석 전용·운영 상시 사용 주의 / 샘플 CLIENT_HANDSHAKE_TRAFFIC_SECRET <client_random> <secret>
+- heading: '로그: Syslog Access'
+  body: '경로 access_log syslog:server=<addr>,... / 형식 RFC3164 syslog·syslog timestamp / 확인 중앙 access 분석·상태코드·요청·트래픽 / 샘플 <PRI>Sep 9 12:00:00 host nginx: 127.0.0.1 - - ...'
+- heading: '로그: Syslog Error'
+  body: '경로 error_log syslog:server=<addr> <level> / 형식 RFC3164 syslog·syslog timestamp / 확인 emerg·alert·crit·error 중앙 장애 상관분석 / 샘플 <PRI>Sep 9 12:00:00 host nginx: connect() failed ...'
+- heading: '로그: Not Found 오류 로그'
+  body: '경로 error_log와 동일·log_not_found on 기본 / 형식 error_log 형식·YYYY/MM/DD HH:mm:ss / 확인 정적파일 404·잘못된 root/alias·권한/배포 누락 / 샘플 2026/09/09 12:00:00 [error] ... open() ".../file" failed (2: No such file or
+    directory)'

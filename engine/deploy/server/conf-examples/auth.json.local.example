@@ -1,0 +1,27 @@
+{
+  "_설명": "사내 이메일 계정 로그인. 이 파일을 <설치경로>/conf/auth.json 으로 복사하고 서비스를 다시 시작합니다. 계정은 관리 명령 또는 [사용자 · 권한] 화면에서 만듭니다.",
+  "mode": "local",
+  "session_idle_min": 60,
+  "session_max_hours": 12,
+  "require_https": "auto",
+  "first_admin": "",
+  "_first_admin": "비워 두면(기본) 1회용 코드로 [관리자 계정 만들기] 화면을 연 사람이 ID 를 직접 적어 첫 관리자를 만듭니다. 특정 ID 로 못 박으려면 그 ID 를 적으십시오(그때는 비밀번호만 정함)",
+  "setup_scope": "private",
+  "_setup_scope": "첫 계정을 만들 수 있는 자리. private(기본)=이 서버·사내망·VPN, loopback=이 서버에서만, token=언제나 1회용 초기 설정 코드 필요(코드는 기동 로그와 conf/setup-code.txt)",
+  "_require_https": "true(기본): 127.0.0.1 직접 접속 또는 같은 서버 nginx(TLS)가 X-Forwarded-Proto=https 를 붙인 요청만 허용. TLS 앞단이 없는 Windows 설치형 서버 모드는 false 로 두고 사내망 구간 보호를 따로 확인",
+  "local": {
+    "domain": "solideos.com",
+    "_domain": "이 도메인 이메일만 ID 로 쓸 수 있습니다. 다른 도메인은 등록·로그인 모두 거부합니다",
+    "min_length": 10,
+    "classes": 3,
+    "_classes": "영문 대문자·소문자·숫자·기호 중 최소 몇 종류를 섞을지(2~4)",
+    "history": 5,
+    "expire_days": 90,
+    "_expire_days": "0 이면 사용 기간 제한 없음",
+    "max_fails": 5,
+    "lock_minutes": 10,
+    "scrypt_n": 14,
+    "_scrypt_n": "비밀번호 해시 세기(2의 거듭제곱). 14=16,384(약 16MB). 서버 성능이 넉넉하면 15~16 권장"
+  },
+  "_HTTPS": "auto: 사내망·VPN·같은 PC 는 평문(HTTP)도 허용하고 인터넷 구간은 HTTPS 로만 받습니다. 인터넷에 직접 노출한다면 conf/tls.json 으로 인증서를 달고 true 로 고정하십시오."
+}

@@ -1,0 +1,108 @@
+# 7차 연결 감사(2026-10-16) — WAS 묶음 C(Tomcat·JEUS·JBoss EAP·WebLogic·WebSphere) '이 판정 전용'인데 판정 제목 핵심어가 절차에 없던 57건 검토 결과
+# (a) fit_reviewed: 핵심어는 없지만 1차가 그 판정을 실제로 진단한다(이유는 reviewed) · (b) primary: 더 맞는 기존 절차로 1순위 지정
+# (c) 새 전용 절차는 r7_was_procedures.yaml(scope: id 로 이름 붙인 판정에 자동 우선) — 여기에는 적지 않는다.
+links:
+# ---------- (a) 맞음 — JEUS ----------
+- procedure: JEUS-PROC-MEMORY
+  match: [JEUS-GC-OVERHEAD]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — 제목 'GC overhead' 가 영문이라 핵심어 0 으로 걸림. 1차 jstat -gcutil 의 O·FGC 지속 증가와 JeusServer.log 'GC overhead' grep 이 GC 오버헤드 초과를 그대로 확정하고 2차 힙 덤프·-Xmx 조정이 맞음"
+- procedure: JEUS-PROC-INTERNAL
+  match: [JEUS-DAS-CONNECT-FAIL]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — DAS 접속 실패는 MS 의 JeusLauncher.log 에 남고(1차 tail 200), 1차 확인 기준의 LAUNCHER-0052(MASTER 설정 수신 실패)·9736 포트 확인과 2차 1단계 'MASTER(DAS) 통신 실패 시 MASTER 기동·INDEPENDENT 기동'이 이 판정의 조치와 같음"
+- procedure: JEUS-PROC-R5-DISK
+  match: [JEUS-LOG-WRITE-FAIL]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — 로그 쓰기 실패의 주원인인 <SERVER_HOME>/logs 공간·inode 를 1차 df -h/-i·du 로 확정하고 2차 회전 로그 압축·이동·로거 회전 설정으로 조치(권한 원인은 판정 1차 줄의 ls -ld 로 보완)"
+- procedure: JEUS-PROC-CONNECTION
+  match: [CPOOL-0034, JDBC-0395]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — 'DB풀' 표기 차이로 핵심어 0. 1차 connection-pool-info 의 active·최대값·대기와 스레드 덤프의 getConnection 대기가 풀 사용률 과다·연결 전부 활성을 직접 확정하고 2차 풀 크기·누수 조치와 일치"
+# ---------- (a) 맞음 — Tomcat ----------
+- procedure: TOMCAT-PROC-R5-DISK
+  match: [TOMCAT-LOG-WRITE-FAIL]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — 로그 쓰기 실패를 1차 logs·temp·work df -h/-i, 큰 파일·디렉터리 소유자 대 실행 계정(ls -ld·ps -o user), AccessLogValve 경로로 공간·권한·경로 원인을 모두 가르고 2차 압축·이동·catalina.out 비우기·chown 으로 조치"
+- procedure: TOMCAT-PROC-MEMORY
+  match: [TOMCAT-GC-OVERHEAD]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — 제목 'GC 과부하'와 절차의 'GC overhead' 표기 차이. 1차 jstat -gcutil·catalina.out 'GC overhead' grep 이 GC 과부하를 확정하고 2차 힙 덤프·-Xmx·GC 설정 조정이 맞음"
+- procedure: TOMCAT-PROC-R5-CAPACITY
+  match: [TOMCAT-ACCEPT-FAILED]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — 소켓 수락 실패의 주원인 Too many open files 를 1차 로그 구분 grep·/proc/<PID>/fd 수 대 한도·ss -tan 상태로 확인하고 2차 nofile 상향으로 조치(대기열 포화는 판정 1차 줄의 ss -ltn Recv-Q 로 보완)"
+# ---------- (a) 맞음 — JBoss EAP ----------
+- procedure: EAP-PROC-INTERNAL
+  match: [WFLYCTL0013, WFLYCTL0186, WFLYSRV0055, WFLYSRV0011, WFLYCTL0190]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — 관리 작업 실행 실패(WFLYCTL0013 은 1차 grep 에 직접)·서비스 시작 실패·부팅 중 예외·재배포 롤백·롤백 단계 핸들러 실패는 모두 1차 ERROR/Failed to start grep·read-boot-errors·server-state(reload/restart-required)·deployment-info(FAILED)로 원인 줄과 상태를 확정하고 2차 재배포/롤백·재기동·standalone_xml_history 복원과 일치"
+- procedure: EAP-PROC-UNDO
+  match: [ARJUNA016037, ARJUNA016087]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — 복구용 XAResource 탐색 실패(ARJUNA016037 은 1차 grep 에 직접)·알 수 없는 XA 리소스를 1차 transactions read-resource(node-identifier 포함)·log-store probe·미완료 트랜잭션 목록으로 확인하고 2차 DBA 협의 후 log-store 정리·node-identifier 교정 경로와 일치"
+# ---------- (a) 맞음 — WebLogic ----------
+- procedure: WLS-PROC-CONNECTION
+  match: [BEA-001131, BEA-001156, BEA-001234, BEA-001112]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — 모두 JDBC 하위시스템(BEA-0011xx) 메시지. 캐시 문장 닫기 실패·관련 메시지 스택추적·풀 대기 시간 초과·DB풀 연결검사 실패를 1차 WLST 데이터소스 런타임(State·Waiting·Failed·Leaked)과 nc DB 도달성으로 판정하고 2차 용량·Reserve Timeout·Test Connections On Reserve·statement-cache-size·reset 으로 조치(BEA-001234 는 코드 사전의 미검증 표시 유지)"
+- procedure: WLS-PROC-R5-CAPACITY
+  match: [BEA-002616, BEA-000205]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — 채널 리슨 실패(BEA-002616 은 1차 grep 에 직접)와 그 뒤의 포트 리슨 복구를 1차 accept 실패 grep·FD 사용량 대 한도·ss -s 로 확인하고 2차 nofile·Accept Backlog 상향과 일치"
+- procedure: WLS-PROC-R6-SOCKET
+  match: [BEA-002637]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — 1차 grep 이 BEA-002637 을 직접 포함하고 확인 기준에 '기동 중 1회면 정상'이 있어 연결해제 리스너 등록 실패의 판단(기동 직후 1회성 vs 운영 중 반복)을 그대로 한다"
+- procedure: WLS-PROC-INTERNAL
+  match: [BEA-149205]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — 1차 grep 이 BEA-149205 를 직접 포함하고 확인 기준이 'BEA-149205 의 원인 예외' 기록이며 2차 weblogic.Deployer 재배포·직전 정상본 롤백이 애플리케이션 초기화 실패 조치와 같음"
+- procedure: WLS-PROC-R5-UPSTREAM
+  match: [BEA-170011]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — 1차 grep 이 BEA-170011 을 직접 포함하고 nc 관리 서버 포트·WLST state 로 관리서버 로그 전송 실패 원인(관리 서버 비가동)을 확정, 2차 Node Manager 로 관리 서버 기동과 일치"
+# ---------- (a) 맞음 — WebSphere ----------
+- procedure: WSP-PROC-R6-INFO
+  match: [WSVR0623W]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — 1차 grep 이 WSVR0623W 를 직접 포함하고 server.xml 의 clearThreadLocal 사용 위치를 확인해 deprecated ThreadLocal 옵션 적용 경고의 출처를 그대로 찾음"
+- procedure: WAS-PROC-SECURITY
+  match: [CWPKI0033E]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — 1차 grep 의 'CWPKI00' 이 CWPKI0033E 를 포함하고 listPersonalCertificates 가 해당 키스토어를 실제로 열어 키스토어 생성·로드 실패 여부를 확인, 2차 키스토어·인증서 교체/복원과 일치"
+- procedure: WAS-PROC-INTERNAL
+  match: [ADMU0111E, WSVR0194E, WSVR0501E]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — 관리 도구 오류로 종료는 1차 startServer.log tail·serverStatus -all 로 뒤따르는 ADMU 예외를, 구성단위 시작 실패(WSVR0194E 는 1차 grep 에 직접)·컴포넌트 생성 오류는 ffdc·startServer.log 로 확인하고 2차 재기동·앱 재시작/롤백·restoreConfig 로 조치"
+# ---------- (b) 더 맞는 기존 절차 ----------
+- procedure: TOMCAT-PROC-R6-CLIENT-IO
+  match: [TOMCAT-INVALID-CHARACTER]
+  primary: true
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — 기존 TOMCAT-PROC-SECURITY 는 1차가 keytool 인증서·2차가 SSL/AJP 설정이라 요청 URI 잘못된 문자와 무관. CLIENT-IO 는 1차가 'Invalid character found' 문맥과 HTTPS→HTTP 포트·스캐너 판단(첫 건만 INFO 기록)을, 2차가 잘못된 요청 출처 차단·교정을 다룬다"
+- procedure: EAP-PROC-R6-DEPENDENCY
+  match: [WFLYCTL0180]
+  primary: true
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — 서비스 의존성 누락은 누락 서비스 이름(jboss.naming…·data-source)을 찾고 데이터소스·JNDI 정의를 확인해야 한다. DEPENDENCY 1차가 WFLYCTL0180 문맥 grep·read-boot-errors·data-source 목록·jndi-view 를 하고 2차가 누락 데이터소스 정의·배포 롤백"
+- procedure: WASC-PROC-R5-CAPACITY
+  match: [WFLYSRV0071]
+  primary: true
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — 파일 한도 부족(OS 가 open files 를 4096 미만으로 제한)은 기동·배포 실패 절차가 아니라 열린 파일 한도 절차가 맞다. WASC 1차 /proc/<PID>/limits Max open files·fd 수(한도 값 자체가 4096 미만인지로 판단), 2차 nofile 상향 후 재기동"
+- procedure: EAP-PROC-R6-PORT
+  match: [WFLYSRV0082]
+  primary: true
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — 인터페이스 해석 실패는 설정 주소가 NIC 에 없을 때다. PORT 1차가 'Cannot assign requested address'·기동 인수 -b/jboss.bind.address·ip -4 addr 대조를 하고 2차가 바인드 주소 교정 후 기동"
+- procedure: EAP-PROC-R6-LIFECYCLE
+  match: [WFLYJCA0099]
+  primary: true
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — 비트랜잭션 DS 언바인드는 서버 정지·데이터소스 제거 때의 정보 로그. 풀 고갈 절차가 아니라 LIFECYCLE 1차(정지·시작 흐름·server-state·deployment-info·감사 로그의 remove/shutdown 수행자)로 계획 작업 여부를 가르고 2차 계획 외 중지 복구"
+- procedure: WLS-PROC-R6-MUXER
+  match: [BEA-000438]
+  primary: true
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — 네이티브 IO 로드 실패는 기동 실패가 아니라 Java Muxer 대체 동작. MUXER 1차가 BEA-000438/000446 grep·MuxerClass·native-io-enabled 를 확인하고 2차가 네이티브 I/O 활성(라이브러리 경로)"

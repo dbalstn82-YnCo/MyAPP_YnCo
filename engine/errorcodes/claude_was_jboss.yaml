@@ -1,0 +1,872 @@
+product: jboss
+layer: was
+note: GPT 협업 수집분 — 벤더 공식 문서와 대조 후 확정 · 2026-10-16 G7a 4단 보강(WildFly 34·EAP 7.3 Log Message Reference 원문 대조, jboss-cli 읽기 전용 조작만 1차). 로그=$JBOSS_HOME/standalone/log/server.log(도메인 모드는 $JBOSS_HOME/domain/servers/<server>/log/server.log), CLI=$JBOSS_HOME/bin/jboss-cli.sh -c
+codes:
+- code: WFLYSRV0049
+  severity: info
+  category: internal
+  title: WildFly 서버 기동 시작
+  immediate:
+  - "기동 시작 정보 로그 — `grep -n -E 'WFLYSRV0025|WFLYSRV0026|WFLYSRV0049' $JBOSS_HOME/standalone/log/server.log | tail -5` 로 같은 기동의 완료(0025 정상·0026 오류 동반) 여부 확인"
+  - "`$JBOSS_HOME/bin/jboss-cli.sh -c ':read-attribute(name=server-state)'` 로 running 인지 확인(읽기 전용, EAP 7+/WildFly)"
+  short:
+  - "(정보 로그) 2차 조치 없음 — 비계획 기동이면 직전 종료 원인(OOM·hs_err·운영자 명령)을 2차에서 분석"
+  mid:
+  - "기동·정지 작업을 변경 관리 대장에 기록해 비계획 기동과 구분"
+  long:
+  - "기동 소요 시간(WFLYSRV0025 의 started in) 기준값 기록과 비계획 기동 경보"
+  source: GPT 수집·벤더 문서 대조 완료(https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html)
+  note: 공식 Level=INFO
+  vendor_cause: 서버가 시작 중임을 알리는 INFO 메시지다. 그 자체는 장애가 아니며, 계획에 없던 시각이면 직전 비정상 종료 후 재기동되었을 수 있다.
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: WFLY* 접두 코드는 WildFly 9/EAP 7.0 이후 — EAP 6.x 는 JBAS0xxxxx(룰 LEG-JBOSS-JBAS001 로 보완)
+- code: WFLYSRV0073
+  severity: error
+  category: internal
+  title: 잘못된 서버 옵션
+  immediate:
+  - "`ps -ef | grep -E 'jboss-modules|standalone|domain' | grep -v grep` 로 실제 기동 인자 확인, 메시지의 옵션 이름과 대조"
+  - "`grep -n -E 'SERVER_OPTS|JAVA_OPTS' $JBOSS_HOME/bin/standalone.conf` 와 서비스 기동 스크립트에서 오타·지원되지 않는 옵션 확인(읽기 전용)"
+  short:
+  - "(2차·승인 후, 롤백: 기동 스크립트·standalone.conf 백업 복원) 잘못된 옵션을 `standalone.sh --help` 목록 기준으로 수정한 뒤 기동"
+  mid:
+  - "기동 스크립트·서비스 유닛을 형상 관리하고 판 업그레이드 시 기동 옵션 호환성 점검"
+  long:
+  - "기동 스크립트 변경 시 검증 환경 기동 시험 의무화"
+  source: GPT 수집·벤더 문서 대조 완료(https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html)
+  note: Invalid option
+  vendor_cause: '지정한 서버 시작 옵션이 유효하지 않다(Invalid option ''%s''). 기동 스크립트의 오타, 판 업그레이드 후 없어진 옵션, 인자 따옴표 처리 오류가 흔한 원인.'
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: WFLY* 접두 코드는 WildFly 9/EAP 7.0 이후 — EAP 6.x 는 JBAS0xxxxx(룰 LEG-JBOSS-JBAS001 로 보완)
+- code: WFLYSRV0148
+  severity: error
+  category: internal
+  title: 포트 오프셋 범위 초과
+  immediate:
+  - "`ps -ef | grep -o 'jboss.socket.binding.port-offset=[0-9-]*'` 로 기동 인자의 포트 오프셋 값 확인"
+  - "`grep -n 'port-offset' $JBOSS_HOME/standalone/configuration/standalone*.xml` 로 설정 기본값 확인 — 오프셋+기본 포트가 65535 를 넘거나 음수면 범위 초과 확정"
+  short:
+  - "(2차·승인 후, 롤백: 기동 스크립트 백업 복원) 인스턴스별 포트 오프셋을 유효 범위(0~65535-최대 포트)로 수정 후 기동"
+  mid:
+  - "서버 인스턴스별 port-offset 대장(예 0·100·200) 운영"
+  long:
+  - "기동 전 포트 충돌·범위 자동 점검"
+  source: GPT 수집·벤더 문서 대조 완료(https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html)
+  note: portOffset is out of range
+  vendor_cause: 지정된 portOffset 값이 허용 범위를 벗어났다. 기동 인자 -Djboss.socket.binding.port-offset 오입력, 기본 포트에 더하면 65535 를 넘는 값이 흔한 원인.
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: WFLY* 접두 코드는 WildFly 9/EAP 7.0 이후 — EAP 6.x 는 JBAS0xxxxx(룰 LEG-JBOSS-JBAS001 로 보완)
+- code: WFLYSRV0176
+  severity: critical
+  category: internal
+  title: 배포 완료 실패
+  immediate:
+  - "`grep -n -A15 'WFLYSRV0176' $JBOSS_HOME/standalone/log/server.log | grep -E 'WFLY|Exception|Caused by' | head -20` 로 실패 배포 이름과 최초 원인 확인"
+  - "`$JBOSS_HOME/bin/jboss-cli.sh -c 'deployment-info'` 로 배포 상태(OK·FAILED·STOPPED) 확인(읽기 전용, EAP 7+)"
+  short:
+  - "(2차·승인 후, 롤백: 이전 배포본 보관) 원인(의존성·데이터소스·설정) 수정 후 재배포, 급하면 이전 정상 배포본으로 되돌림"
+  mid:
+  - "배포 전 검증 환경 배포 시험과 의존 자원(데이터소스·모듈) 사전 점검"
+  long:
+  - "배포 실패 경보와 배포본 보관(되돌림용) 정책"
+  source: GPT 수집·공식 문서 미확인(보류)(https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html)
+  note: EAP 7.3/8·WildFly 공식 참조 미등재
+  vendor_cause: 배포 처리가 완료되지 못하고 실패한 상태로 관찰된다(코드 원문 미확인). 일반적으로 배포 단위의 의존성 누락, 데이터소스·모듈 미가용, 디스크립터 오류가 원인이다.
+  verify_note: "미검증 — WFLYSRV0176 은 WildFly 23/26/34·EAP 7.3 Log Message Reference 에 없음(2026-10-16 원문 대조), 메시지 원문·의미 미확인"
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: WFLY* 접두 코드는 WildFly 9/EAP 7.0 이후 — EAP 6.x 는 JBAS0xxxxx(룰 LEG-JBOSS-JBAS001 로 보완)
+- code: WFLYSRV0210
+  severity: error
+  category: internal
+  title: 서버가 이미 일시중지됨
+  immediate:
+  - "`$JBOSS_HOME/bin/jboss-cli.sh -c ':read-attribute(name=suspend-state)'` 로 현재 일시정지(suspend) 상태(RUNNING·SUSPENDING·SUSPENDED) 확인(읽기 전용)"
+  - "`grep -n -E 'WFLYSRV0211|WFLYSRV0212|suspend' $JBOSS_HOME/standalone/log/server.log | tail -10` 로 누가 언제 suspend 했는지(운영 스크립트·graceful shutdown 중) 확인"
+  short:
+  - "(2차·승인 후, 롤백: 다시 :suspend) 의도치 않은 일시중지면 `jboss-cli.sh -c ':resume'` 으로 요청 수신 재개, 운영 스크립트의 중복 suspend 호출 수정"
+  mid:
+  - "graceful shutdown·유지보수 스크립트의 suspend/resume 순서 표준화"
+  long:
+  - "suspend-state 감시(RUNNING 외 경보)"
+  source: GPT 수집·벤더 문서 대조 완료(https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html)
+  note: Server is already paused
+  vendor_cause: 서버가 이미 일시중지(suspend)된 상태에서 다시 일시중지하려 했다. 운영·배포 스크립트의 중복 suspend 호출, graceful shutdown 진행 중 추가 요청이 흔한 원인.
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: WFLY* 접두 코드는 WildFly 9/EAP 7.0 이후 — EAP 6.x 는 JBAS0xxxxx(룰 LEG-JBOSS-JBAS001 로 보완)
+- code: WFLYSRV0232
+  severity: error
+  category: internal
+  title: 모듈 정보 조회 실패
+  immediate:
+  - "`grep -n -B2 -A5 'WFLYSRV0232' $JBOSS_HOME/standalone/log/server.log | tail -20` 로 조회 실패한 모듈 이름 확인"
+  - "`ls -l $JBOSS_HOME/modules/system/layers/base/<모듈경로>/main/ $JBOSS_HOME/modules/<모듈경로>/main/ 2>/dev/null` 로 module.xml·JAR 존재·권한 확인 — 없으면 모듈 누락 확정"
+  short:
+  - "(2차·승인 후, 롤백: 추가 전 modules 디렉터리 백업) 누락·손상 모듈(module.xml·resource-root JAR) 복구 후 관리 작업 재실행"
+  mid:
+  - "사용자 모듈은 $JBOSS_HOME/modules 하위 별도 경로로 관리하고 패치 시 덮어쓰기 점검"
+  long:
+  - "모듈 디렉터리 무결성 점검(체크섬)과 변경 이력 관리"
+  source: GPT 수집·벤더 문서 대조 완료(https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html)
+  note: Could not get module info
+  vendor_cause: 지정 모듈 이름에 대한 모듈 정보를 가져오지 못했다. modules 디렉터리에 해당 모듈(module.xml·JAR)이 없거나 손상·권한 문제, 모듈 이름 오타가 흔한 원인.
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: WFLY* 접두 코드는 WildFly 9/EAP 7.0 이후 — EAP 6.x 는 JBAS0xxxxx(룰 LEG-JBOSS-JBAS001 로 보완)
+- code: WFLYSRV0257
+  severity: error
+  category: internal
+  title: 필수 시스템 속성 미설정
+  immediate:
+  - "`grep -n 'WFLYSRV0257' $JBOSS_HOME/standalone/log/server.log | tail -5` 로 미설정 속성 이름 확인"
+  - "`ps -ef | grep -o -- '-D<속성이름>[^ ]*'` 와 `grep -n '<속성이름>' $JBOSS_HOME/bin/standalone.conf $JBOSS_HOME/standalone/configuration/standalone*.xml` 로 설정 위치 확인"
+  short:
+  - "(2차·승인 후, 롤백: 설정 백업 복원) 누락 속성을 기동 인자(-D) 또는 standalone.xml system-properties 에 추가 후 기동/리로드"
+  mid:
+  - "환경별 필수 시스템 속성 목록과 기동 스크립트 표준 틀"
+  long:
+  - "기동 전 필수 속성 자동 점검"
+  source: GPT 수집·벤더 문서 대조 완료(https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html)
+  note: Required system property not set
+  vendor_cause: '필수 시스템 속성이 설정되지 않았다(Required system property ''%s'' not set). 기동 스크립트에서 -D 인자 누락, 환경별 설정 파일 누락이 흔한 원인.'
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: WFLY* 접두 코드는 WildFly 9/EAP 7.0 이후 — EAP 6.x 는 JBAS0xxxxx(룰 LEG-JBOSS-JBAS001 로 보완)
+- code: WFLYCTL0013
+  severity: error
+  category: internal
+  title: 관리 작업 실행 실패
+  immediate:
+  - "`grep -n -A10 'WFLYCTL0013' $JBOSS_HOME/standalone/log/server.log | tail -30` 로 실패 작업(operation)·주소(address)·실패 설명 확인 — 기동 중이면 해당 하위시스템이 미기동"
+  - "`$JBOSS_HOME/bin/jboss-cli.sh -c '/core-service=management:read-boot-errors'` 로 부팅 오류 목록 확인(읽기 전용, EAP 7+)"
+  short:
+  - "(2차·승인 후, 롤백: standalone.xml 백업 복원) 실패 설명의 원인(누락 자원·잘못된 속성) 수정 후 관리 작업 재실행 또는 :reload"
+  mid:
+  - "관리 작업은 CLI 스크립트(batch)로 검증 환경 시험 후 운영 반영"
+  long:
+  - "read-boot-errors 결과를 기동 점검 항목에 포함"
+  source: GPT 수집·벤더 문서 대조 완료(https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html)
+  note: 공식 Level=ERROR
+  vendor_cause: '지정 관리 주소에서 관리 작업 실행이 실패했다(Operation (%s) failed - address: (%s)). 부팅 시 설정 오류, 의존 서비스 누락, 잘못된 속성값이 흔한 원인.'
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: WFLY* 접두 코드는 WildFly 9/EAP 7.0 이후 — EAP 6.x 는 JBAS0xxxxx(룰 LEG-JBOSS-JBAS001 로 보완)
+- code: WFLYCTL0180
+  severity: critical
+  category: internal
+  title: 서비스 의존성 누락
+  immediate:
+  - "`grep -n -A10 'WFLYCTL0180' $JBOSS_HOME/standalone/log/server.log | tail -30` 로 누락 의존 서비스 이름(예 jboss.naming.context.java.jboss.datasources.<DS>) 확인"
+  - "누락 대상이 데이터소스면 `$JBOSS_HOME/bin/jboss-cli.sh -c '/subsystem=datasources:read-children-names(child-type=data-source)'` 로 정의 여부 확인(읽기 전용)"
+  short:
+  - "(2차·승인 후, 롤백: standalone.xml 백업 복원) 누락 자원(데이터소스·JMS 큐·모듈) 정의 추가 또는 이름 수정 후 재배포"
+  mid:
+  - "배포 단위가 요구하는 자원 목록(JNDI 이름)을 배포 문서에 명시"
+  long:
+  - "배포 전 의존 자원 존재 자동 점검"
+  source: GPT 수집·벤더 문서 대조 완료(https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html)
+  note: Services with missing/unavailable dependencies
+  vendor_cause: 하나 이상의 서비스에 누락됐거나 사용 불가능한 의존성이 있다. 배포가 참조하는 데이터소스·JNDI 이름·모듈이 정의되지 않았거나 기동 실패한 경우가 흔한 원인.
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: WFLY* 접두 코드는 WildFly 9/EAP 7.0 이후 — EAP 6.x 는 JBAS0xxxxx(룰 LEG-JBOSS-JBAS001 로 보완)
+- code: WFLYCTL0186
+  severity: critical
+  category: internal
+  title: 서비스 시작 실패
+  immediate:
+  - "`grep -n -A15 'WFLYCTL0186' $JBOSS_HOME/standalone/log/server.log | tail -30` 로 실패 서비스 이름 확인 후 같은 서비스의 최초 ERROR·Caused by 확인"
+  - "`$JBOSS_HOME/bin/jboss-cli.sh -c ':read-attribute(name=server-state)'` 와 `'deployment-info'` 로 서버·배포 상태 확인(읽기 전용)"
+  short:
+  - "(2차·승인 후, 롤백: 설정·배포본 백업) 최초 원인(포트 충돌·DB 연결·설정 오류) 해소 후 재배포 또는 :reload"
+  mid:
+  - "기동 후 read-boot-errors·배포 상태 점검 자동화"
+  long:
+  - "서비스 기동 실패 경보와 구성 변경 이력 관리"
+  source: GPT 수집·벤더 문서 대조 완료(https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html)
+  note: Services which failed to start
+  vendor_cause: 하나 이상의 서비스가 시작에 실패했다. 포트 충돌, 데이터소스 연결 실패, 설정 오류, 배포 단위의 예외가 흔한 원인이며 최초 원인은 앞쪽 ERROR 에 있다.
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: WFLY* 접두 코드는 WildFly 9/EAP 7.0 이후 — EAP 6.x 는 JBAS0xxxxx(룰 LEG-JBOSS-JBAS001 로 보완)
+- code: WFLYCTL0348
+  severity: error
+  category: performance
+  title: 서비스 안정화 대기 시간초과
+  immediate:
+  - "`grep -n 'WFLYCTL0348' $JBOSS_HOME/standalone/log/server.log | tail -5` 로 대기 시간(초)·처음 서비스 컨테이너를 바꾼 단계·주소 확인 — 해당 관리 작업은 이미 자동으로 되돌려진(rolled back) 상태 (EAP 7/8 standalone 기본 경로)"
+  - "`jcmd <PID> Thread.print > td_$(date +%H%M%S).txt` 로 MSC 서비스 스레드가 어디서 막혔는지(DB 연결·원격 호출) 확인(스레드 덤프, 프로세스는 유지)"
+  short:
+  - "(2차·승인 후, 롤백: 이전 값 복원) 막힌 서비스 원인(느린 DB·원격 자원) 해소 후 작업 재실행, 필요 시 jboss.as.management.blocking.timeout 시스템 속성 상향"
+  mid:
+  - "배포 초기화의 외부 의존 호출을 지연 초기화로 바꿔 서비스 기동 시간 단축"
+  long:
+  - "배포·관리 작업 소요 시간 감시"
+  source: GPT 수집·벤더 문서 대조 완료(https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html)
+  note: 공식 Level=ERROR; operation rollback
+  vendor_cause: 서비스 컨테이너가 지정 시간 내 안정 상태에 도달하지 못해 관리 작업이 롤백됐다. 배포 초기화가 DB·원격 자원을 오래 기다리거나 교착된 경우가 흔한 원인.
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html
+  verify_note: "미검증 — 대기 시간 조정 속성 이름(jboss.as.management.blocking.timeout)을 EAP 판별 원문으로 확인 못 함"
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: WFLY* 접두 코드는 WildFly 9/EAP 7.0 이후 — EAP 6.x 는 JBAS0xxxxx(룰 LEG-JBOSS-JBAS001 로 보완)
+- code: WFLYUT0006
+  severity: info
+  category: connection
+  title: Undertow 리스너 수신 시작
+  immediate:
+  - "리스너 수신 시작 정보 로그 — 메시지의 주소·포트가 의도한 값인지 확인, `ss -ltnp | grep java` 로 실제 LISTEN 포트 대조"
+  - "0.0.0.0 이 아닌 127.0.0.1 로 바인드됐다면 외부 접속 불가 — `ps -ef | grep -o -- ' -b [^ ]*'` 로 기동 시 바인드 주소(-b) 확인"
+  short:
+  - "(정보 로그) 2차 조치 없음 — 바인드 주소·포트가 의도와 다르면 interface·socket-binding 설정 수정(승인 후, 롤백: standalone.xml 백업)"
+  mid:
+  - "interface(public·management) 바인드 주소와 socket-binding 포트 표준"
+  long:
+  - "기동 후 리스너 포트 LISTEN 자동 점검"
+  source: GPT 수집·벤더 문서 대조 완료(https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html)
+  note: 공식 Level=INFO
+  vendor_cause: Undertow 리스너가 지정 주소와 포트에서 수신을 시작했다는 정상 정보 메시지다. 바인드 주소가 127.0.0.1 이면 외부에서 접속할 수 없으므로 주소를 함께 확인한다.
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: WFLY* 접두 코드는 WildFly 9/EAP 7.0 이후 — EAP 6.x 는 JBAS0xxxxx(룰 LEG-JBOSS-JBAS001 로 보완)
+- code: WFLYUT0080
+  severity: warn
+  category: internal
+  title: Valve 미지원으로 미활성화
+  immediate:
+  - "`grep -n 'WFLYUT0080' $JBOSS_HOME/standalone/log/server.log | tail -5` 로 무시된 Valve 이름 확인"
+  - "`unzip -p <앱>.war WEB-INF/jboss-web.xml | grep -n -i valve` 로 배포 디스크립터의 Valve 선언 확인 — 그 Valve 가 맡던 기능(인증·로그·접근 제어)이 지금 동작하지 않는다는 뜻"
+  short:
+  - "(2차·승인 후, 롤백: 이전 배포본) Valve 기능을 Undertow 핸들러·필터(undertow subsystem filter) 또는 서블릿 Filter 로 이전한 수정본 배포 — 보안 기능이면 우선 처리"
+  mid:
+  - "EAP 6→7 이전 점검표에 Valve 사용 여부 포함"
+  long:
+  - "배포 디스크립터 호환성 정기 점검"
+  source: GPT 수집·벤더 문서 대조 완료(https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html)
+  note: 공식 Level=WARN
+  vendor_cause: Valve 기능이 더 이상 지원되지 않아 지정 Valve가 활성화되지 않았다. EAP 6(JBoss Web) 시절 jboss-web.xml 에 선언한 Valve 를 EAP 7(Undertow)에 그대로 배포한 경우가 흔한 원인.
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: WFLY* 접두 코드는 WildFly 9/EAP 7.0 이후 — EAP 6.x 는 JBAS0xxxxx(룰 LEG-JBOSS-JBAS001 로 보완)
+- code: WFLYJCA0027
+  severity: warn
+  category: security
+  title: IronJacamar 보안설정 없음
+  immediate:
+  - "`grep -n 'WFLYJCA0027' $JBOSS_HOME/standalone/log/server.log | tail -5` 로 대상 리소스 어댑터·연결 정의 이름 확인"
+  - "배포의 `META-INF/ironjacamar.xml` 또는 리소스 어댑터 정의에 security 요소가 있는지 열람(자격 증명 값은 기록 금지) — 의도된 무인증 구성이면 경고성"
+  short:
+  - "(2차·승인 후, 롤백: 이전 설정 백업) 인증이 필요한 자원이면 ironjacamar.xml·resource-adapters 하위에 보안 도메인(elytron) 설정 추가 후 재배포"
+  mid:
+  - "리소스 어댑터 보안 설정 표준(자격 증명 저장소 사용)"
+  long:
+  - "배포 시 보안 경고 검사 자동화"
+  source: GPT 수집·벤더 문서 대조 완료(https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html)
+  note: 공식 Level=WARN
+  vendor_cause: 지정 리소스에 ironjacamar.security 설정이 정의되지 않았다. 리소스 어댑터 배포에 보안(인증) 설정을 넣지 않은 경우로, 의도된 구성이면 경고에 그친다.
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: WFLY* 접두 코드는 WildFly 9/EAP 7.0 이후 — EAP 6.x 는 JBAS0xxxxx(룰 LEG-JBOSS-JBAS001 로 보완)
+- code: WFLYJCA0030
+  severity: error
+  category: internal
+  title: JCA 리소스 배포 불가
+  immediate:
+  - "`grep -n -A15 'WFLYJCA0030' $JBOSS_HOME/standalone/log/server.log | grep -E 'IJ|Exception|Caused by' | head -20` 로 배포 불가 원인(IJ 코드·클래스 누락·설정 오류) 확인"
+  - "`$JBOSS_HOME/bin/jboss-cli.sh -c 'deployment-info'` 로 해당 RAR·데이터소스 배포 상태 확인(읽기 전용)"
+  short:
+  - "(2차·승인 후, 롤백: 이전 RAR·설정 백업) 원인(드라이버·RAR 클래스 누락, ironjacamar.xml 오류) 수정 후 재배포"
+  mid:
+  - "리소스 어댑터·드라이버 모듈 판 고정과 배포 전 검증"
+  long:
+  - "JCA 자원 배포 실패 경보"
+  source: GPT 수집·벤더 문서 대조 완료(https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html)
+  note: 'DeployException: unable to deploy'
+  vendor_cause: JCA 리소스(리소스 어댑터·연결 정의)를 배포하지 못했다(DeployException). RAR 패키지·ironjacamar.xml 오류, 필요한 클래스·드라이버 누락이 흔한 원인.
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: WFLY* 접두 코드는 WildFly 9/EAP 7.0 이후 — EAP 6.x 는 JBAS0xxxxx(룰 LEG-JBOSS-JBAS001 로 보완)
+- code: WFLYJCA0099
+  severity: info
+  category: internal
+  title: 비트랜잭션 DS 언바인드
+  immediate:
+  - "정보 로그 — 같은 시각 서버 정지·데이터소스 제거·배포 해제 작업이 있었는지 `grep -n -E 'WFLYSRV0050|WFLYJCA0010|undeploy' $JBOSS_HOME/standalone/log/server.log | tail` 로 확인"
+  - "서비스 운영 중인데 나왔다면 `$JBOSS_HOME/bin/jboss-cli.sh -c '/subsystem=datasources:read-children-names(child-type=data-source)'` 로 데이터소스가 남아 있는지 확인(읽기 전용)"
+  short:
+  - "(정보 로그) 계획된 정지·변경이면 조치 없음, 비계획이면 변경 이력·관리 감사 로그로 수행자 확인 후 데이터소스 복구(승인 후, 롤백: standalone.xml 백업)"
+  mid:
+  - "관리 작업 감사 로그(audit-log) 활성화"
+  long:
+  - "데이터소스 구성 변경 이력 관리"
+  source: GPT 수집·벤더 문서 대조 완료(https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html)
+  note: 공식 Level=INFO
+  vendor_cause: 비트랜잭션(jta=false) 데이터소스가 JNDI 에서 언바인드됐다는 정보 메시지다. 서버 정지·데이터소스 제거·리로드 과정에서 정상적으로 나타난다.
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: WFLY* 접두 코드는 WildFly 9/EAP 7.0 이후 — EAP 6.x 는 JBAS0xxxxx(룰 LEG-JBOSS-JBAS001 로 보완)
+- code: IJ000453
+  severity: error
+  category: connection
+  title: 관리 연결 획득 실패
+  immediate:
+  - "`grep -n -A10 'IJ000453' $JBOSS_HOME/standalone/log/server.log | grep -E 'IJ0|Caused by|SQLException' | head -20` 로 뒤따르는 원인(IJ000655 풀 대기 초과·SQLException 접속 실패) 구분"
+  - "`$JBOSS_HOME/bin/jboss-cli.sh -c '/subsystem=datasources/data-source=<DS>/statistics=pool:read-resource(include-runtime=true)'` 로 ActiveCount·AvailableCount·MaxWaitCount 확인(statistics-enabled=true 필요, 읽기 전용), `nc -zvw3 <db_host> <db_port>`"
+  short:
+  - "(2차·승인 후, 롤백: 설정 백업 복원) DB 접속 실패면 DBA 와 원인 해소, 풀 고갈이면 누수 추적 후 max-pool-size·blocking-timeout-wait-millis 조정"
+  mid:
+  - "데이터소스 연결 검증(background-validation)·재시도 설정 표준"
+  long:
+  - "풀 사용률·연결 실패 건수 감시"
+  source: GPT 수집·벤더 문서 대조 완료(https://access.redhat.com/solutions/17782)
+  note: Unable to get managed connection
+  vendor_cause: JBoss EAP 관리 연결 풀에서 새 managed connection을 얻지 못했다. 뒤따르는 원인이 풀 대기 시간 초과(IJ000655)면 풀 고갈·누수, SQLException 이면 DB 접속 장애다.
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/solutions/17782
+  versions:
+  - JBoss EAP 6.x (AS 7)
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: IronJacamar(IJ*) 코드는 EAP 6.0 이후 동일
+- code: IJ000655
+  severity: error
+  category: capacity
+  title: 풀 연결 대기시간 초과
+  immediate:
+  - "`$JBOSS_HOME/bin/jboss-cli.sh -c '/subsystem=datasources/data-source=<DS>/statistics=pool:read-resource(include-runtime=true)'` 로 ActiveCount·MaxUsedCount·MaxWaitCount 확인(읽기 전용) — ActiveCount 가 max-pool-size 와 같으면 고갈 확정"
+  - "`jcmd <PID> Thread.print | grep -c -E 'getConnection|getManagedConnection'` 로 연결 대기 스레드 수 확인, DBA 에 장시간 SQL·락 대기 확인 요청"
+  short:
+  - "(2차·승인 후, 롤백: 이전 값 복원) DB 지연 해소가 우선, 누수면 cached-connection-manager debug·error 로 미반납 위치 확인, 풀 max-pool-size 조정은 DB 세션 한도 안에서"
+  mid:
+  - "풀 크기·blocking-timeout-wait-millis 재산정, try-with-resources 로 반납 보장"
+  long:
+  - "풀 사용률 80% 경보와 statistics-enabled 상시 운영"
+  source: GPT 수집·벤더 문서 대조 완료(https://access.redhat.com/solutions/17782)
+  note: No managed connections within blocking timeout
+  vendor_cause: 설정된 blocking timeout 안에 사용할 수 있는 managed connection이 없었다. 연결 미반납(누수), DB 쪽 느린 SQL·락 대기, max-pool-size 부족이 흔한 원인.
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/solutions/17782
+  versions:
+  - JBoss EAP 6.x (AS 7)
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: IronJacamar(IJ*) 코드는 EAP 6.0 이후 동일
+- code: IJ000100
+  severity: info
+  category: connection
+  title: 미반납 연결 자동 종료
+  immediate:
+  - "`grep -n -A20 'IJ000100' $JBOSS_HOME/standalone/log/server.log | grep -E 'at [a-z]' | grep -v -E 'org.jboss|java.' | head -20` 로 연결을 연 앱 클래스·메서드(누수 위치) 확인"
+  - "`grep -c 'IJ000100' $JBOSS_HOME/standalone/log/server.log` 로 빈도 확인 — 계속 늘면 풀 고갈(IJ000655)로 이어질 수 있음"
+  short:
+  - "(2차) 누수 위치를 개발 담당에 전달해 Connection close(try-with-resources) 수정 배포(승인 후, 롤백: 이전 배포본)"
+  mid:
+  - "코드 검사 규칙에 JDBC 자원 반납 검사 추가"
+  long:
+  - "IJ000100 건수를 배포 품질 지표로 감시"
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.wildfly.org/34/wildscribe/log-message-reference.html)
+  note: 공식 Level=INFO
+  vendor_cause: 애플리케이션이 연결을 직접 닫지 않아 IronJacamar가 대신 연결을 닫았다(cached connection manager 의 누수 감지). 앱의 Connection close 누락이 원인이다.
+  vendor_action: 애플리케이션에서 사용한 연결을 명시적으로 닫는다.
+  vendor_url: https://docs.wildfly.org/34/wildscribe/log-message-reference.html
+  versions:
+  - JBoss EAP 6.x (AS 7)
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: IronJacamar(IJ*) 코드는 EAP 6.0 이후 동일
+- code: IJ000604
+  severity: warn
+  category: connection
+  title: 새 연결 획득 중 예외
+  immediate:
+  - "`grep -n -A10 'IJ000604' $JBOSS_HOME/standalone/log/server.log | grep -E 'Caused by|SQLException|ORA-|refused' | head -10` 로 물리 연결 실패 원인(인증·네트워크·DB 한도) 확인"
+  - "`nc -zvw3 <db_host> <db_port>` 로 도달성 확인, DBA 에 세션·프로세스 한도 도달 여부 확인 요청"
+  short:
+  - "(2차·승인 후, 롤백: 설정 백업 복원) DB 원인 해소, 접속 정보 오류면 데이터소스 connection-url·보안 설정 수정 후 :flush-gracefully-connection-in-pool"
+  mid:
+  - "DB 세션 한도와 WAS 전체 풀 합계 정렬"
+  long:
+  - "물리 연결 실패 건수 감시"
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.wildfly.org/34/wildscribe/log-message-reference.html)
+  note: 공식 Level=WARN
+  vendor_cause: 새 물리 연결을 얻으려는 과정에서 예외가 발생했다(Throwable while attempting to get a new connection). DB 미기동·네트워크 차단, 계정 잠김·비밀번호 오류, DB 세션 한도 도달이 흔한 원인.
+  vendor_action: ''
+  vendor_url: https://docs.wildfly.org/34/wildscribe/log-message-reference.html
+  versions:
+  - JBoss EAP 6.x (AS 7)
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: IronJacamar(IJ*) 코드는 EAP 6.0 이후 동일
+- code: IJ031040
+  severity: error
+  category: connection
+  title: 관리 연결과 연관되지 않음
+  immediate:
+  - "`grep -n -B5 -A15 'IJ031040' $JBOSS_HOME/standalone/log/server.log | grep -E 'IJ000100|Caused by|at [a-z]' | head -20` 로 같은 연결이 앞서 누수로 닫혔는지(IJ000100) 와 재사용한 호출 위치 확인"
+  - "원격 EJB 호출 종료 직후 발생인지 확인 — 그렇다면 트랜잭션 경계를 넘긴 연결 재사용 패턴"
+  short:
+  - "(2차) 연결을 필드·세션에 보관해 재사용하는 코드를 메서드 범위 사용으로 수정하도록 개발 담당에 전달(승인 후 배포, 롤백: 이전 배포본)"
+  mid:
+  - "연결 사용 범위(트랜잭션 내 획득·반납) 코딩 표준"
+  long:
+  - "IJ031040·IJ000100 건수 감시"
+  source: GPT 수집·벤더 문서 대조 완료(https://access.redhat.com/solutions/3455811)
+  note: Connection is not associated with a managed connection
+  vendor_cause: 원격 EJB 호출 종료 때 연결이 누수로 판단돼 닫힌 뒤 기존 트랜잭션에서 다시 사용됐다. 연결 객체를 필드·세션에 보관해 재사용하는 앱 코드가 흔한 원인.
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/solutions/3455811
+  versions:
+  - JBoss EAP 6.x (AS 7)
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: IronJacamar(IJ*) 코드는 EAP 6.0 이후 동일
+- code: ARJUNA012117
+  severity: warn
+  category: undo
+  title: 트랜잭션 타임아웃 감지
+  immediate:
+  - "`grep -c 'ARJUNA012117' $JBOSS_HOME/standalone/log/server.log` 와 같은 시각 느린 SQL·외부 호출 오류 확인 — 특정 업무에 집중되면 그 업무 SQL 원인"
+  - "`$JBOSS_HOME/bin/jboss-cli.sh -c '/subsystem=transactions:read-attribute(name=default-timeout)'` 로 현재 기본 타임아웃(초) 확인(읽기 전용)"
+  short:
+  - "(2차·승인 후, 롤백: 이전 값 복원) 지연 SQL·연동 해소가 우선, 업무 최대 처리 시간 기준으로 default-timeout 또는 @TransactionTimeout 재설정"
+  mid:
+  - "장시간 트랜잭션 분할, 트랜잭션 타임아웃 > 쿼리 타임아웃 순서 정렬"
+  long:
+  - "트랜잭션 타임아웃 건수 감시"
+  source: GPT 수집·벤더 문서 대조 완료(https://access.redhat.com/solutions/18425)
+  note: TransactionReaper timeout/check
+  vendor_cause: 트랜잭션이 실행 상태에서 timeout에 도달해 TransactionReaper가 처리(롤백 표시·취소)하기 시작했다. 느린 SQL·락 대기, 외부 연동 지연, 짧은 default-timeout 이 흔한 원인.
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/solutions/18425
+  versions:
+  - JBoss EAP 6.x (AS 7)
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: Narayana/JBossTS(ARJUNA*) 코드는 EAP 6.0 이후 동일
+- code: ARJUNA012121
+  severity: warn
+  category: undo
+  title: 타임아웃 트랜잭션 취소 성공
+  immediate:
+  - "`grep -n -B3 'ARJUNA012121' $JBOSS_HOME/standalone/log/server.log | tail -20` 로 취소된 트랜잭션과 직전 ARJUNA012117(타임아웃) 짝 확인 — 짝이 있으면 타임아웃 처리 결과"
+  - "취소된 스레드가 실행하던 업무를 스레드 이름·시각으로 특정해 업무 담당에 부분 처리 여부 확인 요청"
+  short:
+  - "(2차) 타임아웃 원인(ARJUNA012117 기준) 해소, 데이터 보정이 필요하면 업무 담당 승인 하에(롤백: 보정 전 대상 데이터 백업)"
+  mid:
+  - "타임아웃 발생 업무의 SQL·연동 개선"
+  long:
+  - "타임아웃 취소 건수 추세 감시와 업무별 기준값 관리"
+  source: GPT 수집·벤더 문서 대조 완료(https://access.redhat.com/solutions/18425)
+  note: TransactionReaper worker successfully canceled TX
+  vendor_cause: TransactionReaper가 timeout된 트랜잭션을 성공적으로 취소했다. 앞선 트랜잭션 타임아웃(ARJUNA012117)의 결과로, 원인은 느린 SQL·연동 지연이다.
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/solutions/18425
+  versions:
+  - JBoss EAP 6.x (AS 7)
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: Narayana/JBossTS(ARJUNA*) 코드는 EAP 6.0 이후 동일
+- code: ARJUNA016037
+  severity: warn
+  category: undo
+  title: 복구용 XAResource 탐색 실패
+  immediate:
+  - "`grep -c 'ARJUNA016037' $JBOSS_HOME/standalone/log/server.log` 로 주기적 반복 여부 확인(복구 주기마다 반복되면 미해결 트랜잭션 잔존)"
+  - "`$JBOSS_HOME/bin/jboss-cli.sh -c '/subsystem=transactions:read-attribute(name=node-identifier)'` 로 노드 식별자 확인 — HA 서버끼리 같으면 다른 노드의 트랜잭션을 복구하려는 상태(읽기 전용)"
+  short:
+  - "(2차·승인 후, 롤백: 이전 값 복원) HA 서버마다 node-identifier 를 고유하게 설정 후 :reload, XA 데이터소스 복구 계정 권한 확인"
+  mid:
+  - "XA 데이터소스 recovery 자격 증명·권한 표준"
+  long:
+  - "복구 경고 건수와 object store 잔존 트랜잭션 수 감시"
+  source: GPT 수집·벤더 문서 대조 완료(https://access.redhat.com/solutions/3338481)
+  note: 공식 WARN; XA recovery
+  vendor_cause: 트랜잭션 복구에 사용할 새 XAResource를 찾지 못했다. HA 서버 간 같은 node-identifier, 복구 대상 XA 데이터소스 삭제·이름 변경, 복구 권한 부족이 흔한 원인.
+  vendor_action: HA 서버마다 transaction node identifier를 고유하게 설정한다.
+  vendor_url: https://access.redhat.com/articles/3645532
+  versions:
+  - JBoss EAP 6.x (AS 7)
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: Narayana/JBossTS(ARJUNA*) 코드는 EAP 6.0 이후 동일
+- code: ARJUNA016087
+  severity: warn
+  category: undo
+  title: 알 수 없는 XA 리소스
+  immediate:
+  - "`grep -n -B5 -A5 'ARJUNA016087' $JBOSS_HOME/standalone/log/server.log | tail -30` 로 대상 리소스·트랜잭션과 동반 오류 확인"
+  - "같은 시각 XA 데이터소스·JMS 의 연결 오류(IJ·AMQ 코드) 동반 여부 확인 — 동반이면 자원 장애로 인한 정리 실패"
+  short:
+  - "(2차) 대상 자원 상태 확인 후 남은 트랜잭션은 log-store 조회 결과와 DB 측을 대조해 처리(승인 후, 롤백: 처리 전 object store 백업)"
+  mid:
+  - "XA 자원 구성 정비와 트랜잭션 경계 점검"
+  long:
+  - "XA 경고 건수와 object store 잔존 트랜잭션 수 감시"
+  source: GPT 수집·벤더 문서 대조 완료(https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/7.3/mgmt_model/log-message-reference.html)
+  note: 공식 Level=WARN
+  vendor_cause: 트랜잭션 처리 중 트랜잭션 매니저가 알 수 없는 리소스가 발견됐다({0} - unknown resource). 자원 장애로 등록 정보가 맞지 않거나 XA 자원 구성이 바뀐 경우가 흔한 원인.
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/7.3/mgmt_model/log-message-reference.html
+  versions:
+  - JBoss EAP 6.x (AS 7)
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: Narayana/JBossTS(ARJUNA*) 코드는 EAP 6.0 이후 동일
+- code: WFLYEJB0034
+  severity: error
+  category: internal
+  title: EJB 호출 예외
+  immediate:
+  - "`grep -n -A20 'WFLYEJB0034' $JBOSS_HOME/standalone/log/server.log | grep -E 'Caused by|Exception' | head -10` 로 실패 컴포넌트·메서드와 최초 원인 확인"
+  - "같은 시각 동반 오류(IJ 연결·ARJUNA 타임아웃) 확인 — 동반이면 자원 장애, 없으면 앱 예외"
+  short:
+  - "(2차) 최초 원인 예외에 따라 자원 장애 해소 또는 개발 담당에 스택 전달 후 수정 배포(승인 후, 롤백: 이전 배포본)"
+  mid:
+  - "EJB 예외 처리·트랜잭션 롤백 규칙 점검"
+  long:
+  - "EJB 호출 오류율 감시"
+  source: GPT 수집·벤더 문서 대조 완료(https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html)
+  note: 공식 Level=ERROR
+  vendor_cause: 지정 컴포넌트와 메서드의 EJB 호출이 실패했다. 앱 예외, DB·트랜잭션 오류, 의존 자원 미가용이 흔한 원인.
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: WFLY* 접두 코드는 WildFly 9/EAP 7.0 이후 — EAP 6.x 는 JBAS0xxxxx(룰 LEG-JBOSS-JBAS001 로 보완)
+- code: WFLYEJB0044
+  severity: error
+  category: upstream
+  title: 리소스 어댑터 저장소 없음
+  immediate:
+  - "`grep -n -B5 -A10 'WFLYEJB0044' $JBOSS_HOME/standalone/log/server.log | tail -30` 로 함께 실패한 서비스(resource-adapters·messaging) 확인"
+  - "`$JBOSS_HOME/bin/jboss-cli.sh -c '/subsystem=ejb3:read-attribute(name=default-resource-adapter-name)'` 와 `'/subsystem=resource-adapters:read-resource'` 로 MDB 기본 리소스 어댑터와 정의 확인(읽기 전용)"
+  short:
+  - "(2차·승인 후, 롤백: standalone.xml 백업 복원) 메시징(messaging-activemq)·resource-adapters 하위시스템 기동 오류 해소 또는 MDB 용 설정 프로필(standalone-full) 사용 여부 점검"
+  mid:
+  - "MDB 사용 앱은 full 프로필 서버에만 배포하는 기준"
+  long:
+  - "배포 대상 프로필 점검을 배포 체크리스트에 포함"
+  source: GPT 수집·벤더 문서 대조 완료(https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html)
+  note: Resource adapter repository is not available
+  vendor_cause: Resource Adapter Repository 서비스를 사용할 수 없어 MDB 등 리소스 어댑터에 의존하는 EJB 를 기동하지 못했다. 메시징·JCA 하위시스템 기동 실패, MDB 를 메시징 없는 프로필에 배포한 경우가 흔한 원인.
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: WFLY* 접두 코드는 WildFly 9/EAP 7.0 이후 — EAP 6.x 는 JBAS0xxxxx(룰 LEG-JBOSS-JBAS001 로 보완)
+- code: WFLYEJB0227
+  severity: critical
+  category: capacity
+  title: EJB 풀 고갈
+  immediate:
+  - "`grep -n -A10 'WFLYEJB0227' $JBOSS_HOME/standalone/log/server.log | tail -20` 로 대상 빈·대기 시간 확인"
+  - "`$JBOSS_HOME/bin/jboss-cli.sh -c '/subsystem=ejb3/strict-max-bean-instance-pool=<pool>:read-resource(include-runtime=true)'` 로 max-pool-size·timeout 확인(읽기 전용), `jcmd <PID> Thread.print` 로 EJB 메서드 대기 지점 확인"
+  short:
+  - "(2차·승인 후, 롤백: 이전 값 복원) 장기 호출 원인(후단 지연) 해소, 필요 시 strict-max-bean-instance-pool max-pool-size·timeout 조정"
+  mid:
+  - "빈 풀 크기를 동시 호출량·스레드 풀(derive-size) 기준으로 산정"
+  long:
+  - "EJB 풀 대기·시간 초과 건수 감시"
+  source: GPT 수집·공식 문서 미확인(보류)(https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html)
+  note: EAP 7.3/8·WildFly 공식 참조 미등재
+  vendor_cause: 무상태 빈(SLSB)·MDB 인스턴스 풀이 모두 사용 중이라 timeout 안에 인스턴스를 얻지 못한 상태로 관찰된다(코드 원문 미확인). 오래 걸리는 EJB 메서드, 호출량 급증, 작은 max-pool-size 가 일반적 원인이다.
+  verify_note: "미검증 — WFLYEJB0227 은 WildFly 23/26/34·EAP 7.3 Log Message Reference 에 없음(2026-10-16 원문 대조), 메시지 원문 미확인"
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: WFLY* 접두 코드는 WildFly 9/EAP 7.0 이후 — EAP 6.x 는 JBAS0xxxxx(룰 LEG-JBOSS-JBAS001 로 보완)
+- code: WFLYCLINF0003
+  severity: info
+  category: internal
+  title: Infinispan 캐시 중지
+  immediate:
+  - "정보 로그 — 같은 시각 서버 정지·배포 해제(WFLYSRV0050·WFLYSRV0028) 가 있었는지 `grep -n -E 'WFLYSRV0050|WFLYSRV0028|WFLYCLINF0003' $JBOSS_HOME/standalone/log/server.log | tail` 로 확인"
+  - "서비스 운영 중 단독 발생이면 동반 오류(ISPN·JGRP) 확인 — 클러스터 통신 문제로 캐시가 내려갔을 수 있음"
+  short:
+  - "(정보 로그) 정지·배포 해제 문맥이면 조치 없음, 단독 발생이면 동반 ISPN·JGRP 코드 기준으로 2차 분석"
+  mid:
+  - "캐시 컨테이너 구성(web·ejb 등) 문서화"
+  long:
+  - "비계획 캐시 정지 건수 감시"
+  source: GPT 수집·벤더 문서 대조 완료(https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html)
+  note: 공식 Level=INFO
+  vendor_cause: 지정 Infinispan 캐시가 해당 캐시 컨테이너에서 중지됐다는 정보 메시지다. 서버 정지·배포 해제 과정에서 정상적으로 나타난다.
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: WFLY* 접두 코드는 WildFly 9/EAP 7.0 이후 — EAP 6.x 는 JBAS0xxxxx(룰 LEG-JBOSS-JBAS001 로 보완)
+- code: JGRP000029
+  severity: info
+  category: connection
+  title: JGroups 메시지 전송 실패
+  immediate:
+  - "`grep -n -A3 'JGRP000029' $JBOSS_HOME/standalone/log/server.log | tail -20` 로 전송 대상 노드 주소와 원인(시간 초과·연결 거부) 확인"
+  - "대상 노드에 `ping -c3 <peer_ip>` 와 `nc -zvw3 <peer_ip> <jgroups_tcp_port>`(TCP 스택일 때, 기본 7600) 로 도달성 확인, 대상 노드 생존 여부 확인"
+  short:
+  - "(2차·승인 후, 롤백: 설정 백업 복원) 대상 노드 다운·GC 정지·방화벽 원인 해소, 스택 설정(TCP·UDP) 오류면 jgroups 하위시스템 수정 후 :reload"
+  mid:
+  - "클러스터 전용 네트워크·포트 대장과 방화벽 규칙 표준"
+  long:
+  - "클러스터 멤버 수와 전송 실패 건수 감시"
+  source: GPT 수집·벤더 문서 대조 완료(https://access.redhat.com/solutions/5361651)
+  note: EAP 7.3/JGroups 4.1부터 TRACE; 사전은 info로 정규화
+  vendor_cause: 클러스터 메시지 전송 중 대상 연결 시간이 초과되는 등 전송 실패가 발생했다. 대상 노드 다운·GC 정지, 방화벽 차단, 네트워크 단절이 흔한 원인.
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/solutions/5361651
+  versions:
+  - JBoss EAP 6.x (AS 7)
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: JGroups 3.x(JGRP*) 코드는 EAP 6.0 이후
+- code: JGRP000032
+  severity: warn
+  category: connection
+  title: 물리 주소 없어 메시지 폐기
+  immediate:
+  - "`grep -n 'JGRP000032' $JBOSS_HOME/standalone/log/server.log | tail -10` 로 주소를 찾지 못한 노드 이름 확인"
+  - "해당 노드가 실제로 내려갔는지(서버·파드 상태) 확인, DNS_PING 이면 `getent hosts <dns_query_name>` 로 DNS 응답에 노드가 있는지 확인(읽기 전용)"
+  short:
+  - "(2차·승인 후, 롤백: 설정 백업 복원) 노드 다운이면 기동, DNS 응답 문제면 DNS·서비스 레코드 정정, FD 감지 시간(FD_ALL timeout) 조정은 :reload 필요"
+  mid:
+  - "클러스터 노드 탐색 방식(TCPPING·DNS_PING) 표준과 노드 교체 절차"
+  long:
+  - "클러스터 뷰 크기 변화 감시"
+  source: GPT 수집·벤더 문서 대조 완료(https://access.redhat.com/solutions/7128235)
+  note: 공식 사례 Level=WARN
+  vendor_cause: DNS_PING 클러스터에서 대상 노드의 물리 주소를 찾지 못해 메시지를 폐기했다. 대상 노드 종료 직후 뷰 미갱신, DNS 응답 지연·누락이 흔한 원인.
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/solutions/7128235
+  versions:
+  - JBoss EAP 6.x (AS 7)
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: JGroups 3.x(JGRP*) 코드는 EAP 6.0 이후
+- code: ISPN000136
+  severity: error
+  category: internal
+  title: Infinispan 캐시 실행 오류
+  immediate:
+  - "`grep -n -A15 'ISPN000136' $JBOSS_HOME/standalone/log/server.log | grep -E 'ISPN|Caused by' | head -20` 로 실패 명령·키·원인(ISPN000299 잠금 시간 초과·노드 이탈) 확인"
+  - "같은 시각 JGRP 코드(노드 통신 실패) 동반 여부 확인 — 동반이면 클러스터 통신 원인"
+  short:
+  - "(2차) 원인이 잠금 시간 초과면 ISPN000299 기준, 통신이면 JGroups 기준으로 조치(설정 변경은 승인 후, 롤백: standalone.xml 백업)"
+  mid:
+  - "캐시 모드(replicated·distributed)·잠금 설정을 세션 사용 패턴에 맞게 재검토"
+  long:
+  - "캐시 오류 건수와 클러스터 상태 감시"
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.wildfly.org/34/wildscribe/log-message-reference.html)
+  note: 공식 Level=ERROR
+  vendor_cause: 지정 노드에서 키를 쓰는 캐시 명령을 실행하는 중 오류가 발생했다. 키 잠금 경합(시간 초과), 노드 이탈 중 복제 실패가 흔한 원인.
+  vendor_action: ''
+  vendor_url: https://docs.wildfly.org/34/wildscribe/log-message-reference.html
+  versions:
+  - JBoss EAP 6.x (AS 7)
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: Infinispan(ISPN*) 코드는 EAP 6.0 이후
+- code: ISPN000299
+  severity: error
+  category: lock
+  title: 캐시 잠금 시간 초과
+  immediate:
+  - "`grep -n 'ISPN000299' $JBOSS_HOME/standalone/log/server.log | tail -20` 로 잠금 대기 키·요청자·잠금 보유자 확인 — 같은 키(세션 ID)에 반복이면 동시 요청 경합"
+  - "`jcmd <PID> Thread.print > td_$(date +%H%M%S).txt` 로 잠금 보유 스레드가 무엇을 기다리는지 확인(프로세스 유지), 같은 시각 JGRP 오류 동반 여부 확인"
+  short:
+  - "(2차·승인 후, 롤백: standalone.xml 백업 복원) 보유 스레드의 지연 원인 해소, 같은 세션 동시 요청이 원인이면 앱 측 중복 요청 차단, 필요 시 locking acquire-timeout 조정 후 :reload"
+  mid:
+  - "세션 캐시 잠금 범위·캐시 모드 재검토, 장시간 요청이 세션을 잡지 않도록 개선"
+  long:
+  - "ISPN000299 건수와 세션 동시 요청 비율 감시"
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.wildfly.org/34/wildscribe/log-message-reference.html)
+  note: TimeoutException
+  vendor_cause: 지정 시간(locking acquire-timeout, 기본 15000ms) 내 키 잠금을 얻지 못했으며 다른 요청자가 해당 잠금을 보유 중이다. 같은 세션의 동시 요청, 잠금을 오래 잡는 장시간 요청, 노드 간 통신 지연이 흔한 원인.
+  vendor_action: ''
+  vendor_url: https://docs.wildfly.org/34/wildscribe/log-message-reference.html
+  versions:
+  - JBoss EAP 6.x (AS 7)
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: Infinispan(ISPN*) 코드는 EAP 6.0 이후
+- code: WFLYSEC0011
+  severity: error
+  category: internal
+  title: 필수 인자 값이 null
+  immediate:
+  - "`grep -n -A15 'WFLYSEC0011' $JBOSS_HOME/standalone/log/server.log | grep -E 'Caused by|at [a-z]' | head -15` 로 null 인자 이름과 호출한 보안 구성 요소(security-domain·login-module) 확인 — 로그인 실패(자격 증명 오류)가 아님"
+  - "같은 시각 보안 설정 변경·배포 이력 확인"
+  short:
+  - "(2차·승인 후, 롤백: standalone.xml 백업 복원) null 인자를 만드는 security 하위시스템 설정 누락 항목(도메인 이름·옵션) 보완 후 :reload"
+  mid:
+  - "보안 하위시스템(legacy security·elytron) 설정 검증 절차"
+  long:
+  - "보안 설정 변경 이력 관리"
+  source: GPT 수집·벤더 문서 대조 완료(https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/7.3/mgmt_model/log-message-reference.html)
+  note: IllegalArgumentException; 로그인 실패 아님
+  vendor_cause: '필수 메서드 인수 값이 null이다(IllegalArgumentException: Argument %s is null). 보안 하위시스템 설정 누락·잘못된 security-domain 참조가 흔한 원인이며 사용자 로그인 실패와는 다르다.'
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/7.3/mgmt_model/log-message-reference.html
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: WFLY* 접두 코드는 WildFly 9/EAP 7.0 이후 — EAP 6.x 는 JBAS0xxxxx(룰 LEG-JBOSS-JBAS001 로 보완)
+- code: WFLYDM0022
+  severity: error
+  category: security
+  title: 관리 인증 실패
+  immediate:
+  - "`grep -n 'WFLYDM0022' $JBOSS_HOME/standalone/log/server.log | tail -20` 로 발생 시각·빈도 확인, 관리 감사 로그(audit-log 사용 시)에서 출처 주소 확인"
+  - "관리 포트(기본 9990, EAP 6 은 9999) 노출 범위를 `ss -ltnp | grep -E ':(9990|9993|9999) '` 로 확인 — 업무망·외부에 열려 있고 반복 실패면 대입 시도로 보안 담당 통보"
+  short:
+  - "(2차·승인 후, 롤백: 설정 백업 복원) 관리 인터페이스 바인드를 관리망 주소로 제한, 계정 비밀번호 변경은 add-user.sh 로 계정 소유자 승인 하에"
+  mid:
+  - "관리 계정 개인화와 관리 인터페이스 접근 제한 표준"
+  long:
+  - "관리 인증 실패 건수 감시"
+  source: GPT 수집·공식 문서 미확인(보류)(https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html)
+  note: EAP 7.3/8·WildFly 공식 참조 미등재
+  vendor_cause: 관리 인터페이스(jboss-cli·관리 콘솔) 인증이 실패한 상태로 관찰된다(코드 원문 미확인). 비밀번호 오입력·변경 미공유, 스크립트의 구 자격 증명, 대입 시도가 일반적 원인이다.
+  verify_note: "미검증 — WFLYDM0022 는 WildFly 23/26/34·EAP 7.3 Log Message Reference 에 없음(2026-10-16 원문 대조), 메시지 원문 미확인"
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: WFLY* 접두 코드는 WildFly 9/EAP 7.0 이후 — EAP 6.x 는 JBAS0xxxxx(룰 LEG-JBOSS-JBAS001 로 보완)
+- code: WFLYDS0009
+  severity: error
+  category: disk
+  title: 파일시스템 배포 서비스 실패
+  immediate:
+  - "`grep -n -A10 'WFLYDS0009' $JBOSS_HOME/standalone/log/server.log | grep -E 'Caused by|Exception' | head -10` 로 원인(공간·권한·파일 접근) 확인"
+  - "`df -h $JBOSS_HOME/standalone/deployments` 와 `ls -la $JBOSS_HOME/standalone/deployments | head -30` 로 공간·권한·마커 파일(.failed·.isdeploying) 확인(읽기 전용)"
+  short:
+  - "(2차·승인 후, 롤백: 변경 전 deployments 목록·마커 백업) 공간 확보·권한 바로잡은 뒤 실패 마커(.failed) 확인 후 재배포 마커(.dodeploy) 생성"
+  mid:
+  - "운영 배포는 deployment-scanner 대신 CLI deploy 로 일원화 검토, deployments 디렉터리 권한 표준"
+  long:
+  - "배포 디렉터리 파일시스템 사용률 감시"
+  source: GPT 수집·벤더 문서 대조 완료(https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html)
+  note: 공식 Level=ERROR
+  vendor_cause: 파일시스템 배포 서비스(deployment-scanner)가 실패했다. deployments 디렉터리 공간 부족·권한 오류, 스캔 중 파일 접근 오류가 흔한 원인.
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: WFLY* 접두 코드는 WildFly 9/EAP 7.0 이후 — EAP 6.x 는 JBAS0xxxxx(룰 LEG-JBOSS-JBAS001 로 보완)
+- code: WFLYMSGAMQ0040
+  severity: error
+  category: connection
+  title: 메시징 연결 실패
+  immediate:
+  - "`grep -n -A10 'WFLYMSGAMQ0040' $JBOSS_HOME/standalone/log/server.log | grep -E 'AMQ|Caused by' | head -10` 로 동반 AMQ 코드와 대상 커넥터·주소 확인"
+  - "원격 브로커면 `nc -zvw3 <broker_host> <port>` 로 도달성, 내장 브로커면 `$JBOSS_HOME/bin/jboss-cli.sh -c '/subsystem=messaging-activemq/server=default:read-attribute(name=started)'` 로 기동 여부 확인(읽기 전용)"
+  short:
+  - "(2차·승인 후, 롤백: standalone.xml 백업 복원) 브로커 장애·네트워크 원인 해소, 커넥터 주소 오류면 remote-connector·socket-binding 수정 후 :reload"
+  mid:
+  - "브로커 이중화(HA)와 클라이언트 재접속 설정 표준"
+  long:
+  - "브로커 연결 실패 건수·큐 적체 감시"
+  source: GPT 수집·공식 문서 미확인(보류)(https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/8.0/mgmt_model/log-message-reference.html)
+  note: EAP 7.3/8·WildFly 공식 참조 미등재
+  vendor_cause: messaging-activemq 하위시스템이 브로커(내장·원격)에 연결하지 못한 상태로 관찰된다(코드 원문 미확인). 브로커 미기동, 커넥터 주소·포트 오류, 네트워크 차단이 일반적 원인이다.
+  verify_note: "미검증 — WFLYMSGAMQ0040 은 WildFly 23/26/34·EAP 7.3 Log Message Reference 에 없음(2026-10-16 원문 대조), messaging-activemq server 의 started 속성 이름도 원문 미확인"
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: ActiveMQ Artemis 메시징(messaging-activemq)은 EAP 7.0 이후 — EAP 6 은 HornetQ(HQ* 코드)
+- code: AMQ222212
+  severity: warn
+  category: disk
+  title: 디스크 가득 참, 생산 차단
+  immediate:
+  - "`df -h $JBOSS_HOME/standalone/data/activemq` 와 `du -sh $JBOSS_HOME/standalone/data/activemq/*` 로 저널·페이징·대용량 메시지 디렉터리 사용량 확인(기본 경로, journal-directory 변경 시 그 경로)"
+  - "`$JBOSS_HOME/bin/jboss-cli.sh -c '/subsystem=messaging-activemq/server=default:read-attribute(name=max-disk-usage)'` 와 `'/subsystem=messaging-activemq/server=default/jms-queue=<Q>:read-attribute(name=message-count)'` 로 생산이 막히는 기준(%)과 적체 큐 확인(읽기 전용, EAP 7/8) — 사용률이 max-disk-usage 이상이면 확정"
+  short:
+  - "(2차·승인 후, 롤백: 정리 전 해당 파일시스템 백업·소비자 원복) 소비자(MDB) 복구로 적체 해소가 우선, 공간 증설 또는 같은 파일시스템의 다른 대용량 파일 이동"
+  mid:
+  - "저널을 전용 파일시스템으로 분리, address-setting 의 max-size-bytes·address-full-policy(PAGE) 와 max-disk-usage 재산정"
+  long:
+  - "저널 파일시스템 사용률·큐 적체량 감시(max-disk-usage 보다 10%p 낮게 경보)"
+  source: GPT 수집·벤더 문서 대조 완료(https://access.redhat.com/solutions/5196591)
+  note: 공식 Level=WARN
+  vendor_cause: '브로커 디스크 사용률이 max-disk-usage(기본 90%)를 넘어 해당 주소의 메시지 생산이 차단됐다(Disk Full! Blocking message production). 소비자 중단으로 인한 큐 적체·페이징 파일 누적, 같은 파일시스템의 다른 파일 증가가 흔한 원인.'
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/solutions/5196591
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: ActiveMQ Artemis 메시징(messaging-activemq)은 EAP 7.0 이후 — EAP 6 은 HornetQ(HQ* 코드)
+- code: AMQ224088
+  severity: error
+  category: connection
+  title: 프로토콜 핸드셰이크 시간초과
+  immediate:
+  - "`grep -n 'AMQ224088' $JBOSS_HOME/standalone/log/server.log | tail -20` 로 시간 초과 상대 주소 확인 — 같은 주소 반복이면 그 클라이언트·LB 헬스체크 의심"
+  - "상대 주소가 LB·모니터링 장비면 TCP 헬스체크가 핸드셰이크 없이 연결만 여는 경우(장애 아님), 실제 클라이언트면 네트워크 지연·TLS 설정 불일치 확인"
+  short:
+  - "(2차·승인 후, 롤백: 설정 백업 복원) 헬스체크면 acceptor 대상에서 제외하거나 점검 방식 변경, 실제 클라이언트면 TLS·프로토콜 설정 일치화"
+  mid:
+  - "acceptor 별 허용 프로토콜·포트 표준과 헬스체크 대상 정리"
+  long:
+  - "핸드셰이크 시간 초과 건수 감시(출처 주소별)"
+  source: GPT 수집·벤더 문서 대조 완료(https://access.redhat.com/solutions/3638681)
+  note: 공식 Level=ERROR
+  vendor_cause: 'Acceptor에서 프로토콜 handshake가 지정된 제한 시간 안에 완료되지 않았다(Timeout ({0} seconds) while handshaking with {1}). 연결만 열고 닫는 LB 헬스체크, 네트워크 지연, TLS·프로토콜 불일치가 흔한 원인.'
+  vendor_action: ''
+  vendor_url: https://access.redhat.com/solutions/3638681
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: ActiveMQ Artemis 메시징(messaging-activemq)은 EAP 7.0 이후 — EAP 6 은 HornetQ(HQ* 코드)

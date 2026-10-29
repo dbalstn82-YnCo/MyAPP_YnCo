@@ -1,0 +1,77 @@
+# WEB — IIS 시그니처 (W3C 로그 5xx 이벤트)
+rules:
+- id: WEB-IIS-001
+  layer: web
+  product:
+  - iis
+  match:
+    regex: HTTP 503
+  severity: critical
+  defer_to_code: true   # 503.2·503.3·503.4 처럼 사전에 원인이 있는 하위 상태는 사전이 판정(룰 학습 3차)
+  category: capacity
+  verdict: 서비스 사용 불가 (503) — 앱풀 중단/큐 포화 의심
+  immediate:
+  - '`%windir%\system32\inetsrv\appcmd list apppool` 로 Stopped 앱 풀 확인(PowerShell `Get-WebAppPoolState -Name <AppPool>`)'
+  - '`Select-String -Path "$env:SystemRoot\System32\LogFiles\HTTPERR\httperr*.log" -Pattern "AppOffline|QueueFull|ConnLimit|Disabled" | Select-Object -Last 20` 로 503 사유 확인'
+  - '`Get-WinEvent -FilterHashtable @{LogName="System"; ProviderName="Microsoft-Windows-WAS"} -MaxEvents 20 | Format-List TimeCreated,Id,Message` 로 5002·5059 등 원인 이벤트 확인'
+  short:
+  - '(2차·승인 후) 원인 이벤트(크래시·ID 오류)를 조치한 뒤 `appcmd start apppool /apppool.name:<AppPool>` 로 시작 — 원인 미해결 재시작은 다시 비활성화됨(롤백: 해당 없음, 상태 확인)'
+  mid:
+  - '큐 길이(queueLength)·Rapid-Fail Protection·재활용 설정을 처리량 기준으로 재산정'
+  long:
+  - '앱 풀 Stopped·503 비율 경보와 부하 분산(다중 서버) 구성 검토'
+  versions:
+  - IIS 6.0 (2003)
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: W3C 로그 sc-status 503 전 버전
+- id: WEB-IIS-002
+  layer: web
+  product:
+  - iis
+  match:
+    regex: HTTP 502|HTTP 500
+  severity: error
+  defer_to_code: true   # 500.19·500.30·502.5 처럼 사전에 원인이 있는 하위 상태는 사전이 판정(룰 학습 3차, GPT 12차)
+  category: upstream
+  verdict: 백엔드 오류 (500/502)
+  immediate:
+  - '`Select-String -Path "C:\inetpub\logs\LogFiles\W3SVC<siteID>\u_ex*.log" -Pattern " 50[02] " | Select-Object -Last 20` 로 하위 상태(sc-substatus)·URL 확인 — 500.19·502.5 등은 사전 코드 조치를 따름'
+  - '`Get-WinEvent -FilterHashtable @{LogName="Application"} -MaxEvents 50 | Where-Object { $_.ProviderName -like "ASP.NET*" -or $_.ProviderName -like "*AspNetCore*" } | Format-List TimeCreated,Id,Message` 로 앱 예외 확인'
+  short:
+  - '(2차) 이벤트·FREB 추적으로 실패 모듈·백엔드를 특정해 담당에 전달, 추적 규칙 추가는 승인 후(롤백: 규칙 제거)'
+  mid:
+  - '앱 오류 수정 배포와 백엔드 연결 시간 제한·재시도 정책 정비'
+  long:
+  - '500/502 비율 경보와 백엔드 헬스체크 체계 정비'
+  versions:
+  - IIS 6.0 (2003)
+  - IIS 7.0/7.5 (2008/R2)
+  - IIS 8.0/8.5 (2012/R2)
+  - IIS 10.0 (2016~2025)
+  version_note: sc-status 500/502 전 버전
+- id: WEB-IIS-003
+  layer: web
+  product:
+  - iis
+  match:
+    regex: HTTP 5\d{2}(?:\.\d+)?\b[^\r\n]*\(time-taken (?:[3-9]\d{4}|[1-9]\d{5,})ms\)
+  severity: warn
+  auxiliary: true   # 보조 판정 — 같은 줄의 사전 주 원인(500.30·502.5 등)을 가리지 않는다(GPT 12차)
+  category: performance
+  verdict: 30초 이상 걸린 뒤 5xx 응답 — 처리 지연·시간 초과 의심(네트워크 시간 포함)
+  immediate:
+  - '`Select-String -Path ''C:\inetpub\logs\LogFiles\W3SVC<사이트ID>\u_ex*.log'' -Pattern '' 5\d\d \d+ \d+ ([3-9]\d{4}|\d{6,})$'' | Select-Object -Last 20` 로 time-taken 30000ms 이상 5xx 의 URL·시각 확인 (기본 W3C 필드 순서·time-taken 마지막 칸 기준)'
+  - '같은 시각 `Get-Counter ''\ASP.NET\Requests Queued''` 와 `%windir%\system32\inetsrv\appcmd list requests /elapsed:30000` (cmd) 로 장기 실행 요청 확인 — 특정 URL 이 남아 있으면 백엔드(DB·외부 연동) 지연 확인 대상'
+  short:
+  - 앱 풀·ASP.NET·ANCM 요청 시간 제한 값과 실제 처리 시간 비교(2차)
+  mid:
+  - 지연 API 개선 결과에 따라 시간 제한 재조정
+  long:
+  - 응답 시간 목표(SLO) 정의·상시 측정
+  versions:
+  - IIS 7.5
+  - IIS 8.5
+  - IIS 10
+  version_note: 파서가 sc-status·sc-substatus·time-taken 칸으로 만든 정규화 문구에만 건다. time-taken 은 밀리초·네트워크 송수신 포함, 30,000ms 기준은 우리가 정함(Microsoft 장애 기준 아님) — 주 판정이 아니라 보조

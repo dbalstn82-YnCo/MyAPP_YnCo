@@ -1,0 +1,95 @@
+# WEB — Tmax WebtoB 시그니처
+rules:
+- id: WEB-WTB-001
+  layer: web
+  product:
+  - webtob
+  match:
+    regex: JEUS.*(connect|fail|down|timeout)|(jsv|backend|svr).*(fail|timeout|not available|disconnect)|connection refused
+  severity: critical
+  category: upstream
+  verdict: 백엔드(JEUS/서버 프로세스) 연결 실패
+  immediate:
+  - '`wsadmin` 접속 후 `si`(서버 상태)·`ci`(클라이언트) 로 JSV/서버 그룹 연결 상태 확인'
+  - JEUS 프로세스·리스너 포트 확인(`ps -ef | grep -i jeus`, `netstat -an | grep <포트>`)
+  short:
+  - '(2차·승인 후, 롤백: 없음) 다운된 JEUS 서버 기동 후 WebtoB 재연결(si 상태 RDY) 확인'
+  - WebtoB-JEUS 연결 설정(svrgroup/jsv 수) 및 JEUS 로그 대조
+  mid:
+  - 헬스체크·자동 재연결 구성 점검
+  long:
+  - JEUS 이중화 체계
+  versions:
+  - WebtoB 4.1
+  - WebtoB 5.x
+  - WebtoB 6.x
+  version_note: 문구 기반
+- id: WEB-WTB-002
+  layer: web
+  product:
+  - webtob
+  match:
+    regex: HTTP 50[23]|no more .* (worker|hth|process)|max.*(client|connection)|too many
+  severity: critical
+  category: capacity
+  verdict: 처리 용량 한계 (503/502·워커 고갈)
+  immediate:
+  - '`$WEBTOBDIR/bin/wsadmin` 접속 후 `st -s` 로 서비스 큐 대기 수, `si` 로 내부 서버 상태 확인 — 큐 대기가 계속 늘면 처리 용량 포화'
+  - '`tail -50000 <접근로그> | awk ''{print $1}'' | sort | uniq -c | sort -rn | head` 로 출처 쏠림 확인 — 소수 IP 집중이면 폭주·공격(보안 담당 통보)'
+  short:
+  - '(2차·승인 후, 롤백: 제한 설정 원복) 폭주·공격 출처가 확인되면 LB·방화벽에서 유량 제한'
+  - MaxUser·HTH/워커 수와 실제 부하 비교
+  mid:
+  - 웹서버 파라미터 재산정
+  long:
+  - WEB 계층 스케일아웃
+  versions:
+  - WebtoB 4.1
+  - WebtoB 5.x
+  - WebtoB 6.x
+  version_note: 문구 기반
+- id: WEB-WTB-003
+  layer: web
+  product:
+  - webtob
+  match:
+    regex: HTTP 504|timed? ?out|timeout
+  severity: error
+  category: upstream
+  verdict: 백엔드 응답 시간 초과 (504)
+  immediate:
+  - '`$WEBTOBDIR/bin/wsadmin` 접속 후 `st -s` 로 JSV 큐 대기 수 확인 — 큐 적체 동반이면 JEUS 처리 지연이 원인, WEB 단독 원인은 드묾'
+  - '`tail -50000 <접근로그> | awk ''$9 == 504 {print $7}'' | sort | uniq -c | sort -rn | head` 로 504 URL 상위 확인(기본 common 형식) 후 같은 시각 JEUS 로그의 해당 URL 처리 시간·DB 대기 대조'
+  short:
+  - 타임아웃 설정과 실제 응답 시간 비교
+  mid:
+  - 지연 API 개선 후 타임아웃 재조정
+  long:
+  - 응답 시간 SLO 관리
+  versions:
+  - WebtoB 4.1
+  - WebtoB 5.x
+  - WebtoB 6.x
+  version_note: 문구 기반
+- id: WEB-WTB-004
+  layer: web
+  product:
+  - webtob
+  match:
+    regex: 'JSV: premature client close|HTH0113|Client has closed connection'
+  severity: warn
+  category: performance
+  verdict: 클라이언트가 응답 전에 연결 종료(premature client close / HTH0113) — 큐 대기 중 종료면 JEUS 미전달, 처리 후 종료면 응답 폐기(서버 장애 단정 금지)
+  immediate:
+  - '`grep -cE "premature client close|HTH0113|Client has closed connection" <오류로그>` 로 빈도 확인 — 평소 수준이면 정보성, 서버 장애로 단정하지 않음'
+  - '급증 시 `$WEBTOBDIR/bin/wsadmin` 접속 후 `st -s` 로 JSV 큐 대기 확인 — 큐 적체 동반이면 JEUS 응답 지연, 없으면 클라이언트(연계 시스템) 타임아웃 값 확인'
+  short:
+  - 클라이언트(연계 시스템) 측 타임아웃 값과 WAS 처리 시간 대조
+  mid:
+  - 느린 요청(URL)별 처리 시간 개선
+  long:
+  - 응답 시간 임계 관리
+  versions:
+  - WebtoB 5.x
+  - WebtoB 6.x
+  version_note: 'HTH0113 은 5 Fix#3+, ''JSV: premature client close'' 문구는 5.x'

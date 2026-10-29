@@ -1,0 +1,15 @@
+product: jboss
+title: JBoss/WildFly 운영 참고 (GPT 수집 — 벤더 문서 대조 필요)
+sections:
+- heading: 로그 위치
+  body: Standalone 기본 로그는 $WILDFLY_HOME/standalone/log/server.log, managed domain은
+    domain/servers/<server>/log/server.log, host controller는 domain/log/host-controller.log이다.
+- heading: 장애 시 수집 방법
+  body: server.log, host/process controller 로그와 standalone.xml 또는 domain 설정을 수집한다.
+    CLI의 read-resource 결과와 jcmd <pid> Thread.print를 장애 시각에 함께 저장한다.
+- heading: 대표 장애 신호
+  body: WFLYSRV 부팅·배포 실패, WFLYJCA datasource/driver 오류, WFLYTX 트랜잭션 오류, Undertow listener
+    실패, OOM, blocked thread와 DB pool 고갈을 우선 확인한다.
+- heading: 1차 확인 명령
+  body: $WILDFLY_HOME/bin/jboss-cli.sh --connect --commands=':read-attribute(name=server-state)'
+    로 상태를 확인하고 tail -100 standalone/log/server.log와 jcmd <pid> Thread.print를 실행한다.

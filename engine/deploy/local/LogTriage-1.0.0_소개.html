@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LogTriage 1.0.0 소개</title>
+<style>
+:root{--bg:#F4F7FA;--card:#FFFFFF;--ink:#0F1720;--muted:#5B6B7A;--line:#E2E8F0;--acc:#0E7490;--acc-soft:#E1F0F4;--crit:#C62828;--ok:#1B7F4B;--warn:#8A4B00}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#0E151C;--card:#16212B;--ink:#E6EEF4;--muted:#93A6B6;--line:#26343F;--acc:#38BDD8;--acc-soft:#123241;--crit:#F07070;--ok:#5BD08F;--warn:#F2B35A}}
+:root[data-theme="dark"]{--bg:#0E151C;--card:#16212B;--ink:#E6EEF4;--muted:#93A6B6;--line:#26343F;--acc:#38BDD8;--acc-soft:#123241;--crit:#F07070;--ok:#5BD08F;--warn:#F2B35A}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.7 "Malgun Gothic","Apple SD Gothic Neo","Noto Sans KR",sans-serif;word-break:keep-all}
+.wrap{max-width:1040px;margin:0 auto;padding:40px 16px 64px}
+header.hero{background:linear-gradient(135deg,#0B4F63,#0E7490 60%,#22A3BF);color:#fff;border-radius:18px;padding:40px 36px;margin-bottom:28px}
+.hero .tag{display:inline-block;background:rgba(255,255,255,.16);border-radius:999px;padding:3px 12px;font-size:12.5px;letter-spacing:.02em}
+.hero h1{margin:14px 0 6px;font-size:34px;line-height:1.25}
+.hero p{margin:0;max-width:720px;opacity:.95;font-size:16px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-top:26px}
+.kpi{background:rgba(255,255,255,.12);border-radius:12px;padding:12px 14px}
+.kpi b{display:block;font-size:24px;line-height:1.2}
+.kpi span{font-size:12.5px;opacity:.9}
+section{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:26px 28px;margin:0 0 18px}
+h2{margin:0 0 12px;font-size:20px}
+h2 small{font-size:13px;color:var(--muted);font-weight:400;margin-left:8px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}
+.box{border:1px solid var(--line);border-radius:12px;padding:14px 16px;background:var(--bg)}
+.box h3{margin:0 0 6px;font-size:15.5px}
+.box p{margin:0;color:var(--muted);font-size:14px}
+ol.flow{counter-reset:s;list-style:none;margin:0;padding:0;display:grid;gap:10px}
+ol.flow li{counter-increment:s;display:grid;grid-template-columns:34px 1fr;gap:12px;align-items:start}
+ol.flow li::before{content:counter(s);width:34px;height:34px;border-radius:50%;background:var(--acc);color:#fff;display:grid;place-items:center;font-weight:700}
+ol.flow b{display:block}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th,td{border-bottom:1px solid var(--line);padding:9px 10px;text-align:left;vertical-align:top}
+th{color:var(--muted);font-weight:600;white-space:nowrap}
+td.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.pill{display:inline-block;border-radius:999px;padding:1px 10px;font-size:12.5px;background:var(--acc-soft);color:var(--acc);font-weight:600}
+.lim li{margin-bottom:4px}
+.note{color:var(--muted);font-size:13px}
+footer{color:var(--muted);font-size:12.5px;text-align:center;margin-top:24px}
+@media (max-width:640px){header.hero{padding:28px 20px}.hero h1{font-size:26px}section{padding:20px 18px}}
+@media print{body{background:#fff}header.hero{color:#000;background:none;border:2px solid #0E7490}.kpi{border:1px solid #ccc}section{break-inside:avoid}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="hero">
+  <span class="tag">사내 해커톤 출품 · 폐쇄망 장애 1차 대응</span>
+  <h1>LogTriage 1.0.0<br>장애 로그를 넣으면, 최초 이상 계층과 1차 조치가 나옵니다</h1>
+  <p>OS·DB·WAS·WEB·상용 SW 로그를 한 번에 넣으면 어느 계층에서 처음 이상이 났는지, 그것이 무엇인지, 지금 무엇을 확인해야 하고 무엇을 하면 안 되는지를
+    근거 줄과 함께 보여 주고, 장애 보고서(HWPX)까지 만듭니다. 인터넷이 없는 망에서 exe 하나로 동작합니다.</p>
+  <div class="kpis">
+    <div class="kpi"><b>427</b><span>시그니처 룰</span></div>
+    <div class="kpi"><b>1,605</b><span>제조사 에러코드</span></div>
+    <div class="kpi"><b>37</b><span>지원 제품</span></div>
+    <div class="kpi"><b>4.8만 줄/초</b><span>550MB 로그 118초 · 메모리 약 67MB</span></div>
+    <div class="kpi"><b>exe 1개</b><span>판정 지식 내장 · 설치 불필요</span></div>
+  </div>
+</header>
+
+<section>
+  <h2>풀려는 문제</h2>
+  <div class="grid2">
+    <div class="box"><h3>장애 첫 30분이 가장 비싸다</h3><p>여러 서버의 로그를 사람이 하나씩 열어 보며 "어디가 먼저 아팠나"를 찾는 동안 서비스는 멈춰 있습니다.</p></div>
+    <div class="box"><h3>폐쇄망이라 외부 도구를 못 쓴다</h3><p>공공·금융 운영 환경은 인터넷이 막혀 있고, 로그를 밖으로 보낼 수도 없습니다.</p></div>
+    <div class="box"><h3>담당자마다 대응 품질이 다르다</h3><p>같은 증상에도 경험에 따라 확인 순서·조치가 달라지고, 위험한 조치(무작정 재기동·한도 올리기)가 반복됩니다.</p></div>
+  </div>
+</section>
+
+<section>
+  <h2>30초 시연 <small>로그 파일 없이도 됩니다</small></h2>
+  <ol class="flow">
+    <li><div><b>LogTriage.exe 를 아무 폴더에 두고 실행</b>처음 실행할 때 exe 안의 판정 지식(룰·에러코드·매뉴얼·보고서 서식)을 그 폴더에 펼치고, 합성 견본으로 자가 점검을 합니다. 왼쪽 아래 '자가 점검 ✓'.</div></li>
+    <li><div><b>홈의 [견본으로 30초 체험]</b>합성 견본 4종(Tomcat·Oracle·WebSphere·리스너)을 자동 판별해 바로 분석합니다(실로그 아님).</div></li>
+    <li><div><b>판정 리포트</b>"이번 분석에서 DB 계층 치명 8건" — 최초 관측 계층·시각, 무슨 일이 일어났나, 판단 근거(실제 로그 줄), 하지 말 것, 단계별 대응, 원문 미리보기. 위쪽 목차로 구획 이동.</div></li>
+    <li><div><b>[장애 보고서 만들기]</b>회사 서식(HWPX)에 분석 결과를 채운 보고서. HTML·인쇄/PDF 도 됩니다.</div></li>
+    <li><div><b>시연 정리</b>견본 분석은 'DEMO-'로 남아 [체험 기록 지우기]로 실제 분석은 건드리지 않고 지웁니다.</div></li>
+  </ol>
+</section>
+
+<section>
+  <h2>무엇이 다른가</h2>
+  <div class="grid2">
+    <div class="box"><h3>근거가 보이는 판정</h3><p>판정마다 걸린 로그 줄·룰·에러코드를 보여 주고, 원인을 단정하지 않습니다("최초 관측 ≠ 근본 원인", "추가 확인 필요"를 그대로 씁니다).</p></div>
+    <div class="box"><h3>거짓 '이상 없음'을 내지 않는다</h3><p>판정 지식이 없거나 일부만 있으면 '미검출' 리포트 대신 멈추고 이유를 알립니다. 기동 때마다 합성 견본으로 자가 점검합니다.</p></div>
+    <div class="box"><h3>조치의 검증 상태를 따로 표시</h3><p>1차 확인 명령마다 문법 검사·시험 클러스터 실행·제조사 문서 대조를 축별로 나눠 보여 줍니다. 위험 명령은 되돌리기 방법이 없으면 출시가 멈춥니다.</p></div>
+    <div class="box"><h3>현장에서 배우는 룰</h3><p>분석에서 안 걸린 오류 문구를 모아 룰 초안을 만들고, 안전 검사 후 사람이 승인한 것만 반영합니다. 반입은 Ed25519 서명 룰팩만.</p></div>
+    <div class="box"><h3>지식 무결성</h3><p>세 지식 폴더의 내용 지문(세대 기록)을 기동마다 대조 — 한 폴더만 바뀌거나 섞이면 띄우지 않습니다.</p></div>
+    <div class="box"><h3>로그 없이도 에러코드 × OS 해법</h3><p>1,605개 에러코드 × 그 제품이 도는 OS(Linux·AIX·HP-UX·Solaris·Windows) 5,394 조합마다 1차 읽기 전용 확인 · 2차 승인 후 조치 · 3차 의뢰 자료를 명령과 함께 냅니다. 지원 상태(지원·조건부·레거시·미확인)를 먼저 밝히고, 재기동은 그 코드의 지식이 같은 대상을 두고 긍정형으로 권할 때만 근거 문장과 함께 붙입니다.</p></div>
+    <div class="box"><h3>단독 실행 ↔ 서버형</h3><p>같은 엔진으로 단독 창(exe 하나)과 사내 서버(통합 로그인·권한·사이트별 자산·본사 허브)를 모두 지원합니다.</p></div>
+  </div>
+</section>
+
+<section>
+  <h2>성능 실측 <small>포장본 CLI · 합성 tomcat 로그 · 이 PC(CPU 12)</small></h2>
+  <table>
+    <thead><tr><th>크기</th><th class="n">줄 수</th><th class="n">11차(순차)</th><th class="n">12차(병렬)</th><th class="n">초당 줄 수</th><th class="n">최대 메모리(작업자 합)</th><th>판정</th></tr></thead>
+    <tbody>
+      <tr><td>100MB</td><td class="n">1,051,798</td><td class="n">27.1초</td><td class="n">14.6초</td><td class="n">71,851</td><td class="n">578MB</td><td>커넥션 풀 고갈 · JVM 힙 고갈 검출(11차와 같음)</td></tr>
+      <tr><td>300MB</td><td class="n">3,133,299</td><td class="n">66.1초</td><td class="n">32.9초</td><td class="n">95,251</td><td class="n">578MB</td><td>같음</td></tr>
+      <tr><td>550MB</td><td class="n">5,735,176</td><td class="n">118.1초</td><td class="n">52.9초</td><td class="n">108,431</td><td class="n">578MB</td><td>같음</td></tr>
+    </tbody>
+  </table>
+  <p class="note">12차: 큰 로그를 CPU 수만큼(최대 16) 작업자 프로세스로 나눠 해석하고(여러 줄 스택트레이스는 이벤트 시작 줄에서만 자름), 판정·줄 번호는 순차와 같습니다(시험으로 대조).
+  작업자 수는 남은 메모리의 60% 안에서 자동으로 줄어듭니다. 메모리는 0.5초 간격으로 잰 작업 집합의 최댓값(작업자 합)이며, 12차 값은 지식 읽기 C 파서 교체 직전 빌드 실측입니다.
+  실제 로그는 형식·오류 비율에 따라 달라집니다.</p>
+</section>
+
+<section>
+  <h2>품질을 어떻게 지켰나</h2>
+  <table>
+    <tbody>
+      <tr><th>자동 회귀 시험</th><td>1,250건 이상 — 빌드마다 전부 통과해야 설치</td></tr>
+      <tr><th>포장본 점검</th><td>빌드된 exe 그대로 11종 — CLI 판정 일치·CSP·15화면·보고서·룰팩 서명·단추 클릭 종단·단독 실행(빈 폴더)·화면 품질(넘침·잘림·접근성·JS 오류 0)·실기동. 점검 기록의 exe 해시가 맞아야만 설치</td></tr>
+      <tr><th>돌연변이 시험</th><td>일부러 결함을 넣어 시험이 잡는지 — 회차마다 전부 잡힐 때까지 시험 보강</td></tr>
+      <tr><th>교차 검증</th><td>Claude 와 GPT 가 80차례 넘게 서로의 설계를 반대 검토 — 지적은 수용·부분 수용·불수용과 근거, 지키는 시험 이름까지 장부에 남김</td></tr>
+      <tr><th>한글 보고서</th><td>한글 2022 로 열어 PDF 로 저장한 뒤 글자 겹침·종이 밖·칸 넘침 0 확인(12개 서식 조합)</td></tr>
+      <tr><th>설치</th><td>복사 없이 이동 설치 — 강제 종료돼도 일지로 설치 전 상태로 되돌림, 설치본은 기동 때 자기 해시를 설치 기록과 대조</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2>보안 원칙</h2>
+  <ul>
+    <li>로그는 이 PC(또는 사내 서버) 밖으로 나가지 않습니다. 화면은 엄격한 CSP 로 외부 연결을 막습니다.</li>
+    <li>룰팩은 Ed25519 서명만 받고, 처음 등록할 때 키 지문을 사람이 대조합니다.</li>
+    <li>학습 룰의 정규식은 안전 검사(재앙적 역추적 차단)를 통과해야 하고, 사람 승인 전에는 판정에 쓰이지 않습니다.</li>
+    <li>현장 실행 결과는 머리글만 받습니다(값 거절). 공용 비밀번호는 scrypt 검증값으로만 보관합니다.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>정직한 한계</h2>
+  <ul class="lim">
+    <li>판정은 알려진 장애 패턴(룰·에러코드) 기준입니다. 처음 보는 장애는 '알려진 장애 패턴 미검출'로 보일 수 있습니다 — 그 오류 문구는 룰 학습 후보로 모이고, 사람이 승인하면 다음부터 판정합니다.</li>
+    <li>최초 관측 계층은 시각 순서일 뿐 근본 원인이 아닙니다 — 리포트가 그렇게 표시합니다.</li>
+    <li>조치 지식의 기술 정확성은 표본 실검증으로 넓혀 가는 중이며, 검증 상태를 축별로 그대로 보여 줍니다.</li>
+    <li>실제 전원 차단 복구, 심볼릭 링크·정션 거부는 이 PC 권한·환경에서 실측하지 못했습니다(프로세스 강제 종료로만 확인).</li>
+  </ul>
+</section>
+<footer>LogTriage 1.0.0 · 장애 로그 1차 대응 분석기 · 이 문서의 숫자는 2026-10-19 실측값입니다.</footer>
+</div>
+</body>
+</html>

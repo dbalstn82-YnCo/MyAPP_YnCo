@@ -1,0 +1,381 @@
+# 기존 'AI 로그분석기 v2.2' 내장 룰에서 변환 반입(tools/import_legacy_rules.py) — 중복(코드·패턴) 제외
+# 심각도 CRITICAL→critical HIGH→error MEDIUM→warn LOW→info · immediate_actions→즉시 · root_actions→중기 · negative_patterns→exclude
+rules:
+- id: LEG-IND-001
+  layer: db
+  product:
+  - oracle
+  match:
+    regex: '(?:ORA-12899: value too large for column "[^"]+"\."([^"]+)"\."([^"]+)"\s*\(actual:\s*(\d+),\s*maximum:\s*(\d+)\))'
+  severity: critical
+  category: capacity
+  verdict: Oracle DB 컬럼 크기 초과 — INSERT 실패 — 입력 데이터 길이가 해당 테이블 컬럼의 최대 허용 크기를 초과함. 스키마 변경 없이 데이터 길이가 증가한 경우 발생
+  immediate:
+  - 로그의 스키마·테이블·컬럼과 actual/maximum 값 기록(입력 값 자체는 개인정보일 수 있어 기록하지 않음)
+  - '컬럼 정의 확인(읽기): `SELECT data_type,data_length,char_used FROM dba_tab_columns WHERE owner=''<OWNER>'' AND table_name=''<TABLE>'' AND column_name=''<COLUMN>'';` — BYTE 단위면 한글(UTF-8 3바이트)로 초과 가능'
+  - '같은 인터페이스 반복 건수: `grep -c ''ORA-12899'' <ESB 로그>`'
+  short:
+  - '(2차·승인 후, 롤백: 변경 전 DDL 추출) 업무 담당 승인 후 컬럼 확장(ALTER TABLE … MODIFY) 또는 송신 측 데이터 길이 검증 추가'
+  - '영향: DBMS 계층 — Oracle DB 컬럼 크기 초과 — INSERT 실패'
+  mid:
+  - 연계 전문 길이 규격과 DB 컬럼 길이(CHAR 단위 사용 검토) 정합
+  long:
+  - 스키마 변경 시 연계 전문 규격 동시 갱신 절차와 ORA-12899 건수 감시
+  source_note: 'legacy-analyzer-v2.2 indigo_esb_rules.json IND-001 (원 출처: patch)'
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: ORA-12899 — 10g 이후
+- id: LEG-IND-002
+  layer: db
+  product:
+  - oracle
+  match:
+    regex: (?:HubLogDB Detail Table Insert Error\s*:\s*transaction id\s*=\s*([\w]+))
+  severity: error
+  category: internal
+  verdict: 허브 로그 상세 테이블 INSERT 실패 — 감사 로그 누락 위험
+  immediate:
+  - 'transaction id 와 같은 시각 ORA- 오류 확인: `grep -n -B2 -A5 ''HubLogDB Detail Table Insert Error'' <ESB 로그> | grep -E ''ORA-|transaction id'' | tail -20`'
+  - 본 거래 결과는 정상이고 감사 로그만 누락인지 업무 담당과 확인
+  - '허브 로그 DB 테이블스페이스 여유(읽기): `SELECT tablespace_name,ROUND(SUM(bytes)/1048576) free_mb FROM dba_free_space GROUP BY tablespace_name;`'
+  short:
+  - '(2차·승인 후, 롤백: 재적재 전 대상 테이블 백업) 원인 ORA 코드 해소 후 누락 transaction id 의 감사 로그 재적재 여부 결정'
+  - '영향: DBMS 계층 — 허브 로그 상세 테이블 INSERT 실패 — 감사 로그 누락 위험'
+  mid:
+  - 허브 로그 테이블 스키마(컬럼 길이·파티션) 검토
+  - 감사 로그 적재 실패 시 파일 보존 후 재처리 경로 마련
+  long:
+  - 허브 로그 적재 실패 건수 감시와 테이블 보관 주기(파티션) 관리
+  source_note: 'legacy-analyzer-v2.2 indigo_esb_rules.json IND-002 (원 출처: patch)'
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: Indigo ESB 문구 — 버전 무관
+- id: LEG-IND-003
+  layer: db
+  product:
+  - oracle
+  match:
+    regex: (?:\[SQU-OTO\]\s*\*\*\s*SQL ERR CODE\s*:\s*(\d+)\s*\*\*\s*SQL ERR MSG\s*:(.*))
+  severity: error
+  category: lock
+  verdict: SQU-OTO SQL 오류 — DB 처리 실패
+  immediate:
+  - 'SQL ERR CODE 번호 기록 후 구분: 12899=컬럼 길이 초과, 1=중복 키(ORA-00001), 60=데드락(ORA-00060)'
+  - '데드락(60)이면 alert log 확인: `grep -n ''ORA-00060'' $ORACLE_BASE/diag/rdbms/<db>/<SID>/trace/alert_<SID>.log | tail -5` 후 기록된 trace 파일 확인'
+  - '중복 키(1)면 제약 이름으로 대상 테이블 확인: `SELECT table_name FROM dba_constraints WHERE constraint_name=''<CONSTRAINT>'';`'
+  short:
+  - (2차·승인 후) 코드별 조치 — 12899 는 컬럼 확장(DDL 백업 후), 1 은 중복 데이터 원인 확인, 60 은 재시도 로직·잠금 순서 정비
+  - '영향: DBMS 계층 — SQU-OTO SQL 오류 — DB 처리 실패'
+  mid:
+  - 코드별 대응표(12899·1·60)를 운영 매뉴얼에 등록하고 반복 코드는 개발팀 결함 관리로 이관
+  long:
+  - SQU-OTO SQL 오류 건수 감시와 DB 오류 코드별 알림 등급 표준화
+  source_note: 'legacy-analyzer-v2.2 indigo_esb_rules.json IND-003 (원 출처: patch)'
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: SQU-OTO 문구 — 버전 무관
+- id: LEG-IND-004
+  layer: sw
+  product:
+  - indigo-esb
+  match:
+    regex: (?:Error processing exchange InOnly\[\s*id:\s*(ID:[\w\-\./:]+).*?service:\s*(\{[^}]+\}[\w\-]+).*?endpoint:\s*([\w\-]+))
+  severity: error
+  category: hardware
+  verdict: JBI Exchange 처리 실패 — 비동기 메시지 처리 오류 — 비동기 InOnly 메시지 처리 중 예외 발생. 주로 DB 저장 실패나 다운스트림 서비스 오류로 인한 연쇄 오류
+  immediate:
+  - 'Exchange ID·서비스·엔드포인트 기록 후 연관 줄 검색: `grep -n ''<Exchange ID>'' <ESB_HOME>/logs/*.log | head -20`'
+  - '선행 DB·네트워크 오류: `grep -nE ''ORA-|Connection refused|timed out'' <ESB_HOME>/logs/*.log | tail -20`'
+  - DLQ(Dead Letter Queue) 적재 건수를 관리 콘솔·브로커 화면에서 확인
+  short:
+  - '(2차·승인 후, 롤백: 재처리 전 메시지 사본 보관) 선행 오류 해소 후 DLQ 메시지 재처리'
+  - '영향: WAS 계층 — JBI Exchange 처리 실패 — 비동기 메시지 처리 오류'
+  mid:
+  - DLQ 적재 감시와 재처리 절차 문서화
+  - 비동기 메시지 재시도 횟수·간격 설정 표준화
+  long:
+  - Exchange 처리 실패율 감시 등록
+  source_note: 'legacy-analyzer-v2.2 indigo_esb_rules.json IND-004 (원 출처: patch)'
+  versions:
+  - Indigo ESB (Apache CXF/ServiceMix 기반, 납품 버전 기준)
+  version_note: Indigo ESB 실로그 문구(Apache CXF 'Interceptor for {..} has thrown exception'·ServiceMix 'Error processing exchange' 계열) — 버전 미확인
+- id: LEG-IND-005
+  layer: sw
+  product:
+  - indigo-esb
+  match:
+    regex: (?:Interceptor for \{([^}]+)\}([\w]+)#\{[^}]+\}([\w]+) has thrown exception, unwinding now)
+  severity: warn
+  category: security
+  verdict: CXF Interceptor 예외 — 서비스 처리 중단 후 언와인딩
+  immediate:
+  - '서비스·오퍼레이션 이름과 원인 확인: `grep -n -A10 ''has thrown exception, unwinding now'' <ESB_HOME>/logs/*.log | grep -iE ''Interceptor|Caused by'' | tail -20`'
+  - '연관 Response-Code 와 외부 연계 서버 도달: `nc -zvw3 <target_host> <port>`'
+  short:
+  - '(2차·승인 후, 롤백: 설정 사본) 외부 연계 서버 장애면 상대 기관 통보, 인증·서명 인터셉터 오류면 인증서·키 설정 확인'
+  - '영향: WAS 계층 — CXF Interceptor 예외 — 서비스 처리 중단 후 언와인딩'
+  mid:
+  - 인터셉터 예외 원인별(연결·인증·형식) 대응표 작성
+  - 외부 연계 타임아웃·재시도 설정 표준화
+  long:
+  - 서비스별 인터셉터 예외 건수 감시
+  source_note: 'legacy-analyzer-v2.2 indigo_esb_rules.json IND-005 (원 출처: patch)'
+  versions:
+  - Indigo ESB (Apache CXF/ServiceMix 기반, 납품 버전 기준)
+  version_note: Indigo ESB 실로그 문구(Apache CXF 'Interceptor for {..} has thrown exception'·ServiceMix 'Error processing exchange' 계열) — 버전 미확인
+- id: LEG-IND-006
+  layer: sw
+  product:
+  - indigo-esb
+  match:
+    regex: (?:Application \{([^}]+)\}([\w]+)#\{[^}]+\}([\w]+) has thrown exception, unwinding now)
+  severity: warn
+  category: internal
+  verdict: CXF Application 레벨 예외 — 비즈니스 로직 처리 중 오류
+  immediate:
+  - '서비스 구현 예외 스택 확인: `grep -n -A15 ''has thrown exception'' <ESB_HOME>/logs/*.log | grep -E ''Caused by|at '' | head -30`'
+  - 특정 입력 전문에서만 나는지 거래 ID 기준 반복 여부 확인(전문 원문은 개인정보 마스킹)
+  short:
+  - '(2차·승인 후, 롤백: 이전 배포본) 개발팀에 예외 스택·발생 시각 전달, 입력 검증 보강 배포는 변경 승인 후'
+  - '영향: WAS 계층 — CXF Application 레벨 예외 — 비즈니스 로직 처리 중 오류'
+  mid:
+  - 해당 서비스 구현 클래스의 예외 스택 트레이스 확인.
+  - 입력 데이터 유효성 검증 강화.
+  - 외부 API 응답 오류 처리 로직 보강.
+  long:
+  - 애플리케이션 예외 건수 서비스별 감시
+  source_note: 'legacy-analyzer-v2.2 indigo_esb_rules.json IND-006 (원 출처: patch)'
+  versions:
+  - Indigo ESB (Apache CXF/ServiceMix 기반, 납품 버전 기준)
+  version_note: Indigo ESB 실로그 문구(Apache CXF 'Interceptor for {..} has thrown exception'·ServiceMix 'Error processing exchange' 계열) — 버전 미확인
+- id: LEG-IND-007
+  layer: sw
+  product:
+  - indigo-esb
+  match:
+    regex: (?:Target service \(\{([^}]+)\}([\w]+)\) and endpoint \(([\w]+)\) specified, but no matching endpoint found\.\s*Only the service will be used for routing\.)
+  severity: warn
+  category: upstream
+  verdict: 라우팅 대상 Endpoint 미등록 — 서비스만으로 라우팅 진행
+  immediate:
+  - '대상 서비스·엔드포인트 이름 기록: `grep -n ''no matching endpoint found'' <ESB_HOME>/logs/*.log | tail -10`'
+  - '배포 상태 확인: Karaf 기반이면 콘솔 `bundle:list | grep -i <service>` 로 해당 서비스 번들 Active 여부'
+  short:
+  - '(2차·승인 후, 롤백: 이전 설정·번들 보관) 엔드포인트 설정 등록(예: ElecDocReceptInfoPortESB) 후 서비스 재배포'
+  - '영향: WAS 계층 — 라우팅 대상 Endpoint 미등록 — 서비스만으로 라우팅 진행'
+  mid:
+  - 해당 서비스의 endpoint 설정 파일 확인.
+  - ESB 서비스 재배포 여부 점검.
+  - ElecDocReceptInfoPortESB 등록 필요.
+  long:
+  - 배포 후 엔드포인트 등록 검증을 배포 점검표에 추가
+  source_note: 'legacy-analyzer-v2.2 indigo_esb_rules.json IND-007 (원 출처: patch)'
+  versions:
+  - Indigo ESB (Apache CXF/ServiceMix 기반, 납품 버전 기준)
+  version_note: Indigo ESB 실로그 문구(Apache CXF 'Interceptor for {..} has thrown exception'·ServiceMix 'Error processing exchange' 계열) — 버전 미확인
+- id: LEG-IND-008
+  layer: sw
+  product:
+  - indigo-esb
+  match:
+    regex: '(?:Response-Code: 500)'
+  severity: warn
+  category: upstream
+  verdict: 외부 연계 서비스 HTTP 500 응답 수신 — 연계 대상 외부 서비스(WFIS 게이트웨이, 법원 등기 서비스 등)에서 서버 내부 오류 반환. 외부 시스템 장애, 과부하, 데이터 오류 등이 원인
+  immediate:
+  - '500 응답 대상·건수 확인: `grep -n -B5 ''Response-Code: 500'' <ESB_HOME>/logs/*.log | grep -iE ''Address|service'' | tail -20`'
+  - '대상 응답(읽기): `curl -s -o /dev/null -w ''%{http_code}'' --max-time 5 ''http://<target_host>:<port>/<service>?wsdl''`'
+  - 5분 단위 반복 여부를 기록해 연계 기관 담당에 발생 시각·건수 통보
+  short:
+  - '(2차·승인 후, 롤백: 설정 사본) 상대 기관 복구 확인 후 실패 거래 재처리 여부 결정, 재시도 정책(retry count·backoff) 설정 변경'
+  - '영향: WAS 계층 — 외부 연계 서비스 HTTP 500 응답 수신'
+  mid:
+  - 동일 서비스에 대한 500 반복 여부 모니터링.
+  - 연계 기관 담당자에게 오류 통보.
+  - 재시도 정책 설정 검토 (retry count, backoff).
+  long:
+  - 연계 기관별 500 응답률 감시와 장애 통보 연락망 관리
+  source_note: 'legacy-analyzer-v2.2 indigo_esb_rules.json IND-008 (원 출처: patch)'
+  versions:
+  - Indigo ESB (Apache CXF/ServiceMix 기반, 납품 버전 기준)
+  version_note: Indigo ESB 실로그 문구(Apache CXF 'Interceptor for {..} has thrown exception'·ServiceMix 'Error processing exchange' 계열) — 버전 미확인
+- id: LEG-IND-009
+  layer: sw
+  product:
+  - indigo-esb
+  match:
+    regex: '(?:==\[outHandle\] SingEncryptProcessor (START|END)!==)'
+  severity: info
+  category: security
+  verdict: GPKI 서명/암호화 처리 시작/종료 — 정상 처리 흐름. EUC-KR 인코딩 기반 GPKI 보안 프로세서가 송신 메시지를 서명/암호화하는 단계
+  immediate:
+  - '서명 START/END 짝 확인: `grep -c ''SingEncryptProcessor START'' <로그>` 와 `grep -c ''SingEncryptProcessor END'' <로그>` — 두 수가 다르면 처리 중단 건 존재'
+  - 정상 흐름 메시지 — 짝이 맞으면 조치 불필요
+  short:
+  - (2차) START/END 불일치 시 해당 시각 GPKI 오류(인증서·키) 로그를 보안 모듈 담당에 전달
+  - '영향: WAS 계층 — GPKI 서명/암호화 처리 시작/종료'
+  mid:
+  - '모니터링 불필요. START 이후 일정 시간(예: 5초) 내 END가 없을 경우 처리 지연 의심.'
+  long:
+  - '서명 처리 시간(START~END) 감시 임계(예: 5초) 등록'
+  source_note: 'legacy-analyzer-v2.2 indigo_esb_rules.json IND-009 (원 출처: patch)'
+  versions:
+  - Indigo ESB (Apache CXF/ServiceMix 기반, 납품 버전 기준)
+  version_note: Indigo ESB 실로그 문구(Apache CXF 'Interceptor for {..} has thrown exception'·ServiceMix 'Error processing exchange' 계열) — 버전 미확인
+- id: LEG-IND-010
+  layer: sw
+  product:
+  - indigo-esb
+  match:
+    regex: '(?:==\[inHandle\] SingDecryptProcessor (START|END)!==)'
+  severity: info
+  category: internal
+  verdict: GPKI 서명/복호화 처리 시작/종료 — 정상 처리 흐름. 수신 메시지에 대한 서명 검증 및 복호화 단계
+  immediate:
+  - '복호화 START/END 짝 확인: `grep -c ''SingDecryptProcessor START'' <로그>` 와 `grep -c ''SingDecryptProcessor END'' <로그>`'
+  - 'END 없이 오류면 인증서 만료·LDAP 조회 실패 확인: `grep -niE ''certificate|ldap'' <로그> | tail -20`'
+  short:
+  - '(2차·승인 후, 롤백: 기존 인증서 보관) GPKI 인증서 만료 시 갱신·배포는 보안 담당 승인 후'
+  - '영향: WAS 계층 — GPKI 서명/복호화 처리 시작/종료'
+  mid:
+  - 모니터링 불필요. START 이후 END 없이 오류 발생 시 인증서 만료 또는 LDAP 조회 실패 가능성 검토.
+  long:
+  - GPKI 인증서 만료 60/30일 알림 등록
+  source_note: 'legacy-analyzer-v2.2 indigo_esb_rules.json IND-010 (원 출처: patch)'
+  versions:
+  - Indigo ESB (Apache CXF/ServiceMix 기반, 납품 버전 기준)
+  version_note: Indigo ESB 실로그 문구(Apache CXF 'Interceptor for {..} has thrown exception'·ServiceMix 'Error processing exchange' 계열) — 버전 미확인
+- id: LEG-IND-011
+  layer: sw
+  product:
+  - indigo-esb
+  match:
+    regex: (?:===== Decrypte encoding:\s*([\w\-]+)=====)
+  severity: info
+  category: performance
+  verdict: 복호화 인코딩 정보 — EUC-KR 응답 처리 — 정상 처리. 수신 메시지의 인코딩이 EUC-KR임을 확인 후 복호화 수행. EUC-KR 응답에서 userName 등 한글 필드가 깨질 수 있음
+  immediate:
+  - '인코딩 값 확인: `grep -n ''Decrypte encoding'' <로그> | tail -10` — EUC-KR 이면 이후 한글 필드 깨짐 여부 확인'
+  - 깨짐 사례는 거래 ID 만 기록(개인정보 원문 기록 금지)해 개발팀 전달
+  short:
+  - '(2차·승인 후, 롤백: 이전 배포본) EUC-KR→UTF-8 변환 로직 수정 배포는 변경 승인 후'
+  - '영향: WAS 계층 — 복호화 인코딩 정보 — EUC-KR 응답 처리'
+  mid:
+  - EUC-KR 수신 후 UTF-8 변환 처리 로직 점검. userName 필드 인코딩 깨짐 여부 확인.
+  long:
+  - 연계 기관별 문자셋 규격 문서화
+  source_note: 'legacy-analyzer-v2.2 indigo_esb_rules.json IND-011 (원 출처: patch)'
+  versions:
+  - Indigo ESB (Apache CXF/ServiceMix 기반, 납품 버전 기준)
+  version_note: Indigo ESB 실로그 문구(Apache CXF 'Interceptor for {..} has thrown exception'·ServiceMix 'Error processing exchange' 계열) — 버전 미확인
+- id: LEG-IND-012
+  layer: sw
+  product:
+  - indigo-esb
+  match:
+    regex: (?:Request ldap\.\s*(ldap://[^/]+/cn=([^,]+),.*))
+  severity: info
+  category: security
+  verdict: GPKI 인증서 LDAP 조회 요청 — 정상 처리. GPKI 서명 검증을 위해 상대방 서버 인증서를 LDAP 디렉토리 서비스에서 조회
+  immediate:
+  - 'LDAP 조회 지연 확인: 조회 로그 직후 서명 검증 완료까지 시간 차를 거래 ID 기준으로 비교'
+  - 'LDAP 서버 도달(읽기): `nc -zvw3 <ldap_server> 389` — 실패면 GPKI 디렉터리 장애'
+  short:
+  - '(2차·승인 후, 롤백: 캐시 비활성 설정) 동일 CN 반복 조회가 많으면 인증서 캐싱 적용을 개발팀과 검토'
+  - '영향: WAS 계층 — GPKI 인증서 LDAP 조회 요청'
+  mid:
+  - LDAP 서버(<ldap_server>:389) 응답 지연 감시
+  - 동일 CN 반복 조회 시 캐싱 적용 검토
+  long:
+  - GPKI LDAP 조회 실패·지연 감시 등록
+  source_note: 'legacy-analyzer-v2.2 indigo_esb_rules.json IND-012 (원 출처: patch)'
+  versions:
+  - Indigo ESB (Apache CXF/ServiceMix 기반, 납품 버전 기준)
+  version_note: Indigo ESB 실로그 문구(Apache CXF 'Interceptor for {..} has thrown exception'·ServiceMix 'Error processing exchange' 계열) — 버전 미확인
+- id: LEG-IND-013
+  layer: sw
+  product:
+  - indigo-esb
+  match:
+    regex: (?:Executing operation\s+(\w+))
+  severity: info
+  category: upstream
+  verdict: ESB 서비스 오퍼레이션 실행 시작 — 정상 처리. 인바운드 요청이 ESB 라우팅을 통해 해당 서비스 구현체로 전달되어 처리 시작
+  immediate:
+  - '오퍼레이션별 처리 건수: `grep -c ''Executing operation <오퍼레이션>'' <로그>` 를 시간대별로 비교 — 평시 대비 급증·급감이면 이상'
+  - 정상 흐름 메시지 — 특정 오퍼레이션 급증 시 호출 측 재시도 폭주 여부 확인
+  short:
+  - (2차·승인 후) 급증 원인(호출 측 재시도·배치) 담당 확인 후 유량 제어 설정 검토
+  - '영향: WAS 계층 — ESB 서비스 오퍼레이션 실행 시작'
+  mid:
+  - 분당 처리 건수 모니터링. 특정 서비스의 급격한 증가/감소 시 이상 징후 확인.
+  long:
+  - 오퍼레이션별 처리량 기준선 감시
+  source_note: 'legacy-analyzer-v2.2 indigo_esb_rules.json IND-013 (원 출처: patch)'
+  versions:
+  - Indigo ESB (Apache CXF/ServiceMix 기반, 납품 버전 기준)
+  version_note: Indigo ESB 실로그 문구(Apache CXF 'Interceptor for {..} has thrown exception'·ServiceMix 'Error processing exchange' 계열) — 버전 미확인
+- id: LEG-IND-014
+  layer: sw
+  product:
+  - indigo-esb
+  match:
+    regex: (?:!+\s*return Body not null\s*!+)
+  severity: info
+  category: upstream
+  verdict: 서비스 응답 Body 정상 수신 확인 — 정상 처리. 외부 연계 서비스로부터 응답 Body가 null이 아닌 정상 데이터로 수신됨을 표시
+  immediate:
+  - '정상 응답 표시 — 반대 경우 확인: `grep -n ''return Body null'' <로그> | tail -10` 와 NullPointerException 동반 여부'
+  - null 응답이 특정 연계 기관에 몰리면 해당 기관 응답 이상으로 통보
+  short:
+  - (2차) null 응답 처리 로직(예외 처리) 보강을 개발팀에 요청
+  - '영향: WAS 계층 — 서비스 응답 Body 정상 수신 확인'
+  mid:
+  - 모니터링 불필요. 반대로 'return Body null' 또는 null 관련 NPE 발생 시 외부 서비스 응답 이상 의심.
+  long:
+  - 응답 Body null 건수 감시 등록
+  source_note: 'legacy-analyzer-v2.2 indigo_esb_rules.json IND-014 (원 출처: patch)'
+  versions:
+  - Indigo ESB (Apache CXF/ServiceMix 기반, 납품 버전 기준)
+  version_note: Indigo ESB 실로그 문구(Apache CXF 'Interceptor for {..} has thrown exception'·ServiceMix 'Error processing exchange' 계열) — 버전 미확인
+- id: LEG-IND-015
+  layer: sw
+  product:
+  - indigo-esb
+  match:
+    regex: (?:======+\s*SA set (request|response) valuse (start|end)\s*======+)
+  severity: info
+  category: upstream
+  verdict: SA(서비스 어댑터) 요청/응답 값 설정 시작/종료 — 정상 처리. 서비스 어댑터에서 연계 요청 및 응답 파라미터를 매핑/설정하는 단계
+  immediate:
+  - '어댑터 start/end 짝 확인: `grep -c ''SA set request valuse start'' <로그>` 와 `grep -c ''SA set request valuse end'' <로그>` — 불일치면 매핑 중단 건'
+  - 정상 흐름 메시지 — 짝이 맞으면 조치 불필요
+  short:
+  - (2차) 매핑 오류 건의 거래 ID·시각을 개발팀에 전달
+  - '영향: WAS 계층 — SA(서비스 어댑터) 요청/응답 값 설정 시작/종료'
+  mid:
+  - 모니터링 불필요. start 이후 end 없이 오류 발생 시 파라미터 매핑 오류 의심.
+  long:
+  - 서비스 어댑터 매핑 실패 건수 감시
+  source_note: 'legacy-analyzer-v2.2 indigo_esb_rules.json IND-015 (원 출처: patch)'
+  versions:
+  - Indigo ESB (Apache CXF/ServiceMix 기반, 납품 버전 기준)
+  version_note: Indigo ESB 실로그 문구(Apache CXF 'Interceptor for {..} has thrown exception'·ServiceMix 'Error processing exchange' 계열) — 버전 미확인

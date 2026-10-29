@@ -1,0 +1,223 @@
+# WEB 계층 제품 버전 카탈로그 — 코드 조회 › 제품 › [버전] 탭 (검증 2026-09-11, Claude 웹 대조 + GPT 교차 수집)
+products:
+  apache:
+    title: Apache HTTP Server 버전별 수명주기·로그 형식
+    updated: '2026-09-11'
+    note: 'AH##### 오류 코드는 2.4 에서 도입. 1.3/2.0/2.2 는 ''[날짜] [level] [client ip] 문구'' 형식이며 파서가 두 형식을 모두 읽고 2.2 문구는 별칭으로 AH 코드에 대응한다. 2.2 이하 EOS 이지만 현장 잔존. GPT 교차(collect/verify/resp_web_versions_2026-09-11.txt): 2.4 에서 404 ''File does not exist'' 가 error→info
+      로 하향.'
+    columns:
+    - version
+    - released
+    - support_end
+    - latest
+    - errorlog_format
+    - code_scheme
+    - access_log
+    - source
+    labels:
+      version: 버전
+      released: 출시
+      support_end: 지원 종료
+      latest: 최종 릴리스
+      errorlog_format: 오류 로그 형식
+      code_scheme: 코드 체계
+      access_log: 접근 로그
+      source: 출처
+    versions:
+    - version: '1.3'
+      released: '1998-06-01'
+      support_end: '2010-02-03'
+      latest: 1.3.42
+      errorlog_format: '[Wed Oct 11 14:32:52 2000] [error] [client ip] msg'
+      code_scheme: 없음(문구)
+      access_log: CLF/combined
+      source: https://endoflife.date/apache-http-server
+    - version: '2.0'
+      released: '2002-04-05'
+      support_end: '2013-07-10'
+      latest: 2.0.65
+      errorlog_format: '[날짜] [level] [client ip] msg'
+      code_scheme: 없음(문구)
+      access_log: CLF/combined
+      source: https://endoflife.date/apache-http-server
+    - version: '2.2'
+      released: '2005-12-01'
+      support_end: 2017-07-11 (2.2.34 최종) — 보안 패치 2017-12 종료
+      latest: 2.2.34
+      errorlog_format: '[Wed Oct 11 14:32:52 2000] [error] [client 127.0.0.1] client denied by server configuration: …'
+      code_scheme: 없음(문구) → 별칭으로 AH 코드 대응
+      access_log: CLF/combined
+      source: https://endoflife.date/apache-http-server ; https://httpd.apache.org/docs/2.2/logs.html
+    - version: '2.4'
+      released: '2012-02-21'
+      support_end: 지원 중 (2.4.68, 2026-06-08)
+      latest: 2.4.68
+      errorlog_format: '[Fri Sep 09 10:42:29.902022 2011] [core:error] [pid 35708:tid 4328636416] [client 72.15.99.187] AH00124: Request exceeded …'
+      code_scheme: AH##### (모듈별 고유 코드)
+      access_log: CLF/combined (+ %{ms}T 등 2.4 확장)
+      source: https://endoflife.date/apache-http-server ; https://httpd.apache.org/docs/2.4/logs.html
+  nginx:
+    title: nginx 버전별 수명주기·로그 형식
+    updated: '2026-09-11'
+    note: '매년 4월 mainline 에서 stable 을 분기하고 이전 stable 은 종료(약 1년 지원). 오류 로그 형식과 주요 메시지 문구는 0.7 이후 변하지 않아 코드 사전은 전 버전 공통. 배포판 동봉 버전(RHEL 8: 1.14, RHEL 9: 1.20, Ubuntu 22.04: 1.18, 24.04: 1.24)은 배포판 EOS 를 따른다.'
+    columns:
+    - version
+    - released
+    - support_end
+    - note
+    - source
+    labels:
+      version: stable 버전
+      released: 출시
+      support_end: 지원 종료
+      note: 비고
+      source: 출처
+    versions:
+    - version: '1.14'
+      released: 2018-04
+      support_end: 2019-04 (RHEL 8 AppStream 은 2029-05 까지 배포판 지원)
+      note: RHEL 8 기본 모듈. 1.14.2 에서 일부 SSL 오류(unsupported protocol 등) 레벨 crit→info
+      source: https://nginx.org/en/download.html ; https://endoflife.date/nginx
+    - version: '1.16'
+      released: 2019-04
+      support_end: 2020-04
+      note: ''
+      source: https://endoflife.date/nginx
+    - version: '1.18'
+      released: 2020-04
+      support_end: 2021-04 (Ubuntu 20.04/22.04 동봉)
+      note: ''
+      source: https://endoflife.date/nginx
+    - version: '1.20'
+      released: 2021-04
+      support_end: 2022-04 (RHEL 9 AppStream 은 배포판 지원)
+      note: RHEL 9 기본 모듈
+      source: https://endoflife.date/nginx
+    - version: '1.22'
+      released: 2022-05
+      support_end: 2023-04
+      note: ''
+      source: https://endoflife.date/nginx
+    - version: '1.24'
+      released: 2023-04
+      support_end: 2024-04 (Ubuntu 24.04 동봉)
+      note: ''
+      source: https://endoflife.date/nginx
+    - version: '1.26'
+      released: 2024-04
+      support_end: 2025-04
+      note: ''
+      source: https://endoflife.date/nginx
+    - version: '1.28'
+      released: 2025-04
+      support_end: 2026-04
+      note: JSON 오류 로그는 1.29.8 부터(1.28 없음)
+      source: https://endoflife.date/nginx
+    - version: 1.30 / 1.31(mainline)
+      released: 2026-04 / 2026-05
+      support_end: 지원 중
+      note: 현재 stable·mainline
+      source: https://endoflife.date/nginx
+  iis:
+    title: IIS 버전별 수명주기·로그 체계
+    updated: '2026-09-11'
+    note: IIS 는 Windows Server 와 함께 배포·종료된다(수명주기는 'windows' 카탈로그). W3C 접근 로그·HTTP.sys HTTPERR 로그는 6.0 부터 동일. HTTP 하위 상태 코드(500.19 등)와 FREB 는 7.0 부터. 이벤트 소스는 6.0 W3SVC → 7.0+ WAS/IIS-W3SVC-WP.
+    columns:
+    - version
+    - windows
+    - released
+    - support_end
+    - access_log
+    - httperr
+    - substatus
+    - events
+    - source
+    labels:
+      version: IIS
+      windows: Windows Server
+      released: 출시
+      support_end: 지원 종료(ESU)
+      access_log: 접근 로그
+      httperr: HTTPERR
+      substatus: 하위 상태 코드
+      events: 이벤트 ID
+      source: 출처
+    versions:
+    - version: '6.0'
+      windows: '2003'
+      released: 2003-04
+      support_end: '2015-07-14'
+      access_log: W3C (%SystemRoot%\system32\LogFiles\W3SVCn)
+      httperr: HTTPERR (HTTP.sys)
+      substatus: 일부만(404.2 등)
+      events: W3SVC 1xxx, WAS 5xxx(IIS 6 W3SVC 소스)
+      source: https://endoflife.date/windows-server
+    - version: 7.0 / 7.5
+      windows: 2008 / 2008 R2
+      released: 2008-02 / 2009-10
+      support_end: 2020-01-14 (ESU 2023-01-10)
+      access_log: W3C (%SystemDrive%\inetpub\logs\LogFiles)
+      httperr: HTTPERR
+      substatus: 전체 체계 도입(500.19, 503.2 …)
+      events: WAS 5002~5059, IIS-W3SVC-WP 2xxx, ASP.NET 13xx
+      source: https://endoflife.date/windows-server
+    - version: 8.0 / 8.5
+      windows: 2012 / 2012 R2
+      released: 2012-10 / 2013-11
+      support_end: 2023-10-10 (ESU 2026-10-13)
+      access_log: W3C (+ Enhanced Logging 8.5)
+      httperr: HTTPERR
+      substatus: 7.0 과 동일 + 500.5x(ARR)
+      events: 동일
+      source: https://endoflife.date/windows-server
+    - version: '10.0'
+      windows: 2016 / 2019 / 2022 / 2025
+      released: 2016-10~
+      support_end: 2027-01-12 / 2029-01-09 / 2031-10-14 / 2034-11-14
+      access_log: W3C (+ HTTP/2, 2019+ HTTP/3 필드)
+      httperr: HTTPERR
+      substatus: 동일 + 502.5(ASP.NET Core)
+      events: 동일
+      source: https://endoflife.date/windows-server
+  webtob:
+    title: TmaxSoft WebtoB 버전별 수명주기·로그 체계
+    updated: '2026-09-11'
+    note: TmaxSoft 는 공개 EOS 일정을 게시하지 않는다(계약 기준). 5 에서 HTMLS 프로세스가 HTH 워커 스레드로 바뀌고 HTH-xxxxx 코드가, 6 에서 SVR_/NET_ 코드와 YAML/JSON 설정이 도입됐다. 파서는 4.1/5/6 로그 줄 형식을 모두 인식한다. GPT 교차 수집(A 21/B 5) 반영.
+    columns:
+    - version
+    - released
+    - support_end
+    - log_files
+    - code_scheme
+    - jeus_link
+    - source
+    labels:
+      version: 버전
+      released: 출시
+      support_end: 지원 종료
+      log_files: 로그 파일
+      code_scheme: 코드 체계
+      jeus_link: JEUS 연동
+      source: 출처
+    versions:
+    - version: 4.1 (SP1~SP8)
+      released: 2008 (SP8 2016)
+      support_end: 미공개 — 5 GA(2016-03-31) 이후 단계적 종료
+      log_files: error.log / system.log / access.log (*LOGGING, $WEBTOBDIR 상대경로)
+      code_scheme: 문구 위주(HTH/HTL/WSM 프로세스명, HTMLS 별도 프로세스)
+      jeus_link: WJP v1/v2 (JEUS 6/7)
+      source: https://technet.tmax.co.kr/upload/download/online/webtob/pver-20160622-000001/release-note/index.html
+    - version: 5 (Fix#1~#4, 5.4)
+      released: 2016-03-31 (GA), Fix#4 2020
+      support_end: 미공개(지원 중)
+      log_files: error.log(Format 설정형) / system.log [2020-08-05T10:44:16] [HTH(22378)] [I] [HTH-00074] msg / access.log(DEFAULT %h %t "%r" %s %b %D)
+      code_scheme: 'HTH-xxxxx·HTL-xxxxx 메시지 코드, COM_/CONN_/DST_/REQ_/RSC_ 분류, CFL-05010 설정 오류; Fix#3: HTH0113·HTH0099 INFO→DEBUG, HTH0499 신규'
+      jeus_link: WJP/WJPv2 (JEUS 7/8/8.5), Fix#3 WJPv2 JEUS shutdown 수정
+      source: https://docs.tmaxsoft.com/ko/webtob/5.4/release-note/chapter-overview.html ; https://docs.tmaxsoft.com/ko/webtob/5.4/administrator-guide/chapter-administration.html
+    - version: 6 / 6.1
+      released: 2024-10-07 (6 GA) / 2025-10-31 (6.1)
+      support_end: 미공개(지원 중)
+      log_files: webtob_error.log / webtob_system.log / webtob_access.log (YAML/JSON logging, $WEBTOB6_HOME_PATH 상대경로; 6.1 PID별 로그·자동 삭제)
+      code_scheme: '[고정밀시각][LEVEL][HTH-n][SVR_nnnn|NET_nnnn]소스:라인 함수: msg — SVR_3455·NET_2004·NET_4000 등 신규 코드 체계(HTH-xxxxx 폐기 여부 미확인)'
+      jeus_link: server.wjp(기본 port 9900), JEUS domain.xml wjp-version=2; UNIX 는 UDS
+      source: https://docs.tmaxsoft.com/ko/webtob/6.1/release-note/chapter-overview.html ; https://docs.tmaxsoft.com/ko/webtob/6/administrator-guide/configuration-logging.html

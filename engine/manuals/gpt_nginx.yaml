@@ -1,0 +1,16 @@
+product: nginx
+title: NGINX 운영 참고 (GPT 수집 — 벤더 문서 대조 필요)
+sections:
+- heading: 로그 위치
+  body: error_log와 access_log 지시어가 실제 경로를 정한다. 소스 기본 prefix는 logs/error.log, logs/access.log이며
+    Linux 패키지는 일반적으로 /var/log/nginx/error.log와 access.log를 사용한다.
+- heading: 장애 시 수집 방법
+  body: error/access log와 nginx.conf 및 include 파일을 보존하고 nginx -T로 전체 적용 설정을 저장한다.
+    upstream 장애면 backend 상태와 동일 시각의 502/503/504 요청도 함께 수집한다.
+- heading: 대표 장애 신호
+  body: worker_connections 부족, upstream connect failed/timed out, no live upstreams,
+    upstream prematurely closed, SSL handshake failed, too many open files와 disk full을
+    우선 확인한다.
+- heading: 1차 확인 명령
+  body: nginx -t, nginx -T, ps -ef | grep nginx, curl -s -o /dev/null -w '%{http_code} %{time_total}s' http://127.0.0.1/<헬스체크URL> (GET) 를 실행하고
+    error_log에서 [emerg], [alert], [crit], [error]를 확인한다.

@@ -1,0 +1,9 @@
+product: db-common
+title: "DBMS 공통 운영 참고 (MySQL·PostgreSQL·MS-SQL·Tibero·Altibase)"
+sections:
+  - heading: "로그 위치"
+    body: "MySQL: /var/log/mysqld.log 또는 datadir/<호스트>.err · PostgreSQL: $PGDATA/log/postgresql-*.log · MS-SQL: ERRORLOG (기본 C:\\Program Files\\Microsoft SQL Server\\...\\MSSQL\\Log, UTF-16) · Tibero: $TB_HOME/instance/<SID>/log · Altibase: $ALTIBASE_HOME/trc/altibase_boot.log"
+  - heading: "대표 장애 신호"
+    body: "MySQL: Too many connections · Deadlock found · Errcode 28 디스크 풀 · InnoDB corruption / PostgreSQL: deadlock detected · connection slots reserved · PANIC / MS-SQL: 1205 데드락 · 9002 로그 풀 · 701 메모리 · 823/824 I/O / Altibase: 세션 한도 · unable to extend / Tibero: TBR-코드"
+  - heading: "1차 확인 명령"
+    body: "MySQL: SHOW PROCESSLIST; SHOW ENGINE INNODB STATUS; · PostgreSQL: pg_stat_activity, pg_locks · MS-SQL: sp_who2, DBCC SQLPERF(LOGSPACE) · 공통: 디스크 여유(df -h), DB 프로세스 상태"

@@ -1,0 +1,446 @@
+# 기존 'AI 로그분석기 v2.2' 내장 룰에서 변환 반입(tools/import_legacy_rules.py) — 중복(코드·패턴) 제외
+# 심각도 CRITICAL→critical HIGH→error MEDIUM→warn LOW→info · immediate_actions→즉시 · root_actions→중기 · negative_patterns→exclude
+rules:
+- id: LEG-ORA-WARN-REDO
+  layer: db
+  product:
+  - oracle
+  match:
+    regex: (?:checkpoint not complete)|(?:log file sync)|(?:log file parallel write)|(?:redo log.*switch)|(?:log switch.*incomplete)
+  severity: warn
+  category: storage
+  verdict: Redo Log 경고 — Redo Log 스위치/체크포인트 지연. I/O 병목 또는 로그 크기 부족
+  immediate:
+  - 'Redo 그룹 크기·상태(읽기): `SELECT group#,members,bytes/1048576 mb,status,archived FROM v$log;` — CURRENT 외 ACTIVE 가 여럿이면 체크포인트 지연'
+  - '로그 스위치 빈도(읽기): `SELECT TO_CHAR(first_time,''YYYY-MM-DD HH24'') hr,COUNT(*) FROM v$log_history WHERE first_time>SYSDATE-1 GROUP BY TO_CHAR(first_time,''YYYY-MM-DD HH24'') ORDER BY 1;` — 시간당 4회 이상이면 Redo 크기 부족 의심'
+  - '대기 이벤트: `SELECT event,total_waits,time_waited FROM v$system_event WHERE event IN (''log file sync'',''log file parallel write'');` 와 alert log ''Checkpoint not complete'' 건수'
+  short:
+  - '(2차·승인 후, 롤백: 추가 그룹은 INACTIVE 상태에서 DROP LOGFILE GROUP 으로 원복) 더 큰 Redo 그룹 추가 후 작은 그룹을 순차 교체'
+  - '영향: DB 응답 지연.'
+  mid:
+  - Redo Log 크기를 피크 시 로그 스위치 15~20분 간격이 되도록 재산정
+  - Redo 그룹 최소 3개·멤버 다중화 구성
+  - Redo 를 데이터파일과 분리된 저지연 디스크에 배치(log file parallel write 개선)
+  long:
+  - 로그 스위치 빈도·'Checkpoint not complete' 발생을 AWR·감시 항목으로 등록해 분기별 Redo 용량 재검토
+  source_note: 'legacy-analyzer-v2.2 severity_rules.json ORA-WARN-REDO (원 출처: builtin)'
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: ORA/TNS 코드·alert log 문구 — 10gR2~26ai 공통
+- id: LEG-ORA-WARN-LATCH
+  layer: db
+  product:
+  - oracle
+  match:
+    regex: (?:latch.*contention)|(?:latch.*wait)|(?:cache buffers chains)|(?:library cache.*latch)|(?:shared pool.*latch)
+  severity: warn
+  category: connection
+  verdict: 래치 경합 — SGA 내부 래치 경합. 고동시 접속 또는 SQL 파싱 과다
+  immediate:
+  - '래치 경합 상위(읽기): `SELECT * FROM (SELECT name,gets,misses,sleeps FROM v$latch WHERE misses>0 ORDER BY sleeps DESC) WHERE ROWNUM<=10;`'
+  - '현재 대기 세션·SQL: `SELECT sid,event,sql_id FROM v$session WHERE event LIKE ''latch%'' OR event LIKE ''library cache%'';` — 특정 sql_id 편중이면 해당 SQL 원인'
+  - '하드 파스 비율: `SELECT name,value FROM v$sysstat WHERE name IN (''parse count (total)'',''parse count (hard)'');` — 하드 파스 비율 높으면 바인드 변수 미사용'
+  short:
+  - (2차·승인 후) 원인 SQL 담당에게 바인드 변수 적용 요청, cache buffers chains 면 핫 블록 객체(인덱스·테이블) 분산 설계 검토
+  - '영향: DB 응답 지연, CPU 증가.'
+  mid:
+  - SHARED_POOL_SIZE·DB_CACHE_SIZE 를 Advisory(V$SHARED_POOL_ADVICE·V$DB_CACHE_ADVICE) 기준으로 조정(DBA 승인·spfile 백업)
+  - 애플리케이션 SQL 바인드 변수 적용과 session_cached_cursors 검토
+  long:
+  - AWR 상위 대기 이벤트의 래치 비중 감시와 신규 SQL 배포 전 파스 점검 기준 수립
+  source_note: 'legacy-analyzer-v2.2 severity_rules.json ORA-WARN-LATCH (원 출처: builtin)'
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: ORA/TNS 코드·alert log 문구 — 10gR2~26ai 공통
+- id: LEG-ORA-WARN-TABLELOCK
+  layer: db
+  product:
+  - oracle
+  match:
+    regex: (?:enq.*TX)|(?:lock.*wait)|(?:table.*locked)|(?:row.*lock.*wait)|(?:enqueue waits)|(?:TX.*lock)
+  severity: warn
+  category: lock
+  verdict: 테이블 잠금 대기 — DML 잠금 대기. 트랜잭션 충돌
+  immediate:
+  - "블로킹 세션 확인(읽기): `SELECT sid,serial#,username,blocking_session,event,seconds_in_wait,sql_id FROM v$session WHERE blocking_session IS NOT NULL;` — 같은 blocking_session 이 계속 나오면 그 세션이 원인"
+  - "잠긴 객체 확인: `SELECT l.session_id,o.owner,o.object_name,l.locked_mode FROM v$locked_object l JOIN dba_objects o ON o.object_id=l.object_id;` — 최상위 블로커가 유휴(SQL*Net message from client)면 미커밋 트랜잭션"
+  short:
+  - '(2차·승인 후, 롤백: 불가 — 종료 세션의 미커밋 작업은 롤백됨을 업무 담당 확인) 최상위 차단 세션을 `ALTER SYSTEM KILL SESSION ''<sid>,<serial#>'' IMMEDIATE;` 로 정리'
+  - '영향: 특정 DML 지연.'
+  mid:
+  - (2차·승인 후) 장기 대기 원인 세션 정리 기준(대기 N분·업무 담당 확인) 문서화
+  - 트랜잭션 범위 축소·커밋 주기 조정과 FOR UPDATE NOWAIT/WAIT n 으로 대기 상한 설정
+  long:
+  - 'blocking_session 지속 시간 감시(예: 5분)와 배치·온라인 시간대 분리'
+  source_note: 'legacy-analyzer-v2.2 severity_rules.json ORA-WARN-TABLELOCK (원 출처: builtin)'
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: ORA/TNS 코드·alert log 문구 — 10gR2~26ai 공통
+- id: LEG-JEUS-WARN-HEAP-HIGH
+  layer: was
+  product:
+  - jeus
+  match:
+    regex: (?:heap.*usage.*high)|(?:heap.*warning)|(?:heap.*80%)|(?:heap.*90%)|(?:heap.*pressure)|(?:GC.*warning)
+  severity: warn
+  category: memory
+  verdict: JVM 힙 사용률 경고 — JVM 힙 사용률 80% 이상. OOM 예비 단계
+  immediate:
+  - "힙·GC 추이(읽기): `jstat -gcutil <PID> 5000 6` — O 85% 이상 유지·FGC 연속 증가면 OOM 임박"
+  - "GC 로그에서 Full GC 뒤 Old 사용량 확인: `grep -iE 'Full GC|Pause Full' <GC로그경로> | tail -10` — Full GC 뒤에도 Old 가 높게 남으면 누수 의심"
+  - "서버 응답 확인(읽기): `$JEUS_HOME/bin/jeusadmin -host localhost:9736 -u <user>` 접속(비밀번호는 프롬프트 입력) 후 `server-info` 로 RUNNING 여부 확인 (JEUS 7+)"
+  short:
+  - (2차·승인 후) 대형 객체 확인 `jmap -histo:live <PID> | head -20`(Full GC 발생·수 초 정지) 또는 힙 덤프 수집 후 서버 재기동 일정 확정
+  - '영향: OOM 발생 임박.'
+  mid:
+  - -Xmx·-Xms 를 GC 로그 실측(Full GC 후 Old 사용량 3~4배) 기준으로 재산정해 domain.xml 의 JVM 옵션에 반영
+  - 세션·캐시 객체 크기 상한과 만료 시간 설정 점검
+  - GC 정책(G1GC·MaxGCPauseMillis) 검토
+  long:
+  - Old 영역 사용률 85% 감시 임계와 HeapDumpOnOutOfMemoryError 표준 옵션 적용
+  source_note: 'legacy-analyzer-v2.2 severity_rules.json JEUS-WARN-HEAP-HIGH (원 출처: builtin)'
+  versions:
+  - JEUS 6
+  - JEUS 7
+  - JEUS 8/8.5
+  - JEUS 9/9.1
+  version_note: 문구 기반
+- id: LEG-JEUS-WARN-SLOW-QUERY
+  layer: was
+  product:
+  - jeus
+  match:
+    regex: (?:slow.*query.*jeus)|(?:response.*time.*high)|(?:slow.*response.*jeus)|(?:execution.*time.*ms)|(?:jdbc.*slow)|(?:query.*timeout.*warning)
+  severity: warn
+  category: performance
+  verdict: JEUS 슬로우 쿼리/응답 — DB 쿼리 또는 외부 서비스 응답 지연
+  immediate:
+  - '느린 요청·쿼리 줄 확인: `grep -niE ''slow|execution time|timeout'' $DOMAIN_HOME/servers/<server>/logs/JeusServer.log | tail -30` — 특정 URL·SQL 편중 여부 기록'
+  - '같은 시각 DB 대기 확인을 DB 담당에 요청(Oracle 예: `SELECT sql_id,event,seconds_in_wait FROM v$session WHERE status=''ACTIVE'' AND type=''USER'';`)'
+  - '스레드 덤프(프로세스 유지)로 대기 지점 확인: `jcmd <PID> Thread.print > td_$(date +%H%M%S).txt` 를 10초 간격 3회'
+  short:
+  - (2차·승인 후) 원인 SQL 실행 계획 확인(`EXPLAIN PLAN FOR` 은 실행하지 않음) 후 DB 담당과 인덱스·통계 조치, 데이터소스 쿼리 타임아웃 설정
+  - '영향: 서비스 응답 시간 증가.'
+  mid:
+  - 슬로우 쿼리 상위 건을 실행 계획 기준으로 튜닝(인덱스·조인 순서·통계 갱신)
+  - 데이터소스 쿼리 타임아웃·커넥션 풀 크기를 응답시간 목표 기준으로 재산정
+  long:
+  - '요청 응답시간·SQL 수행시간 임계(예: 3초) 감시와 신규 SQL 배포 전 실행 계획 검토 절차'
+  source_note: 'legacy-analyzer-v2.2 severity_rules.json JEUS-WARN-SLOW-QUERY (원 출처: builtin)'
+  versions:
+  - JEUS 6
+  - JEUS 7
+  - JEUS 8/8.5
+  - JEUS 9/9.1
+  version_note: 문구 기반
+- id: LEG-RHEL-WARN-IO-HIGH
+  layer: os
+  product:
+  - linux
+  match:
+    regex: (?:io.*wait.*high)|(?:iowait.*warning)|(?:disk.*io.*high)|(?:await.*high)|(?:util.*100%.*disk)
+  severity: warn
+  category: disk
+  verdict: 디스크 I/O 사용률 높음 — 디스크 I/O 사용률 높음. 저속 디스크 또는 I/O 집약 작업
+  immediate:
+  - '장치별 사용률·대기(읽기): `iostat -xz 1 5` (sysstat) — %util 90% 이상·await 가 평소의 수 배면 해당 장치 포화'
+  - 'I/O 유발 프로세스: `pidstat -d 1 5` (sysstat) 또는 `iotop -obn 3` — 특정 프로세스(백업·배치) 편중 여부'
+  - 'SAN 이면 경로 상태: `multipath -ll | grep -iE ''failed|faulty''` — 경로 감소면 경로 문제로 분기'
+  short:
+  - (2차·승인 후) I/O 유발 배치·백업 일정 조정 또는 `ionice` 로 우선순위 하향, 경로 장애면 스토리지 담당 이관
+  - '영향: 전체 시스템 응답 지연.'
+  mid:
+  - 고 I/O 프로세스의 쿼리·파일 접근 패턴 최적화(배치 분할·인덱스)
+  - 저속 디스크를 SSD·고성능 LUN 으로 이전
+  - I/O 스케줄러를 장치 유형에 맞게 설정(SSD 는 none 또는 mq-deadline, RHEL 8+)
+  long:
+  - 장치별 %util·await 감시 임계 등록과 sar -d 이력 30일 보존
+  source_note: 'legacy-analyzer-v2.2 severity_rules.json RHEL-WARN-IO-HIGH (원 출처: builtin)'
+  versions:
+  - RHEL 5~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: 모니터링 문구
+- id: LEG-RHEL-WARN-LOAD
+  layer: os
+  product:
+  - linux
+  match:
+    regex: (?:load average.*high)|(?:load.*warning)|(?:system.*load.*high)|(?:load average:\s*[5-9]\d)|(?:load average:\s*[1-9]\d{1,})
+  severity: warn
+  category: internal
+  verdict: 시스템 부하 경고 — 시스템 Load Average 높음. CPU 과부하 또는 I/O 대기 과다
+  immediate:
+  - '부하 추이(읽기): `uptime` 과 `nproc` — Load Average 가 CPU 수의 2배 이상 지속이면 과부하'
+  - '원인 구분: `vmstat 1 5` — r 이 CPU 수 초과면 CPU 대기, b·wa 가 높으면 I/O 대기'
+  - '상위·D 상태 프로세스: `ps -eo pid,stat,pcpu,cmd --sort=-pcpu | head -10` 와 `ps -eo pid,stat,cmd | awk ''$2 ~ /D/''`'
+  short:
+  - (2차·승인 후) CPU 폭주 프로세스는 담당 확인 후 조치, D 상태 누적이면 스토리지·NFS 응답 확인으로 이관
+  - '영향: 시스템 전체 응답 지연.'
+  mid:
+  - 고 CPU 프로세스 원인 코드·쿼리 최적화 요청
+  - CPU 증설 또는 L4 부하 분산 재산정
+  - I/O 대기(D 상태) 원인 스토리지 경로·NFS 응답 개선
+  long:
+  - Load Average(코어 수 대비 1.5배) 감시 임계와 sar -q 이력 보존
+  source_note: 'legacy-analyzer-v2.2 severity_rules.json RHEL-WARN-LOAD (원 출처: builtin)'
+  versions:
+  - RHEL 5~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: 모니터링 문구
+- id: LEG-RHEL-WARN-ZOMBIE
+  layer: os
+  product:
+  - linux
+  match:
+    regex: (?:zombie.*process)|(?:defunct.*process)|(?:<defunct>)|(?:Z.*stat)
+  severity: info
+  category: internal
+  verdict: 좀비 프로세스 경고 — 좀비 프로세스 누적. 부모 프로세스가 자식 종료 상태 미수집
+  immediate:
+  - '좀비 수·부모 PID 확인(읽기): `ps -eo pid,ppid,stat,cmd | awk ''$3 ~ /Z/''` — 수 개는 일시 현상, 계속 증가하면 부모 프로세스 결함'
+  - '부모 프로세스 식별: `ps -o pid,cmd -p <PPID>` — 같은 부모 편중 여부 기록'
+  - 'PID 한도 대비: `cat /proc/sys/kernel/pid_max` 와 `ps -e | wc -l`'
+  short:
+  - '(2차·승인 후, 롤백: 기동 스크립트·설정 변경 없음 확인) 좀비는 신호로 정리되지 않으므로 부모 프로세스 재기동으로 회수'
+  - '영향: PID 고갈 가능성.'
+  mid:
+  - 부모 프로세스 SIGCHLD 처리·waitpid() 누락 수정을 개발팀에 요청
+  - systemd 서비스로 관리해 자식 프로세스 회수 보장
+  long:
+  - '좀비 프로세스 수 감시 임계(예: 50개) 등록'
+  source_note: 'legacy-analyzer-v2.2 severity_rules.json RHEL-WARN-ZOMBIE (원 출처: builtin)'
+  versions:
+  - RHEL 5~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: 일반 문구
+- id: LEG-AH-WARN-SLOW
+  layer: web
+  product:
+  - apache
+  match:
+    regex: (?:request.*timeout.*apache)|(?:slow.*request.*apache)|(?:ReqTimeout)|(?:lingering.*close)
+  severity: warn
+  category: upstream
+  verdict: Apache 슬로우 요청 경고 — Apache 슬로우 요청. 클라이언트 또는 백엔드 응답 지연
+  immediate:
+  - '응답시간 기록 여부: `grep -n ''LogFormat'' /etc/httpd/conf/httpd.conf` — %D·%T 가 없으면 응답시간 분석 불가(추가는 2차)'
+  - '느린 요청 URL: LogFormat 마지막 필드가 %D 이면 `awk ''{print $NF, $7}'' /var/log/httpd/access_log | sort -rn | head -20`'
+  - '워커 점유(읽기): `curl -s ''http://localhost/server-status?auto'' | grep -E ''BusyWorkers|IdleWorkers''` (mod_status 허용 시) — Busy 가 MaxRequestWorkers 에 근접하면 포화'
+  short:
+  - '(2차·승인 후, 롤백: 설정 백업 후 `apachectl -t`) 백엔드 지연이면 WAS 담당 이관, 느린 클라이언트면 RequestReadTimeout·Timeout·KeepAliveTimeout 조정 후 graceful'
+  - '영향: Worker 점유 장기화로 MaxRequestWorkers 도달 위험.'
+  mid:
+  - mod_reqtimeout `RequestReadTimeout header=20-40,MinRate=500 body=20,MinRate=500` 수준으로 느린 클라이언트 차단
+  - 백엔드 WAS 응답 튜닝(ProxyTimeout·커넥션 재사용)
+  - KeepAliveTimeout 2~5초로 단축 검토
+  long:
+  - LogFormat 에 %D 표준 포함, 응답시간 상위 1% 감시와 BusyWorkers 80% 임계 등록
+  source_note: 'legacy-analyzer-v2.2 severity_rules.json AH-WARN-SLOW (원 출처: builtin)'
+  versions:
+  - Apache 2.0~2.2 (메시지 별칭)
+  - Apache 2.4
+  version_note: 문구 기반
+- id: LEG-AH-WARN-CERT-EXPIRE
+  layer: web
+  product:
+  - apache
+  match:
+    regex: (?:certificate.*expir.*soon)|(?:SSL.*expire.*warning)|(?:certificate.*days.*remain)|(?:cert.*will.*expire)
+  severity: warn
+  category: security
+  verdict: SSL 인증서 만료 임박 — SSL 인증서 만료 30일 이내
+  immediate:
+  - '설정된 인증서 파일 찾기: `grep -rn ''SSLCertificateFile'' /etc/httpd/conf /etc/httpd/conf.d`'
+  - '만료일 확인(읽기): `openssl x509 -enddate -noout -in <SSLCertificateFile 경로>` — 남은 일수 30일 이하면 갱신 착수'
+  - '실제 제공 인증서: `openssl s_client -connect localhost:443 -servername <host> </dev/null 2>/dev/null | openssl x509 -noout -enddate`'
+  short:
+  - '(2차·승인 후, 롤백: 기존 인증서·키 사본 보관) 신규 인증서·체인 교체 후 `apachectl -t` 확인 뒤 graceful 적용'
+  - '영향: 만료 시 HTTPS 서비스 중단.'
+  mid:
+  - 발급기관 처리 기간을 포함해 만료 30일 전 갱신 착수
+  - 자동 갱신(ACME certbot)은 인터넷 연결 환경에서만 — 폐쇄망은 내부 CA 갱신 절차 문서화
+  long:
+  - 전체 인증서 만료일 인벤토리와 30/7일 전 알림 등록
+  source_note: 'legacy-analyzer-v2.2 severity_rules.json AH-WARN-CERT-EXPIRE (원 출처: builtin)'
+  versions:
+  - Apache 2.0~2.2 (메시지 별칭)
+  - Apache 2.4
+  version_note: 문구 기반
+- id: LEG-HW-WARN-BATTERY
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:battery.*warning)|(?:BBU.*fail)|(?:cache.*battery.*low)|(?:write.*cache.*disabled.*battery)|(?:battery.*charge.*low)
+  severity: warn
+  category: storage
+  verdict: RAID 배터리 경고 — RAID 컨트롤러 배터리(BBU) 충전 부족 또는 장애
+  immediate:
+  - "RAID 캐시 배터리·캐시볼트 상태(읽기): Broadcom/LSI `storcli /c0/bbu show all` 또는 `storcli /c0/cv show all` / HPE `ssacli ctrl all show status` / Dell `perccli /c0/bbu show`"
+  - "현재 캐시 정책: `storcli /c0/vall show` 의 Cache 열 — WB 가 WT 로 바뀌었으면 배터리 원인 성능 저하 확정"
+  - "학습 주기(Learn cycle) 진행 여부: `storcli /c0/bbu show all` 출력의 Learn Cycle 항목 — 진행 중이면 일시적인 WT 이므로 완료 후 재확인"
+  short:
+  - (2차·승인 후) 배터리 교체 일정을 제조사와 확정, 그동안 Write-Through 유지(강제 WriteBack 은 정전 시 데이터 손실 위험으로 금지)
+  - '영향: Write Cache 비활성화로 RAID 쓰기 성능 급저하.'
+  mid:
+  - BBU·캐시볼트를 제조사 권장 주기(3~5년)로 예방 교체
+  - 학습 주기(Learn cycle) 시간을 업무 비수기로 조정
+  long:
+  - RAID 컨트롤러 캐시 정책 변경(WB→WT) 이벤트 감시 등록
+  source_note: 'legacy-analyzer-v2.2 severity_rules.json HW-WARN-BATTERY (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-HW-WARN-LINK-ERR
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:input errors.*[0-9]+)|(?:CRC error.*[0-9]+)|(?:interface.*error.*increment)|(?:runts.*[0-9]+)|(?:giants.*[0-9]+)|(?:frame.*error.*[0-9]+)|(?:interface.*flap)|(?:duplex mismatch)
+  severity: warn
+  category: internal
+  verdict: 인터페이스 오류 증가 — 네트워크 인터페이스 오류 패킷 증가. 케이블 불량, 듀플렉스 불일치
+  immediate:
+  - '장비 포트 오류 카운터(읽기, Cisco IOS 기준): `show interfaces <if> | include errors|CRC|runts|giants|duplex` — CRC·input errors 가 증가 중이면 물리 계층 문제'
+  - '서버 NIC 오류(읽기): Linux `ethtool -S <nic> | grep -iE ''err|crc|drop''` 와 `ethtool <nic>` / AIX `entstat -d ent<N> | grep -iE ''error|crc''` / Windows `Get-NetAdapterStatistics`'
+  - 양단 속도·듀플렉스 일치 확인 — 한쪽 auto·한쪽 고정이면 duplex mismatch 의심
+  short:
+  - '(2차·승인 후, 롤백: 카운터 초기화 전 `show interfaces` 출력 보관) `clear counters <if>` 후 증가 추이 재측정, 증가 지속 시 케이블·SFP 교체'
+  - '영향: 패킷 손실, 네트워크 성능 저하.'
+  mid:
+  - 케이블·SFP 교체와 광 레벨(DOM) 확인
+  - 속도/듀플렉스 정책을 양단 auto 또는 양단 고정으로 통일
+  long:
+  - 인터페이스 오류율 감시(SNMP ifInErrors 증가율) 등록
+  source_note: 'legacy-analyzer-v2.2 severity_rules.json HW-WARN-LINK-ERR (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-HW-WARN-TEMP
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:temperature.*warning)|(?:TEMP.*WARNING)|(?:temp.*warn.*threshold)|(?:inlet.*temp.*warning)|(?:ambient.*warning)
+  severity: warn
+  category: hardware
+  verdict: 온도 경고 (Warning 단계) — 서버 온도 Warning 임계값 도달. Critical 전 예비 단계
+  immediate:
+  - '온도 센서 현황(읽기): `ipmitool sdr type Temperature` — ok 가 아닌(nc·cr) 센서 위치 기록'
+  - 관리 콘솔(iLO·iDRAC·IMM/XCC) 온도 화면과 같은 랙 다른 서버의 동시 상승 여부 — 동시 상승이면 항온항습 문제
+  - '팬 상태: `ipmitool sdr type Fan`'
+  short:
+  - (2차) 항온항습기·랙 공기 흐름(블랭킹 패널·케이블 막힘) 점검 요청, 단일 서버만이면 팬·방열판 점검을 제조사 의뢰
+  - '영향: 방치 시 Critical 온도 도달 및 서비스 중단 위험.'
+  mid:
+  - 서버실 냉각 용량·Hot/Cold Aisle 배치 점검
+  - BIOS 팬 정책(냉각 우선) 조정은 제조사 권고 범위에서 승인 후
+  long:
+  - '흡기 온도 감시 임계(예: 27℃ 경고 — ASHRAE 권장 상한) 등록과 서버실 온도 이력 보관'
+  source_note: 'legacy-analyzer-v2.2 severity_rules.json HW-WARN-TEMP (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-HW-WARN-POWER
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:power.*warning)|(?:AC.*loss)|(?:power.*fluctuation)|(?:under voltage.*warning)|(?:over voltage.*warning)|(?:PDU.*warning)|(?:UPS.*warning)
+  severity: error
+  category: hardware
+  verdict: 전원 이상 경고 — 전원 공급 이상. 전압 변동 또는 PSU 이상
+  immediate:
+  - '전원·전압 센서(읽기): `ipmitool sdr type ''Power Supply''` 와 `ipmitool sdr type Voltage` — PSU 고장 표시·전압 cr 이면 확정'
+  - 'SEL 전원 이벤트: `ipmitool sel elist | grep -iE ''power|ac lost|volt'' | tail -20`'
+  - UPS·PDU 관리 화면에서 입력 전압·부하율·배터리 잔량 확인 — 여러 서버 동시면 상위 전원 문제
+  short:
+  - (2차) 상위 전원(UPS·PDU) 문제는 시설 담당 이관, 단일 PSU 결함이면 제조사 교체 요청
+  - '영향: 서버 비정상 종료 위험.'
+  mid:
+  - UPS 배터리 잔량·부하율 점검과 전원 이중화(A/B 피드) 구성 확인
+  - 전력 품질 이상 반복 시 시설 담당과 전기 공급 점검
+  - PSU 상태 정기 점검(BMC 센서 이력)
+  long:
+  - PSU·UPS 이벤트 감시(SNMP 트랩)와 정전 대비 계획 셧다운 절차 문서화
+  source_note: 'legacy-analyzer-v2.2 severity_rules.json HW-WARN-POWER (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-VMW-WARN-SNAPSHOT
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:snapshot.*warning)|(?:snapshot.*too.*old)|(?:snapshot.*delta.*large)|(?:consolidation.*needed)|(?:snapshot.*chain.*long)
+  severity: warn
+  category: hardware
+  verdict: VM 스냅샷 경고 — VM 스냅샷이 오래되거나 체인이 너무 깊음
+  immediate:
+  - '스냅샷 목록·생성일 확인(읽기): vCenter › VM › 스냅샷 관리 또는 ESXi `vim-cmd vmsvc/get.snapshotinfo <vmid>` (vmid 는 `vim-cmd vmsvc/getallvms`)'
+  - '델타 디스크 크기: `ls -lh /vmfs/volumes/<datastore>/<vm>/ | grep -- ''-0000''` — 델타 합계가 데이터스토어 여유를 위협하면 긴급'
+  - 백업 솔루션이 남긴 스냅샷인지 이름·생성 주체로 확인 — 백업 작업 중이면 손대지 않음
+  short:
+  - '(2차·승인 후, 롤백: 불가 — 통합 전 VM 백업 확인) 업무 담당 승인 후 불필요 스냅샷 삭제(통합), ''통합 필요'' 상태면 Consolidate 실행 — 대용량은 I/O 영향으로 비업무 시간'
+  - '영향: 디스크 공간 고갈, VM 성능 저하.'
+  mid:
+  - 스냅샷 보존 정책(최대 3개·72시간 이내) 수립
+  - 스냅샷 정기 점검 스크립트(PowerCLI Get-Snapshot) 자동화
+  long:
+  - 스냅샷 경과 일수·델타 크기 vCenter 사용자 정의 알람 등록
+  source_note: 'legacy-analyzer-v2.2 severity_rules.json VMW-WARN-SNAPSHOT (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-VMW-WARN-RESOURCE
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:cpu.*ready.*high)|(?:memory.*balloon)|(?:memory.*swap.*vmware)|(?:resource.*contention)|(?:co-stop.*high)
+  severity: warn
+  category: memory
+  verdict: VMware 리소스 경합 경고 — VMware 클러스터 CPU/메모리 리소스 경합
+  immediate:
+  - vCenter › VM › 모니터 › 성능에서 CPU 준비(Ready)·Co-stop·메모리 Balloon·Swap 확인 — Ready 가 vCPU 당 5% 이상 지속이면 CPU 경합
+  - 'ESXi 실시간 수집(읽기): `esxtop -b -n 1 > /tmp/esxtop_$(date +%H%M).csv` 또는 대화형 esxtop 의 %RDY·MCTLSZ·SWCUR 확인'
+  - 호스트 할당 비율(vCPU:pCPU, 메모리 오버커밋) 확인
+  short:
+  - '(2차·승인 후, 롤백: 이동 전 VM 위치 기록) 경합 호스트의 VM 을 여유 호스트로 vMotion, 과다 vCPU VM 은 크기 축소 일정 협의'
+  - '영향: VM 성능 저하.'
+  mid:
+  - VM 리소스 예약·제한·공유(Shares) 설정 재검토
+  - ESXi 호스트 추가 또는 DRS 자동화 수준 상향
+  long:
+  - 클러스터 CPU Ready·Balloon 감시 임계와 분기별 용량 계획
+  source_note: 'legacy-analyzer-v2.2 severity_rules.json VMW-WARN-RESOURCE (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관

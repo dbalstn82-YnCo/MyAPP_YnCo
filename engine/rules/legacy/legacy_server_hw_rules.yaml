@@ -1,0 +1,256 @@
+# 기존 'AI 로그분석기 v2.2' 내장 룰에서 변환 반입(tools/import_legacy_rules.py) — 중복(코드·패턴) 제외
+# 심각도 CRITICAL→critical HIGH→error MEDIUM→warn LOW→info · immediate_actions→즉시 · root_actions→중기 · negative_patterns→exclude
+rules:
+- id: LEG-HW-MEM-ECC
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:memory.*ECC.*error)|(?:correctable.*ECC)|(?:uncorrectable.*ECC)|(?:DIMM.*fault)|(?:ECC.*CE.*error)|(?:ECC.*UE.*error)|(?:DIMM.*correctable)|(?:DIMM.*uncorrectable)|(?:corrected.*memory.*error)
+  severity: critical
+  category: memory
+  verdict: 메모리 ECC 오류 — 서버 메모리 모듈 ECC 오류
+  immediate:
+  - 'SEL 의 ECC 이벤트(읽기): `ipmitool sel elist | grep -iE ''memory|ecc'' | tail -20` — Correctable/Uncorrectable·DIMM 위치 기록'
+  - 'OS ECC 집계: Linux `ras-mc-ctl --error-count` (rasdaemon) / AIX `errpt -d H | head -20` / Windows `Get-WinEvent -ProviderName Microsoft-Windows-WHEA-Logger -MaxEvents 20`'
+  - Uncorrectable 이면 즉시 2차 통보(서비스 우회 준비)
+  short:
+  - (2차·승인 후) UE·다발 CE DIMM 은 서비스 우회 후 제조사 교체
+  - '영향: 시스템 불안정, 데이터 손상, 커널 패닉 위험.'
+  mid:
+  - 오류 DIMM 교체(제조사 진단 결과 기준)
+  - 교체 후 memtest86+로 메모리 전체 검사
+  long:
+  - DIMM 별 CE 누적 감시와 임계 초과 예방 교체 기준
+  source_note: 'legacy-analyzer-v2.2 server_hw_rules.json HW-MEM-ECC (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-HW-FAN-FAIL
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:fan.*failure)|(?:fan.*fault)|(?:fan.*critical)|(?:cooling.*fan.*failed)|(?:fan.*speed.*0 RPM)|(?:FAN.*WARN)|(?:FAN.*CRIT)|(?:fan.*stall)|(?:FAN_FAULT)
+  severity: error
+  category: hardware
+  verdict: 냉각 팬 장애 — 서버 내부 냉각 팬 고장
+  immediate:
+  - '팬 센서(읽기): `ipmitool sdr type Fan` — 0 RPM·cr 상태 팬 번호 기록'
+  - 관리 콘솔(iLO·iDRAC·IMM/XCC) 팬 화면에서 이중화(Redundant) 상태와 슬롯 위치 확인
+  - '온도 동반 상승: `ipmitool sdr type Temperature`'
+  short:
+  - (2차) 제조사 Hot-swap 팬 교체 요청, 이중화 소실·온도 상승 시 서비스 우회 준비
+  - '영향: 시스템 과열로 자동 셧다운 위험.'
+  mid:
+  - 장애 팬 교체 (Hot-swap 가능 시 즉시)
+  - 예비 팬 재고 확보(모델별 1개 이상)
+  long:
+  - 팬 상태 BMC 알림 연동과 예비 팬 재고 기준 수립
+  source_note: 'legacy-analyzer-v2.2 server_hw_rules.json HW-FAN-FAIL (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-HW-PSU-FAIL
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:power supply.*failure)|(?:PSU.*fault)|(?:PSU.*FAIL)|(?:power supply.*critical)|(?:redundant.*PSU.*lost)|(?:PS.*failure)|(?:power.*redundancy.*lost)
+  severity: critical
+  category: hardware
+  verdict: 전원 공급 장치 장애 — 서버 PSU 고장. 이중화 소실
+  immediate:
+  - 'PSU 센서(읽기): `ipmitool sdr type ''Power Supply''` — Failure detected·AC lost PSU 번호 기록'
+  - 'SEL 전원 이벤트 시각: `ipmitool sel elist | grep -i ''power supply'' | tail -20`'
+  - 장애 PSU LED 와 해당 PDU 콘센트 전원 확인
+  short:
+  - (2차) 제조사 Hot-swap PSU 교체, 교체 전 남은 PSU 정상·부하 여유 확인
+  - '영향: 추가 장애 시 서버 즉시 다운.'
+  mid:
+  - 장애 PSU 즉시 Hot-swap 교체
+  - 예비 PSU 재고 확보 기준 수립
+  long:
+  - PSU 이중화 소실 즉시 알림과 A/B 피드 분리 점검
+  source_note: 'legacy-analyzer-v2.2 server_hw_rules.json HW-PSU-FAIL (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-HW-TEMP-WARN
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:temperature.*warning)|(?:thermal.*warning)|(?:TEMP.*HIGH)|(?:inlet.*temp.*warning)|(?:system.*temperature.*exceeded)|(?:thermal.*threshold)|(?:CPU.*temp.*warning)
+  severity: error
+  category: hardware
+  verdict: 시스템 온도 경고 — 서버 흡기 또는 내부 온도 임계값 초과
+  immediate:
+  - '흡기·CPU 온도(읽기): `ipmitool sdr type Temperature` — Inlet 값과 경고 임계 비교'
+  - 서버실 항온항습기 상태와 같은 랙 장비 온도 동시 상승 여부 확인
+  - '팬 정상 여부: `ipmitool sdr type Fan`'
+  short:
+  - (2차) 시설 담당 냉각 점검 요청, 단일 서버 원인이면 제조사 팬·방열 점검
+  - '영향: CPU/메모리 쓰로틀링 또는 긴급 셧다운.'
+  mid:
+  - 서버실 냉각 용량·Hot/Cold Aisle 배치 점검
+  - BIOS/BMC 팬 정책 상향은 제조사 권고 범위에서 승인 후
+  - 랙 블랭킹 패널·케이블 정리로 공기 흐름 개선
+  long:
+  - 흡기 온도 27℃ 경고 감시와 서버실 온도 이력 관리
+  source_note: 'legacy-analyzer-v2.2 server_hw_rules.json HW-TEMP-WARN (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-HW-OVERTEMP
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:TEMP_CRIT)|(?:TEMP_HIGH)|(?:over temperature)|(?:thermal.*critical)|(?:thermal.*emergency)|(?:OVERTEMP_CRIT)|(?:emergency.*shutdown.*temperature)|(?:thermal.*shutdown)|(?:critical.*temperature.*shutdown)|(?:CRIT.*temp)
+  severity: critical
+  category: hardware
+  verdict: 과온도 긴급 셧다운 — 시스템 온도 위험 수준 도달로 강제 셧다운
+  immediate:
+  - '온도 센서 상태(읽기): `ipmitool sdr type Temperature` — cr 센서와 값 기록, 이미 꺼졌으면 BMC 원격(iLO·iDRAC)으로 확인'
+  - 'SEL 의 과열 이벤트: `ipmitool sel elist | grep -iE ''temp|thermal'' | tail -20`'
+  - 서버실 냉각 설비 경보·실내 온도 확인 — 여러 장비 동시면 설비 장애
+  short:
+  - (2차·승인 후) 냉각 복구·온도 정상화 확인 후 서버 기동, 기동 후 SEL·하드웨어 진단 결과 확인
+  - '영향: 서버 비정상 종료, 모든 서비스 중단.'
+  mid:
+  - 서버실 냉각 복구 후 재기동
+  - 서버 팬 전수 점검 및 결함 팬 교체
+  - 랙 공기 흐름(Hot/Cold Aisle) 재설계
+  long:
+  - 온도 경고 단계 조기 알림과 냉각 설비 이중화 점검
+  source_note: 'legacy-analyzer-v2.2 server_hw_rules.json HW-OVERTEMP (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-HW-RAID-DEGRADE
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:RAID.*degraded)|(?:array.*degraded)|(?:raid.*member.*failed)|(?:RAID.*critical)|(?:volume.*degraded)|(?:mirror.*broken)|(?:parity.*error)|(?:drive.*fail.*array)|(?:RAID.*offline)
+  severity: critical
+  category: storage
+  verdict: RAID 어레이 성능 저하 — RAID 멤버 드라이브 장애로 성능 저하 모드
+  immediate:
+  - 'Degraded 논리 드라이브 확인(읽기): `storcli /c0/vall show` / HPE `ssacli ctrl all show config` / Dell `perccli /c0/vall show` — Dgrd·Interim Recovery 상태 기록'
+  - '장애 멤버 슬롯: `storcli /c0/eall/sall show` — Failed/UBad·Rbld 디스크 위치 기록'
+  - 'Linux md RAID: `cat /proc/mdstat` — [U_] 처럼 누락 멤버 표시'
+  short:
+  - '(2차·승인 후, 롤백: 교체 전 백업 성공 확인) 장애 드라이브 Hot-swap 교체 후 재구성 진행 확인'
+  - '영향: 데이터 보호 소실. 추가 장애 시 데이터 손실.'
+  mid:
+  - 교체 드라이브로 Hot-swap
+  - RAID 재구성 완료 모니터링
+  long:
+  - RAID 상태 변화 알림 연동과 핫스페어 상시 확보
+  source_note: 'legacy-analyzer-v2.2 server_hw_rules.json HW-RAID-DEGRADE (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-HW-MCE
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:Machine Check Exception)|(?:MCE.*error)|(?:machine.*check.*cpu)|(?:mce.*bank)|(?:machine.*check.*memory)|(?:mce.*corrected)|(?:mce.*uncorrected)|(?:hardware.*error.*MCE)
+  severity: critical
+  category: memory
+  verdict: Machine Check Exception — CPU 또는 메모리 MCE 발생. HW 불량 신호
+  immediate:
+  - 'MCE 기록(읽기): Linux `ras-mc-ctl --errors` (rasdaemon) 또는 `mcelog --client` (mcelog 데몬 사용 시) 와 `journalctl -k | grep -i mce | tail -20`'
+  - 'CPU·메모리 뱅크 구분: 메시지의 Bank·CPU 번호 기록 후 `ipmitool sel elist | tail -20` 과 대조'
+  - 'Windows: `Get-WinEvent -ProviderName Microsoft-Windows-WHEA-Logger -MaxEvents 20` / AIX: `errpt -d H | head -20`'
+  short:
+  - (2차·승인 후) Uncorrected MCE 면 서비스 우회 후 제조사 진단·부품(CPU/DIMM) 교체, Corrected 반복이면 교체 계획 수립
+  - '영향: 시스템 불안정, 커널 패닉 가능.'
+  mid:
+  - rasdaemon으로 오류 분석
+  - CPU 또는 메모리 교체
+  long:
+  - MCE·EDAC 오류 감시 등록과 BIOS·마이크로코드 제조사 권고 판 유지
+  source_note: 'legacy-analyzer-v2.2 server_hw_rules.json HW-MCE (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-HW-DISK-SMART
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:SMART.*warning)|(?:SMART.*error)|(?:drive.*predictive.*failure)|(?:disk.*health.*warning)|(?:reallocated.*sector)|(?:pending.*sector)|(?:uncorrectable.*error)|(?:bad block)
+  severity: error
+  category: capacity
+  verdict: HDD/SSD SMART 경고 — HDD/SSD SMART 지표 임계값 초과. 드라이브 교체 임박
+  immediate:
+  - 'SMART 요약(읽기): `smartctl -H /dev/<sdX>` 와 `smartctl -A /dev/<sdX> | grep -iE ''Reallocated|Pending|Uncorrectable''` — 증가 추세면 교체 대상'
+  - 'RAID 뒤 디스크: `smartctl -a -d megaraid,<N> /dev/sda` 또는 `storcli /c0/eall/sall show all` 의 Predictive Failure 카운트'
+  - 'Windows: `Get-PhysicalDisk | Get-StorageReliabilityCounter | Select-Object DeviceId,ReadErrorsUncorrected,Wear,Temperature`'
+  short:
+  - '(2차·승인 후, 롤백: 교체 전 최신 백업 확인) 예측 장애 디스크 교체 일정 확정, 단일 디스크(비RAID)면 데이터 이전 우선'
+  - '영향: 데이터 손실 위험.'
+  mid:
+  - 예측 장애 드라이브 예방적 교체
+  - 정기 SMART 모니터링 설정 (smartd)
+  long:
+  - smartd 알림 연동과 디스크 사용 연수 기반 교체 계획
+  source_note: 'legacy-analyzer-v2.2 server_hw_rules.json HW-DISK-SMART (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-HW-BMC
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:BMC.*warning)|(?:iLO.*critical)|(?:iDRAC.*warning)|(?:IMM.*critical)|(?:IPMI.*event)|(?:SEL.*CRITICAL)|(?:SEL.*WARNING)
+  severity: warn
+  category: internal
+  verdict: BMC/iLO/iDRAC 경고 — 서버 관리 컨트롤러 경고 이벤트
+  immediate:
+  - 'SEL 최근 이벤트(읽기): `ipmitool sel elist | tail -30` — 실제 부품 이벤트인지 BMC 자체(통신·로그 가득) 이벤트인지 구분'
+  - 'SEL 용량: `ipmitool sel info` — Percent Used 가 100% 에 가까우면 새 이벤트 기록 불가'
+  - 'BMC 상태: `ipmitool mc info` 와 관리 콘솔(iLO IML·iDRAC Lifecycle·IMM/XCC 이벤트) 확인'
+  short:
+  - '(2차·승인 후, 롤백: 불가 — 초기화 전 `ipmitool sel elist > sel_backup.txt` 보관) SEL 가득 참이면 백업 후 `ipmitool sel clear`, BMC 무응답이면 제조사 권고에 따라 `ipmitool mc reset cold`'
+  - '영향: 하드웨어 상태 모니터링 이상 또는 실제 HW 문제.'
+  mid:
+  - BMC 펌웨어 업데이트
+  - SEL 로그 분석 후 근본 원인 조치
+  long:
+  - BMC 이벤트를 감시 시스템(SNMP 트랩·Redfish 이벤트)으로 통합하고 BMC 펌웨어 판 관리
+  source_note: 'legacy-analyzer-v2.2 server_hw_rules.json HW-BMC (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-HW-CPU-THROTTLE
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:thermal throttling)|(?:cpu.*throttled)|(?:power limit throttle)|(?:cpu.*frequency.*reduced)|(?:thermal.*event)
+  severity: error
+  category: performance
+  verdict: CPU 서멀 쓰로틀링 — CPU 과열 또는 전력 제한으로 자동 성능 하강
+  immediate:
+  - 'CPU 온도·스로틀 기록(읽기): `ipmitool sdr type Temperature` 와 `journalctl -k | grep -iE ''throttl|thermal'' | tail -20` (Linux)'
+  - '현재 주파수: Linux `grep MHz /proc/cpuinfo | sort | uniq -c` 또는 `cpupower frequency-info` — 정격 대비 크게 낮으면 스로틀링 진행'
+  - BIOS 전원 정책(절전/성능)을 관리 콘솔에서 확인 — 절전 모드면 정책 원인
+  short:
+  - '(2차·승인 후, 롤백: 변경 전 BIOS 설정 내보내기) 냉각 원인 해소, BIOS 전원 프로필을 성능 우선으로 바꾸는 작업은 계획 정지 시'
+  - '영향: 서버 전체 처리 성능 급저하.'
+  mid:
+  - 냉각 시스템(팬·방열판·서버실) 점검
+  - 서버실 흡기 온도 27℃ 이하 유지
+  - CPU 부하 분산(L4·작업 분산) 재산정
+  long:
+  - CPU 스로틀링 이벤트·온도 감시와 서버 BIOS 전원 프로필 표준화
+  source_note: 'legacy-analyzer-v2.2 server_hw_rules.json HW-CPU-THROTTLE (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관

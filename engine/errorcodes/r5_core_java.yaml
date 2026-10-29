@@ -1,0 +1,112 @@
+# 5차 보강(2026-10-16) — GPT 핵심 코드 대조에서 빠진 Java 표준 예외. docs.oracle.com Java SE API·JLS·JNI 명세로 의미 확인한 것만 넣었다.
+product: java
+layer: sw
+note: Java 표준 예외 클래스(FQCN) 코드 — 파서(exception_code)가 가장 안쪽 Caused by 의 예외 FQCN 을 코드로 부여
+codes:
+- code: java.lang.ExceptionInInitializerError
+  severity: error
+  category: app
+  title: 클래스 static 초기화 중 예외 — 소스·설정 결함 가능성, 이후 같은 클래스는 NoClassDefFoundError
+  vendor_cause: "static 초기화 블록이나 static 변수 초기화식을 실행하는 중 예상치 못한 예외가 발생했다. 그 클래스는 '오류 상태'로 표시되어 같은 JVM(클래스로더)에서 다시 쓰려 하면 원인 예외 없이 NoClassDefFoundError 가 난다. static 블록에서 읽는 설정 파일·환경 변수·JDBC 드라이버·외부 자원 누락이 흔한 원인."
+  vendor_action: "원래 예외는 getCause()(구 getException()) 로 얻는다 — 로그의 Caused by 가 실제 원인이다."
+  vendor_url: https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/ExceptionInInitializerError.html
+  immediate:
+  - "최초 발생 시각의 원인 예외와 static 블록 실패 클래스 기록: `grep -n -A30 \"ExceptionInInitializerError\" <path>/<log> | grep -E \"ExceptionInInitializerError|Caused by|at .*<clinit>\" | head -40` — `<clinit>` 프레임의 클래스가 static 블록에서 실패한 클래스"
+  - "그 뒤 같은 클래스에 `NoClassDefFoundError: Could not initialize class <클래스>` 가 반복되는지 확인: `grep -c \"Could not initialize class\" <path>/<log>` — 반복되면 첫 ExceptionInInitializerError 만 보면 됨(JVM 이 다시 뜨기 전까지 회복되지 않음)"
+  - "Caused by 가 가리키는 설정 파일·자원 존재·읽기 권한 확인: `ls -l <설정파일 경로>` 와 실행 계정 `ps -o user= -p <PID>` (읽기 전용)"
+  short:
+  - "(2차·승인 후, 롤백: 직전 배포본·설정 파일 백업으로 원복) Caused by 원인(설정 누락·드라이버 jar·외부 자원)을 고친 뒤 해당 애플리케이션 재배포 또는 인스턴스 재기동 — 클래스가 오류 상태로 남아 있어 재기동 없이는 회복되지 않는다"
+  mid:
+  - "static 초기화에서 외부 자원 접근(파일·DB·네트워크)을 빼고 지연 초기화(최초 사용 시 생성·예외 처리)로 바꾸며, 필수 설정은 기동 시 검사해 명확한 오류로 실패하게 한다"
+  long:
+  - "배포 후 기동 점검에 핵심 클래스 로딩·설정 파일 검증을 넣고, ExceptionInInitializerError·'Could not initialize class' 건수를 감시"
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: "java.lang 표준 클래스(Since 1.1) — JDK 6~25 동일. 초기화 실패 후 재사용 시 NoClassDefFoundError 동작은 JLS 12.4.2(Detailed Initialization Procedure) 5·11·12단계. 'Could not initialize class' 문구는 HotSpot 표기"
+  source: "공식 문서 대조(2026-10-16 5차 보강)"
+- code: java.lang.UnsatisfiedLinkError
+  severity: error
+  category: internal
+  title: 네이티브 라이브러리(JNI) 적재·연결 실패
+  vendor_cause: "native 로 선언된 메서드의 네이티브 구현을 JVM 이 찾지 못했다. System.loadLibrary/load 에서 라이브러리를 java.library.path 에서 찾지 못하거나, 호스트 OS 가 라이브러리를 적재하지 못하거나(32/64비트·OS 불일치, 의존 라이브러리 누락), 같은 네이티브 라이브러리를 두 번째 클래스로더가 적재하려 할 때 발생한다(WAS 재배포 후 흔함)."
+  vendor_action: "같은 JNI 네이티브 라이브러리는 둘 이상의 클래스로더에 적재할 수 없으며 그러면 UnsatisfiedLinkError 가 발생한다. 라이브러리 검색 경로는 시스템 속성 java.library.path 이다."
+  vendor_url: https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/UnsatisfiedLinkError.html
+  immediate:
+  - "오류 원문의 라이브러리 이름·경로·사유(검색 경로에 없음 / 적재 실패 / 이미 다른 클래스로더에 적재) 기록: `grep -n -A5 \"UnsatisfiedLinkError\" <path>/<log> | head -40`"
+  - "실행 중 JVM 의 검색 경로·아키텍처: `jcmd <PID> VM.system_properties | grep -E \"java.library.path|os.arch|sun.arch.data.model\"` (Windows 는 findstr) — 라이브러리가 그 경로에 있는지 `ls -l <경로>/lib<이름>.so` 로 확인 (읽기 전용)"
+  - "라이브러리 형식·의존성: `file <경로>/lib<이름>.so` 로 32/64비트·CPU 가 os.arch 와 같은지, `readelf -d <경로>/lib<이름>.so | grep NEEDED` 로 의존 라이브러리 목록 확인 (Linux · AIX 는 `dump -H`)"
+  short:
+  - "(2차·승인 후, 롤백: 변경 전 기동 스크립트·환경 변수 백업) JVM 아키텍처에 맞는 라이브러리를 배치하고 기동 옵션 -Djava.library.path 또는 LD_LIBRARY_PATH(AIX LIBPATH·Windows PATH) 에 경로 추가 후 인스턴스 재기동"
+  - "(2차·승인 후) '다른 클래스로더에 이미 적재' 사유면 재배포 대신 인스턴스 재기동으로 해소하고, 네이티브 라이브러리를 쓰는 jar 를 WAS 공유 라이브러리(서버 클래스패스)로 옮기는 변경을 계획"
+  mid:
+  - "네이티브 라이브러리 버전·경로·아키텍처를 배포 목록에 명시하고, JNI 를 쓰는 jar 는 애플리케이션(WEB-INF/lib) 이 아닌 서버 공용 경로에 한 번만 두어 핫 재배포 시 중복 적재를 막는다"
+  long:
+  - "JDK 업그레이드·OS 이전 시 네이티브 라이브러리 호환성(32/64비트·glibc) 점검 항목을 변경 절차에 포함"
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: "java.lang 표준 클래스(Since 1.0, LinkageError 하위) — JDK 6~25 동일. 상세 메시지 문구(no <이름> in java.library.path, Can't load library 등)는 JDK·OS 마다 다르다. 클래스로더 중복 적재 제한은 JNI 명세 'Library and Version Management'"
+  source: "공식 문서 대조(2026-10-16 5차 보강)"
+- code: java.lang.InternalError
+  severity: critical
+  category: internal
+  title: JVM 내부의 예상치 못한 오류(VirtualMachineError)
+  vendor_cause: "Java 가상 머신 내부에서 예상치 못한 오류가 발생했다(VirtualMachineError 하위). 애플리케이션 로직보다 JVM·JDK 라이브러리·네이티브 계층(JNI, 메모리 매핑 파일, OS 자원) 이상을 뜻하며, 같은 시각 JVM 크래시(hs_err_pid 파일)나 OS 오류가 함께 있는지가 판단 기준이다."
+  vendor_url: https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/InternalError.html
+  immediate:
+  - "예외 메시지·스택 전체와 발생 시각 기록 후 같은 시각 JVM 크래시 파일 확인: `ls -lt <작업 디렉터리>/hs_err_pid*.log | head` (-XX:ErrorFile 지정 시 그 경로) — 있으면 상단의 문제 프레임·JDK 버전 기록"
+  - "프로세스가 살아 있으면 상태 보존: `jcmd <PID> VM.version` 과 `jcmd <PID> Thread.print > <path>/td_$(date +%H%M%S).txt` (스레드 덤프, 프로세스는 유지)"
+  - "같은 시각 OS 오류 확인: `dmesg -T | tail -50` (메모리·I/O 오류) · 디스크 사용률 `df -h <작업 디렉터리>` (읽기 전용)"
+  short:
+  - "(2차·승인 후, 롤백: 변경 전 JDK 경로·기동 스크립트 백업) 반복되면 hs_err·스레드 덤프·로그를 JDK 공급사에 의뢰하고, 같은 메이저 버전의 최신 업데이트 JDK 적용을 시험 환경에서 먼저 검증"
+  - "(2차) 직전 변경(JDK·네이티브 라이브러리·JVM 옵션) 이 있었다면 변경 전 구성으로 되돌린 인스턴스 1대에서 재현 여부 비교"
+  mid:
+  - "JDK 업데이트 주기(분기 CPU 패치)와 -XX:ErrorFile·코어 덤프 보관 경로를 표준 기동 옵션으로 고정"
+  long:
+  - "InternalError·hs_err 파일 발생을 감시 대상으로 등록하고 JDK·OS 조합 지원 매트릭스를 관리"
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: "java.lang 표준 클래스(Since 1.0, VirtualMachineError 하위) — JDK 6~25 동일. jcmd 는 JDK 7+(JDK 6 은 jstack <PID>). 메시지 문구는 원인 구성요소마다 다르다"
+  source: "공식 문서 대조(2026-10-16 5차 보강)"
+- code: java.nio.file.AccessDeniedException
+  severity: error
+  category: storage
+  title: 파일시스템 접근 거부(파일·디렉터리 권한)
+  vendor_cause: "파일시스템 작업이 거부됐다 — 대개 파일 권한 또는 그 밖의 접근 검사 때문이다(FileSystemException 하위, 메시지에 대상 파일 경로가 들어간다). 실행 계정 변경, 다른 계정으로 만든 파일, 디렉터리 쓰기 권한 누락, SELinux 같은 보안 정책 차단이 흔한 원인. 보안 관리자(SecurityException)와는 무관하다."
+  vendor_url: https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/nio/file/AccessDeniedException.html
+  immediate:
+  - "오류 원문의 대상 경로 기록 후 경로와 상위 디렉터리 권한·소유자 확인: `ls -ld <경로> <상위 디렉터리>` (Windows: `icacls <경로>`) (읽기 전용)"
+  - "JVM 실행 계정 확인: `ps -o user=,group= -p <PID>` 와 `id <실행 계정>` — 소유자·그룹·권한 비트와 대조"
+  - "권한이 맞는데도 거부되면 보안 정책 확인: `getenforce` 와 `ausearch -m avc -ts recent | tail -20` (RHEL 계열, root 필요)"
+  short:
+  - "(2차·승인 후, 롤백: 변경 전 `ls -l`·`getfacl` 결과 보관 후 같은 값으로 원복) 대상 파일·디렉터리 소유자(chown)·권한(chmod)을 실행 계정에 맞게 최소 범위로 조정 — 777 같은 전체 허용 금지"
+  mid:
+  - "애플리케이션 쓰기 경로(로그·업로드·임시)를 전용 디렉터리로 분리하고 실행 계정·umask 를 기동 스크립트에 고정, SELinux 는 파일 컨텍스트(semanage fcontext) 규칙으로 등록"
+  long:
+  - "배포·계정 변경 절차에 쓰기 경로 권한 검사를 넣고 AccessDeniedException 건수를 감시"
+  versions:
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: "java.nio.file(NIO.2) 클래스로 JDK 7 이상(Since 1.7) — java.io API(FileInputStream 등) 는 같은 상황에서 FileNotFoundException(Permission denied) 을 던진다"
+  source: "공식 문서 대조(2026-10-16 5차 보강)"

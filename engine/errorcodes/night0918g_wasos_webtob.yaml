@@ -1,0 +1,132 @@
+product: webtob
+layer: web
+note: GPT 협업 수집분 — 벤더 공식 문서와 대조 후 확정
+codes:
+- code: HTH0529
+  severity: error
+  category: upstream
+  title: JEUS 큐 대기시간 초과
+  immediate:
+  - '`$WEBTOBDIR/bin/wsadmin` 접속 후 `st -s` 로 JSV 큐 대기 수, `si` 로 JSV 서버 상태(RDY·연결 수) 확인 (`si` 는 내부 서버(JSV) 상태 — `ci` 는 WebtoB 5 에서 클라이언트 정보라 JEUS 연결 확인에 쓰지 않는다)'
+  - '같은 시각 JEUS 스레드 풀·DB 대기 상태를 WAS 담당에 확인 요청'
+  short:
+  - '(2차) JEUS 지연 해소가 우선, 큐 대기 시간·프로세스 수 조정은 원인 확인 뒤 승인 후(롤백: http.m 백업 복원)'
+  mid:
+  - '반복 발생 시 WebtoB·JEUS 요청 큐와 처리량을 함께 재산정'
+  long:
+  - 'JEUS 연동 구간 지연·대기 요청 지속 감시'
+  vendor_cause: 'HTH0529 — JEUS(JSV)로 전달하려던 요청이 큐에서 대기하는 동안 시간 제한을 넘었다(queuing 상태 timeout). JEUS 처리 프로세스가 모두 바빠 요청이 큐에 머문 것이 원인이며 사용자에게 시간 초과 오류가 나간다.'
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://docs.tmaxsoft.com/en/webtob/5_fix4/release-note/chapter-5-fix3.html)
+  versions:
+  - WebtoB 4.1
+  - WebtoB 5.x
+  - WebtoB 6.x
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: JEUS 전달 중 queuing 상태에서 timeout 발생 시 출력
+- code: HTH0063
+  severity: warn
+  category: capacity
+  title: JSV 연결 자원 부족
+  immediate:
+  - '로그의 Remote IP 와 `$WEBTOBDIR/bin/wsadmin` 접속 후 `si` 출력의 JSV 서버 상태·연결 수 확인'
+  - 'JEUS 서버 기동 시각·WebtoB 연결 설정 수와 실제 연결 수 대조'
+  short:
+  - '(2차) JEUS 연결 수 부족이면 WAS 담당과 연결(워커) 수 조정 협의(승인 후)'
+  mid:
+  - '반복 시 JEUS 연동 연결 수와 동시 요청량 재산정'
+  long:
+  - '최대 동시 요청량 기준 JSV 연결 용량 관리'
+  vendor_cause: 'HTH-00063 계열 — 요청을 보낼 JSV(JEUS) 연결이 부족하다. JEUS 쪽 연결 수(워커) 부족이나 JEUS 재기동 중 연결 미복구가 흔한 원인.'
+  verify_note: '미검증 — 공식 문서 표기는 HTH-00063 이며 입력 코드 HTH0063 과 같은 의미인지 확인하지 못함(원 수집 note 와 같음)'
+  source: GPT 수집 2026-09-18·공식 문서 미확인(보류)(https://docs.tmaxsoft.com/ko/tmaxsoft_docs/main/_attachments/webtob/5_fix4/WebtoB_5Fix4_Release-Note_ko.pdf)
+  versions:
+  - WebtoB 4.1
+  - WebtoB 5.x
+  - WebtoB 6.x
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 공식 문서에서 확인되는 표기는 HTH-00063이며 입력 코드 HTH0063은 확인하지 못함
+- code: HTH0292
+  severity: warn
+  category: capacity
+  title: JSV 연결 자원 부족
+  immediate:
+  - '로그의 Remote IP·Connection 상태와 `$WEBTOBDIR/bin/wsadmin` 접속 후 `si` 출력의 JSV 연결 수 확인'
+  - '같은 시각 JEUS 쪽 연결·스레드 상태 확인 요청'
+  short:
+  - '(2차) 부족한 JSV 연결이 회복되지 않으면 WAS 담당과 연결 수 조정 협의(승인 후)'
+  mid:
+  - '연결 부족 시점의 요청량과 JEUS 처리 상태 분석'
+  long:
+  - 'JSV 연결 고갈 방지 용량 정기 검토'
+  vendor_cause: 'HTH-00292 계열 — JSV(JEUS) 연결 자원이 부족해 요청 전달에 필요한 연결을 확보하지 못했다. JEUS 연결 수 부족·연결 끊김 뒤 미복구가 흔한 원인.'
+  verify_note: '미검증 — 공식 문서 표기는 HTH-00292 이며 입력 코드 HTH0292 와 같은 의미인지 확인하지 못함(원 수집 note 와 같음)'
+  source: GPT 수집 2026-09-18·공식 문서 미확인(보류)(https://docs.tmaxsoft.com/ko/tmaxsoft_docs/main/_attachments/webtob/5_fix4/WebtoB_5Fix4_Release-Note_ko.pdf)
+  versions:
+  - WebtoB 4.1
+  - WebtoB 5.x
+  - WebtoB 6.x
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 공식 문서에서 확인되는 표기는 HTH-00292이며 입력 코드 HTH0292는 확인하지 못함
+- code: HTH0499
+  severity: error
+  category: upstream
+  title: 비요청 JSV 응답 수신
+  immediate:
+  - '`grep -n "HTH0499" <오류로그> | tail -20` 로 발생 시각·JSV 이름 확인 후 같은 시각 JEUS 로그에서 해당 요청이 시간 초과 뒤 늦게 응답했는지 대조 (`ls -lt $WEBTOBDIR/log | head` 로 최근 오류 로그 찾기)'
+  - '`$WEBTOBDIR/bin/wsadmin` 접속 후 `si` 로 해당 JSV 서버가 다시 RDY 로 연결됐는지 확인 — 연결 수가 원래대로면 일시 현상, 줄어든 채면 JEUS 쪽 확인'
+  short:
+  - '(2차) 반복되면 JEUS 측 비정상 응답 조건을 WAS 담당·기술지원과 조사'
+  mid:
+  - '동일 메시지 반복 시 JEUS 비정상 응답 발생 조건 분석'
+  long:
+  - 'WebtoB·JEUS 패치 수준 관리와 연동 오류 감시'
+  vendor_cause: 'HTH0499 — WebtoB 가 보낸 요청에 대응하지 않는 JSV 응답을 받아 폐기하고 그 연결을 종료했다. JEUS 쪽 응답 순서 오류·시간 초과 뒤 늦게 도착한 응답이 흔한 원인.'
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://docs.tmaxsoft.com/en/webtob/5_fix4/release-note/chapter-5-fix3.html)
+  versions:
+  - WebtoB 4.1
+  - WebtoB 5.x
+  - WebtoB 6.x
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: WebtoB 요청에 대응하지 않는 JSV 응답을 폐기하고 연결 종료
+- code: ERR-00122
+  severity: error
+  category: internal
+  title: Worker 처리 오류
+  immediate:
+  - '같은 로그 줄·다음 줄의 하위 ERR 코드 확인(`grep -n -A2 "ERR-00122" <로그파일> | tail -20`)'
+  - '하위 오류가 가리키는 요청·대상 파일 또는 서비스 확인'
+  short:
+  - '(2차) 하위 오류 유형별로 대상 파일·서비스 담당에 조치 요청'
+  mid:
+  - '동일 Worker 오류가 반복되는 요청 패턴과 설정 분석'
+  long:
+  - '반복 하위 오류 유형 기준 WebtoB 설정·애플리케이션 개선'
+  vendor_cause: 'ERR-00122 — WebtoB Worker 처리 오류다. 같은 로그 줄의 하위 ERR 코드가 실제 실패 원인(파일 없음·권한 등)을 나타낸다.'
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://docs.tmaxsoft.com/en/webtob/5_fix4/release-note/chapter-5.html)
+  versions:
+  - WebtoB 4.1
+  - WebtoB 5.x
+  - WebtoB 6.x
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 공식 에러 로그 예제의 Worker error
+- code: ERR-05065
+  severity: error
+  category: internal
+  title: 요청 URI 존재하지 않음
+  immediate:
+  - '요청 URI 와 실제 파일·매핑 대상 존재 확인(`ls -l <DOCROOT>/<경로>`)'
+  - '`grep -n -i "URI\|ALIAS" $WEBTOBDIR/config/http.m` 로 URI 매핑 설정 확인'
+  short:
+  - '(2차) 잘못된 URI·대상 경로를 수정하거나 누락 파일 재배포(승인 후, 롤백: 원복)'
+  mid:
+  - 'URI 매핑과 배포 파일 구성 정합 점검'
+  long:
+  - '배포·URI 변경 시 경로 정합성 검증을 운영 절차에 포함'
+  vendor_cause: 'ERR-05065 — 요청 URI 에 해당하는 대상(파일·매핑)이 존재하지 않는다(로그 레벨 E). 배포 누락·URI 매핑 오류·잘못된 요청 경로가 흔한 원인.'
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://docs.tmaxsoft.com/en/webtob/5_fix4/release-note/chapter-5.html)
+  versions:
+  - WebtoB 4.1
+  - WebtoB 5.x
+  - WebtoB 6.x
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 공식 로그 레벨 E이며 upstream 오류가 아니라 요청 URI 대상 부재

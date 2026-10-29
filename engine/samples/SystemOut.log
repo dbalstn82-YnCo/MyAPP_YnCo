@@ -1,0 +1,12 @@
+************ Start Display Current Environment ************
+WebSphere Platform 9.0.5.14 [ND 9.0.5.14 cf142321.01]  running with process name <cell>\<node>\server1 and process id 12345
+************* End Display Current Environment *************
+[10/16/26 9:58:01:120 KST] 00000001 WsServerImpl  A   WSVR0001I: Server server1 open for e-business
+[10/16/26 10:12:44:501 KST] 0000004d ThreadMonitor W   WSVR0605W: Thread "WebContainer : 3" (0000004f) has been active for 612345 milliseconds and may be hung.  There is/are 1 thread(s) in total in the server that may be hung.
+	at java.net.SocketInputStream.socketRead0(Native Method)
+	at java.net.SocketInputStream.read(SocketInputStream.java:171)
+[10/16/26 10:13:02:887 KST] 00000063 FreePool      E   J2CA0045E: Connection not available while invoking method createOrWaitForConnection for resource jdbc/<ds>.
+[10/16/26 10:13:02:890 KST] 00000063 ConnectionEve A   J2CA0056I: The Connection Manager received a fatal connection error from the Resource Adapter for resource jdbc/<ds>.
+[10/16/26 10:13:05:010 KST] 00000063 SystemErr     R   java.sql.SQLTransientConnectionException: Connection not available, Timed out waiting for 180003
+[10/16/26 10:13:05:011 KST] 00000063 SystemErr     R   	at com.ibm.ejs.j2c.FreePool.createOrWaitForConnection(FreePool.java:1720)
+[10/16/26 10:15:40:002 KST] 00000071 ThreadMonitor W   WSVR0606W: Thread "WebContainer : 3" (0000004f) was previously reported to be hung but has completed.  It was active for approximately 795001 milliseconds.  There is/are 0 thread(s) in total in the server that still may be hung.

@@ -1,0 +1,24 @@
+# DBMS — SUNJESOFT GOLDILOCKS 시그니처. ERR-…(내부번호) 코드 문구는 errorcodes(사전)가 판정한다
+# 룰 학습 5차(국산) 승격 — 2026-10-15 · 벤더 문서 대조 GPT 14차 + 원문 재확인
+rules:
+- id: DB-GD-001
+  layer: db
+  product:
+  - goldilocks
+  match:
+    regex: \[CLEANUP\]\s+long statement timeout\b
+  severity: warn
+  category: performance
+  verdict: Goldilocks 장기 실행 문장 시간 초과 정리 — 오래 걸린 SQL 을 서버가 정리함
+  immediate:
+  - "`grep -n -B1 -A3 \"long statement timeout\" $GOLDILOCKS_DATA/trc/system.trc | tail -40` 으로 pid·thread·program·statement start time 기록 — 같은 program 반복이면 해당 업무 SQL 문제 (26c)"
+  - "gsql 로 DBA 접속 후 `SELECT PROPERTY_NAME, PROPERTY_VALUE FROM V$PROPERTY WHERE PROPERTY_NAME LIKE '%TIMEOUT%';` 로 적용 중인 시간 제한 설정, `SELECT * FROM V$LOCK_WAIT;` 로 같은 시각 잠금 대기 잔존 여부 확인"
+  short:
+  - 해당 프로그램 SQL 실행 계획·시간 제한 설정 검토(2차)
+  mid:
+  - 장기 실행 작업 시간대 분산
+  long:
+  - 질의 성능 기준(SLO) 정의
+  versions:
+  - GOLDILOCKS 26c
+  version_note: system.trc — 머리줄 다음 줄의 '[CLEANUP] long statement timeout - pid(…)…'. 인스턴스 전체 장애를 뜻하지 않는다

@@ -1,0 +1,542 @@
+# 근거 매뉴얼·작성 기준 (G7a: Tomcat·JEUS·JBoss EAP/WildFly, 2026-10-16 · knowledge_spec 5차 GPT 45차 관문)
+# - Apache Tomcat 9.0 Documentation(tomcat.apache.org/tomcat-9.0-doc): Configuration Reference 'The HTTP Connector'(maxHttpHeaderSize·maxPostSize·maxConnections·acceptCount)
+#   · 'The Manager Component'(secureRandomAlgorithm·pathname) · 'The Valve Component'(AccessLogValve) · 'Logging in Tomcat' · 'Manager App How-To'(/manager/status, findleaks 는 Full GC 유발)
+# - TmaxSoft JEUS Reference Guide 'jeusadmin 콘솔 툴'(server-info·list-servers·thread-info·connection-pool-info·transaction-info·list-jms-destinations, JEUS 7+)
+#   · JEUS 9 Server Guide '로깅'(SERVER_HOME/logs: JeusServer.log·JeusLauncher.log·jvm.log·servlet/access.log) · JEUS Deployment Guide '애플리케이션 관리'(repository, DEPLOY-0062)
+# - Red Hat JBoss EAP 7.3 / WildFly 34 Log Message Reference(WFLY·IJ·ARJUNA·ISPN·AMQ 원문 대조) · WildFly 34 Model Reference(wildscribe:
+#   messaging-activemq server max-disk-usage·journal-directory, address-setting address-full-policy, undertow access-log, reverse-proxy max-request-time,
+#   infinispan locking acquire-timeout, transactions default-timeout, ejb3 strict-max-bean-instance-pool)
+# 작성 기준: 1차=읽기 전용(재기동·정리·설정 변경 없음), 2차=사전조건·영향·승인·백업/롤백 + 성공/실패 판단, 3차=민감정보 마스킹·전달 승인.
+# 버전 적용: Tomcat 7.0~11.0(명령 차이는 note), JEUS 7/8/21(jeusadmin 은 JEUS 7+, JEUS 6 은 로그·OS 명령만), JBoss EAP 7.x/8.x·WildFly(EAP 6 은 JBAS 코드·관리 포트 9999).
+procedures:
+- id: TOMCAT-PROC-R5-CAPACITY
+  products: [tomcat]
+  category: capacity
+  match: [TOMCAT-STARTUP-SLOW, TOMCAT-REQUEST-HEADER-TOO-LARGE, TOMCAT-MAX-POST-SIZE, TOMCAT-TOO-MANY-OPEN-FILES]
+  title: 요청 크기 한도·파일 디스크립터·기동 지연 (Tomcat 용량 한도)
+  source: "Apache Tomcat 9.0 Configuration Reference 'The HTTP Connector'(maxHttpHeaderSize 기본 8192·maxPostSize 기본 2097152·maxConnections·acceptCount)·'The Manager Component'(secureRandomAlgorithm) — tomcat.apache.org/tomcat-9.0-doc/config/http.html, config/manager.html"
+  stages:
+  - stage: 1
+    steps:
+    - do: 어떤 한도에 걸렸는지 로그로 구분 (읽기 전용)
+      cmd: |
+        grep -n -E 'Request header is too large|maxPostSize|Parameters: Too much|Too many open files|Creation of SecureRandom instance' $CATALINA_BASE/logs/catalina.out | tail -20
+        grep -n -o -E '(maxHttpHeaderSize|maxPostSize|maxConnections|acceptCount)="[0-9-]*"' $CATALINA_BASE/conf/server.xml
+      check: "헤더 초과·POST 초과·FD 고갈·SecureRandom 지연 중 어느 문구인지 확정. server.xml 에 값이 없으면 기본값(헤더 8192 바이트, POST 2MB) 적용 중"
+      note: "적용: Tomcat 7.0~11.0(로그 경로는 $CATALINA_BASE/logs) · 권한: Tomcat 실행 계정 또는 읽기 권한"
+    - do: 파일 디스크립터 사용량·한도 확인 (FD 고갈일 때)
+      cmd: |
+        ls /proc/<PID>/fd | wc -l ; grep 'Max open files' /proc/<PID>/limits
+        ss -tan | awk '{print $1}' | sort | uniq -c
+      check: "사용량이 한도의 90% 이상이면 FD 고갈 확정. CLOSE-WAIT 가 수백 개 이상 쌓이면 앱의 연결 미종료(누수) 원인"
+      note: "적용: Linux · 권한: root 또는 Tomcat 실행 계정(/proc/<PID> 열람)"
+    - do: 기동 지연이면 엔트로피 상태 확인
+      cmd: |
+        cat /proc/sys/kernel/random/entropy_avail
+        grep -n -E 'Server startup in|Creation of SecureRandom' $CATALINA_BASE/logs/catalina.out | tail -5
+      check: "SecureRandom 생성이 수 초 이상이고 entropy_avail 이 수백 이하이면 엔트로피 부족 확정"
+      note: "적용: Linux, Tomcat 7.0+ · 권한: 일반 사용자"
+  - stage: 2
+    steps:
+    - do: Connector 한도 조정 (헤더·POST·연결 수)
+      config:
+        file: $CATALINA_BASE/conf/server.xml (해당 Connector)
+        snippet: |
+          <Connector port="<port>" protocol="org.apache.coyote.http11.Http11NioProtocol"
+                     maxHttpHeaderSize="16384" maxPostSize="10485760"
+                     maxConnections="8192" acceptCount="200" connectionTimeout="20000" />
+        note: "사전조건: 원인 요청(쿠키 누적·대형 폼)이 정상 업무임을 업무 담당과 확인, 앞단 웹서버·LB 한도도 같은 값으로 · 영향: 재기동 동안 해당 인스턴스 서비스 중단(LB 우회 후 진행) · 승인: WAS 담당·변경관리 승인 · 백업/롤백: cp server.xml server.xml.$(date +%Y%m%d) 후 변경, 문제 시 백업본으로 복원·재기동"
+      cmd: |
+        cp $CATALINA_BASE/conf/server.xml $CATALINA_BASE/conf/server.xml.$(date +%Y%m%d)
+        $CATALINA_HOME/bin/shutdown.sh ; sleep 10 ; $CATALINA_HOME/bin/startup.sh
+      check: "성공: 기동 후 catalina.out 에 'Server startup in' 이 찍히고 해당 400/파라미터 누락 문구가 재발하지 않음 · 실패: 기동 오류(SEVERE) 발생 → 백업 server.xml 로 복원 후 재기동"
+      note: "사전조건: LB 에서 인스턴스 우회 · 영향: 인스턴스 재기동 수십 초 · 승인: WAS 담당 · 백업/롤백: 위 server.xml 백업본 복원"
+    - do: FD 한도 상향 또는 엔트로피 옵션 적용
+      config:
+        file: systemd 서비스 유닛(LimitNOFILE) 또는 /etc/security/limits.conf · $CATALINA_BASE/bin/setenv.sh
+        snippet: |
+          # systemd: [Service] LimitNOFILE=65536
+          # setenv.sh: CATALINA_OPTS="$CATALINA_OPTS -Djava.security.egd=file:/dev/./urandom"
+        note: "사전조건: CLOSE_WAIT 누수가 원인이면 코드 수정이 먼저(한도 상향은 시간 벌기) · 영향: 재기동 필요 · 승인: 시스템·보안 담당(egd 변경은 보안 검토) · 백업/롤백: 유닛 파일·setenv.sh 사본 보관 후 원복"
+      cmd: |
+        systemctl daemon-reload ; systemctl restart <tomcat_service>
+      check: "성공: grep 'Max open files' /proc/<새PID>/limits 가 새 값, 기동 시간이 기준값 수준으로 단축 · 실패: 서비스 기동 실패 → 유닛·setenv.sh 원복 후 재기동"
+      note: "사전조건: LB 우회 · 영향: 재기동 동안 중단 · 승인: 시스템 담당 · 백업/롤백: 변경 전 파일 사본으로 복원"
+  - stage: 3
+    steps:
+    - do: 유지보수사(또는 커뮤니티 문의) 자료 수집
+      cmd: |
+        $CATALINA_HOME/bin/version.sh > tc_version.txt 2>&1 ; java -version 2>> tc_version.txt
+        tail -2000 $CATALINA_BASE/logs/catalina.out > catalina_tail.txt
+        grep -v -i -E 'password|secret|keystorePass' $CATALINA_BASE/conf/server.xml > server_xml_masked.txt
+      check: "버전·catalina 로그 발췌·비밀값 제외한 server.xml·/proc/<PID>/limits 출력"
+      note: "민감정보 마스킹: 접근 로그의 사용자 IP·쿠키·세션 ID, server.xml 비밀번호·secret 제거 후 전달 · 전달 승인: 보안 담당 승인 후 반출"
+
+- id: TOMCAT-PROC-R5-DISK
+  products: [tomcat]
+  category: disk
+  match: [TOMCAT-TEMP-DIR-FAIL, TOMCAT-LOG-WRITE-FAIL, TOMCAT-NO-SPACE, WAS-TC-020]
+  title: 로그·temp·work 디스크 공간·권한 (Tomcat)
+  source: "Apache Tomcat 9.0 'Logging in Tomcat'(AsyncFileHandler maxDays)·Configuration Reference 'The Valve Component'(AccessLogValve directory·maxDays)·'The Context Container'(workDir) — tomcat.apache.org/tomcat-9.0-doc/logging.html, config/valve.html, config/context.html"
+  stages:
+  - stage: 1
+    steps:
+    - do: 공간·inode 사용률 확인 (읽기 전용)
+      cmd: |
+        df -h $CATALINA_BASE/logs $CATALINA_BASE/temp $CATALINA_BASE/work ; df -i $CATALINA_BASE/logs
+      check: "사용률 또는 inode 95% 이상이면 공간 원인 확정, 여유가 있으면 권한·경로 원인으로 다음 단계"
+      note: "적용: Tomcat 7.0~11.0, Linux/UNIX · 권한: 일반 사용자"
+    - do: 큰 파일·권한 확인 (정리는 하지 않는다)
+      cmd: |
+        du -sh $CATALINA_BASE/logs/* 2>/dev/null | sort -h | tail -10
+        find $CATALINA_BASE -xdev -type f -size +500M -exec ls -lh {} \; 2>/dev/null | head
+        ls -ld $CATALINA_BASE/logs $CATALINA_BASE/temp $CATALINA_BASE/work ; ps -o user= -p <PID>
+      check: "catalina.out·hprof 덤프·회전 로그 중 무엇이 큰지 식별. 디렉터리 소유자와 Tomcat 실행 계정이 다르면 권한 원인 확정"
+      note: "적용: GNU find(-xdev 로 다른 파일시스템 제외) · 권한: Tomcat 실행 계정"
+    - do: 접근 로그 경로 설정 확인 (WAS-TC-020)
+      cmd: |
+        grep -n -A3 'AccessLogValve' $CATALINA_BASE/conf/server.xml
+      check: "directory 가 존재하지 않거나 다른 파일시스템이면 경로 원인"
+      note: "적용: Tomcat 7.0+ · 권한: 읽기"
+  - stage: 2
+    steps:
+    - do: 오래된 회전 로그·분석 끝난 덤프를 압축·이동해 공간 확보
+      cmd: |
+        mkdir -p <보관경로>/tomcat_$(date +%Y%m%d)
+        find $CATALINA_BASE/logs -xdev -type f -name '*.log' -mtime +7 -exec gzip {} \;
+        find $CATALINA_BASE/logs -xdev -type f -name '*.gz' -mtime +7 -exec mv {} <보관경로>/tomcat_$(date +%Y%m%d)/ \;
+      check: "성공: df 사용률 85% 이하, 로그 쓰기 오류 문구 사라짐 · 실패: 공간이 확보되지 않음 → 큰 열린 파일(catalina.out) 확인 후 다음 단계"
+      note: "사전조건: 보관 경로는 다른 파일시스템, 감사·보존 의무 로그인지 확인 · 영향: 서비스 영향 없음(열린 파일은 건드리지 않음) · 승인: WAS·보안(로그 보존) 담당 · 백업/롤백: 이동만 하므로 보관 경로에서 되돌릴 수 있음"
+    - do: catalina.out 비우기(열린 파일) 또는 권한 바로잡기
+      cmd: |
+        cp $CATALINA_BASE/logs/catalina.out <보관경로>/catalina.out.$(date +%Y%m%d) && : > $CATALINA_BASE/logs/catalina.out
+        chown -R <tomcat_user>:<tomcat_group> $CATALINA_BASE/logs $CATALINA_BASE/temp $CATALINA_BASE/work
+      check: "성공: catalina.out 크기 0 에서 다시 증가, 쓰기 실패 문구 재발 없음 · 실패: 권한 오류 지속 → 상위 디렉터리 권한·SELinux 확인"
+      note: "사전조건: catalina.out 사본이 보관 경로에 완전히 복사됐는지 크기 비교 · 영향: 비우는 순간 이후 기록만 남음 · 승인: WAS 담당 · 백업/롤백: 사본 보관, 소유자 변경 전 ls -l 결과 기록 후 원복 가능"
+    - do: 재발 방지 — 로그 보관 기간 설정
+      config:
+        file: $CATALINA_BASE/conf/logging.properties · server.xml(AccessLogValve)
+        snippet: |
+          1catalina.org.apache.juli.AsyncFileHandler.maxDays = 30
+          <Valve className="org.apache.catalina.valves.AccessLogValve" directory="logs" maxDays="30" ... />
+        note: "사전조건: 로그 보존 정책(감사 요구 기간) 확인 · 영향: 다음 재기동부터 적용 · 승인: WAS·보안 담당 · 백업/롤백: 변경 전 파일 사본 보관 후 원복"
+      check: "성공: maxDays 경과 로그가 자동 정리되고 사용률이 안정 · 실패: 설정 오류로 로그 미생성 → 사본 복원"
+  - stage: 3
+    steps:
+    - do: 유지보수사 의뢰 자료
+      cmd: |
+        df -h > df_$(date +%Y%m%d).txt ; du -sh $CATALINA_BASE/* > du_tomcat.txt 2>/dev/null
+        tail -500 $CATALINA_BASE/logs/catalina.out > catalina_tail.txt
+      check: "df·du 결과, catalina 로그 발췌, logging.properties"
+      note: "민감정보 마스킹: 호스트명·IP·사용자 계정·요청 URL 의 개인정보 가림 후 전달 · 전달 승인: 보안 담당"
+
+- id: JEUS-PROC-R5-CAPACITY
+  products: [jeus]
+  category: capacity
+  match: [JEUS-EJB-POOL-FULL]
+  title: EJB 풀·처리 스레드 고갈 (JEUS)
+  source: "JEUS Reference Guide 'jeusadmin 콘솔 툴' — thread-info(-server, -type servlet|ejb|server, 별칭 ti)·server-info(si) (JEUS 7+) / JDK jcmd Thread.print"
+  verify_note: "미검증 — thread-info -type ejb 출력 항목·EJB 빈 풀 설정 요소 이름(jeus-ejb-dd.xml)을 판(7/8/21)별 원문으로 확인 못 함"
+  stages:
+  - stage: 1
+    steps:
+    - do: EJB 처리 스레드 사용 상태 확인 (읽기 전용)
+      cmd: |
+        $JEUS_HOME/bin/jeusadmin -host <host>:9736 -u <user> 'thread-info -server <server> -type ejb'
+        $JEUS_HOME/bin/jeusadmin -host <host>:9736 -u <user> 'server-info -server <server> -state'
+      check: "활성 스레드가 최대치와 같고 대기 요청이 있으면 고갈 확정, 서버 상태가 RUNNING 이 아니면 서버 장애 우선"
+      note: "적용: JEUS 7/8/21(jeusadmin) — JEUS 6 은 다음 단계 덤프만 · 권한: JEUS 관리 계정(읽기)"
+    - do: 스레드 덤프로 대기 지점 확인
+      cmd: |
+        for i in 1 2 3; do jcmd <PID> Thread.print > td_$(date +%H%M%S)_$i.txt; sleep 10; done
+        grep -c 'java.lang.Thread.State: BLOCKED' td_*.txt
+      check: "EJB 메서드 스레드 다수가 같은 후단(DB·외부 호출)·락에서 대기하면 장기 호출이 원인"
+      note: "적용: JDK 7+ jcmd(없으면 jstack <PID>) · 권한: JEUS 실행 계정 · 프로세스는 유지됨"
+  - stage: 2
+    steps:
+    - do: 장기 호출 원인 해소 후 빈 풀·스레드 상한 조정
+      cmd: |
+        cp <app>/META-INF/jeus-ejb-dd.xml <app>/META-INF/jeus-ejb-dd.xml.$(date +%Y%m%d)
+        $JEUS_HOME/bin/jeusadmin -host <host>:9736 -u <user> 'application-info'
+      check: "성공: 재배포 후 thread-info 활성 비율 70% 이하·EJB 대기 오류 소멸 · 실패: 배포 실패 또는 지연 지속 → 백업 DD 로 원복 재배포"
+      note: "사전조건: 후단 지연(DB·외부) 원인 해소가 먼저, 풀 상한은 DB 풀·CPU 와 함께 산정 · 영향: 재배포 동안 해당 앱 중단 · 승인: WAS·개발 담당 · 백업/롤백: 변경 전 jeus-ejb-dd.xml·배포본 보관 후 원복 재배포"
+  - stage: 3
+    steps:
+    - do: TmaxSoft 기술지원 의뢰 자료
+      cmd: |
+        $JEUS_HOME/bin/jeusadmin -host <host>:9736 -u <user> 'thread-info -server <server>' > ti_$(date +%Y%m%d_%H%M).txt
+        tail -2000 <SERVER_HOME>/logs/JeusServer.log > jeusserver_tail.txt ; java -version 2> jdk_version.txt
+      check: "thread-info 결과·스레드 덤프 3회·JeusServer.log 발췌·JEUS/JDK 판"
+      note: "민감정보 마스킹: 스레드 덤프·로그의 사용자 ID·계좌/주민번호 등 파라미터·IP 가림 · 전달 승인: 보안 담당"
+
+- id: JEUS-PROC-R5-DISK
+  products: [jeus]
+  category: disk
+  match: [JEUS-JMS-STORE-FULL, JEUS-LOG-WRITE-FAIL, LEG-JEUS-LOG-FULL]
+  title: JEUS 로그·JMS 저장소 디스크 부족
+  source: "JEUS 9 Server Guide '로깅'(SERVER_HOME/logs: JeusServer.log·JeusLauncher.log·jvm.log·servlet/access.log, 로그 핸들러 회전) / JEUS Reference Guide 'jeusadmin' list-jms-destinations"
+  verify_note: "미검증 — JMS 영속 저장소 경로 설정 요소 이름과 list-jms-destinations 출력의 적체 항목을 판별 원문으로 확인 못 함"
+  stages:
+  - stage: 1
+    steps:
+    - do: 로그·저장소 파일시스템 사용률 확인 (읽기 전용)
+      cmd: |
+        df -h <SERVER_HOME>/logs ; df -i <SERVER_HOME>/logs
+        du -sh <SERVER_HOME>/logs/* 2>/dev/null | sort -h | tail -10
+      check: "사용률·inode 95% 이상이면 확정. JeusServer·access·jvm.log 중 어느 것이 큰지 식별(SERVER_HOME=$JEUS_HOME/domains/<domain>/servers/<server>)"
+      note: "적용: JEUS 7/8/21 경로(JEUS 6 은 $JEUS_HOME/logs) · 권한: JEUS 실행 계정"
+    - do: JMS 저장소 적체 확인 (JMS 저장소 부족일 때)
+      cmd: |
+        $JEUS_HOME/bin/jeusadmin -host <host>:9736 -u <user> 'list-jms-destinations'
+        df -h <JMS 저장소 경로>
+      check: "특정 큐에 메시지가 계속 쌓이면 소비자(MDB) 중단이 원인, 저장소 파일시스템 95% 이상이면 공간 원인"
+      note: "적용: JEUS 7+ · 권한: JEUS 관리 계정(읽기)"
+  - stage: 2
+    steps:
+    - do: 회전된 오래된 로그 압축·이동 (현재 로그는 건드리지 않는다)
+      cmd: |
+        mkdir -p <보관경로>/jeus_$(date +%Y%m%d)
+        find <SERVER_HOME>/logs -xdev -type f -name 'JeusServer_*.log' -mtime +7 -exec gzip {} \;
+        find <SERVER_HOME>/logs -xdev -type f -name '*.gz' -mtime +7 -exec mv {} <보관경로>/jeus_$(date +%Y%m%d)/ \;
+      check: "성공: df 사용률 85% 이하, 로그 쓰기 실패 문구 사라짐 · 실패: 공간 미확보 → 다른 대용량 파일·증설 검토"
+      note: "사전조건: 로그 보존 의무 확인, 보관 경로는 다른 파일시스템 · 영향: 서비스 영향 없음 · 승인: WAS·보안 담당 · 백업/롤백: 이동만 하므로 보관 경로에서 되돌림 가능 · 회전 파일 이름 형식은 로거 설정에 따라 다르므로 ls 로 확인 후 패턴 조정"
+    - do: JMS 적체 해소·저장소 증설
+      cmd: |
+        $JEUS_HOME/bin/jeusadmin -host <host>:9736 -u <user> 'server-info -server <server> -state'
+      check: "성공: 소비자 재개 후 list-jms-destinations 적체 감소, 저장소 사용률 85% 이하 · 실패: 적체 지속 → 소비 앱 오류 로그 분석·저장소 증설"
+      note: "사전조건: 소비자(MDB·수신 앱) 오류 원인 해소가 먼저, 메시지 강제 정리는 업무 승인 없이는 하지 않는다 · 영향: 증설 중 I/O 지연 가능 · 승인: WAS·업무 담당 · 백업/롤백: 저장소 디렉터리 백업 후 작업, 증설은 되돌릴 수 없어 용량 계획에 반영"
+    - do: 재발 방지 — 로거 회전·보관 설정
+      config:
+        file: domain.xml 서버 logging 설정(JEUS 7+) 또는 WebAdmin 로깅 화면
+        snippet: |
+          로거 핸들러: 회전 기준(크기·일자)과 보관 개수 지정, 로그 레벨 운영 기준(INFO 이상)
+        note: "사전조건: 보존 의무 기간 확인 · 영향: 다음 회전부터 적용 · 승인: WAS 담당 · 백업/롤백: domain.xml 사본 보관 후 원복"
+      check: "성공: 회전 파일이 지정 개수로 유지 · 실패: 로그 미생성 → domain.xml 원복"
+  - stage: 3
+    steps:
+    - do: TmaxSoft 기술지원 의뢰 자료
+      cmd: |
+        df -h > df_$(date +%Y%m%d).txt ; du -sh <SERVER_HOME>/logs/* > du_jeus.txt 2>/dev/null
+        tail -1000 <SERVER_HOME>/logs/JeusServer.log > jeusserver_tail.txt
+      check: "df·du 결과, JeusServer.log 발췌, list-jms-destinations 결과"
+      note: "민감정보 마스킹: 호스트명·IP·사용자 계정·메시지 본문의 개인정보 가림 · 전달 승인: 보안 담당"
+
+- id: JEUS-PROC-R5-STORAGE
+  products: [jeus]
+  category: storage
+  match: [DEPLOY-0062]
+  title: 유효한 애플리케이션이 없는 배포 저장소 (JEUS)
+  source: "JEUS Deployment Guide '애플리케이션 관리'(애플리케이션 저장소 repository, DEPLOY-0062 'repository does not contain any valid applications') — docs.tmaxsoft.com/ko/jeus/8.6/deployment-guide/chapter-application-management.html"
+  verify_note: "미검증 — 저장소 추가·제거 jeusadmin 명령 이름을 원문으로 확인 못 해 2차 명령은 application-info 조회와 파일 조작으로만 적음"
+  stages:
+  - stage: 1
+    steps:
+    - do: 저장소 경로와 그 안의 파일 확인 (읽기 전용)
+      cmd: |
+        grep -n -B2 -A3 'DEPLOY-0062' <SERVER_HOME>/logs/JeusServer.log | tail -20
+        ls -l <repository경로>/
+      check: "로그의 저장소 경로에 EAR·WAR·JAR(또는 펼친 디렉터리)가 없거나 확장자가 다르면 확정"
+      note: "적용: JEUS 7/8/21(저장소 개념은 JEUS 7 도메인 구조부터) · 권한: JEUS 실행 계정"
+    - do: 패키지 무결성·권한 확인
+      cmd: |
+        unzip -tq <repository경로>/<app>.war ; ls -l <repository경로>/<app>.war
+        $JEUS_HOME/bin/jeusadmin -host <host>:9736 -u <user> 'application-info'
+      check: "unzip 오류면 패키지 손상, JEUS 실행 계정이 읽을 수 없으면 권한 원인, application-info 에 기대한 앱이 없으면 미등록"
+      note: "적용: JEUS 7+ · 권한: JEUS 관리 계정(읽기)"
+  - stage: 2
+    steps:
+    - do: 유효한 패키지를 저장소에 두거나 잘못 등록한 저장소 정리
+      cmd: |
+        cp <정상배포본>.war <repository경로>/
+        $JEUS_HOME/bin/jeusadmin -host <host>:9736 -u <user> 'application-info'
+      check: "성공: DEPLOY-0062 경고가 더 나오지 않고 application-info 에 앱이 보임 · 실패: 같은 경고 지속 → 패키지 형식·확장자 재확인"
+      note: "사전조건: 배포 담당과 대상 패키지 판 확인 · 영향: 저장소 변경은 자동 배포 설정 시 배포를 일으킬 수 있음 · 승인: WAS·배포 담당 · 백업/롤백: 저장소 디렉터리 목록·기존 파일 사본 보관 후 원복"
+  - stage: 3
+    steps:
+    - do: TmaxSoft 기술지원 의뢰 자료
+      cmd: |
+        ls -lR <repository경로> > repo_list.txt ; grep -n 'DEPLOY-' <SERVER_HOME>/logs/JeusServer.log | tail -50 > deploy_log.txt
+      check: "저장소 목록·DEPLOY 로그 발췌·JEUS 판"
+      note: "민감정보 마스킹: 경로의 사용자명·호스트명 가림 · 전달 승인: 보안 담당"
+
+- id: JEUS-PROC-R5-HARDWARE
+  products: [jeus]
+  category: hardware
+  match: [LEG-JEUS-CRASH]
+  title: JEUS 프로세스 비정상 종료(JVM crash·OS 강제 종료)
+  source: "JEUS 9 Server Guide '로깅'(JeusLauncher.log·jvm.log) / JDK Troubleshooting Guide 'Fatal Error Log(hs_err_pid)' / Linux dmesg(OOM)"
+  stages:
+  - stage: 1
+    steps:
+    - do: JVM 크래시 로그·OS 메모리 부족 흔적 확인 (읽기 전용)
+      cmd: |
+        ls -lt <SERVER_HOME>/hs_err_pid*.log $JEUS_HOME/bin/hs_err_pid*.log 2>/dev/null | head
+        head -40 <hs_err_pid파일>
+        dmesg -T | grep -i -E 'out of memory|oom' | tail
+      check: "hs_err 의 문제 프레임이 C(네이티브)면 JDK·네이티브 라이브러리, J 면 앱 코드 경로. dmesg 에 OOM 기록이 있으면 OS 메모리 부족으로 프로세스가 종료된 것"
+      note: "적용: JEUS 6/7/8/21 공통(JVM) · 권한: dmesg 는 root 필요할 수 있음"
+    - do: 종료 직전 로그·서버 상태 확인
+      cmd: |
+        tail -100 <SERVER_HOME>/logs/JeusLauncher.log ; tail -200 <SERVER_HOME>/logs/JeusServer.log
+        $JEUS_HOME/bin/jeusadmin -host <host>:9736 -u <user> 'server-info'
+      check: "종료 직전 OutOfMemoryError·SIGSEGV·운영자 종료 명령 중 무엇인지 구분, 다른 서버는 정상인지 확인"
+      note: "적용: jeusadmin 은 JEUS 7+ · 권한: JEUS 관리 계정(읽기)"
+  - stage: 2
+    steps:
+    - do: 자료 보존 후 서버 기동
+      cmd: |
+        mkdir -p <보관경로>/crash_$(date +%Y%m%d) ; cp <SERVER_HOME>/hs_err_pid*.log <보관경로>/crash_$(date +%Y%m%d)/
+        $JEUS_HOME/bin/jeusadmin -host <host>:9736 -u <user> 'start-server <server>'
+      check: "성공: server-info 상태 RUNNING, 서비스 URL 정상 응답 · 실패: 기동 실패·같은 크래시 반복 → 기동 보류하고 3차 의뢰"
+      note: "사전조건: hs_err·core·로그 보존 완료, OS OOM 이면 메모리 점유 원인 확인 · 영향: 기동 중 해당 서버 서비스 불가 · 승인: WAS 담당 · 백업/롤백: 보존한 자료는 원본 유지, 기동 실패 시 이전 상태(정지)로 두고 의뢰"
+    - do: 재발 방지 — JVM 옵션·패치
+      config:
+        file: domain.xml 서버 JVM 옵션(JEUS 7+)
+        snippet: |
+          -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=<덤프경로> -XX:ErrorFile=<로그경로>/hs_err_pid%p.log
+        note: "사전조건: 덤프 경로에 힙 크기 이상 여유 · 영향: 다음 기동부터 적용 · 승인: WAS 담당 · 백업/롤백: domain.xml 사본 보관 후 원복"
+      check: "성공: 다음 크래시 시 지정 경로에 hs_err·hprof 생성 · 실패: 기동 오류 → domain.xml 원복"
+  - stage: 3
+    steps:
+    - do: TmaxSoft·JDK 공급사 의뢰 자료
+      cmd: |
+        tar czf jeus_crash_$(date +%Y%m%d).tgz <보관경로>/crash_$(date +%Y%m%d) <SERVER_HOME>/logs/JeusLauncher.log
+        java -version 2> jdk_version.txt ; uname -a > os.txt
+      check: "hs_err 전체·JeusLauncher/JeusServer 로그·JDK·OS 판, core 파일은 크기 확인 후 별도 협의"
+      note: "민감정보 마스킹: hs_err 의 환경 변수·명령행 인자(비밀번호)·호스트명 가림, core 파일은 메모리 내용(개인정보) 포함이므로 반출 금지 원칙 · 전달 승인: 보안 담당"
+
+- id: JEUS-PROC-R5-PERFORMANCE
+  products: [jeus]
+  category: performance
+  match: [LEG-JEUS-WARN-SLOW-QUERY]
+  title: 느린 응답·슬로우 쿼리 (JEUS)
+  source: "JEUS Reference Guide 'jeusadmin' thread-info·connection-pool-info(JEUS 7+) / JEUS 9 Server Guide '로깅'(servlet/access.log) / JDK jcmd Thread.print"
+  stages:
+  - stage: 1
+    steps:
+    - do: 느린 요청과 처리 스레드 상태 확인 (읽기 전용)
+      cmd: |
+        $JEUS_HOME/bin/jeusadmin -host <host>:9736 -u <user> 'thread-info -server <server>'
+        $JEUS_HOME/bin/jeusadmin -host <host>:9736 -u <user> 'connection-pool-info -server <server>'
+      check: "장시간 실행 스레드가 많고 풀 사용 중 연결이 max 근처면 DB 지연, 풀은 여유인데 스레드가 오래 걸리면 외부 연동·앱 로직"
+      note: "적용: JEUS 7/8/21 · 권한: JEUS 관리 계정(읽기)"
+    - do: 스레드 덤프로 느린 지점 확인
+      cmd: |
+        for i in 1 2 3; do jcmd <PID> Thread.print > td_$(date +%H%M%S)_$i.txt; sleep 10; done
+      check: "같은 SQL 실행(executeQuery)·소켓 읽기에서 여러 스레드가 반복 관찰되면 그 지점이 병목 — DBA 에 해당 시각 SQL 확인 요청"
+      note: "적용: JDK 7+ · 권한: JEUS 실행 계정 · 프로세스 유지"
+  - stage: 2
+    steps:
+    - do: 원인 SQL·연동 개선과 타임아웃 정렬
+      config:
+        file: 데이터소스 설정(domain.xml) · 앱 쿼리 타임아웃 설정
+        snippet: |
+          쿼리 타임아웃 < 트랜잭션 타임아웃 < 웹서버(WebtoB)·LB 타임아웃 순으로 정렬
+        note: "사전조건: DBA 의 실행 계획 분석·인덱스 검토 결과 확보 · 영향: 타임아웃 단축 시 긴 업무가 실패할 수 있음 · 승인: WAS·DB·업무 담당 · 백업/롤백: 변경 전 domain.xml·설정 사본 보관 후 원복"
+      check: "성공: 해당 URI 응답 시간이 기준값으로 복귀, 슬로우 경고 감소 · 실패: 변경 후 타임아웃 오류 증가 → 이전 값 원복"
+  - stage: 3
+    steps:
+    - do: TmaxSoft·DB 공급사 의뢰 자료
+      cmd: |
+        tar czf jeus_slow_$(date +%Y%m%d).tgz td_*.txt
+        tail -2000 <SERVER_HOME>/logs/servlet/access.log > access_tail.txt
+      check: "스레드 덤프 3회·access 로그 발췌·thread-info·connection-pool-info 결과·DB 측 SQL 통계"
+      note: "민감정보 마스킹: 접근 로그의 사용자 IP·쿼리 문자열 개인정보, SQL 바인드 값 가림 · 전달 승인: 보안 담당"
+
+- id: EAP-PROC-R5-UPSTREAM
+  products: [jboss]
+  category: upstream
+  match: [WFLYEJB0044, WAS-JB-017]
+  title: 리소스 어댑터 저장소 미가용·프록시 백엔드 연결 실패 (JBoss EAP/WildFly)
+  source: "Red Hat JBoss EAP 7.3 Log Message Reference(WFLYEJB0044 'Resource adapter repository is not available', UT005031) / WildFly 34 Model Reference undertow configuration=handler reverse-proxy(problem-server-retry·max-request-time), ejb3"
+  stages:
+  - stage: 1
+    steps:
+    - do: 실패 대상 확인 (읽기 전용)
+      cmd: |
+        grep -n -E 'WFLYEJB0044|UT005031' $JBOSS_HOME/standalone/log/server.log | tail -20
+        $JBOSS_HOME/bin/jboss-cli.sh -c '/subsystem=ejb3:read-attribute(name=default-resource-adapter-name)'
+        $JBOSS_HOME/bin/jboss-cli.sh -c '/subsystem=undertow/configuration=handler:read-children-resources(child-type=reverse-proxy,recursive=true)'
+      check: "WFLYEJB0044 면 MDB 기본 리소스 어댑터(메시징)가 기동되지 않은 것, UT005031 이면 reverse-proxy 대상 백엔드 주소 확인"
+      note: "적용: EAP 7.x/8.x·WildFly(EAP 6 은 JBAS 코드·관리 포트 9999) · 권한: 관리 사용자(읽기)"
+    - do: 백엔드 도달성·메시징 기동 상태 확인
+      cmd: |
+        nc -zvw3 <backend_host> <port>
+        grep -n -E 'WFLYMSGAMQ|AMQ22|WFLYCTL0186' $JBOSS_HOME/standalone/log/server.log | tail -20
+      check: "nc 거부면 백엔드 미기동·포트 불일치, 시간 초과면 네트워크. 메시징 기동 오류가 있으면 WFLYEJB0044 의 선행 원인"
+      note: "적용: Linux(nc 없으면 telnet) · 권한: 일반 사용자"
+  - stage: 2
+    steps:
+    - do: 메시징·리소스 어댑터 원인 해소 또는 프록시 대상 정정
+      cmd: |
+        cp $JBOSS_HOME/standalone/configuration/standalone-full.xml $JBOSS_HOME/standalone/configuration/standalone-full.xml.$(date +%Y%m%d)
+        $JBOSS_HOME/bin/jboss-cli.sh -c ':reload'
+      check: "성공: reload 후 server-state running, WFLYEJB0044·UT005031 재발 없음, MDB 배포 OK · 실패: reload 후 서비스 기동 오류 → 백업 설정으로 복원 후 reload"
+      note: "사전조건: MDB 앱은 messaging-activemq 가 있는 full 프로필에서만 기동 — 프로필 확인, 폐기된 백엔드는 대상 담당 확인 · 영향: reload 동안 요청 처리 중단(수 초~수십 초) · 승인: WAS 담당·변경관리 · 백업/롤백: 설정 파일 사본으로 복원 후 :reload"
+  - stage: 3
+    steps:
+    - do: Red Hat 지원 의뢰 자료
+      cmd: |
+        $JBOSS_HOME/bin/jboss-cli.sh -c ':read-attribute(name=product-version)' > eap_version.txt
+        tail -3000 $JBOSS_HOME/standalone/log/server.log > server_log_tail.txt
+      check: "제품 판·server.log 발췌·관련 하위시스템 read-resource 결과(비밀값 제외)"
+      note: "민감정보 마스킹: 설정 덤프의 password·credential-reference, 호스트명·IP 가림 · 전달 승인: 보안 담당"
+
+- id: EAP-PROC-R5-LOCK
+  products: [jboss]
+  category: lock
+  match: [ISPN000299]
+  title: Infinispan 캐시 잠금 시간 초과 (세션·캐시 경합)
+  source: "WildFly 34 Log Message Reference ISPN000299 'Unable to acquire lock after %s for key %s and requestor %s. Lock is held by %s' / WildFly 34 Model Reference infinispan cache-container *-cache component=locking(acquire-timeout 기본 15000)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 경합 키·잠금 보유자 확인 (읽기 전용)
+      cmd: |
+        grep -n 'ISPN000299' $JBOSS_HOME/standalone/log/server.log | tail -20
+        grep -c 'ISPN000299' $JBOSS_HOME/standalone/log/server.log
+      check: "같은 키(세션 ID)가 반복되면 같은 세션 동시 요청 경합, 다양한 키에 걸쳐 급증하면 노드 통신 지연·장시간 요청"
+      note: "적용: EAP 6.x~8.x·WildFly(ISPN 코드 공통) · 권한: 로그 읽기"
+    - do: 잠금 보유 스레드와 클러스터 통신 확인
+      cmd: |
+        jcmd <PID> Thread.print > td_$(date +%H%M%S).txt
+        grep -n -E 'JGRP0|ISPN000136' $JBOSS_HOME/standalone/log/server.log | tail -10
+        $JBOSS_HOME/bin/jboss-cli.sh -c '/subsystem=infinispan/cache-container=web:read-resource(recursive=true)'
+      check: "보유 스레드가 DB·외부 호출에서 대기하면 장시간 요청 원인, JGRP 오류가 동반되면 클러스터 통신 원인. 캐시 모드·locking 설정값 기록"
+      note: "적용: EAP 7+ 의 web 캐시 컨테이너 이름은 구성에 따라 다름 · 권한: 관리 사용자(읽기)"
+  - stage: 2
+    steps:
+    - do: 경합 원인 해소 후 잠금 대기 시간 조정
+      cmd: |
+        $JBOSS_HOME/bin/jboss-cli.sh -c '/subsystem=infinispan/cache-container=web/distributed-cache=<cache>/component=locking:write-attribute(name=acquire-timeout,value=30000)'
+        $JBOSS_HOME/bin/jboss-cli.sh -c ':reload'
+      check: "성공: ISPN000299 건수가 기준값 이하로 감소, 세션 오류 신고 없음 · 실패: 응답 지연 증가 → 이전 값(기본 15000)으로 write-attribute 후 :reload"
+      note: "사전조건: 같은 세션 동시 요청(중복 클릭·병렬 AJAX)·장시간 요청 원인 개선이 먼저, 캐시 종류(distributed/replicated)와 이름 확인 · 영향: reload 동안 요청 처리 중단 · 승인: WAS 담당 · 백업/롤백: 변경 전 read-attribute 값 기록, 같은 명령으로 원값 복원"
+  - stage: 3
+    steps:
+    - do: Red Hat 지원 의뢰 자료
+      cmd: |
+        $JBOSS_HOME/bin/jboss-cli.sh -c '/subsystem=infinispan:read-resource(recursive=true)' > ispn_config.txt
+        tail -3000 $JBOSS_HOME/standalone/log/server.log > server_log_tail.txt
+      check: "infinispan·jgroups 설정, server.log 발췌, 스레드 덤프"
+      note: "민감정보 마스킹: 로그의 세션 ID·사용자 ID·노드 IP 가림 · 전달 승인: 보안 담당"
+
+- id: EAP-PROC-R5-DISK
+  products: [jboss]
+  category: disk
+  match: [AMQ222212, WAS-JB-015]
+  title: 메시징 저널·접근 로그 디스크 부족 (JBoss EAP/WildFly)
+  source: "EAP 7.3 Log Message Reference AMQ222212 'Disk Full! Blocking message production on address' / WildFly 34 Model Reference messaging-activemq server(max-disk-usage·journal-directory·disk-scan-period), address-setting(address-full-policy·max-size-bytes), undertow host setting=access-log(directory·rotate)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 저널·로그 파일시스템 사용률 확인 (읽기 전용)
+      cmd: |
+        df -h $JBOSS_HOME/standalone/data/activemq $JBOSS_HOME/standalone/log ; df -i $JBOSS_HOME/standalone/log
+        du -sh $JBOSS_HOME/standalone/data/activemq/* $JBOSS_HOME/standalone/log/* 2>/dev/null | sort -h | tail -10
+      check: "저널 파일시스템 사용률이 max-disk-usage(기본 90%) 이상이면 AMQ222212 확정, 로그 경로 95% 이상·권한 불일치면 WAS-JB-015 원인"
+      note: "적용: EAP 7.x/8.x·WildFly 기본 경로(journal-directory·access-log directory 를 바꿨으면 그 경로) · 권한: JBoss 실행 계정"
+    - do: 차단 기준·적체 큐 확인
+      cmd: |
+        $JBOSS_HOME/bin/jboss-cli.sh -c '/subsystem=messaging-activemq/server=default:read-attribute(name=max-disk-usage)'
+        $JBOSS_HOME/bin/jboss-cli.sh -c '/subsystem=messaging-activemq/server=default/jms-queue=<Q>:read-attribute(name=message-count)'
+        $JBOSS_HOME/bin/jboss-cli.sh -c '/subsystem=messaging-activemq/server=default/jms-queue=<Q>:read-attribute(name=consumer-count)'
+      check: "message-count 가 계속 늘고 consumer-count 가 0 이면 소비자 중단이 적체 원인"
+      note: "적용: EAP 7.0+(messaging-activemq) · 권한: 관리 사용자(읽기)"
+  - stage: 2
+    steps:
+    - do: 소비자 복구로 적체 해소 후 공간 확보
+      cmd: |
+        mkdir -p <보관경로>/eap_$(date +%Y%m%d)
+        find $JBOSS_HOME/standalone/log -xdev -type f -name 'server.log.*' -mtime +7 -exec gzip {} \;
+        find $JBOSS_HOME/standalone/log -xdev -type f -name '*.gz' -mtime +7 -exec mv {} <보관경로>/eap_$(date +%Y%m%d)/ \;
+      check: "성공: 저널 파일시스템 사용률이 max-disk-usage 아래로 내려가고 AMQ222212 해제·생산 재개, 접근 로그 쓰기 오류 소멸 · 실패: 사용률 그대로 → 저널 증가 원인(적체) 재확인·증설"
+      note: "사전조건: 저널(activemq) 파일은 브로커 데이터이므로 직접 정리 금지, 소비자(MDB) 오류 해소가 먼저 · 영향: 로그 이동은 서비스 영향 없음 · 승인: WAS·업무 담당 · 백업/롤백: 이동만 하므로 보관 경로에서 되돌림 가능"
+    - do: 재발 방지 — 주소 한도·페이징·저널 분리
+      cmd: |
+        $JBOSS_HOME/bin/jboss-cli.sh -c '/subsystem=messaging-activemq/server=default/address-setting=#:read-resource'
+        $JBOSS_HOME/bin/jboss-cli.sh -c '/subsystem=messaging-activemq/server=default/address-setting=#:write-attribute(name=address-full-policy,value=PAGE)'
+      check: "성공: 적체 시 BLOCK 대신 페이징, 디스크 경보가 max-disk-usage 보다 먼저 발생 · 실패: 페이징 파일 급증 → 이전 값으로 원복"
+      note: "사전조건: 현재 address-setting 값 기록, 페이징 디렉터리 용량 확보 · 영향: 설정에 따라 :reload 필요(reload-required 확인) · 승인: WAS 담당 · 백업/롤백: 기록한 이전 값으로 write-attribute 복원"
+  - stage: 3
+    steps:
+    - do: Red Hat 지원 의뢰 자료
+      cmd: |
+        $JBOSS_HOME/bin/jboss-cli.sh -c '/subsystem=messaging-activemq/server=default:read-resource(include-runtime=true)' > amq_server.txt
+        df -h > df_$(date +%Y%m%d).txt ; tail -3000 $JBOSS_HOME/standalone/log/server.log > server_log_tail.txt
+      check: "messaging 서버 런타임 정보, df, server.log 발췌"
+      note: "민감정보 마스킹: 설정 덤프의 cluster-password·credential, 메시지 본문, 호스트명·IP 가림 · 전달 승인: 보안 담당"
+
+- id: EAP-PROC-R5-HARDWARE
+  products: [jboss]
+  category: hardware
+  match: [LEG-WFLY-ORA-IBATIS]
+  title: Oracle 데이터 변환·제약 오류(WildFly+iBatis/Spring) — 분류는 hardware 이나 실제는 SQL·데이터 오류
+  source: "Red Hat JBoss EAP 7.3 Log Message Reference(UT005023 Exception handling request) / Oracle Database Error Messages(ORA-00001·ORA-01460·ORA-01461·ORA-01401) — docs.oracle.com"
+  stages:
+  - stage: 1
+    steps:
+    - do: 오류 요청·ORA 코드·SQL 매핑 ID 확인 (읽기 전용)
+      cmd: |
+        grep -n -A30 'UT005023' $JBOSS_HOME/standalone/log/server.log | grep -E 'ORA-|SQL state|statement|Caused by' | head -30
+        grep -c -E 'ORA-0000|ORA-014' $JBOSS_HOME/standalone/log/server.log
+      check: "ORA-00001 이면 중복 키(업무 데이터), ORA-01460/01461/01401 이면 길이·타입 초과 — 하드웨어 장애가 아님. 특정 statement ID·URI 에 집중되는지 확인"
+      note: "적용: EAP 6.x~8.x(애플리케이션 계층, EAP 판 무관) · 권한: 로그 읽기 · 파라미터 값(개인정보)은 기록하지 않는다"
+    - do: 드라이버·매핑 확인
+      cmd: |
+        ls $JBOSS_HOME/modules/*/*/*/main/ojdbc*.jar 2>/dev/null ; unzip -l <앱>.war | grep -i ojdbc
+      check: "드라이버 판과 DB 판 조합, 앱 WAR 과 모듈에 드라이버가 중복되는지 확인"
+      note: "적용: Linux · 권한: 읽기"
+  - stage: 2
+    steps:
+    - do: 매핑 jdbcType·입력 검증 수정 배포
+      cmd: |
+        $JBOSS_HOME/bin/jboss-cli.sh -c 'deploy <수정본>.war --force'
+      check: "성공: 해당 URI 의 UT005023·ORA 오류 소멸 · 실패: 배포 오류·다른 기능 회귀 → 이전 배포본으로 재배포"
+      note: "사전조건: 개발 담당이 jdbcType(VARCHAR→CLOB)·입력 길이 검증 수정 및 시험 완료, 데이터 보정 필요 여부를 업무 담당과 합의 · 영향: 재배포 동안 해당 앱 중단 · 승인: 개발·WAS·업무 담당 · 백업/롤백: 이전 배포본 보관 후 deploy --force 로 원복"
+  - stage: 3
+    steps:
+    - do: 개발·DB 공급사 의뢰 자료
+      cmd: |
+        grep -n -A30 'UT005023' $JBOSS_HOME/standalone/log/server.log | grep -v -i -E 'password' > ut005023_extract.txt
+      check: "오류 스택 발췌·statement ID·ORA 코드·드라이버/DB 판"
+      note: "민감정보 마스킹: 바인드 파라미터 값·사용자 식별자·요청 URL 의 개인정보 가림 · 전달 승인: 보안 담당"
+
+- id: EAP-PROC-R5-PERFORMANCE
+  products: [jboss]
+  category: performance
+  match: [WAS-JB-012, WAS-JB-018]
+  title: 트랜잭션 타임아웃 취소·프록시 요청 시간 초과 (JBoss EAP/WildFly)
+  source: "EAP 7.3 Log Message Reference ARJUNA012117/012121·UT005027 / WildFly 34 Model Reference transactions(default-timeout), undertow configuration=handler reverse-proxy(max-request-time)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 시간 초과 빈도·대상 확인 (읽기 전용)
+      cmd: |
+        grep -c -E 'ARJUNA012117|ARJUNA012121' $JBOSS_HOME/standalone/log/server.log
+        grep -n 'UT005027' $JBOSS_HOME/standalone/log/server.log | tail -10
+        $JBOSS_HOME/bin/jboss-cli.sh -c '/subsystem=transactions:read-attribute(name=default-timeout)'
+      check: "트랜잭션 취소가 특정 시간대·업무에 몰리면 그 업무 SQL·연동 지연, UT005027 은 대상 백엔드의 응답 지연"
+      note: "적용: EAP 6.4~8.x·WildFly(UT005027 은 EAP 7+) · 권한: 관리 사용자(읽기)"
+    - do: 느린 지점 덤프 확인
+      cmd: |
+        for i in 1 2 3; do jcmd <PID> Thread.print > td_$(date +%H%M%S)_$i.txt; sleep 10; done
+      check: "같은 SQL 실행·소켓 읽기·락 대기가 반복되면 그 지점이 병목 — DBA·백엔드 담당에 해당 시각 전달"
+      note: "적용: JDK 7+ · 권한: JBoss 실행 계정 · 프로세스 유지"
+  - stage: 2
+    steps:
+    - do: 원인 해소 후 타임아웃 값 정렬
+      cmd: |
+        $JBOSS_HOME/bin/jboss-cli.sh -c '/subsystem=transactions:write-attribute(name=default-timeout,value=<초>)'
+        $JBOSS_HOME/bin/jboss-cli.sh -c '/subsystem=undertow/configuration=handler/reverse-proxy=<name>:write-attribute(name=max-request-time,value=<밀리초>)'
+        $JBOSS_HOME/bin/jboss-cli.sh -c ':read-attribute(name=server-state)'
+      check: "성공: 시간 초과 건수 감소·업무 정상, server-state 가 reload-required 면 승인된 시간에 :reload · 실패: 장시간 요청 적체로 스레드 고갈 → 이전 값 원복"
+      note: "사전조건: 느린 SQL·백엔드 개선이 먼저(타임아웃 연장은 증상 완화), 변경 전 read-attribute 로 현재 값 기록 · 영향: 타임아웃을 늘리면 장애 시 스레드 점유 시간도 늘어남 · 승인: WAS·업무 담당 · 백업/롤백: 기록한 이전 값으로 write-attribute 복원"
+  - stage: 3
+    steps:
+    - do: Red Hat 지원 의뢰 자료
+      cmd: |
+        $JBOSS_HOME/bin/jboss-cli.sh -c '/subsystem=transactions:read-resource(include-runtime=true)' > tx_config.txt
+        tail -3000 $JBOSS_HOME/standalone/log/server.log > server_log_tail.txt
+      check: "트랜잭션 설정·런타임 통계, 스레드 덤프 3회, server.log 발췌"
+      note: "민감정보 마스킹: 로그·덤프의 사용자 ID·SQL 바인드 값·IP 가림 · 전달 승인: 보안 담당"

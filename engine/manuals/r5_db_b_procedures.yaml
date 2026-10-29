@@ -1,0 +1,970 @@
+# 근거 매뉴얼·작성 기준 (r5 DB 묶음 B — SQL Server · MySQL · PostgreSQL, 2026-10-16)
+# - SQL Server 2012~2022: Microsoft Learn 'Database Engine events and errors (MSSQLSERVER_n)', 'sys.dm_exec_requests / sys.dm_os_wait_stats /
+#   sys.dm_tran_locks / sys.dm_hadr_* (Transact-SQL)', 'Manage the suspect_pages table', 'DBCC CHECKDB (Transact-SQL)', 'Log shipping tables and stored procedures'
+# - MySQL 5.7 / 8.0 / 8.4: MySQL Reference Manual 'Server Error Message Reference', 'The Host Cache', 'SHOW ENGINE INNODB STATUS',
+#   'The sys Schema', 'Replication' (SHOW REPLICA STATUS 8.0.22+ / SHOW SLAVE STATUS 이전), 'Forcing InnoDB Recovery'
+# - PostgreSQL 10~16(17 차이는 줄마다 표기): PostgreSQL Documentation 'Appendix A. PostgreSQL Error Codes', 'Monitoring Database Activity'
+#   (pg_stat_activity·pg_stat_replication·pg_stat_archiver·pg_locks), 'The pg_hba.conf File', 'Routine Vacuuming', 'WAL Configuration', 'amcheck'
+# 작성 기준(GPT 45차 관문): 1차 = 읽기 전용 조회·자료 보존만(재시작·KILL·DBCC CHECKDB·EXPLAIN ANALYZE·설정 변경 없음),
+#   2차 = 명령마다 사전조건·영향·승인·백업/롤백 + 성공/실패 판단, 3차 = 제조사 의뢰 자료 + 민감정보 마스킹·전달 승인.
+# 자리표시자: <server> <port> <db> <user> <login> <PID> <path> <data_directory> <log_error 경로> — 실제 호스트·계정을 쓰지 않는다.
+procedures:
+# ── SQL Server ──
+- id: MS-PROC-R5-CONNECTION
+  products: [mssql]
+  category: connection
+  match: [MSSQL-17, MSSQL-53, MSSQL-233, MSSQL-1418, MSSQL-4014, MSSQL-17187, MSSQL-9642, MSSQL-17826, MSSQL-17182, MSSQL-4060, MSSQL-4064, MSSQL-17832, MSSQL-17836, MSSQL-10054]
+  title: SQL Server 접속 불가·연결 끊김 (17·53·4060·4064·10054·17832)
+  source: "Microsoft Learn — SQL Server 'Network-related or instance-specific error occurred while establishing a connection', 'MSSQLSERVER_4060·4064·18456' 오류 문서, 'Configure a Server to Listen on a Specific TCP Port', 'Configure the Windows Firewall to Allow SQL Server Access'"
+  stages:
+  - stage: 1
+    steps:
+    - do: "서버 서비스·리슨 포트·기동 완료 확인 (읽기 전용)"
+      cmd: |
+        Get-Service MSSQL*, SQLBrowser, SQLSERVERAGENT
+        Get-NetTCPConnection -State Listen | Where-Object LocalPort -eq <port>
+        Select-String -Path "<SQL로그폴더>\ERRORLOG" -Pattern 'Server is listening on','ready for client connections' | Select-Object -Last 10
+      check: "Running·Listen·'ready for client connections' 가 모두 있으면 서버 측 정상 → 네트워크·클라이언트 쪽 확인. Stopped 이거나 Listen 이 없으면 서버 측 원인(17·53·17187)"
+      note: "적용: SQL Server 2012~2022, Windows Server 2012 R2+ (Get-NetTCPConnection) · 권한: 서버 로컬 관리자 조회"
+    - do: "클라이언트에서 이름 해석·포트 도달성 확인 (읽기 전용)"
+      cmd: |
+        Resolve-DnsName <server>
+        Test-NetConnection <server> -Port <port>
+      check: "TcpTestSucceeded True 면 경로 정상. False 면 방화벽·라우팅(네트워크 담당), 이름 해석 실패면 DNS(53)"
+      note: "적용: PowerShell 4+ · 권한: 일반 사용자"
+    - do: "로그인·DB 단계 실패와 DB 상태 확인 (읽기 전용)"
+      cmd: |
+        sqlcmd -S <server>,<port> -E -Q "EXEC xp_readerrorlog 0, 1, N'Login failed'"
+        sqlcmd -S <server>,<port> -E -Q "SELECT name, state_desc, user_access_desc FROM sys.databases WHERE state_desc <> 'ONLINE' OR user_access_desc <> 'MULTI_USER'"
+        sqlcmd -S <server>,<port> -E -Q "EXEC xp_readerrorlog 0, 1, N'17832'"
+      check: "18456 State 38·40 은 지정 DB·기본 DB 열기 실패(4060·4064), ONLINE 이 아닌 DB 가 있으면 DB 상태 원인, 17832·17836 은 비정상 패킷 — 출처 IP 를 자산 목록과 대조"
+      note: "적용: SQL Server 2012~2022 · 권한: ERRORLOG 조회는 DBA 권한(1차는 DBA 에 결과 요청)"
+  - stage: 2
+    steps:
+    - do: "방화벽·프로토콜 정정 (17·53·233)"
+      cmd: |
+        Get-NetFirewallRule | Where-Object Enabled -eq True | Export-Csv <path>\fw_before.csv
+        New-NetFirewallRule -DisplayName "SQL Server <port>" -Direction Inbound -Protocol TCP -LocalPort <port> -Action Allow
+      check: "성공: 클라이언트 Test-NetConnection True·접속 성공 · 실패: 여전히 False 면 중간 방화벽·라우팅 문제로 네트워크 담당 이관"
+      note: "사전조건: 허용 출처·포트 확정, TCP/IP 비활성이면 Configuration Manager 에서 활성화(서비스 재시작 필요) · 영향: 방화벽 정책 변경, 재시작 시 접속 중단 · 승인: 보안·DB 담당 · 백업/롤백: fw_before.csv 보관, 롤백은 Remove-NetFirewallRule -DisplayName 'SQL Server <port>'"
+    - do: "DB 상태·기본 DB 복구 (4060·4064)"
+      cmd: |
+        sqlcmd -S <server> -E -Q "SELECT name, default_database_name FROM sys.server_principals WHERE name=N'<login>'"
+        sqlcmd -S <server> -E -Q "ALTER LOGIN [<login>] WITH DEFAULT_DATABASE = [<db>]"
+        sqlcmd -S <server> -E -Q "ALTER DATABASE [<db>] SET ONLINE"
+      check: "성공: 해당 로그인 접속 성공·sys.databases ONLINE · 실패: ONLINE 전환 오류면 ERRORLOG 선행 오류(파일·I/O) 확인 후 MS-PROC-R6-RECOVERY(복구 실패·SUSPECT·RECOVERY_PENDING) 복원 절차"
+      note: "사전조건: DB 가 OFFLINE 인 이유(의도된 작업 여부) 확인 · 영향: 로그인 기본 DB 변경·DB 접속 재개 · 승인: DB 담당 · 백업/롤백: 변경 전 default_database_name·state_desc 기록 후 원복"
+    - do: "커넥션 풀 끊김 대책 (10054·4014)"
+      config:
+        file: 애플리케이션 데이터소스(커넥션 풀) 설정
+        snippet: |
+          대여 시 유효성 검사 = 사용
+          유휴 연결 최대 수명 = 방화벽·L4 세션 타임아웃보다 짧게(예: 장비 30분 → 25분)
+        note: "풀 설정은 WAS 재기동 시 반영되는 경우가 많음"
+      check: "성공: 10054·4014 발생 감소 · 실패: 지속되면 NIC 드라이버·네트워크 장비 패킷 손실 점검"
+      note: "사전조건: 장비 세션 타임아웃 값 확인 · 영향: 풀 재초기화 동안 짧은 지연 · 승인: 애플리케이션 담당 · 백업/롤백: 이전 풀 설정 파일 보관 후 원복"
+  - stage: 3
+    steps:
+    - do: "Microsoft 지원 의뢰 자료 수집"
+      cmd: |
+        Copy-Item "<SQL로그폴더>\ERRORLOG*" <수집폴더>
+        Get-WinEvent -LogName System -MaxEvents 500 | Export-Csv <수집폴더>\system_events.csv
+        Get-WinEvent -LogName Application -MaxEvents 500 | Export-Csv <수집폴더>\application_events.csv
+      check: "ERRORLOG·이벤트 로그·클라이언트 오류 원문·Test-NetConnection 결과·@@VERSION"
+      note: "민감정보 마스킹: 서버명·IP·로그인 이름·도메인 이름을 가린 뒤 전달 · 전달 승인: 보안 담당"
+
+- id: MS-PROC-R5-INTERNAL
+  products: [mssql]
+  category: internal
+  match: [MSSQL-3624, MSSQL-5901, MSSQL-8623, MSSQL-17053, MSSQL-18461, MSSQL-19406, MSSQL-35262, MSSQL-41144, MSSQL-41145, MSSQL-35264, MSSQL-28005, MSSQL-8115]
+  title: 엔진 내부 오류·AG 상태·산술 오버플로 (3624·5901·41144·35264·8115)
+  source: "Microsoft Learn — 'MSSQLSERVER_3624', 'MSSQLSERVER_17053', 'Database Engine events and errors (19000~41399)', 'sys.dm_hadr_availability_replica_states / sys.dm_hadr_database_replica_states', 'DBCC CHECKDB (Transact-SQL)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: "ERRORLOG 오류와 덤프 생성 확인 (읽기 전용)"
+      cmd: |
+        sqlcmd -S <server> -E -Q "EXEC xp_readerrorlog 0, 1, N'Error:'"
+        Get-ChildItem "<SQL로그폴더>" -Filter SQLDump*.mdmp | Sort-Object LastWriteTime -Descending | Select-Object -First 5
+        sqlcmd -S <server> -E -Q "SELECT @@VERSION"
+      check: "3624 어설션·17053 OS 오류 번호·5901 직전 오류를 기록. 같은 시각 SQLDump 가 생겼으면 덤프 보존(3차 자료)"
+      note: "적용: SQL Server 2012~2022 · 권한: DBA 조회 권한"
+    - do: "AG 메시지(19406·35262·35264·41144·41145)면 복제본·DB 상태 확인 (읽기 전용)"
+      cmd: |
+        sqlcmd -S <server> -E -Q "SELECT ag.name, rs.role_desc, rs.operational_state_desc, rs.connected_state_desc, rs.synchronization_health_desc FROM sys.dm_hadr_availability_replica_states rs JOIN sys.availability_groups ag ON rs.group_id=ag.group_id"
+        sqlcmd -S <server> -E -Q "SELECT DB_NAME(database_id) AS db, synchronization_state_desc, is_suspended, suspend_reason_desc FROM sys.dm_hadr_database_replica_states WHERE is_local=1"
+      check: "operational_state FAILED 면 41144, is_suspended=1 이면 35264(사유 기록). 19406·35262·41145 만 있고 HEALTHY 면 정보 메시지로 조치 불필요"
+      note: "적용: SQL Server 2012+ (Always On) · 권한: VIEW SERVER STATE"
+    - do: "산술 오버플로(8115)면 오류 원문과 컬럼 정의 확인 (읽기 전용) — 제약 위반 547·2627 은 전용 절차 MS-PROC-R6B-CONSTRAINT"
+      cmd: |
+        sqlcmd -S <server> -d <db> -E -Q "SELECT name, TYPE_NAME(user_type_id) AS type, is_identity, is_nullable FROM sys.columns WHERE object_id=OBJECT_ID(N'<schema>.<table>')"
+      check: "오류 원문의 대상 형식(int·smallint·IDENTITY)과 입력·계산값 범위를 대조 — 값이 형식 상한을 넘으면 8115 확정, 데이터는 수정하지 않음"
+      note: "적용: SQL Server 2012~2022 · 권한: 해당 DB 읽기"
+  - stage: 2
+    steps:
+    - do: "무결성 검사 (3624·5901·17053 손상 의심)"
+      cmd: |
+        sqlcmd -S <server> -E -Q "DBCC CHECKDB([<db>]) WITH NO_INFOMSGS, ALL_ERRORMSGS"
+      check: "성공: 'CHECKDB found 0 allocation errors and 0 consistency errors' · 실패: 오류가 있으면 REPAIR 금지, 최신 백업 복원 계획으로 전환"
+      note: "사전조건: 업무 외 시간·tempdb 여유 확인 · 영향: 대량 I/O·CPU 부하 · 승인: DB·업무 담당 · 백업/롤백: 데이터 변경 없는 검사, 실행 전 최신 백업 유효성 확인"
+    - do: "AG 데이터 이동 재개 (35264) 또는 복제본 복구 (41144)"
+      cmd: |
+        sqlcmd -S <server> -E -Q "ALTER DATABASE [<db>] SET HADR RESUME"
+      check: "성공: synchronization_state_desc SYNCHRONIZING/SYNCHRONIZED · 실패: 다시 SUSPENDED 면 suspend_reason 해소 또는 재시딩, 41144 는 문서 권고대로 WSFC 서비스·인스턴스 재시작"
+      note: "사전조건: 중지 사유(로그 공간·redo 오류) 해소 · 영향: 재개 직후 로그 전송량 증가 · 승인: DB 담당 · 백업/롤백: 재개 전 주 복제본 로그 백업 체인 확인, 재시작 전 Get-ClusterLog 보존"
+    - do: "(2차·승인 후) 형식 상한 초과(8115)일 때만 컬럼 형식 확대 — 제약 위반에는 쓰지 않음"
+      cmd: |
+        sqlcmd -S <server> -d <db> -E -Q "ALTER TABLE <schema>.<table> ALTER COLUMN <col> bigint <NULL|NOT NULL — 1차의 is_nullable 과 같게>"
+      check: "성공: 같은 입력에서 오류 재발 없음 · 실패: 인덱스·제약 의존 오류면 의존 객체 정리 계획 수립"
+      note: "사전조건: 개발팀과 변경 범위 합의(애플리케이션 수정이 우선) · 영향: 대형 테이블 ALTER 는 잠금·로그 증가 · 승인: 변경 관리 승인 · 백업/롤백: 변경 전 전체 백업, 원복 스크립트 준비"
+  - stage: 3
+    steps:
+    - do: "Microsoft 지원 의뢰 자료 (어설션·덤프)"
+      cmd: |
+        Copy-Item "<SQL로그폴더>\ERRORLOG*", "<SQL로그폴더>\SQLDump*", "<SQL로그폴더>\system_health*.xel" <수집폴더>
+        sqlcmd -S <server> -E -Q "SELECT @@VERSION" -o <수집폴더>\version.txt
+      check: "ERRORLOG·SQLDump(mdmp·txt)·system_health 확장 이벤트·버전 정보"
+      note: "민감정보 마스킹: 덤프에는 메모리의 데이터·SQL 문이 들어 있으므로 반출 전 보안 검토, 로그의 서버명·IP·로그인 가림 · 전달 승인: 보안 담당"
+
+- id: MS-PROC-R5-SECURITY
+  products: [mssql]
+  category: security
+  match: [MSSQL-15404, MSSQL-18452, MSSQL-18456, MSSQL-229]
+  title: 로그인 실패·권한 거부 (18456·18452·15404·229)
+  source: "Microsoft Learn — 'MSSQLSERVER_18456', 'MSSQLSERVER_18452', 'MSSQLSERVER_15404', 'Change Server Authentication Mode', 'Register a Service Principal Name for Kerberos Connections'"
+  stages:
+  - stage: 1
+    steps:
+    - do: "실패 State·출처 확인 (읽기 전용)"
+      cmd: |
+        sqlcmd -S <server> -E -Q "EXEC xp_readerrorlog 0, 1, N'Login failed'"
+        sqlcmd -S <server> -E -Q "SELECT SERVERPROPERTY('IsIntegratedSecurityOnly') AS windows_only"
+      check: "18456 State 2·5 = 로그인 없음, 8 = 비밀번호 불일치, 18 = 비밀번호 변경 필요, 38·40 = DB 열기 실패, 58 = Windows 인증 전용 서버에 SQL 로그인. windows_only=1 이면 SQL 로그인 불가"
+      note: "적용: SQL Server 2012~2022 · 권한: DBA 조회"
+    - do: "로그인 상태·권한 확인 (비밀번호 없이, 읽기 전용)"
+      cmd: |
+        sqlcmd -S <server> -E -Q "SELECT name, is_disabled, LOGINPROPERTY(name,'IsLocked') AS locked, LOGINPROPERTY(name,'IsExpired') AS expired FROM sys.sql_logins WHERE name=N'<login>'"
+        sqlcmd -S <server> -d <db> -E -Q "SELECT permission_name, state_desc, OBJECT_NAME(major_id) AS obj FROM sys.database_permissions WHERE grantee_principal_id=USER_ID(N'<user>')"
+      check: "locked·expired·disabled=1 이면 계정 상태 원인, 권한 목록에 필요한 권한이 없으면 229"
+      note: "적용: SQL Server 2012~2022 · 권한: VIEW ANY DEFINITION 또는 DBA"
+    - do: "Windows 인증(18452·15404)이면 도메인·Kerberos 확인 (읽기 전용)"
+      cmd: |
+        nltest /sc_query:<domain>
+        klist
+        setspn -L <서비스계정>
+      check: "보안 채널 실패면 도메인 통신 문제, MSSQLSvc/<fqdn>:<port> SPN 이 없으면 Kerberos 실패(NTLM 폴백·이중 홉 실패)"
+      note: "적용: Windows Server 2012 R2+ · 권한: 도메인 사용자 조회"
+  - stage: 2
+    steps:
+    - do: "계정 잠금 해제·권한 부여"
+      cmd: |
+        sqlcmd -S <server> -E -Q "ALTER LOGIN [<login>] ENABLE"
+        sqlcmd -S <server> -d <db> -E -Q "GRANT SELECT ON <schema>.<object> TO [<user>]"
+      check: "성공: 해당 계정 접속·조회 성공 · 실패: 18456 State 가 바뀌지 않으면 비밀번호·인증 모드 원인 재확인"
+      note: "사전조건: 잠금·권한 거부 사유가 공격이 아닌지 출처 IP 확인 · 영향: 계정 사용 재개 · 승인: 보안 담당 · 백업/롤백: 대응 DISABLE·REVOKE 문을 미리 준비해 원복"
+    - do: "SPN 등록 (Kerberos 실패)"
+      cmd: |
+        setspn -S MSSQLSvc/<fqdn>:<port> <도메인>\<서비스계정>
+      check: "성공: 클라이언트 klist 에 MSSQLSvc 티켓·sys.dm_exec_connections auth_scheme KERBEROS · 실패: 중복 SPN 오류면 기존 등록 계정 확인"
+      note: "사전조건: 도메인 관리자 권한·중복 SPN 확인 · 영향: 인증 경로 변경 · 승인: 도메인·보안 담당 · 백업/롤백: setspn -L 결과 저장, 롤백은 setspn -D"
+  - stage: 3
+    steps:
+    - do: "제조사 의뢰 자료"
+      cmd: |
+        Copy-Item "<SQL로그폴더>\ERRORLOG*" <수집폴더>
+        Get-WinEvent -FilterHashtable @{LogName='Security'; Id=4625} -MaxEvents 200 | Export-Csv <수집폴더>\logon_fail.csv
+      check: "ERRORLOG 18456 줄(State 포함)·보안 이벤트 4625·SPN 목록"
+      note: "민감정보 마스킹: 계정명·도메인·IP·워크스테이션 이름 가림 · 전달 승인: 보안 담당"
+
+- id: MS-PROC-R5-THREAD
+  products: [mssql]
+  category: thread
+  match: [MSSQL-17189, MSSQL-17883, MSSQL-17884, MSSQL-17887, MSSQL-17120]
+  title: 워커 스레드 고갈·스케줄러 비양보 (17189·17883·17884·17887·17120)
+  source: "Microsoft Learn — 'MSSQLSERVER_17883', 'MSSQLSERVER_17884', 'MSSQLSERVER_17887', 'sys.dm_os_schedulers', 'Diagnostic connection for database administrators (DAC)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: "스케줄러·THREADPOOL 대기 확인 (읽기 전용, 일반 접속 불가 시 DAC)"
+      cmd: |
+        sqlcmd -S <server> -A -E -Q "SELECT scheduler_id, current_tasks_count, runnable_tasks_count, current_workers_count, work_queue_count FROM sys.dm_os_schedulers WHERE status='VISIBLE ONLINE'"
+        sqlcmd -S <server> -A -E -Q "SELECT wait_type, waiting_tasks_count, wait_time_ms FROM sys.dm_os_wait_stats WHERE wait_type='THREADPOOL'"
+      check: "work_queue_count 가 계속 0 보다 크고 THREADPOOL 대기가 늘면 워커 고갈. runnable_tasks_count 가 높으면 CPU 부족"
+      note: "적용: SQL Server 2012~2022 · 권한: VIEW SERVER STATE, DAC 는 sysadmin"
+    - do: "블로킹 체인 확인 (읽기 전용)"
+      cmd: |
+        sqlcmd -S <server> -A -E -Q "SELECT session_id, blocking_session_id, wait_type, wait_time, command FROM sys.dm_exec_requests WHERE blocking_session_id <> 0"
+      check: "같은 blocking_session_id 에 다수 세션이 걸려 있으면 head blocker 가 워커를 묶은 것"
+      note: "적용: SQL Server 2012~2022 · 권한: VIEW SERVER STATE"
+    - do: "max worker threads 현재값·적용값 확인 (읽기 전용 — sp_configure·RECONFIGURE 를 쓰지 않음)"
+      cmd: |
+        sqlcmd -S <server> -A -E -Q "SELECT name, value, value_in_use FROM sys.configurations WHERE name = 'max worker threads'"
+        sqlcmd -S <server> -A -E -Q "SELECT max_workers_count FROM sys.dm_os_sys_info"
+      check: "value_in_use 0 = 자동(CPU 수 기준 산정), max_workers_count 가 실제 상한. 0 이 아닌 작은 값이 고정돼 있고 current_workers_count 합이 상한에 닿으면 설정이 원인 후보 · 정상: 0(자동)이고 블로킹이 원인"
+      note: "적용: SQL Server 2012~2022 · 권한: VIEW SERVER STATE(sys.configurations 는 public 조회 가능)"
+    - do: "덤프·CPU 기록 보존 (읽기 전용)"
+      cmd: |
+        Get-ChildItem "<SQL로그폴더>" -Filter SQLDump*.mdmp | Sort-Object LastWriteTime -Descending | Select-Object -First 5
+        Get-CimInstance Win32_Processor | Select-Object LoadPercentage
+      check: "17883·17884·17887 과 같은 시각 덤프가 있으면 보존, CPU 가 100% 근접이면 다른 프로세스 점유 여부 확인"
+      note: "적용: Windows Server 2012 R2+ · 권한: 로컬 관리자 조회"
+  - stage: 2
+    steps:
+    - do: "head blocker 정리 또는 인스턴스 재시작 판단"
+      cmd: |
+        sqlcmd -S <server> -A -E -Q "KILL <session_id>"
+      check: "성공: work_queue_count 0·THREADPOOL 대기 해소 · 실패: 롤백이 오래 걸리면 `KILL <session_id> WITH STATUSONLY` 로 진행률 확인, 해소 안 되면 재시작 판단"
+      note: "사전조건: head blocker 의 소유 앱·작업 확인 · 영향: 해당 트랜잭션 롤백 · 승인: DB·업무 담당 · 백업/롤백: 종료 전 세션 SQL·덤프 보존(되돌릴 수 없음)"
+    - do: "(2차·승인 후) max worker threads 변경 — 1차의 sys.configurations 결과로 필요성이 확인됐을 때만(최후 수단)"
+      cmd: |
+        sqlcmd -S <server> -E -Q "EXEC sp_configure 'show advanced options', 1; RECONFIGURE; EXEC sp_configure 'max worker threads', <새 값>; RECONFIGURE"
+        sqlcmd -S <server> -E -Q "SELECT name, value, value_in_use FROM sys.configurations WHERE name IN ('max worker threads','show advanced options')"
+      check: "성공: value_in_use 가 새 값, 이후 work_queue_count 0·THREADPOOL 대기 감소 · 실패: 권한 오류면 sysadmin 요청, 메모리 압박(워커당 스택 메모리) 징후가 보이면 즉시 이전 값으로 원복"
+      note: "사전조건: 블로킹·연결 폭주 원인을 먼저 해소(값 증가는 최후 수단), 변경 전 sys.configurations 의 value·value_in_use 와 show advanced options 값을 기록 · 영향: RECONFIGURE 즉시 서버 전체 설정 반영, 워커 증가는 메모리 사용 증가 · 승인: DB 담당·서비스 담당(변경 관리) · 백업/롤백: 기록한 이전 값으로 sp_configure 'max worker threads', <이전 값>; RECONFIGURE, show advanced options 가 원래 0 이었다면 0 으로 되돌림"
+  - stage: 3
+    steps:
+    - do: "Microsoft 지원 의뢰 자료"
+      cmd: |
+        Copy-Item "<SQL로그폴더>\ERRORLOG*", "<SQL로그폴더>\SQLDump*", "<SQL로그폴더>\system_health*.xel" <수집폴더>
+      check: "ERRORLOG(17883·17884 줄)·덤프·system_health·스케줄러 조회 결과"
+      note: "민감정보 마스킹: 덤프·로그에 포함된 SQL·서버명·IP 확인 후 가림 · 전달 승인: 보안 담당"
+
+- id: MS-PROC-R5-HARDWARE
+  products: [mssql]
+  category: hardware
+  match: [MSSQL-825, MSSQL-832, MSSQL-823]
+  title: 물리 I/O 오류·재시도·메모리 페이지 변조 (823·825·832)
+  source: "Microsoft Learn — 'MSSQLSERVER_823', 'MSSQLSERVER_825', 'MSSQLSERVER_832', 'Manage the suspect_pages table', 'DBCC CHECKDB (Transact-SQL)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: "손상 의심 페이지·오류 기록 (읽기 전용)"
+      cmd: |
+        sqlcmd -S <server> -E -Q "SELECT database_id, file_id, page_id, event_type, error_count, last_update_date FROM msdb.dbo.suspect_pages"
+        sqlcmd -S <server> -E -Q "EXEC xp_readerrorlog 0, 1, N'Error: 82'"
+      check: "suspect_pages 에 행이 있거나 823·824·825·832 가 반복되면 스토리지·메모리 결함 의심 — 825 는 재시도 후 성공한 경고로 823/824 전조"
+      note: "적용: SQL Server 2012~2022 · 권한: msdb 읽기, ERRORLOG 는 DBA"
+    - do: "OS 디스크·메모리 오류와 마지막 백업 확인 (읽기 전용)"
+      cmd: |
+        Get-WinEvent -FilterHashtable @{LogName='System'; Level=1,2} -MaxEvents 100 | Select-Object TimeCreated, ProviderName, Id, Message
+        sqlcmd -S <server> -E -Q "SELECT database_name, MAX(backup_finish_date) AS last_backup FROM msdb.dbo.backupset GROUP BY database_name"
+      check: "disk·storport·Ntfs·WHEA 오류가 같은 시각에 있으면 하드웨어 원인. 마지막 정상 백업 시각을 기록해 복원 판단에 사용"
+      note: "적용: Windows Server 2012 R2+ · 권한: 로컬 관리자 조회"
+  - stage: 2
+    steps:
+    - do: "손상 범위 검사"
+      cmd: |
+        sqlcmd -S <server> -E -Q "DBCC CHECKDB([<db>]) WITH NO_INFOMSGS, ALL_ERRORMSGS"
+      check: "성공: 오류 0 → 하드웨어 점검만 진행 · 실패: 손상 페이지가 있으면 페이지 복원 또는 전체 복원 절차(MS-PROC-R6-RECOVERY — 꼬리 로그 백업·복원)"
+      note: "사전조건: 업무 외 시간·tempdb 여유 · 영향: 대량 I/O(손상 디스크에 부하) · 승인: DB·인프라 담당 · 백업/롤백: 데이터 변경 없는 검사, REPAIR_ALLOW_DATA_LOSS 는 별도 승인 없이는 금지, 복원 전 꼬리 로그 백업"
+    - do: "하드웨어 진단 의뢰"
+      config:
+        file: 서버·스토리지 제조사 진단 도구
+        snippet: |
+          디스크·컨트롤러 펌웨어·드라이버 버전 확인과 제조사 진단 실행
+          832(메모리 페이지 변조)는 메모리 진단 포함
+        note: "진단 중 성능 저하 가능"
+      check: "성공: 결함 부품 식별·교체 후 823/825/832 재발 없음 · 실패: 결함 미발견이면 SQLIOSim 으로 I/O 경로 재검증"
+      note: "사전조건: 백업 확보 · 영향: 진단·교체 중 서비스 영향 · 승인: 인프라 담당 · 백업/롤백: 교체 전 전체 백업 확인"
+  - stage: 3
+    steps:
+    - do: "제조사(Microsoft·하드웨어) 의뢰 자료"
+      cmd: |
+        Copy-Item "<SQL로그폴더>\ERRORLOG*" <수집폴더>
+        sqlcmd -S <server> -E -Q "SELECT * FROM msdb.dbo.suspect_pages" -o <수집폴더>\suspect_pages.txt
+        Get-WinEvent -LogName System -MaxEvents 1000 | Export-Csv <수집폴더>\system_events.csv
+      check: "ERRORLOG·suspect_pages·시스템 이벤트·CHECKDB 결과"
+      note: "민감정보 마스킹: 서버명·IP·DB 이름 가림 · 전달 승인: 보안 담당"
+
+- id: MS-PROC-R5-DISK
+  products: [mssql]
+  category: disk
+  match: [MSSQL-833, MSSQL-3201]
+  title: I/O 지연(15초 초과)·백업 장치 열기 실패 (833·3201)
+  source: "Microsoft Learn — 'MSSQLSERVER_833', 'sys.dm_io_virtual_file_stats (Transact-SQL)', 'sys.dm_os_volume_stats', 'BACKUP (Transact-SQL)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: "파일별 I/O 지연 확인 (읽기 전용)"
+      cmd: |
+        sqlcmd -S <server> -E -Q "SELECT DB_NAME(database_id) AS db, file_id, io_stall_read_ms/NULLIF(num_of_reads,0) AS avg_read_ms, io_stall_write_ms/NULLIF(num_of_writes,0) AS avg_write_ms FROM sys.dm_io_virtual_file_stats(NULL,NULL) ORDER BY 3 DESC"
+      check: "평균 지연이 수십 ms 이상이고 833 이 반복되면 스토리지 경로 지연 확정(누적값이므로 시간차 두 번 조회해 비교)"
+      note: "적용: SQL Server 2012~2022 · 권한: VIEW SERVER STATE"
+    - do: "볼륨 여유·백업 경로 확인 (읽기 전용)"
+      cmd: |
+        sqlcmd -S <server> -E -Q "SELECT DISTINCT s.volume_mount_point, s.available_bytes/1048576 AS free_mb FROM sys.master_files f CROSS APPLY sys.dm_os_volume_stats(f.database_id, f.file_id) s"
+        Test-Path <백업경로>
+        icacls <백업경로>
+      check: "백업 경로가 없거나 SQL 서비스 계정 쓰기 권한이 없으면 3201(OS error 3·5) 원인"
+      note: "적용: SQL Server 2008 R2 SP1+ (dm_os_volume_stats) · 권한: 로컬 관리자 조회"
+  - stage: 2
+    steps:
+    - do: "백업 경로 권한·위치 수정 후 재수행 (3201)"
+      cmd: |
+        icacls <백업경로> /save <path>\acl_before.txt
+        icacls <백업경로> /grant "<도메인>\<서비스계정>:(OI)(CI)M"
+      check: "성공: 백업 재수행 완료·msdb.dbo.backupset 에 새 행 · 실패: OS error 53·64 면 네트워크 공유 경로 문제(네트워크 담당)"
+      note: "사전조건: 서비스 계정 확인 · 영향: 폴더 권한 변경 · 승인: 보안·DB 담당 · 백업/롤백: acl_before.txt 보관, 롤백은 icacls <상위경로> /restore <path>\acl_before.txt"
+    - do: "스토리지 지연 개선 (833)"
+      config:
+        file: 스토리지·HBA·MPIO 설정
+        snippet: |
+          데이터·로그 볼륨 분리, 큐 깊이·펌웨어 점검, 백신 실시간 검사 예외(.mdf .ldf .ndf)
+        note: "스토리지 담당과 일정 협의"
+      check: "성공: avg 지연 감소·833 재발 없음 · 실패: 지연 지속 시 스토리지 제조사 의뢰"
+      note: "사전조건: 지연 측정값 확보 · 영향: 설정 변경 중 I/O 영향 · 승인: 인프라 담당 · 백업/롤백: 변경 전 설정 기록 후 원복"
+  - stage: 3
+    steps:
+    - do: "제조사 의뢰 자료"
+      cmd: |
+        Copy-Item "<SQL로그폴더>\ERRORLOG*" <수집폴더>
+        sqlcmd -S <server> -E -Q "SELECT * FROM sys.dm_io_virtual_file_stats(NULL,NULL)" -o <수집폴더>\io_stats.txt
+      check: "ERRORLOG(833 줄)·I/O 통계 두 시점·성능 모니터 디스크 카운터"
+      note: "민감정보 마스킹: 서버명·경로·DB 이름 가림 · 전달 승인: 보안 담당"
+
+- id: MS-PROC-R5-UPSTREAM
+  products: [mssql]
+  category: upstream
+  match: [MSSQL-7303, MSSQL-14420, MSSQL-14421]
+  title: 연결된 서버 초기화 실패·로그 전달 지연 (7303·14420·14421)
+  source: "Microsoft Learn — 'Linked Servers (Database Engine)', 'sp_testlinkedserver', 'Log shipping tables and stored procedures (sp_help_log_shipping_monitor)', 'Monitor log shipping'"
+  stages:
+  - stage: 1
+    steps:
+    - do: "연결된 서버 설정·도달성 확인 (7303, 읽기 전용)"
+      cmd: |
+        sqlcmd -S <server> -E -Q "SELECT name, provider, data_source FROM sys.servers WHERE is_linked=1"
+        Test-NetConnection <원격서버> -Port <port>
+      check: "도달 불가면 네트워크, 도달 가능하면 원격 로그인·공급자 원인(오류 원문의 공급자 메시지 기록)"
+      note: "적용: SQL Server 2012~2022 · 권한: 조회(sys.servers)"
+    - do: "로그 전달 상태 확인 (14420·14421, 읽기 전용)"
+      cmd: |
+        sqlcmd -S <server> -E -Q "EXEC sp_help_log_shipping_monitor"
+        sqlcmd -S <server> -E -Q "SELECT TOP 20 j.name, h.run_date, h.run_time, h.run_status, LEFT(h.message,200) FROM msdb.dbo.sysjobhistory h JOIN msdb.dbo.sysjobs j ON h.job_id=j.job_id WHERE j.name LIKE 'LS%' ORDER BY h.instance_id DESC"
+      check: "last_backup/copied/restored 가 임계를 넘고 LS 작업 run_status=0(실패)이면 작업 실패가 원인. 작업이 아예 실행 안 됐으면 SQL Agent 확인"
+      note: "적용: SQL Server 2012~2022 (로그 전달 구성) · 권한: msdb 읽기"
+  - stage: 2
+    steps:
+    - do: "로그 전달 작업 수동 실행"
+      cmd: |
+        sqlcmd -S <server> -E -Q "EXEC msdb.dbo.sp_start_job @job_name = N'<LS작업명>'"
+      check: "성공: sp_help_log_shipping_monitor 의 시각 갱신 · 실패: 로그 체인 단절 오류면 보조 DB 재초기화 계획"
+      note: "사전조건: 경로 권한·공간·Agent 원인 해소 · 영향: 백업·복사·복원 부하 · 승인: DB 담당 · 백업/롤백: 로그 백업 추가만 발생, 보조 DB 는 NORECOVERY/STANDBY 유지"
+    - do: "연결된 서버 로그인 매핑 갱신 (7303)"
+      cmd: |
+        sqlcmd -S <server> -E -Q "EXEC sp_addlinkedsrvlogin @rmtsrvname=N'<linked>', @useself=N'False', @locallogin=NULL, @rmtuser=N'<원격계정>', @rmtpassword=N'<비밀번호>'"
+        sqlcmd -S <server> -E -Q "EXEC sp_testlinkedserver N'<linked>'"
+      check: "성공: sp_testlinkedserver 오류 없음 · 실패: 공급자 오류면 공급자 설치·옵션 확인"
+      note: "사전조건: 원격 계정 최소 권한 확인 · 영향: 연결된 서버 사용 쿼리 동작 변경 · 승인: 보안·DB 담당 · 백업/롤백: 변경 전 sys.linked_logins 조회 결과 저장, sp_droplinkedsrvlogin 으로 원복"
+  - stage: 3
+    steps:
+    - do: "제조사 의뢰 자료"
+      cmd: |
+        sqlcmd -S <server> -E -Q "EXEC sp_help_log_shipping_monitor" -o <수집폴더>\ls_monitor.txt
+        Copy-Item "<SQL로그폴더>\ERRORLOG*", "<SQL로그폴더>\SQLAGENT*" <수집폴더>
+      check: "로그 전달 모니터 결과·작업 이력·ERRORLOG·SQLAGENT 로그"
+      note: "민감정보 마스킹: 서버명·공유 경로·계정명 가림(연결된 서버 비밀번호는 절대 포함 금지) · 전달 승인: 보안 담당"
+
+# ── MySQL ──
+- id: MY-PROC-R5-SECURITY
+  products: [mysql]
+  category: security
+  match: [MY-1044, MY-1142, MY-1449, MY-2026]
+  title: 권한 거부·DEFINER 없음·TLS 연결 오류 (1044·1142·1449·2026)
+  source: "MySQL 8.0 Reference Manual — 'Server Error Message Reference', 'Access Control and Account Management (SHOW GRANTS, GRANT)', 'Stored Object Access Control (DEFINER)', 'Using Encrypted Connections'"
+  stages:
+  - stage: 1
+    steps:
+    - do: "계정 권한·상태 확인 (비밀번호 컬럼 제외, 읽기 전용)"
+      cmd: |
+        mysql -u <관리계정> -p -e "SHOW GRANTS FOR '<user>'@'<host>';"
+        mysql -u <관리계정> -p -e "SELECT user, host, plugin, account_locked FROM mysql.user WHERE user='<user>';"
+      check: "필요한 DB·테이블 권한이 GRANT 목록에 없으면 1044·1142 확정. 계정이 없으면 1449(DEFINER) 또는 다른 host 매칭"
+      note: "적용: MySQL 5.7.6+ (account_locked) · 8.0 · 권한: mysql 스키마 SELECT"
+    - do: "DEFINER 의존 객체 확인 (1449, 읽기 전용)"
+      cmd: |
+        mysql -u <관리계정> -p -e "SELECT routine_schema, routine_name FROM information_schema.ROUTINES WHERE definer='<user>@<host>'; SELECT table_schema, table_name FROM information_schema.VIEWS WHERE definer='<user>@<host>';"
+      check: "목록의 객체가 오류를 낸 객체면 DEFINER 계정 부재 확정"
+      note: "적용: 5.7·8.0 · 권한: 조회"
+    - do: "TLS 설정·인증서 만료 확인 (2026, 읽기 전용)"
+      cmd: |
+        mysql -u <관리계정> -p -e "SHOW GLOBAL VARIABLES LIKE 'tls_version'; SHOW GLOBAL STATUS LIKE 'Ssl_server_not_after';"
+      check: "클라이언트가 지원하지 않는 TLS 버전만 허용됐거나 인증서가 만료됐으면 원인 확정(8.0.28+ 는 TLSv1/1.1 미지원)"
+      note: "적용: 5.7.10+ (tls_version) · 8.0 · 권한: 조회"
+  - stage: 2
+    steps:
+    - do: "최소 권한 부여·DEFINER 계정 복구"
+      cmd: |
+        mysql -u <관리계정> -p -e "GRANT SELECT, INSERT, UPDATE, DELETE ON <db>.<table> TO '<user>'@'<host>';"
+      check: "성공: 같은 문장이 오류 없이 실행 · 실패: 여전히 1142 면 다른 host 계정 매칭(SELECT CURRENT_USER()) 확인"
+      note: "사전조건: 요청 권한의 업무 근거 확인 · 영향: 계정 권한 확대 · 승인: 보안 담당 · 백업/롤백: 변경 전 SHOW GRANTS 결과 저장, REVOKE 문으로 원복"
+    - do: "TLS 인증서·버전 정합"
+      config:
+        file: my.cnf [mysqld]
+        snippet: |
+          ssl_cert=<path>/server-cert.pem
+          ssl_key=<path>/server-key.pem
+          tls_version=TLSv1.2,TLSv1.3
+        note: "8.0.16+ 는 ALTER INSTANCE RELOAD TLS 로 재기동 없이 반영 가능"
+      check: "성공: 클라이언트 접속 후 `SHOW SESSION STATUS LIKE 'Ssl_version';` 값 확인 · 실패: 핸드셰이크 오류면 클라이언트 드라이버 TLS 지원 확인"
+      note: "사전조건: 새 인증서·CA 배포 · 영향: TLS 재설정 중 신규 접속 영향 · 승인: 보안 담당 · 백업/롤백: 기존 인증서·my.cnf 백업 후 원복"
+  - stage: 3
+    steps:
+    - do: "제조사(Oracle MySQL 지원) 의뢰 자료"
+      cmd: |
+        tail -500 <log_error 경로> > /tmp/mysql_err_tail.txt
+        mysql -u <관리계정> -p -e "SELECT VERSION(); SHOW GLOBAL VARIABLES LIKE '%ssl%';" > /tmp/mysql_ssl_vars.txt
+      check: "error log 발췌·버전·TLS 변수·클라이언트 오류 원문"
+      note: "민감정보 마스킹: 계정명·호스트·IP·인증서 경로 가림(키 파일은 절대 포함 금지) · 전달 승인: 보안 담당"
+
+- id: MY-PROC-R5-INTERNAL
+  products: [mysql]
+  category: internal
+  match: [MY-1049, MY-1062, MY-1064, MY-1146, MY-1290, MY-1317, MY-1406, MY-3167, MY-010119, MY-1053, MY-1032, MY-3161, MY-1795, MY-1881, MY-1105]
+  title: SQL·스키마 오류와 서버 중단 처리 (1146·1062·1290·1881·Aborting)
+  source: "MySQL 8.0 Reference Manual — 'Server Error Message Reference', 'Error Log', 'Forcing InnoDB Recovery', 'Server System Variables (read_only, innodb_force_recovery, disabled_storage_engines)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: "error log 의 오류·종료 기록 확인 (읽기 전용)"
+      cmd: |
+        mysql -u <관리계정> -p -e "SELECT @@log_error, VERSION();"
+        grep -E '\[ERROR\]|Aborting|Shutdown' <log_error 경로> | tail -50
+      check: "Aborting 직전 [ERROR] 줄이 실제 원인(010119). 1053 은 종료 진행 중 접속 — 종료 시각과 대조"
+      note: "적용: 5.7·8.0(8.0 은 [MY-nnnnnn] 코드 병기) · 권한: 서버 OS 계정 로그 읽기"
+    - do: "실행을 막는 서버 옵션 확인 (1290·1881·3161·3167, 읽기 전용)"
+      cmd: |
+        mysql -u <관리계정> -p -e "SELECT @@read_only, @@super_read_only, @@innodb_force_recovery, @@disabled_storage_engines, @@lower_case_table_names;"
+      check: "read_only=1 이면 복제본에 쓰기(1290), innodb_force_recovery>0 이면 1881, 비활성 엔진 목록과 일치하면 3161"
+      note: "적용: super_read_only·disabled_storage_engines 5.7.8+ · 권한: 조회"
+    - do: "SQL·스키마 오류 대상 확인 (1146·1062·1406, 읽기 전용)"
+      cmd: |
+        mysql -u <관리계정> -p -e "SELECT table_schema, table_name, engine FROM information_schema.TABLES WHERE table_name='<table>'; SHOW INDEX FROM <db>.<table>;"
+      check: "테이블이 없거나 대소문자가 다르면 1146, 고유 인덱스와 중복 값이 맞으면 1062 — 데이터는 수정하지 않음"
+      note: "적용: 5.7·8.0 · 권한: 조회"
+  - stage: 2
+    steps:
+    - do: "설정 오류로 기동 실패(010119)·복구 모드(1881) 정상화"
+      cmd: |
+        cp /etc/my.cnf /etc/my.cnf.bak_$(date +%Y%m%d)
+        mysqld --validate-config
+        systemctl restart mysqld
+      check: "성공: error log 에 ready for connections·`SELECT @@innodb_force_recovery` 0 · 실패: 다시 Aborting 이면 직전 [ERROR] 원인 재분석, my.cnf.bak 로 원복"
+      note: "사전조건: innodb_force_recovery 제거 전 mysqldump 로 데이터 확보 · 영향: 재기동 중 서비스 중단 · 승인: DB·업무 담당 · 백업/롤백: my.cnf 백업 파일로 원복(--validate-config 는 8.0.16+)"
+    - do: "스키마·SQL 수정 배포 (1146·1062·1406·1064)"
+      cmd: |
+        mysqldump -u <관리계정> -p --no-data <db> > /tmp/<db>_schema_before.sql
+        mysql -u <관리계정> -p <db> < <배포스크립트.sql>
+      check: "성공: 같은 요청이 오류 없이 처리 · 실패: 배포 스크립트 오류면 schema_before.sql 기준으로 원복"
+      note: "사전조건: 개발·운영 스키마 비교, 변경 관리 승인 · 영향: DDL 잠금·테이블 재작성 가능 · 승인: 변경 관리 · 백업/롤백: 배포 전 스키마 덤프와 데이터 백업 확인"
+  - stage: 3
+    steps:
+    - do: "제조사 의뢰 자료"
+      cmd: |
+        tail -1000 <log_error 경로> > /tmp/mysql_err_tail.txt
+        mysql -u <관리계정> -p -e "SELECT VERSION(); SHOW GLOBAL VARIABLES;" > /tmp/mysql_vars.txt
+      check: "error log 발췌·전체 변수·재현 SQL(데이터 제외)"
+      note: "민감정보 마스킹: 계정명·호스트·IP·SQL 안의 업무 데이터 가림 · 전달 승인: 보안 담당"
+
+- id: MY-PROC-R5-CAPACITY
+  products: [mysql]
+  category: capacity
+  match: [MY-1226, MY-1461, MY-1637, MY-1153, MY-1969]
+  title: 계정 자원·준비문·동시 트랜잭션·패킷 한도 초과 (1226·1461·1637·1153)
+  source: "MySQL 8.0 Reference Manual — 'Setting Account Resource Limits', 'Server System Variables (max_prepared_stmt_count, max_allowed_packet)', 'Undo Tablespaces / rollback segments', 'Server Error Message Reference'"
+  stages:
+  - stage: 1
+    steps:
+    - do: "한도와 현재 사용량 확인 (읽기 전용)"
+      cmd: |
+        mysql -u <관리계정> -p -e "SHOW GLOBAL STATUS LIKE 'Prepared_stmt_count'; SELECT @@max_prepared_stmt_count, @@max_allowed_packet, @@max_user_connections;"
+        mysql -u <관리계정> -p -e "SELECT user, host, max_questions, max_updates, max_connections, max_user_connections FROM mysql.user WHERE user='<user>';"
+      check: "Prepared_stmt_count 가 max_prepared_stmt_count 에 근접하면 1461(준비문 미해제), 계정 한도 도달이면 1226"
+      note: "적용: 5.7·8.0 · 권한: 조회"
+    - do: "활성 트랜잭션 수 확인 (1637, 읽기 전용)"
+      cmd: |
+        mysql -u <관리계정> -p -e "SELECT COUNT(*) FROM information_schema.INNODB_TRX; SELECT trx_id, trx_started, trx_mysql_thread_id FROM information_schema.INNODB_TRX ORDER BY trx_started LIMIT 10;"
+      check: "장기 미커밋 트랜잭션이 많으면 1637 원인, 시작 시각이 오래된 순으로 소유 앱 확인"
+      note: "적용: 5.7·8.0 · 권한: PROCESS"
+  - stage: 2
+    steps:
+    - do: "한도 조정"
+      cmd: |
+        mysql -u <관리계정> -p -e "SET PERSIST max_prepared_stmt_count=<n>; SET PERSIST max_allowed_packet=<bytes>;"
+        mysql -u <관리계정> -p -e "ALTER USER '<user>'@'<host>' WITH MAX_USER_CONNECTIONS <n>;"
+      check: "성공: 같은 작업이 오류 없이 처리·변수값 반영 · 실패: 1461 이 계속되면 애플리케이션 준비문 해제 누락 수정이 우선"
+      note: "사전조건: 원인(준비문 누수·대량 패킷) 확인 · 영향: 메모리 사용 증가 · 승인: DB 담당 · 백업/롤백: 이전 값 기록 후 SET PERSIST 로 원복(SET PERSIST 는 8.0+, 5.7 은 SET GLOBAL + my.cnf)"
+  - stage: 3
+    steps:
+    - do: "제조사 의뢰 자료"
+      cmd: |
+        mysql -u <관리계정> -p -e "SHOW GLOBAL STATUS; SHOW GLOBAL VARIABLES;" > /tmp/mysql_status_vars.txt
+        tail -500 <log_error 경로> > /tmp/mysql_err_tail.txt
+      check: "상태·변수·error log 발췌"
+      note: "민감정보 마스킹: 계정명·호스트·IP 가림 · 전달 승인: 보안 담당"
+
+- id: MY-PROC-R5-MEMORY
+  products: [mysql]
+  category: memory
+  match: [MY-2008, MY-1037, MY-1038, MY-1041, MY-1436]
+  title: 서버·클라이언트 메모리 부족과 스택 초과 (1037·1038·1041·2008·1436)
+  source: "MySQL 8.0 Reference Manual — 'How MySQL Uses Memory', 'The sys Schema (memory_global_total)', 'Server System Variables (innodb_buffer_pool_size, sort_buffer_size, thread_stack)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: "OS 메모리·OOM 기록 확인 (읽기 전용)"
+      cmd: |
+        free -m
+        ps -o pid,rss,vsz,cmd -C mysqld
+        dmesg -T | grep -i -E 'out of memory|oom' | tail -20
+      check: "가용 메모리 고갈·OOM killer 기록이 있으면 서버 메모리 부족(1037·1041). 2008 은 클라이언트 호스트에서 같은 명령으로 확인"
+      note: "적용: Linux · 권한: 일반 사용자(dmesg 는 배포판에 따라 root)"
+    - do: "MySQL 메모리 설정·사용량 확인 (읽기 전용)"
+      cmd: |
+        mysql -u <관리계정> -p -e "SELECT @@innodb_buffer_pool_size, @@sort_buffer_size, @@join_buffer_size, @@max_connections, @@thread_stack;"
+        mysql -u <관리계정> -p -e "SELECT * FROM sys.memory_global_total;"
+      check: "버퍼 풀 + (연결 수 × 세션 버퍼)가 물리 메모리를 넘으면 설정 과다. 1038 은 sort_buffer_size 부족, 1436 은 thread_stack 부족"
+      note: "적용: sys.memory_global_total 은 5.7.9+ (메모리 계측이 켜진 경우, 8.0 기본) · 권한: 조회"
+  - stage: 2
+    steps:
+    - do: "메모리 설정 조정"
+      cmd: |
+        mysql -u <관리계정> -p -e "SET GLOBAL innodb_buffer_pool_size=<bytes>;"
+        mysql -u <관리계정> -p -e "SET PERSIST sort_buffer_size=<bytes>;"
+      check: "성공: `SHOW STATUS LIKE 'Innodb_buffer_pool_resize_status';` 완료·OOM 재발 없음 · 실패: 크기 조정 실패면 error log 확인"
+      note: "사전조건: OS·다른 프로세스 메모리 여유 계산 · 영향: 버퍼 풀 축소 시 캐시 적중률 하락 · 승인: DB 담당 · 백업/롤백: 이전 값 기록 후 원복(버퍼 풀 온라인 조정 5.7.5+, thread_stack 은 my.cnf·재기동 필요)"
+  - stage: 3
+    steps:
+    - do: "제조사 의뢰 자료"
+      cmd: |
+        free -m > /tmp/mysql_mem.txt ; dmesg -T | tail -200 >> /tmp/mysql_mem.txt
+        mysql -u <관리계정> -p -e "SELECT * FROM sys.memory_global_by_current_bytes LIMIT 30; SHOW GLOBAL VARIABLES;" > /tmp/mysql_mem_vars.txt
+      check: "OS 메모리·dmesg·sys 메모리 통계·변수"
+      note: "민감정보 마스킹: 호스트명·IP 가림 · 전달 승인: 보안 담당"
+
+- id: MY-PROC-R5-PERFORMANCE
+  products: [mysql]
+  category: performance
+  match: [MY-3024, MY-SLOW-QUERY, DB-MYS-SLOW-001, DB-MYS-005]
+  title: 슬로우 쿼리·실행시간 초과·페이지 클리너 지연 (3024·slow log·page_cleaner)
+  source: "MySQL 8.0 Reference Manual — 'The Slow Query Log', 'mysqldumpslow', 'EXPLAIN Statement', 'The sys Schema (innodb_lock_waits)', 'Configuring InnoDB I/O Capacity'"
+  stages:
+  - stage: 1
+    steps:
+    - do: "실행 중인 장기 쿼리·잠금 대기 확인 (읽기 전용)"
+      cmd: |
+        mysql -u <관리계정> -p -e "SELECT id, user, time, state, LEFT(info,100) FROM information_schema.PROCESSLIST WHERE command='Query' ORDER BY time DESC LIMIT 20;"
+        mysql -u <관리계정> -p -e "SELECT * FROM sys.innodb_lock_waits\G"
+      check: "time 이 큰 쿼리·잠금 대기 체인이 보이면 원인 쿼리 확정 — 이 단계에서 쿼리를 중단하지 않음"
+      note: "적용: sys 스키마 5.7.7+ · 권한: PROCESS"
+    - do: "슬로우 로그 상위 쿼리 집계와 실행계획 (읽기 전용)"
+      cmd: |
+        mysql -u <관리계정> -p -e "SELECT @@slow_query_log_file, @@long_query_time, @@max_execution_time;"
+        mysqldumpslow -s t -t 10 <slow_query_log_file>
+        mysql -u <관리계정> -p <db> -e "EXPLAIN <SELECT 문>;"
+      check: "type=ALL·rows 과다·Using filesort 면 인덱스 문제. Rows_examined 가 Rows_sent 의 수백 배면 풀 스캔"
+      note: "적용: 5.7·8.0 · 권한: 파일 읽기·SELECT — 실제 실행하는 EXPLAIN ANALYZE(8.0.18+)는 1차에서 사용 금지"
+    - do: "디스크 쓰기 지연 확인 (page_cleaner, 읽기 전용)"
+      cmd: |
+        iostat -x 5 3
+        mysql -u <관리계정> -p -e "SELECT @@innodb_io_capacity, @@innodb_io_capacity_max, @@innodb_page_cleaners;"
+      check: "await·%util 이 높고 page_cleaner 경고가 반복되면 스토리지 쓰기 성능 부족"
+      note: "적용: Linux sysstat · 권한: 일반 사용자"
+  - stage: 2
+    steps:
+    - do: "영향 큰 쿼리 중단과 인덱스 보강"
+      cmd: |
+        mysql -u <관리계정> -p -e "KILL QUERY <id>;"
+        mysql -u <관리계정> -p <db> -e "ALTER TABLE <table> ADD INDEX <idx>(<col>), ALGORITHM=INPLACE, LOCK=NONE;"
+      check: "성공: 장기 쿼리 사라짐·같은 쿼리 실행 시간 단축 · 실패: 온라인 DDL 불가 오류면 업무 외 시간 일반 DDL 로 계획"
+      note: "사전조건: 쿼리 소유 업무 확인·인덱스 설계 검토 · 영향: KILL QUERY 는 해당 문장 롤백, 인덱스 생성 중 I/O 부하 · 승인: DB·업무 담당 · 백업/롤백: 인덱스는 DROP INDEX 로 원복, 중단한 쿼리는 재실행 여부 업무 판단"
+    - do: "I/O 용량 설정 조정 (page_cleaner)"
+      cmd: |
+        mysql -u <관리계정> -p -e "SET PERSIST innodb_io_capacity=<IOPS>;"
+      check: "성공: page_cleaner 경고 빈도 감소 · 실패: 변화 없으면 스토리지 증설 검토"
+      note: "사전조건: 스토리지 실측 IOPS 확인 · 영향: 백그라운드 쓰기량 변화 · 승인: DB 담당 · 백업/롤백: 이전 값 기록 후 원복(SET PERSIST 8.0+)"
+  - stage: 3
+    steps:
+    - do: "제조사 의뢰 자료"
+      cmd: |
+        mysqldumpslow -s t -t 30 <slow_query_log_file> > /tmp/slow_top30.txt
+        mysql -u <관리계정> -p -e "SHOW ENGINE INNODB STATUS\G SHOW GLOBAL STATUS;" > /tmp/innodb_status.txt
+      check: "슬로우 로그 집계·InnoDB 상태·전역 상태·실행계획"
+      note: "민감정보 마스킹: SQL 의 리터럴 값(개인정보·업무 데이터)·계정·호스트 가림(mysqldumpslow 는 숫자·문자열을 N·S 로 추상화) · 전달 승인: 보안 담당"
+
+- id: MY-PROC-R5-DISK
+  products: [mysql]
+  category: disk
+  match: [MY-012592, MY-1878]
+  title: InnoDB 파일 OS 오류·임시 파일 쓰기 실패 (MY-012592·1878)
+  source: "MySQL 8.0 Reference Manual — 'Server Error Message Reference', 'perror — Display MySQL Error Message Information', 'Where MySQL Stores Temporary Files', 'PURGE BINARY LOGS Statement'"
+  stages:
+  - stage: 1
+    steps:
+    - do: "공간·권한·OS 오류 확인 (읽기 전용)"
+      cmd: |
+        mysql -u <관리계정> -p -e "SELECT @@datadir, @@tmpdir, @@log_bin_basename;"
+        df -h <datadir> <tmpdir> ; df -i <datadir>
+        ls -ld <datadir> <tmpdir>
+        dmesg -T | tail -50
+      check: "사용률 100%·inode 고갈이면 공간 원인, mysql 계정 쓰기 불가면 권한 원인, dmesg I/O 오류면 스토리지 원인"
+      note: "적용: Linux · 권한: 일반 사용자"
+    - do: "오류 번호 의미 확인 (읽기 전용)"
+      cmd: |
+        grep -E 'Operating system error number|Temporary file write' <log_error 경로> | tail -20
+        perror <errno>
+      check: "28=공간 부족, 13=권한 거부, 2=파일 없음, 5=I/O 오류"
+      note: "적용: 5.7·8.0 · 권한: 로그 읽기"
+  - stage: 2
+    steps:
+    - do: "공간 확보(binlog 정리) 또는 tmpdir 변경"
+      cmd: |
+        mysql -u <관리계정> -p -e "SHOW BINARY LOGS;"
+        mysql -u <관리계정> -p -e "PURGE BINARY LOGS BEFORE '<YYYY-MM-DD hh:mm:ss>';"
+      check: "성공: df 사용률 85% 이하·오류 재발 없음 · 실패: 복제본이 필요한 binlog 를 정리하면 복제 오류(1236) — 즉시 복제 상태 확인"
+      note: "사전조건: 모든 복제본의 적용 위치·백업 보관 여부 확인 · 영향: 정리한 binlog 로 시점 복구 불가 · 승인: DB 담당 · 백업/롤백: 정리 대상 binlog 를 별도 저장소에 백업 후 실행(되돌릴 수 없음)"
+  - stage: 3
+    steps:
+    - do: "제조사 의뢰 자료"
+      cmd: |
+        df -h > /tmp/mysql_disk.txt ; dmesg -T | tail -200 >> /tmp/mysql_disk.txt
+        tail -500 <log_error 경로> > /tmp/mysql_err_tail.txt
+      check: "df·dmesg·error log 발췌"
+      note: "민감정보 마스킹: 호스트명·경로의 업무명 가림 · 전달 승인: 보안 담당"
+
+- id: MY-PROC-R5-UPSTREAM
+  products: [mysql]
+  category: upstream
+  match: [MY-1236]
+  title: 복제본의 원본 binlog 읽기 치명 오류 (1236)
+  source: "MySQL 8.0 Reference Manual — 'SHOW REPLICA STATUS Statement'(8.0.22+), 'SHOW BINARY LOGS', 'Replication with Global Transaction Identifiers (gtid_purged)', 'mysqldump (--source-data)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: "복제본 오류·요청 위치 확인 (읽기 전용)"
+      cmd: |
+        mysql -u <관리계정> -p -e "SHOW REPLICA STATUS\G" | grep -E 'Running|Last_IO_Error|Source_Log_File|Retrieved_Gtid_Set|Executed_Gtid_Set'
+      check: "Replica_IO_Running No·Last_IO_Error 1236 이면 확정, 요청 파일·GTID 기록"
+      note: "적용: 8.0.22+ (이전 버전은 SHOW SLAVE STATUS, 컬럼명 Master_Log_File·Slave_IO_Running) · 권한: REPLICATION CLIENT"
+    - do: "원본에 해당 binlog 가 남아 있는지 확인 (읽기 전용)"
+      cmd: |
+        mysql -h <source> -u <관리계정> -p -e "SHOW BINARY LOGS; SELECT @@gtid_purged, @@binlog_expire_logs_seconds;"
+      check: "요청 파일이 목록에 없거나 필요한 GTID 가 gtid_purged 에 포함되면 원본에서 이미 정리됨 → 재구축 필요"
+      note: "적용: binlog_expire_logs_seconds 8.0+ (5.7 은 expire_logs_days) · 권한: REPLICATION CLIENT"
+  - stage: 2
+    steps:
+    - do: "복제본 재구축"
+      cmd: |
+        mysqldump -h <source> -u <관리계정> -p --single-transaction --source-data=2 --all-databases --triggers --routines --events > /backup/full_$(date +%Y%m%d).sql
+        mysql -u <관리계정> -p < /backup/full_$(date +%Y%m%d).sql
+        mysql -u <관리계정> -p -e "START REPLICA;"
+      check: "성공: Replica_IO_Running·Replica_SQL_Running 모두 Yes·Seconds_Behind_Source 감소 · 실패: 오류 지속 시 GTID 설정(gtid_purged)·CHANGE REPLICATION SOURCE TO 값 재확인"
+      note: "사전조건: 복제본 쓰기 중단·디스크 여유 · 영향: 덤프 중 원본 부하, 재구축 동안 복제본 사용 불가 · 승인: DB·업무 담당 · 백업/롤백: 재구축 전 복제본 데이터·설정 백업(--source-data 8.0.26+, 이전 --master-data, START REPLICA 8.0.22+)"
+  - stage: 3
+    steps:
+    - do: "제조사 의뢰 자료"
+      cmd: |
+        mysql -u <관리계정> -p -e "SHOW REPLICA STATUS\G" > /tmp/replica_status.txt
+        tail -500 <log_error 경로> > /tmp/mysql_err_tail.txt
+      check: "복제 상태·원본 SHOW BINARY LOGS·양쪽 error log"
+      note: "민감정보 마스킹: 원본 호스트·복제 계정·IP 가림 · 전달 승인: 보안 담당"
+
+# ── PostgreSQL ──
+- id: PG-PROC-R5-INTERNAL
+  products: [postgresql]
+  category: internal
+  match: [22P02, 23505, 25P02, 3D000, 42P01, 55000, 57014, 57P04, XX000, 58000, 57P01, 57P02, 23503, 23502, 25006, 42883, 42P07, 42703, 42601, 22003, 22021, 3F000, 57000, 2BP01, DB-PG-004]
+  title: SQL·스키마 오류·운영자 종료·PANIC (SQLSTATE 22/23/42/57 계열·XX000)
+  source: "PostgreSQL 16 Documentation — 'Appendix A. PostgreSQL Error Codes', 'Error Reporting and Logging', 'The Cumulative Statistics System (pg_stat_activity)', 'pg_ctl'"
+  stages:
+  - stage: 1
+    steps:
+    - do: "서버 로그 위치와 오류 줄 확인 (읽기 전용)"
+      cmd: |
+        psql -X -d <db> -c "SHOW data_directory; SHOW log_directory; SELECT pg_current_logfile();"
+        grep -E 'ERROR|FATAL|PANIC' <로그 파일> | tail -50
+      check: "SQLSTATE 앞 두 자리로 분류 — 22·23·42 는 SQL·데이터·스키마(애플리케이션), 57 은 운영자 개입·종료, XX 는 내부 오류. PANIC 이 있으면 인스턴스 중단(DB-PG-004)"
+      note: "적용: PostgreSQL 10~16 (pg_current_logfile 10+) · 권한: superuser 또는 pg_monitor"
+    - do: "기동 시각·역할·세션 상태 확인 (읽기 전용)"
+      cmd: |
+        psql -X -d <db> -c "SELECT pg_postmaster_start_time(), pg_is_in_recovery();"
+        psql -X -d <db> -c "SELECT pid, usename, application_name, state, wait_event_type, LEFT(query,80) FROM pg_stat_activity WHERE state <> 'idle' ORDER BY xact_start;"
+      check: "기동 시각이 오류 시각 직후면 재시작·크래시(57P01·57P02), pg_is_in_recovery=true 면 대기 서버(25006·57P04)"
+      note: "적용: 10~16 (wait_event 9.6+) · 권한: pg_monitor"
+    - do: "스키마 오류 대상 확인 (42P01·42703·42883·3F000, 읽기 전용)"
+      cmd: |
+        psql -X -d <db> -c "SHOW search_path;"
+        psql -X -d <db> -c "SELECT schemaname, tablename FROM pg_tables WHERE tablename ILIKE '<table>';"
+      check: "객체가 다른 스키마에 있거나 없으면 배포 누락·search_path 문제 — 이 단계에서 스키마를 바꾸지 않음"
+      note: "적용: 10~16 · 권한: 조회"
+  - stage: 2
+    steps:
+    - do: "PANIC·크래시 후 기동 (DB-PG-004)"
+      cmd: |
+        cp -a <로그 파일> /tmp/pg_panic_$(date +%Y%m%d).log
+        pg_ctl start -D <data_directory> -l <로그 파일>
+      check: "성공: 로그에 database system is ready to accept connections · 실패: WAL·디스크 오류로 다시 PANIC 이면 백업·복제본 전환 절차"
+      note: "사전조건: 디스크 공간·I/O 오류 원인 해소 · 영향: WAL 재생 복구 동안 접속 불가 · 승인: DB·업무 담당 · 백업/롤백: 기동 전 데이터 디렉터리 백업 존재 확인, 실패 시 복제본 승격 계획"
+    - do: "스키마·SQL 수정 배포 (42P01·42703·42883·23502·22003)"
+      cmd: |
+        pg_dump -s -d <db> -f /tmp/<db>_schema_before.sql
+        psql -X -d <db> -1 -f <배포스크립트.sql>
+      check: "성공: 같은 요청이 오류 없이 처리 · 실패: 스크립트 오류 시 -1(단일 트랜잭션)로 자동 롤백됨, 원인 수정 후 재시도"
+      note: "사전조건: 변경 관리 승인·개발 환경 검증 · 영향: DDL 잠금(ALTER TYPE 은 테이블 재작성) · 승인: 변경 관리 · 백업/롤백: 배포 전 schema_before.sql 과 데이터 백업 확인"
+  - stage: 3
+    steps:
+    - do: "제조사·커뮤니티 지원 의뢰 자료"
+      cmd: |
+        tail -2000 <로그 파일> > /tmp/pg_log_tail.txt
+        psql -X -d <db> -c "SELECT version();" -c "SELECT name, setting FROM pg_settings WHERE source <> 'default';" > /tmp/pg_settings.txt
+      check: "서버 로그 발췌·버전·기본값이 아닌 설정·재현 SQL"
+      note: "민감정보 마스킹: 로그의 사용자·DB·클라이언트 IP·SQL 리터럴 값 가림 · 전달 승인: 보안 담당"
+
+- id: PG-PROC-R5-SECURITY
+  products: [postgresql]
+  category: security
+  match: [28000, 28P01, 42501]
+  title: 접속 규칙 거부·비밀번호 인증 실패·권한 부족 (28000·28P01·42501)
+  source: "PostgreSQL 16 Documentation — 'The pg_hba.conf File', 'pg_hba_file_rules', 'Password Authentication', 'Privileges', 'GRANT'"
+  stages:
+  - stage: 1
+    steps:
+    - do: "거부 로그와 접속 규칙 확인 (읽기 전용)"
+      cmd: |
+        grep -E 'no pg_hba.conf entry|password authentication failed|permission denied' <로그 파일> | tail -30
+        psql -X -d <db> -c "SELECT line_number, type, database, user_name, address, auth_method, error FROM pg_hba_file_rules;"
+      check: "no pg_hba.conf entry 는 규칙 없음(28000), password authentication failed 는 비밀번호·방식 불일치(28P01), permission denied 는 객체 권한(42501). error 컬럼 값이 있으면 pg_hba.conf 문법 오류"
+      note: "적용: pg_hba_file_rules 10+ · 권한: superuser"
+    - do: "계정 상태·권한 확인 (비밀번호 제외, 읽기 전용)"
+      cmd: |
+        psql -X -d <db> -c "SELECT rolname, rolcanlogin, rolvaliduntil FROM pg_roles WHERE rolname='<user>';"
+        psql -X -d <db> -c "SELECT has_table_privilege('<user>', '<schema>.<table>', 'SELECT'), has_schema_privilege('<user>', '<schema>', 'USAGE');"
+      check: "rolcanlogin=false·rolvaliduntil 경과면 계정 원인, has_* 가 false 면 42501 확정"
+      note: "적용: 10~16 · 권한: 조회"
+  - stage: 2
+    steps:
+    - do: "접속 규칙 추가 후 재적재 (28000)"
+      cmd: |
+        cp <data_directory>/pg_hba.conf <data_directory>/pg_hba.conf.bak_$(date +%Y%m%d)
+        echo 'host  <db>  <user>  <허용대역>/32  scram-sha-256' >> <data_directory>/pg_hba.conf
+        psql -X -d <db> -c "SELECT pg_reload_conf();" -c "SELECT line_number, error FROM pg_hba_file_rules WHERE error IS NOT NULL;"
+      check: "성공: error 행 없음·해당 출처 접속 성공 · 실패: error 행이 있으면 즉시 백업 파일로 원복 후 재적재"
+      note: "사전조건: 허용 출처·인증 방식 확정(규칙은 위에서부터 첫 일치) · 영향: 접속 허용 범위 변경 · 승인: 보안 담당 · 백업/롤백: pg_hba.conf.bak 로 원복 후 pg_reload_conf"
+    - do: "권한 부여·비밀번호 재설정 (42501·28P01)"
+      cmd: |
+        psql -X -d <db> -c "GRANT USAGE ON SCHEMA <schema> TO <role>; GRANT SELECT ON <schema>.<table> TO <role>;"
+      check: "성공: 같은 문장 실행 성공 · 실패: 여전히 거부면 행 보안 정책(RLS)·소유자 확인"
+      note: "사전조건: 업무 근거 확인 · 영향: 권한 확대 · 승인: 보안 담당 · 백업/롤백: 변경 전 `\\dp` 결과 저장, REVOKE 로 원복(비밀번호 재설정은 되돌릴 수 없어 영향 앱 목록 사전 확인)"
+  - stage: 3
+    steps:
+    - do: "지원 의뢰 자료"
+      cmd: |
+        grep -E 'FATAL|authentication' <로그 파일> | tail -500 > /tmp/pg_auth_log.txt
+      check: "인증 관련 로그 발췌·pg_hba_file_rules 결과(주소 가림)"
+      note: "민감정보 마스킹: 계정명·DB명·클라이언트 IP 가림, 비밀번호·해시는 절대 포함 금지 · 전달 승인: 보안 담당"
+
+- id: PG-PROC-R5-CAPACITY
+  products: [postgresql]
+  category: capacity
+  match: [53000, 54000, 54001, PG-TXID-WRAPAROUND, 53400, DB-PG-005, DB-PG-007]
+  title: 자원·한도 초과·트랜잭션 ID 고갈·프로세스 생성 실패 (53000·53400·54000·wraparound)
+  source: "PostgreSQL 16 Documentation — 'Routine Vacuuming (Preventing Transaction ID Wraparound Failures)', 'Managing Kernel Resources', 'Appendix A. PostgreSQL Error Codes', 'Appendix K. PostgreSQL Limits'"
+  stages:
+  - stage: 1
+    steps:
+    - do: "트랜잭션 ID 나이 확인 (wraparound, 읽기 전용)"
+      cmd: |
+        psql -X -d <db> -c "SELECT datname, age(datfrozenxid) FROM pg_database ORDER BY 2 DESC;"
+        psql -X -d <db> -c "SELECT c.oid::regclass, age(c.relfrozenxid) FROM pg_class c WHERE c.relkind IN ('r','m','t') ORDER BY 2 DESC LIMIT 10;" -c "SHOW autovacuum_freeze_max_age;"
+      check: "age 가 autovacuum_freeze_max_age(기본 2억)를 크게 넘고 20억에 근접하면 긴급. 장기 트랜잭션·복제 슬롯이 freeze 를 막는지 함께 확인"
+      note: "적용: 10~16 · 권한: 조회"
+    - do: "OS 자원·연결 수 확인 (53000·53400·DB-PG-005/007, 읽기 전용)"
+      cmd: |
+        free -m ; ulimit -a
+        ps -u postgres | wc -l ; ipcs -s | wc -l
+        psql -X -d <db> -c "SELECT count(*) FROM pg_stat_activity;" -c "SHOW max_connections;"
+      check: "프로세스 수가 nproc 한도·세마포어가 kernel.sem 에 근접하거나 메모리 고갈이면 OS 자원 원인"
+      note: "적용: Linux · 권한: postgres 계정"
+  - stage: 2
+    steps:
+    - do: "가장 오래된 테이블 freeze (wraparound)"
+      cmd: |
+        psql -X -d <db> -c "VACUUM (FREEZE, VERBOSE) <schema>.<table>;"
+      check: "성공: 해당 테이블 age(relfrozenxid) 감소·datfrozenxid 갱신 · 실패: 장기 트랜잭션·미사용 복제 슬롯이 막으면 먼저 정리"
+      note: "사전조건: 장기 트랜잭션·prepared transaction·복제 슬롯 확인 · 영향: 대형 테이블 I/O 부하(쓰기는 가능) · 승인: DB 담당 · 백업/롤백: 데이터 변경 없는 유지보수, 실행 전 백업 상태 확인"
+    - do: "OS 자원 한도 조정 (53000·DB-PG-005)"
+      config:
+        file: /etc/security/limits.conf · /etc/sysctl.conf
+        snippet: |
+          postgres  soft  nproc  <값>
+          postgres  hard  nproc  <값>
+          kernel.sem = <SEMMSL> <SEMMNS> <SEMOPM> <SEMMNI>
+        note: "Managing Kernel Resources 의 산식으로 값 산정"
+      check: "성공: 연결·작업 프로세스 생성 오류 재발 없음 · 실패: 메모리 부족이면 max_connections 축소·풀러 도입"
+      note: "사전조건: 현재 값 기록 · 영향: 일부는 재기동 후 반영 · 승인: 시스템·DB 담당 · 백업/롤백: 설정 파일 백업 후 원복"
+  - stage: 3
+    steps:
+    - do: "지원 의뢰 자료"
+      cmd: |
+        psql -X -d <db> -c "SELECT datname, age(datfrozenxid) FROM pg_database;" > /tmp/pg_xid_age.txt
+        tail -1000 <로그 파일> > /tmp/pg_log_tail.txt
+      check: "XID age·서버 로그·OS 자원 값"
+      note: "민감정보 마스킹: DB·테이블 이름 중 업무 정보·호스트명 가림 · 전달 승인: 보안 담당"
+
+- id: PG-PROC-R5-STORAGE
+  products: [postgresql]
+  category: storage
+  match: [58P01, XX001, XX002, DB-PG-006]
+  title: 데이터·인덱스 손상과 파일 누락 (XX001·XX002·58P01·invalid page)
+  source: "PostgreSQL 16 Documentation — 'amcheck', 'pg_amcheck'(14+), 'REINDEX', 'Developer Options (zero_damaged_pages)', 'Data Checksums'"
+  stages:
+  - stage: 1
+    steps:
+    - do: "손상 위치·체크섬 상태 확인 (읽기 전용)"
+      cmd: |
+        grep -E 'invalid page in block|could not read block|could not open file|checksum' <로그 파일> | tail -30
+        psql -X -d <db> -c "SHOW data_checksums;" -c "SELECT datname, checksum_failures FROM pg_stat_database;"
+      check: "블록 번호·relation 경로를 기록. checksum_failures 가 0 보다 크면 저장 매체 손상 가능성 높음"
+      note: "적용: checksum_failures 12+ · 권한: pg_monitor"
+    - do: "경로의 객체 식별과 OS I/O 오류 확인 (읽기 전용)"
+      cmd: |
+        psql -X -d <db> -c "SELECT oid::regclass, relkind FROM pg_class WHERE relfilenode=<파일번호>;"
+        dmesg -T | tail -50
+      check: "relkind=i 면 인덱스(재구축 가능), r 이면 테이블(복원 필요). dmesg I/O 오류가 있으면 스토리지 먼저 조치"
+      note: "적용: 10~16 · 권한: 조회"
+  - stage: 2
+    steps:
+    - do: "손상 범위 검사"
+      cmd: |
+        psql -X -d <db> -c "CREATE EXTENSION IF NOT EXISTS amcheck;"
+        pg_amcheck -d <db> --heapallindexed
+      check: "성공: 오류 없음 → 하드웨어 점검 · 실패: 손상 테이블·인덱스 목록 확보 후 복구 계획"
+      note: "사전조건: 업무 외 시간 · 영향: 대량 읽기 I/O · 승인: DB 담당 · 백업/롤백: 검사는 데이터 변경 없음, 확장 설치는 DROP EXTENSION amcheck 로 원복(pg_amcheck 14+, 이전은 bt_index_check 함수)"
+    - do: "인덱스 재구축 (XX002)"
+      cmd: |
+        psql -X -d <db> -c "REINDEX INDEX CONCURRENTLY <schema>.<index>;"
+      check: "성공: 오류 재발 없음·pg_index.indisvalid true · 실패: 남은 invalid 인덱스(_ccnew)를 정리 후 재시도"
+      note: "사전조건: 디스크 여유(인덱스 크기 이상) · 영향: 재구축 중 I/O 부하 · 승인: DB 담당 · 백업/롤백: 실패 시 invalid 인덱스 정리(CONCURRENTLY 12+, 이전 버전 REINDEX 는 쓰기 잠금)"
+  - stage: 3
+    steps:
+    - do: "지원 의뢰 자료"
+      cmd: |
+        grep -E 'invalid page|checksum|could not read' <로그 파일> > /tmp/pg_corrupt_log.txt
+        dmesg -T > /tmp/pg_dmesg.txt
+      check: "손상 로그·pg_amcheck 결과·dmesg·스토리지 정보"
+      note: "민감정보 마스킹: 경로의 업무명·호스트명 가림, 데이터 파일 자체는 보안 승인 없이 반출 금지 · 전달 승인: 보안 담당"
+
+- id: PG-PROC-R5-UPSTREAM
+  products: [postgresql]
+  category: upstream
+  match: [PG-REPLICATION-LAG, PG-STANDBY-DISCONNECT]
+  title: 스트리밍 복제 지연·대기 서버 연결 끊김
+  source: "PostgreSQL 16 Documentation — 'Monitoring Database Activity (pg_stat_replication, pg_stat_wal_receiver)', 'Log-Shipping Standby Servers', 'pg_basebackup', 'Replication Slots'"
+  stages:
+  - stage: 1
+    steps:
+    - do: "원본에서 복제 상태·지연 측정 (읽기 전용)"
+      cmd: |
+        psql -X -d postgres -c "SELECT application_name, client_addr, state, write_lag, flush_lag, replay_lag, pg_wal_lsn_diff(pg_current_wal_lsn(), replay_lsn) AS lag_bytes FROM pg_stat_replication;"
+        psql -X -d postgres -c "SELECT slot_name, active, restart_lsn FROM pg_replication_slots;"
+      check: "행이 없으면 대기 서버 연결 끊김, replay_lag 가 크면 지연. 비활성 슬롯이 있으면 pg_wal 누적 위험"
+      note: "적용: 10+ (write_lag 등) · 권한: pg_monitor"
+    - do: "대기 서버 수신 상태 확인 (읽기 전용)"
+      cmd: |
+        psql -X -d postgres -c "SELECT status, last_msg_receipt_time FROM pg_stat_wal_receiver;" -c "SELECT pg_is_in_recovery(), now() - pg_last_xact_replay_timestamp() AS replay_delay;"
+        nc -vzw3 <primary> <port>
+      check: "pg_stat_wal_receiver 행이 없거나 status 가 streaming 이 아니면 연결 문제, 포트 도달 실패면 네트워크"
+      note: "적용: pg_stat_wal_receiver 9.6+ · 권한: pg_monitor"
+  - stage: 2
+    steps:
+    - do: "대기 서버 재구축 (원본 WAL 이 이미 정리된 경우)"
+      cmd: |
+        pg_basebackup -h <primary> -p <port> -U <repl_user> -D <새 데이터경로> -X stream -R -P
+      check: "성공: 기동 후 pg_stat_replication 에 streaming·lag 감소 · 실패: 인증 오류면 pg_hba.conf replication 항목 확인"
+      note: "사전조건: 새 경로 디스크 여유·replication 권한 계정 · 영향: 원본 I/O·네트워크 부하, 재구축 동안 대기 서버 사용 불가 · 승인: DB·업무 담당 · 백업/롤백: 기존 대기 데이터 디렉터리는 지우지 않고 보관(-R 은 12+ 에서 standby.signal 생성)"
+  - stage: 3
+    steps:
+    - do: "지원 의뢰 자료"
+      cmd: |
+        psql -X -d postgres -c "SELECT * FROM pg_stat_replication;" > /tmp/pg_repl.txt
+        tail -1000 <로그 파일> > /tmp/pg_log_tail.txt
+      check: "양쪽 서버 로그·pg_stat_replication·pg_stat_wal_receiver·네트워크 측정"
+      note: "민감정보 마스킹: client_addr·호스트명·복제 계정 가림 · 전달 승인: 보안 담당"
+
+- id: PG-PROC-R5-PERFORMANCE
+  products: [postgresql]
+  category: performance
+  match: [PG-CHECKPOINT-FREQ, DB-PG-CKPT-001]
+  title: 체크포인트 과다·지연 (checkpoints are occurring too frequently)
+  source: "PostgreSQL 16 Documentation — 'WAL Configuration', 'Write Ahead Log settings (max_wal_size, checkpoint_timeout, checkpoint_completion_target)', 'pg_stat_bgwriter'(17+ pg_stat_checkpointer)"
+  stages:
+  - stage: 1
+    steps:
+    - do: "체크포인트 빈도·소요 확인 (읽기 전용)"
+      cmd: |
+        grep -E 'checkpoints are occurring too frequently|checkpoint complete' <로그 파일> | tail -20
+        psql -X -d postgres -c "SELECT checkpoints_timed, checkpoints_req FROM pg_stat_bgwriter;"     # 16 이하
+        psql -X -d postgres -c "SELECT num_timed, num_requested FROM pg_stat_checkpointer;"           # 17+ (16 이하에서는 뷰가 없어 오류)
+        psql -X -d postgres -c "SELECT name, setting, unit FROM pg_settings WHERE name IN ('max_wal_size','checkpoint_timeout','checkpoint_completion_target','checkpoint_warning');"
+      check: "checkpoints_req 비율이 높고 경고가 반복되면 max_wal_size 부족. complete 줄의 total 이 길면 I/O 병목"
+      note: "적용: pg_stat_bgwriter 의 checkpoint 컬럼은 16 이하(17+ 는 pg_stat_checkpointer num_timed·num_requested) · 권한: pg_monitor"
+    - do: "디스크 대기 확인 (읽기 전용)"
+      cmd: |
+        iostat -x 5 3
+      check: "await·%util 이 높으면 스토리지 성능 원인"
+      note: "적용: Linux sysstat · 권한: 일반 사용자"
+  - stage: 2
+    steps:
+    - do: "WAL·체크포인트 설정 조정"
+      cmd: |
+        psql -X -d postgres -c "ALTER SYSTEM SET max_wal_size = '<값>';" -c "SELECT pg_reload_conf();"
+        psql -X -d postgres -c "SHOW max_wal_size;"
+      check: "성공: 경고 빈도 감소·checkpoints_req 비율 하락 · 실패: 변화 없으면 대량 적재 일정·스토리지 개선 검토"
+      note: "사전조건: pg_wal 볼륨 여유 확인 · 영향: 크래시 복구 시간·pg_wal 사용량 증가 · 승인: DB 담당 · 백업/롤백: 이전 값 기록, ALTER SYSTEM RESET max_wal_size 로 원복"
+  - stage: 3
+    steps:
+    - do: "지원 의뢰 자료"
+      cmd: |
+        grep -E 'checkpoint' <로그 파일> > /tmp/pg_ckpt_log.txt
+        iostat -x 5 12 > /tmp/pg_iostat.txt
+      check: "체크포인트 로그·bgwriter/checkpointer 통계·iostat"
+      note: "민감정보 마스킹: 호스트명·경로 가림 · 전달 승인: 보안 담당"
+
+- id: PG-PROC-R5-MEMORY
+  products: [postgresql]
+  category: memory
+  match: ['53200']
+  title: 메모리 부족 (53200 out of memory)
+  source: "PostgreSQL 16 Documentation — 'Resource Consumption (work_mem, shared_buffers, maintenance_work_mem)', 'Managing Kernel Resources (Linux Memory Overcommit)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: "OOM 로그·메모리 문맥 덤프 확인 (읽기 전용)"
+      cmd: |
+        grep -B 2 -A 20 'out of memory' <로그 파일> | tail -60
+        dmesg -T | grep -i -E 'out of memory|killed process' | tail -20
+        free -m
+      check: "서버 로그에 TopMemoryContext 덤프와 함께 out of memory 면 PostgreSQL 할당 실패, dmesg 의 Killed process postgres 면 OS OOM killer"
+      note: "적용: Linux · 권한: postgres 계정(dmesg 는 배포판에 따라 root)"
+    - do: "메모리 관련 설정 확인 (읽기 전용)"
+      cmd: |
+        psql -X -d postgres -c "SELECT name, setting, unit FROM pg_settings WHERE name IN ('shared_buffers','work_mem','maintenance_work_mem','max_connections');"
+      check: "shared_buffers + (max_connections × work_mem × 동시 정렬 수)가 물리 메모리를 넘으면 설정 과다"
+      note: "적용: 10~16 · 권한: 조회"
+  - stage: 2
+    steps:
+    - do: "work_mem 조정과 overcommit 정책"
+      cmd: |
+        psql -X -d postgres -c "ALTER ROLE <role> SET work_mem = '<값>';"
+        sysctl vm.overcommit_memory
+        sysctl -w vm.overcommit_memory=2
+      check: "성공: 53200·OOM killer 재발 없음 · 실패: 특정 쿼리가 원인이면 실행계획(EXPLAIN, 실행 안 함) 개선"
+      note: "사전조건: 현재 값 기록·문서의 Linux Memory Overcommit 권고 검토 · 영향: 정렬·해시 성능 변화, overcommit 변경은 서버 전체 영향 · 승인: 시스템·DB 담당 · 백업/롤백: ALTER ROLE … RESET work_mem, sysctl 이전 값으로 원복"
+  - stage: 3
+    steps:
+    - do: "지원 의뢰 자료"
+      cmd: |
+        grep -B 2 -A 60 'out of memory' <로그 파일> > /tmp/pg_oom.txt
+        free -m >> /tmp/pg_oom.txt ; dmesg -T | tail -200 >> /tmp/pg_oom.txt
+      check: "메모리 문맥 덤프·dmesg·설정 값"
+      note: "민감정보 마스킹: 로그의 SQL 리터럴·사용자·DB 이름 가림 · 전달 승인: 보안 담당"

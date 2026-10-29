@@ -1,0 +1,15 @@
+product: jeus
+title: JEUS 운영 참고 (GPT 수집 — 벤더 문서 대조 필요)
+sections:
+- heading: 로그 위치
+  body: 기본 서버 로그는 JEUS_SERVER_HOME/logs이며 Launcher 로그, 서버 로그, access log가 저장된다. JEUS
+    9/21 계열은 일반적으로 $DOMAIN_HOME/servers/<server_name>/logs가 SERVER_HOME의 logs 경로다.
+- heading: 장애 시 수집 방법
+  body: SERVER_HOME/logs의 Launcher·서버·access 로그, domain 설정과 JVM 로그를 수집하고 server-info
+    -server <name> -state/-pid, 필요 시 JVM thread dump를 장애 시각 기준으로 저장한다.
+- heading: 대표 장애 신호
+  body: SERVER 기동 실패·STANDBY, Launcher-Master 통신 실패, CPOOL/JDBC pool 포화, Deploy 오류,
+    JNDI 호출 실패, OOM과 장시간 실행 thread 및 WebtoB 연결 실패를 우선 확인한다.
+- heading: 1차 확인 명령
+  body: $JEUS_HOME/bin/jeusadmin ... server-info -server <server> -state로 상태를 확인하고
+    server-info -server <server> -pid와 $SERVER_HOME/logs 최근 오류를 함께 확인한다.

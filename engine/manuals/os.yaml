@@ -1,0 +1,11 @@
+product: os-common
+title: "OS 공통 운영 참고 (Linux·Solaris·AIX·HP-UX·Windows)"
+sections:
+  - heading: "로그 위치"
+    body: "Linux(RHEL·Rocky·CentOS·Ubuntu): /var/log/messages 또는 /var/log/syslog, journalctl -xe, dmesg · auditd: /var/log/audit/audit.log · Solaris: /var/adm/messages · AIX: errpt -a · HP-UX: /var/adm/syslog/syslog.log · Windows: 이벤트 뷰어 → System/Application"
+  - heading: "Windows 이벤트 추출 (분석기 투입용 CSV)"
+    body: "Get-WinEvent -LogName System -MaxEvents 5000 | Select-Object TimeCreated,LevelDisplayName,ProviderName,Id,Message | Export-Csv events.csv -Encoding UTF8"
+  - heading: "대표 장애 신호"
+    body: "oom-killer 메모리 고갈 · No space left on device 디스크 풀 · kernel panic · file system full(유닉스) · out of swap · Windows 7031/7034 서비스 비정상 종료 · 이벤트 41 비정상 재부팅 · 이벤트 55 NTFS 손상"
+  - heading: "1차 확인 명령"
+    body: "메모리: free -m / vmstat 1 · 디스크: df -h · I/O: iostat -x 1 · 프로세스: top/ps · Windows: Get-Process, Get-Volume, 이벤트 뷰어"

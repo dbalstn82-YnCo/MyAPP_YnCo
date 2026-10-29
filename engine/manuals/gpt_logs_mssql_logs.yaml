@@ -1,0 +1,97 @@
+product: mssql
+layer: db
+title: mssql 로그 종류 카탈로그 (GPT 수집 — 벤더 문서 대조 필요)
+source: GPT 수집(벤더 문서 대조 필요)
+sources: []
+logtypes:
+- name: DB 엔진 Error 로그
+  path: Windows <SQLROOT>\MSSQL\LOG\ERRORLOG, Linux /var/opt/mssql/log/errorlog
+  format: 텍스트·YYYY-MM-DD HH:mm:ss.ss
+  check: 823·824·825·9002·18456·1205·startup/recovery
+  sample: '2026-09-09 12:00:00.00 spid... Error: 9002, Severity: ... 형식'
+- name: 이전 Error 로그
+  path: <SQLROOT>\MSSQL\LOG\ERRORLOG.1 등
+  format: 텍스트·YYYY-MM-DD HH:mm:ss.ss
+  check: 장애 직전 인스턴스 종료·복구·I/O 오류 추적
+  sample: ERRORLOG와 동일 형식
+- name: SQL Agent 로그
+  path: <SQLROOT>\MSSQL\Log\SQLAGENT.OUT
+  format: 텍스트·날짜/시간
+  check: Agent start/stop·job subsystem·proxy·메일·job 실행 오류
+  sample: SQL Server Agent timestamp+severity+message 형식
+- name: Windows Application 로그
+  path: Windows Event Viewer Windows Logs\Application
+  format: EVTX·Windows timestamp
+  check: MSSQLSERVER·SQLSERVERAGENT·18456·서비스·I/O·crash 이벤트
+  sample: Windows Event record 형식
+- name: system_health XEvent
+  path: <SQLROOT>\MSSQL\Log\system_health*.xel 계열
+  format: XEL 바이너리·UTC event timestamp
+  check: deadlock·scheduler·OOM·connectivity·security·sp_server_diagnostics
+  sample: XEvent XML 변환 <event name="..." timestamp="...">
+- name: AlwaysOn Health XEvent
+  path: <SQLROOT>\MSSQL\Log\AlwaysOn_health*.xel 계열
+  format: XEL 바이너리·UTC timestamp
+  check: AG role change·availability replica/database 상태·failover
+  sample: XEvent event/data/action 형식
+- name: Default Trace
+  path: <SQLROOT>\MSSQL\LOG\log.trc rollover
+  format: SQL Trace 바이너리·StartTime
+  check: 설정 변경·객체 변경·자동 파일 증가·서버 활동
+  sample: fn_trace_gettable() 행 형식
+- name: SQL Audit
+  path: CREATE SERVER AUDIT ... TO FILE 지정 경로 *.sqlaudit
+  format: 바이너리 audit·event_time
+  check: 로그인·권한·DDL·객체 접근·감사 실패
+  sample: sys.fn_get_audit_file() 행 형식
+- name: Setup Summary 로그
+  path: '%ProgramFiles%\Microsoft SQL Server\<nnn>\Setup Bootstrap\Log\Summary.txt'
+  format: 텍스트·설치 실행시각
+  check: 설치/패치 실패·Failed rule·feature 결과
+  sample: 텍스트 Summary 섹션 형식
+- name: Setup Detail 로그
+  path: '...\Setup Bootstrap\Log\<yyyyMMdd_HHmmss>\Detail.txt'
+  format: 텍스트·실행시각
+  check: setup exception·error·component action 실패
+  sample: 시간순 Setup action/message 형식
+- name: MSI 설치 로그
+  path: '...\Setup Bootstrap\Log\<yyyyMMdd_HHmmss>\<Name>.log'
+  format: MSI 텍스트·시간
+  check: Return value 3·MSI package failure
+  sample: MSI verbose log 형식
+- name: 트랜잭션 로그
+  path: DB별 .ldf, 위치는 sys.master_files
+  format: 바이너리·LSN
+  check: log full·recovery·VLF·AG/replication log reuse 대기
+  sample: 내부 log record·LSN 기반 형식
+sections:
+- heading: 로그 종류 카탈로그 (전수)
+  body: 'DB 엔진 Error 로그: Windows <SQLROOT>\MSSQL\LOG\ERRORLOG, Linux /var/opt/mssql/log/errorlog · 이전 Error 로그: <SQLROOT>\MSSQL\LOG\ERRORLOG.1 등 · SQL Agent 로그: <SQLROOT>\MSSQL\Log\SQLAGENT.OUT · Windows
+    Application 로그: Windows Event Viewer Windows Logs\Application · system_health XEvent: <SQLROOT>\MSSQL\Log\system_health*.xel 계열 · AlwaysOn Health XEvent: <SQLROOT>\MSSQL\Log\AlwaysOn_health*.xel 계열
+    · Default Trace: <SQLROOT>\MSSQL\LOG\log.trc rollover · SQL Audit: CREATE SERVER AUDIT ... TO FILE 지정 경로 *.sqlaudit · Setup Summary 로그: %ProgramFiles%\Microsoft SQL Server\<nnn>\Setup Bootstrap\Log\Summary.txt
+    · Setup Detail 로그: ...\Setup Bootstrap\Log\<yyyyMMdd_HHmmss>\Detail.txt · MSI 설치 로그: ...\Setup Bootstrap\Log\<yyyyMMdd_HHmmss>\<Name>.log · 트랜잭션 로그: DB별 .ldf, 위치는 sys.master_files'
+- heading: '로그: DB 엔진 Error 로그'
+  body: '경로 Windows <SQLROOT>\MSSQL\LOG\ERRORLOG, Linux /var/opt/mssql/log/errorlog / 형식 텍스트·YYYY-MM-DD HH:mm:ss.ss / 확인 823·824·825·9002·18456·1205·startup/recovery / 샘플 2026-09-09 12:00:00.00 spid...
+    Error: 9002, Severity: ... 형식'
+- heading: '로그: 이전 Error 로그'
+  body: 경로 <SQLROOT>\MSSQL\LOG\ERRORLOG.1 등 / 형식 텍스트·YYYY-MM-DD HH:mm:ss.ss / 확인 장애 직전 인스턴스 종료·복구·I/O 오류 추적 / 샘플 ERRORLOG와 동일 형식
+- heading: '로그: SQL Agent 로그'
+  body: 경로 <SQLROOT>\MSSQL\Log\SQLAGENT.OUT / 형식 텍스트·날짜/시간 / 확인 Agent start/stop·job subsystem·proxy·메일·job 실행 오류 / 샘플 SQL Server Agent timestamp+severity+message 형식
+- heading: '로그: Windows Application 로그'
+  body: 경로 Windows Event Viewer Windows Logs\Application / 형식 EVTX·Windows timestamp / 확인 MSSQLSERVER·SQLSERVERAGENT·18456·서비스·I/O·crash 이벤트 / 샘플 Windows Event record 형식
+- heading: '로그: system_health XEvent'
+  body: 경로 <SQLROOT>\MSSQL\Log\system_health*.xel 계열 / 형식 XEL 바이너리·UTC event timestamp / 확인 deadlock·scheduler·OOM·connectivity·security·sp_server_diagnostics / 샘플 XEvent XML 변환 <event name="..." timestamp="...">
+- heading: '로그: AlwaysOn Health XEvent'
+  body: 경로 <SQLROOT>\MSSQL\Log\AlwaysOn_health*.xel 계열 / 형식 XEL 바이너리·UTC timestamp / 확인 AG role change·availability replica/database 상태·failover / 샘플 XEvent event/data/action 형식
+- heading: '로그: Default Trace'
+  body: 경로 <SQLROOT>\MSSQL\LOG\log.trc rollover / 형식 SQL Trace 바이너리·StartTime / 확인 설정 변경·객체 변경·자동 파일 증가·서버 활동 / 샘플 fn_trace_gettable() 행 형식
+- heading: '로그: SQL Audit'
+  body: 경로 CREATE SERVER AUDIT ... TO FILE 지정 경로 *.sqlaudit / 형식 바이너리 audit·event_time / 확인 로그인·권한·DDL·객체 접근·감사 실패 / 샘플 sys.fn_get_audit_file() 행 형식
+- heading: '로그: Setup Summary 로그'
+  body: 경로 %ProgramFiles%\Microsoft SQL Server\<nnn>\Setup Bootstrap\Log\Summary.txt / 형식 텍스트·설치 실행시각 / 확인 설치/패치 실패·Failed rule·feature 결과 / 샘플 텍스트 Summary 섹션 형식
+- heading: '로그: Setup Detail 로그'
+  body: 경로 ...\Setup Bootstrap\Log\<yyyyMMdd_HHmmss>\Detail.txt / 형식 텍스트·실행시각 / 확인 setup exception·error·component action 실패 / 샘플 시간순 Setup action/message 형식
+- heading: '로그: MSI 설치 로그'
+  body: 경로 ...\Setup Bootstrap\Log\<yyyyMMdd_HHmmss>\<Name>.log / 형식 MSI 텍스트·시간 / 확인 Return value 3·MSI package failure / 샘플 MSI verbose log 형식
+- heading: '로그: 트랜잭션 로그'
+  body: 경로 DB별 .ldf, 위치는 sys.master_files / 형식 바이너리·LSN / 확인 log full·recovery·VLF·AG/replication log reuse 대기 / 샘플 내부 log record·LSN 기반 형식

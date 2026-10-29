@@ -1,0 +1,84 @@
+product: hpux
+layer: os
+title: hpux 로그 종류 카탈로그 (GPT 수집 — 벤더 문서 대조 필요)
+source: GPT 수집(벤더 문서 대조 필요)
+sources: []
+logtypes:
+- name: 시스템 로그
+  path: /var/adm/syslog/syslog.log · OLDsyslog.log
+  format: '텍스트·RFC3164 (vmunix: 커널 메시지)'
+  check: 'vmunix: LVM·SCSI·LAN 오류·panic·Deferred swap reservation failure'
+  sample: 'Sep  9 14:02:11 db1 vmunix: LVM: VG 64 0x010000: PVLink 31 0x000006 Failed! The PV is not accessible.'
+- name: EMS 이벤트
+  path: /var/opt/resmon/log/event.log (HP EMS Hardware Monitors User Guide 기본 TEXTLOG)
+  format: 텍스트
+  check: 하드웨어 결함 경보(디스크·메모리·CPU·온도)·심각도
+  sample: '>------------ Event Monitoring Service Event Notification ------------< ... Severity: CRITICAL'
+- name: su·로그인
+  path: /var/adm/sulog · /var/adm/btmp(lastb) · /var/adm/wtmp(last)
+  format: 텍스트/바이너리
+  check: 권한 상승 실패·반복 로그인 실패·재부팅 이력
+  sample: SU 09/09 14:00 - pts/1 oper-root
+- name: 감사(audit)
+  path: /.secure/etc/audfile1 → audisp
+  format: 바이너리(audisp로 텍스트)
+  check: login 실패·권한 사용
+  sample: audisp -u root ... login fail
+- name: 크래시 덤프
+  path: /var/adm/crash/crash.N (savecrash) · INDEX
+  format: 바이너리(q4/kwdb) + INDEX 텍스트
+  check: panic 원인·덤프 상태
+  sample: 'panic: Data page fault'
+- name: Serviceguard 로그
+  path: /var/adm/cmcluster/log/cmcld.log · 패키지 로그 /etc/cmcluster/<pkg>/<pkg>.log · syslog.log
+  format: 텍스트
+  check: 노드 timeout·패키지 실패/halt·cmcld 메시지
+  sample: 'Sep  9 14:02:11 db1 cmcld[1234]: Package pkg_db failed on node db1'
+- name: STM 진단
+  path: /var/stm/logs/os/ · cstm/mstm 로그
+  format: 텍스트
+  check: 하드웨어 진단 결과·오류 카운트
+  sample: Log Tool ... Error Detected
+- name: 성능 이력
+  path: /var/opt/perf/datafiles/logglob (extract/utility) · sar /var/adm/sa
+  format: 바이너리
+  check: 장애 시각 CPU·메모리·디스크 큐
+  sample: 14:00 GBL_CPU_TOTAL_UTIL 95.3
+- name: 부팅·설치 로그
+  path: /var/adm/sw/swinstall.log · swagent.log · /etc/rc.log
+  format: 텍스트
+  check: 패치 설치 실패·rc 스크립트 실패
+  sample: 'ERROR:   The software "PHKL_12345" ... failed'
+- name: NFS·네트워크
+  path: syslog.log(nfs·lan) · nettl -log
+  format: 텍스트/바이너리(nettl)
+  check: NFS server not responding·LAN 링크 다운·nettl 네트워크 트레이스
+  sample: 'Sep  9 14:02:11 db1 vmunix: NFS server nas1 not responding still trying'
+sections:
+- heading: 로그 종류 카탈로그 (전수)
+  body: '시스템 로그: /var/adm/syslog/syslog.log · OLDsyslog.log · EMS 이벤트: /var/opt/resmon/log/event.log (HP EMS Hardware Monitors User Guide 기본 TEXTLOG) · su·로그인: /var/adm/sulog · /var/adm/btmp(lastb) · /var/adm/wtmp(last) · 감사(audit):
+    /.secure/etc/audfile1 → audisp · 크래시 덤프: /var/adm/crash/crash.N (savecrash) · INDEX · Serviceguard 로그: /var/adm/cmcluster/log/cmcld.log · 패키지 로그 /etc/cmcluster/<pkg>/<pkg>.log · syslog.log · STM 진단:
+    /var/stm/logs/os/ · cstm/mstm 로그 · 성능 이력: /var/opt/perf/datafiles/logglob (extract/utility) · sar /var/adm/sa · 부팅·설치 로그: /var/adm/sw/swinstall.log · swagent.log · /etc/rc.log · NFS·네트워크: syslog.log(nfs·lan)
+    · nettl -log'
+- heading: '로그: 시스템 로그'
+  body: '경로 /var/adm/syslog/syslog.log · OLDsyslog.log / 형식 텍스트·RFC3164 (vmunix: 커널 메시지) / 확인 vmunix: LVM·SCSI·LAN 오류·panic·Deferred swap reservation failure / 샘플 Sep  9 14:02:11 db1 vmunix: LVM: VG 64
+    0x010000: PVLink 31 0x000006 Failed! The PV is not accessible.'
+- heading: '로그: EMS 이벤트'
+  body: '경로 /var/opt/resmon/log/event.log (HP EMS Hardware Monitors User Guide 기본 TEXTLOG) / 형식 텍스트 / 확인 하드웨어 결함 경보(디스크·메모리·CPU·온도)·심각도 / 샘플 >------------ Event Monitoring Service Event Notification ------------< ... Severity: CRITICAL'
+- heading: '로그: su·로그인'
+  body: 경로 /var/adm/sulog · /var/adm/btmp(lastb) · /var/adm/wtmp(last) / 형식 텍스트/바이너리 / 확인 권한 상승 실패·반복 로그인 실패·재부팅 이력 / 샘플 SU 09/09 14:00 - pts/1 oper-root
+- heading: '로그: 감사(audit)'
+  body: 경로 /.secure/etc/audfile1 → audisp / 형식 바이너리(audisp로 텍스트) / 확인 login 실패·권한 사용 / 샘플 audisp -u root ... login fail
+- heading: '로그: 크래시 덤프'
+  body: '경로 /var/adm/crash/crash.N (savecrash) · INDEX / 형식 바이너리(q4/kwdb) + INDEX 텍스트 / 확인 panic 원인·덤프 상태 / 샘플 panic: Data page fault'
+- heading: '로그: Serviceguard 로그'
+  body: '경로 /var/adm/cmcluster/log/cmcld.log · 패키지 로그 /etc/cmcluster/<pkg>/<pkg>.log · syslog.log / 형식 텍스트 / 확인 노드 timeout·패키지 실패/halt·cmcld 메시지 / 샘플 Sep  9 14:02:11 db1 cmcld[1234]: Package pkg_db failed
+    on node db1'
+- heading: '로그: STM 진단'
+  body: 경로 /var/stm/logs/os/ · cstm/mstm 로그 / 형식 텍스트 / 확인 하드웨어 진단 결과·오류 카운트 / 샘플 Log Tool ... Error Detected
+- heading: '로그: 성능 이력'
+  body: 경로 /var/opt/perf/datafiles/logglob (extract/utility) · sar /var/adm/sa / 형식 바이너리 / 확인 장애 시각 CPU·메모리·디스크 큐 / 샘플 14:00 GBL_CPU_TOTAL_UTIL 95.3
+- heading: '로그: 부팅·설치 로그'
+  body: '경로 /var/adm/sw/swinstall.log · swagent.log · /etc/rc.log / 형식 텍스트 / 확인 패치 설치 실패·rc 스크립트 실패 / 샘플 ERROR:   The software "PHKL_12345" ... failed'
+- heading: '로그: NFS·네트워크'
+  body: '경로 syslog.log(nfs·lan) · nettl -log / 형식 텍스트/바이너리(nettl) / 확인 NFS server not responding·LAN 링크 다운·nettl 네트워크 트레이스 / 샘플 Sep  9 14:02:11 db1 vmunix: NFS server nas1 not responding still trying'

@@ -1,0 +1,348 @@
+# 근거 매뉴얼·작성 기준 (r7 · 2026-10-16 · 7차 연결 감사 — OS '이 판정 전용' 연결 중 제목 핵심어 0 건 검토)
+# - 대상: 검증도구\kw7\E_os.json 31건. 기존 전용 절차가 그 판정의 원인·조치에 실제로 맞는 것은 r7_os_proclinks.yaml 에
+#   fit_reviewed(맞음) 또는 primary(더 맞는 기존 절차)로 남기고, 맞는 절차가 없던 6건만 여기 전용 절차로 만들었다.
+# - Linux: 커널 문서 'Softlockup detector and hardlockup detector (aka nmi_watchdog)'·'Documentation for /proc/sys/kernel'
+#   (watchdog_thresh·hardlockup_panic·hung_task_timeout_secs)·'Linux Magic System Request Key Hacks'(sysrq w · /proc/sysrq-trigger),
+#   RHEL 8/9 'Managing, monitoring and updating the kernel'(kdump·crash), sudo(8)·sudoers(5)·visudo(8)·usermod(8)·ps(1)·iostat(1)·nfsstat(8)
+# - Windows: Microsoft Learn — Get-WinEvent, Storage 모듈(Get-Disk·Set-Disk·Get-PhysicalDisk), iSCSI 모듈(Get-IscsiSession·Get-IscsiTarget·
+#   Connect-IscsiTarget·Disconnect-IscsiTarget), mpclaim, chkdsk /scan, KB 822705(이벤트 9·11·15 는 하드웨어 문제 신호)
+# - AIX: IBM AIX 7.x 문서 — errpt, lparstat -i, prtconf, oslevel, lspath · HMC 프로세서 호환 모드(메뉴·CLI 이름은 미검증으로 표시)
+# - Solaris: Oracle Solaris 10/11 관리 문서 — SMF(svcs -xv·svcs -l·svcadm clear·svccfg export), swap, coreadm, pstack·pldd(proc(1)),
+#   DTrace proc 공급자(signal-send)
+# - 작성 기준: 검증도구\knowledge_spec.md 5차 — 1차 읽기 전용, 2차 사전조건·영향·승인·백업/롤백 + 성공/실패, 3차 민감정보 마스킹·전달 승인.
+#   명령 옵션은 코드 항목(errorcodes)에 이미 있는 것과 위 문서에서 확인된 것만 쓰고, 확인 못 한 것은 note 에 '미검증 —' 으로 적었다.
+procedures:
+# ── Linux ──
+- id: LNX-PROC-R7-HARDLOCKUP
+  scope: id
+  products: [linux]
+  category: thread
+  match: [LNX-NMI-WATCHDOG]
+  title: 하드 락업 — NMI 워치독 hard LOCKUP 감지 (Linux)
+  source: "커널 문서 'Softlockup detector and hardlockup detector (aka nmi_watchdog)'·'Documentation for /proc/sys/kernel'(nmi_watchdog·watchdog_thresh·hardlockup_panic), RHEL 8/9 'Managing, monitoring and updating the kernel'(kdump·crash), ipmitool(1)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 하드 락업 CPU·스택 확보 (읽기 전용)
+      cmd: |
+        journalctl -k -b -1 --no-pager | grep -iE -A 30 "hard LOCKUP" | head -60
+        journalctl -k --since "-2 hours" --no-pager | grep -iE -A 30 "hard LOCKUP" | head -60
+        grep -i -A 30 "LOCKUP" /var/log/messages | head -60
+      check: "'Watchdog detected hard LOCKUP on cpu N' 의 CPU 번호와 뒤따르는 RIP·Call Trace(모듈명) 기록 — 같은 모듈·함수가 반복되면 드라이버 원인, 스택 없이 재부팅만 남았으면 하드웨어·펌웨어 의심 · 정상: hard LOCKUP 기록 없음"
+      note: "적용: -b -1(직전 부팅)은 persistent journal(/var/log/journal)이 있을 때만, journalctl 은 RHEL 7+ · RHEL 6 은 /var/log/messages 줄만 · 권한: root"
+    - do: 덤프 확보 여부·워치독 설정 확인 (읽기 전용)
+      cmd: |
+        ls -lt /var/crash | head
+        systemctl status kdump --no-pager | head -10
+        sysctl -a 2>/dev/null | grep -E "nmi_watchdog|watchdog_thresh|lockup_panic"
+      check: "/var/crash 에 락업 시각의 디렉터리(vmcore·vmcore-dmesg.txt)가 있으면 원인 분석 가능, kdump 가 active 가 아니면 다음 발생 때 자료 없음(2차에서 활성화) · hardlockup_panic = 1 이면 락업 즉시 패닉·재부팅되는 설정"
+      note: "적용: systemctl 은 RHEL 7+ (RHEL 6 은 service kdump status) · 가상 머신은 nmi_watchdog 이 0(비활성)인 경우가 많아 이 판정이 드묾 · 권한: root"
+    - do: 같은 시각 하드웨어 이벤트 대조 (읽기 전용)
+      cmd: |
+        ipmitool sel elist 2>/dev/null | tail -20
+        journalctl -k --since "-1 day" --no-pager | grep -iE "mce|EDAC|Hardware Error" | tail -20
+      check: "같은 시각 BMC(iLO/iDRAC) SEL 에 CPU·메모리·PCIe 오류가 있거나 MCE·EDAC 기록이 있으면 하드웨어 결함 — 서버 벤더 의뢰(3차) · 정상: 하드웨어 이벤트 없음"
+      note: "적용: ipmitool 은 ipmi 드라이버·패키지가 있을 때만(없으면 BMC 웹 화면의 이벤트 로그로 대조) · 권한: root"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) vmcore 로 락업 CPU 스택·원인 모듈 식별
+      cmd: |
+        crash /usr/lib/debug/lib/modules/<커널버전>/vmlinux /var/crash/<디렉터리>/vmcore
+        # crash 프롬프트: bt -a → mod → log | tail -100 → quit
+      check: "성공: 락업 CPU 의 bt 에서 반복 함수·모듈을 식별해 갱신 대상(드라이버·펌웨어) 확정 · 실패: debuginfo 버전 불일치·vmcore 손상 → vmcore 를 벤더(3차)에 전달"
+      note: "사전조건: vmcore 를 만든 커널과 같은 판의 kernel-debuginfo 설치 승인, 가능하면 vmcore 를 분석용 서버로 복사해 운영 서버 부하 회피 · 영향: 분석은 운영 영향 없음(변경은 debuginfo 패키지 설치뿐) · 승인: 시스템 담당 · 백업/롤백: vmcore 원본 보존, debuginfo 패키지는 분석 후 제거(yum/dnf remove) · 적용: RHEL 7/8/9"
+    - do: (2차·승인 후) kdump 활성화 — 다음 락업 때 덤프 확보
+      cmd: |
+        cp -p /etc/kdump.conf /etc/kdump.conf.bak
+        grubby --update-kernel=ALL --args="crashkernel=auto"     # RHEL 7/8
+        kdumpctl reset-crashkernel --kernel=ALL                  # RHEL 9
+        systemctl enable --now kdump                             # 재부팅 후
+      check: "성공: 재부팅 후 kdumpctl status 'Kdump is operational'(RHEL 8+) 또는 systemctl is-active kdump = active, /proc/cmdline 에 crashkernel= 표시 · 실패: 'No memory reserved for crash kernel' → crashkernel 값·재부팅 여부 확인"
+      note: "사전조건: /var/crash 여유 공간(물리 메모리 크기를 기준으로 확보), 재부팅 일정 확보 · 영향: crashkernel 예약으로 사용 가능 메모리 감소(수백 MB), 반영에 재부팅 필요 · 승인: 시스템 담당(변경 관리)·서비스 담당(재부팅) · 백업/롤백: /etc/kdump.conf.bak 복원, grubby --update-kernel=ALL --remove-args=crashkernel 후 재부팅 · 적용: crashkernel=auto 는 RHEL 7/8, RHEL 9 는 kdumpctl reset-crashkernel"
+    - do: (2차·승인 후) 원인 드라이버·펌웨어·커널 갱신
+      cmd: |
+        rpm -q kernel ; uname -r
+        modinfo <module> | head
+        grubby --default-kernel
+      check: "성공: 갱신 후 hard LOCKUP 재발 없음 · 실패: 재발하고 SEL·MCE 하드웨어 이벤트가 동반되면 메인보드·CPU 교체 판단(서버 벤더)"
+      note: "사전조건: 벤더 지식베이스·서버 벤더 권고로 결함 모듈·BIOS/펌웨어 판 확인 · 영향: 커널·펌웨어 갱신은 재부팅 필요 · 승인: 시스템 담당·변경 관리 · 백업/롤백: 이전 커널을 grubby --set-default 로 기본 지정, 펌웨어는 벤더 롤백 절차"
+  - stage: 3
+    steps:
+    - do: 벤더(Red Hat·서버 제조사) 의뢰 자료
+      cmd: |
+        sos report --batch
+        ipmitool sel elist > sel_$(date +%Y%m%d).txt 2>/dev/null ; ls -l /var/crash/
+      check: "sosreport·vmcore-dmesg.txt·vmcore(별도 승인)·SEL·BIOS/펌웨어 판"
+      note: "RHEL 6/7 은 sosreport --batch · 민감정보 마스킹: 호스트명·IP·계정 가림, vmcore 는 메모리 전체(비밀번호·개인정보 가능)라 원본 전달은 별도 승인 · 전달 승인: 시스템 담당 확인 후 보안 담당 승인"
+
+- id: LNX-PROC-R7-HUNGTASK
+  scope: id
+  products: [linux]
+  category: thread
+  match: [LNX-HUNG-TASK]
+  title: 태스크 장시간 정지 — hung task(D 상태) 'blocked for more than N seconds' (Linux)
+  source: "커널 문서 'Documentation for /proc/sys/kernel'(hung_task_timeout_secs)·'Linux Magic System Request Key Hacks'(w — 차단 상태 태스크 출력, /proc/sysrq-trigger), ps(1)·iostat(1)·nfsstat(8) man 페이지(man7.org)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 정지 태스크·스택 확보 (읽기 전용)
+      cmd: |
+        journalctl -k --since "-2 hours" --no-pager | grep -iE -A 20 "blocked for more than" | tail -60
+        grep -A 20 "blocked for more than" /var/log/messages | tail -60
+      check: "태스크 이름·PID·스택 상위 함수 기록 — xfs_·ext4_·jbd2 는 파일시스템·저널 대기, nfs_·rpc_ 는 NFS, io_schedule·blk_ 는 블록 I/O 대기 · 정상: 기록 없음"
+      note: "적용: journalctl 은 RHEL 7+, /var/log/messages 는 RHEL 6 · 권한: root"
+    - do: 현재 D 상태 프로세스·대기 함수 확인 (읽기 전용)
+      cmd: |
+        ps -eo pid,stat,wchan:32,comm | awk '$2 ~ /^D/' | head -20
+        cat /proc/<PID>/stack 2>/dev/null | head -20
+      check: "수 분 간격 두 번 조회해 같은 PID 가 D 상태로 남아 있으면 진행 중 — wchan·stack 이 같은 함수로 몰리면 같은 자원(장치·NFS·잠금) 대기 · 정상: D 상태 없음 또는 순간적"
+      note: "적용: RHEL 6~9 · 권한: /proc/<PID>/stack 은 root · D 상태 프로세스는 신호로 끝나지 않으므로 종료 시도는 하지 않는다"
+    - do: 스토리지·NFS 응답 확인 (읽기 전용)
+      cmd: |
+        iostat -xz 1 3
+        grep nfs /proc/mounts
+        nfsstat -rc
+      check: "await 가 평소의 수 배이거나 %util 이 100% 에 가까운 장치가 있으면 스토리지 지연, NFS retrans 증가·'server not responding' 기록이면 NFS 서버 경로(LNX-PROC-R5-UPSTREAM) · 정상: await 정상 범위, retrans 증가 없음"
+      note: "적용: iostat 은 sysstat 패키지 · 멈춘 NFS 마운트 경로에 df·ls 를 실행하지 말 것(그 셸도 D 상태로 멈춤) · 권한: 일반 사용자 가능"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 차단 상태 태스크 전체 스택을 커널 로그로 수집 (sysrq w)
+      cmd: |
+        echo w > /proc/sysrq-trigger
+        journalctl -k --since "-5 min" --no-pager | tail -200
+      check: "성공: 커널 로그에 'Show Blocked State' 와 D 상태 태스크 전부의 스택이 출력됨 → 공통 대기 함수로 원인 자원 확정 · 실패: 출력 없음 → dmesg | tail -200 으로 다시 확인, 그래도 없으면 3차 자료로 sosreport"
+      note: "사전조건: 보안 정책상 sysrq 사용 허용 확인, 태스크가 많으면 로그가 수백 줄 늘어나므로 /var/log 여유 확인 · 영향: 커널 로그 출력만 하고 프로세스·자료·설정은 바꾸지 않음(/proc/sys/kernel/sysrq 값은 키보드 입력에만 적용되어 /proc/sysrq-trigger 는 root 로 항상 동작) · 승인: 시스템 담당 · 백업/롤백: 바꾸는 설정이 없어 롤백 불필요"
+    - do: (2차·승인 후) 원인 I/O 경로 복구 — 스토리지·NFS 담당 협업
+      cmd: |
+        multipath -ll 2>/dev/null | head -40
+        systemctl restart <service>     # 경로 복구 후에도 응답하지 않는 서비스만
+      check: "성공: 경로 복구 뒤 D 상태가 스스로 풀리고 'blocked for more than' 재발 없음 · 실패: 복구 뒤에도 같은 PID 가 D 상태로 남으면 신호로 끝낼 수 없으므로 재부팅 일정 협의"
+      note: "사전조건: 1차에서 대기 자원(장치·NFS 서버) 확정, 스토리지·NFS 담당이 원인 해소 확인(경로 격리는 LNX-PROC-HARDWARE 2차) · 영향: 서비스 재기동 동안 중단 · 승인: 서비스 담당·시스템 담당 · 백업/롤백: 설정 변경 없음 — 재기동 전 서비스 로그·상태(systemctl status) 보관"
+  - stage: 3
+    steps:
+    - do: 벤더(Red Hat·스토리지 제조사) 의뢰 자료
+      cmd: |
+        sos report --batch
+        journalctl -k --since "-1 day" --no-pager > kernel_$(date +%Y%m%d).log
+        iostat -xz 5 12 > iostat_$(date +%Y%m%d).txt
+      check: "sosreport·hung task 스택이 담긴 커널 로그·iostat·NFS 사용 시 nfsstat 출력"
+      note: "RHEL 6/7 은 sosreport --batch · 민감정보 마스킹: 호스트명·IP·계정·NFS 서버 주소·업무 경로 가림 후 전달 · 전달 승인: 시스템 담당 확인 후 보안 담당 승인"
+
+- id: LNX-PROC-R7-SUDO
+  scope: id
+  products: [linux]
+  category: security
+  match: [LNX-SUDO-FAIL]
+  title: sudo 실패 — 비밀번호 오류·sudoers 권한 없음·허용 안 된 명령 (Linux)
+  source: "sudo(8)·sudoers(5)·visudo(8)·usermod(8)·chage(1)·last(1) 매뉴얼 페이지, RHEL 7~9 시스템 관리 문서의 sudo 권한 관리 절"
+  stages:
+  - stage: 1
+    steps:
+    - do: sudo 실패 기록·계정·시도 명령 확인 (읽기 전용)
+      cmd: |
+        grep -E "sudo.*(incorrect password|NOT in sudoers|command not allowed)" /var/log/secure | tail -30
+        grep -E "sudo.*(incorrect password|NOT in sudoers|command not allowed)" /var/log/auth.log | tail -30
+        journalctl _COMM=sudo --since "-1 day" --no-pager | tail -30
+      check: "계정·TTY·PWD·COMMAND 기록 — 'incorrect password attempts' 는 비밀번호 오입력, 'NOT in sudoers' 는 권한 없음, 'command not allowed' 는 허용 범위 밖 명령 · 한 계정이 여러 명령을 반복 시도하거나 평소 쓰지 않는 계정이면 보안 담당 통보 · 정상: 소수의 오입력"
+      note: "적용: /var/log/secure 는 RHEL·CentOS, /var/log/auth.log 는 Ubuntu, journalctl 은 RHEL 7+ · 권한: root · 출력에 계정·명령이 보이므로 결과 공유는 보안 담당 범위로 제한"
+    - do: 해당 계정 허용 범위·접속 출처 확인 (읽기 전용)
+      cmd: |
+        sudo -l -U <user>
+        last -n 20 <user>
+        who
+      check: "sudo -l -U 목록에 시도한 명령이 없으면 권한 밖 시도 — 업무상 필요한지 요청자에게 확인 · last 의 접속 출처·시각이 평소와 다르면 계정 탈취 의심(보안 담당 즉시 통보)"
+      note: "적용: RHEL 6~9·Ubuntu · 권한: root 로 실행(-U 는 다른 사용자 조회, 설정은 바꾸지 않음)"
+    - do: sudoers 문법·해당 계정 규칙 확인 (읽기 전용)
+      cmd: |
+        visudo -c
+        ls -l /etc/sudoers.d/
+        grep -rn "<user>" /etc/sudoers /etc/sudoers.d/ 2>/dev/null
+      check: "visudo -c 결과가 parsed OK 가 아니면 문법 오류로 sudo 전체가 실패할 수 있음(2차 긴급) · 해당 계정·소속 그룹 줄이 없으면 'NOT in sudoers' 원인 확정"
+      note: "visudo -c 는 검사만 하고 파일을 바꾸지 않음 · 그룹 규칙(%그룹)은 id <user> 로 소속 그룹을 보고 함께 확인 · 권한: root"
+  - stage: 2
+    steps:
+    - do: (2차·보안 담당 승인 후) 정당한 요청이면 최소 권한 추가
+      cmd: |
+        cp -p /etc/sudoers.d/<파일> /var/tmp/<파일>.before 2>/dev/null
+        visudo -f /etc/sudoers.d/<파일>
+        visudo -c
+      check: "성공: visudo -c parsed OK, sudo -l -U <user> 에 추가한 명령만 표시, 해당 사용자 sudo 성공 · 실패: 문법 오류면 visudo 가 저장 전에 알림 — 이미 저장됐다면 즉시 백업본 복원"
+      note: "사전조건: 업무 요청서·승인 확인, 명령은 전체 경로로 최소 범위(ALL 부여 금지) · 영향: 해당 계정의 root 권한 범위 확대 · 승인: 보안 담당·시스템 담당 · 백업/롤백: /var/tmp/<파일>.before 로 복원(새 파일이었으면 그 파일 제거) 후 visudo -c"
+    - do: (2차·보안 담당 승인 후) 비인가 시도면 계정 잠금
+      cmd: |
+        chage -l <user> > /var/tmp/chage_<user>_before.txt
+        usermod -L -e 1 <user>
+        passwd -S <user>
+      check: "성공: passwd -S 에 잠김(LK 또는 L) 표시, chage -l 에 계정 만료 표시, 해당 계정 로그인 불가 · 실패: 해당 계정으로 도는 배치·서비스가 멈췄다는 신고 → 보안 담당과 범위 재협의"
+      note: "사전조건: 보안 담당이 비인가 판정, 그 계정으로 도는 배치·서비스 확인(잠그면 함께 멈춤) · 영향: 계정 사용 불가 — -L 만으로는 SSH 키 로그인이 막히지 않아 -e 1(만료)을 함께 씀 · 승인: 보안 담당 · 백업/롤백: 보관한 chage -l 결과의 원래 만료일로 usermod -U -e <원래 만료일> <user>(만료일이 없었으면 -e 에 빈 값)"
+  - stage: 3
+    steps:
+    - do: 보안 담당·벤더 전달 자료
+      cmd: |
+        grep sudo /var/log/secure > sudo_$(date +%Y%m%d).txt
+        last -F -n 50 > last_$(date +%Y%m%d).txt
+      check: "sudo 실패 기록·로그인 이력·해당 계정 sudo -l 결과"
+      note: "Ubuntu 는 /var/log/auth.log · 민감정보 마스킹: 계정·호스트명·접속 IP·명령줄 인자(업무 경로·값) 가림 · 전달 승인: 보안 담당(침해 의심 건은 보안 담당이 직접 전달)"
+
+# ── Windows ──
+- id: WIN-PROC-R7-DISK-NOTREADY
+  scope: id
+  products: [windows]
+  category: disk
+  match: ['15']
+  title: 디스크 장치 준비 안됨 (Disk 15) — SAN·iSCSI 경로 끊김·LUN 미응답 (Windows Server)
+  source: "Microsoft Learn — Get-WinEvent, Storage 모듈(Get-Disk·Set-Disk·Get-PhysicalDisk), iSCSI 모듈(Get-IscsiSession·Get-IscsiTarget·Connect-IscsiTarget), mpclaim, chkdsk · KB 822705(이벤트 9·11·15 는 하드웨어 문제 신호)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 이벤트 15 대상 장치·시각과 동반 이벤트 확인 (읽기 전용)
+      cmd: |
+        Get-WinEvent -FilterHashtable @{LogName="System"; Id=15; StartTime=(Get-Date).AddHours(-24)} -MaxEvents 20 -ErrorAction SilentlyContinue | Format-List TimeCreated,ProviderName,Message
+        Get-WinEvent -FilterHashtable @{LogName="System"; Id=9,11,129,153; StartTime=(Get-Date).AddHours(-24)} -ErrorAction SilentlyContinue | Sort-Object TimeCreated | Format-Table TimeCreated,Id,ProviderName -AutoSize
+      check: "메시지의 HarddiskN 번호(N)와 시각 기록 — 같은 시각 9·11·129·153 이 함께 반복되면 저장 경로·장치 하드웨어 문제, 부팅 직후 한두 번만 있고 이후 없으면 장치 기동 지연 · 정상: 최근 24시간 15 없음"
+      note: "적용: Windows Server 2008 R2+ (Get-WinEvent) · 권한: 관리자 또는 Event Log Readers 그룹 · 미검증 — 이벤트 15 본문 정의는 Microsoft Learn 에 단독 문서가 없음(코드 항목 verify_note 와 같음)"
+    - do: 디스크 온라인·상태 확인 (읽기 전용)
+      cmd: |
+        Get-Disk | Format-Table Number,FriendlyName,OperationalStatus,HealthStatus,IsOffline,IsReadOnly -AutoSize
+        Get-PhysicalDisk | Format-Table FriendlyName,BusType,HealthStatus,OperationalStatus -AutoSize
+      check: "이벤트의 HarddiskN 과 같은 Number 디스크가 Offline·IsOffline True 이거나 HealthStatus 가 Healthy 가 아니면 영향 확정 · 정상: Online·Healthy"
+      note: "적용: Windows Server 2012+ (Storage 모듈) · 권한: 관리자"
+    - do: 저장 경로(iSCSI·MPIO) 연결 확인 (읽기 전용)
+      cmd: |
+        Get-IscsiSession -ErrorAction SilentlyContinue | Format-Table TargetNodeAddress,IsConnected,IsPersistent -AutoSize
+        Get-IscsiTarget -ErrorAction SilentlyContinue | Format-Table NodeAddress,IsConnected -AutoSize
+        mpclaim -s -d
+      check: "IsConnected False 인 대상이 있거나 mpclaim 경로 수가 설계보다 적으면 경로 장애 — 스토리지·SAN 담당에 대상 포트·LUN 상태 확인 요청 · 정상: 모든 세션 연결, 경로 수가 설계와 같음"
+      note: "적용: iSCSI 모듈은 2012+(iSCSI 를 쓰지 않으면 출력 없음), mpclaim 은 MPIO 기능 설치 시 · 권한: 관리자"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 경로 복구 뒤 iSCSI 재연결·디스크 온라인
+      cmd: |
+        Get-IscsiSession | Format-List | Out-File C:\temp\iscsi_before_<날짜>.txt
+        Get-Disk | Format-List | Out-File C:\temp\disk_before_<날짜>.txt
+        Connect-IscsiTarget -NodeAddress <IQN> -IsPersistent $true
+        Set-Disk -Number <N> -IsOffline $false
+      check: "성공: Get-IscsiSession IsConnected True, Get-Disk 의 해당 디스크 Online, 이벤트 15 재발 없음 · 실패: 연결 실패·다시 Offline → 대상 포트·네트워크 경로를 스토리지 담당과 재확인 후 3차"
+      note: "사전조건: 스토리지·SAN 담당이 대상 포트·LUN 매핑 복구 확인, CHAP 을 쓰는 대상은 비밀값을 명령행에 쓰지 말고 iSCSI 초기자 화면에서 연결, 장애 조치 클러스터 디스크는 Set-Disk 대신 장애 조치 클러스터 관리자에서만 온라인 전환 · 영향: 디스크가 온라인되면 응용이 다시 접근(드라이브 문자 확인) · 승인: 시스템 담당·스토리지 담당 · 백업/롤백: 실행 전 상태를 C:\temp 에 보관, 원복은 Set-Disk -Number <N> -IsOffline $true · Disconnect-IscsiTarget -NodeAddress <IQN> · 적용: Windows Server 2012+"
+    - do: (2차·승인 후) 디스크 복귀 뒤 파일시스템 온라인 검사
+      cmd: |
+        chkdsk <드라이브>: /scan
+      check: "성공: 오류 없음(종료 코드 0) · 실패: 손상 발견 → NTFS 복구 절차(WIN-PROC-R5-STORAGE 2차의 /spotfix·/f)로 작업 창을 잡아 진행"
+      note: "사전조건: 경로 안정(이벤트 15·129 재발 없음) 확인 · 영향: /scan 은 온라인 검사로 I/O 부하만 있음(볼륨 잠금 없음) · 승인: 시스템 담당 · 백업/롤백: 검사만 하므로 롤백 불필요 — 복구(/spotfix·/f) 전에는 백업 확인 · 적용: /scan 은 Windows Server 2012+ NTFS"
+  - stage: 3
+    steps:
+    - do: Microsoft·스토리지 벤더 의뢰 자료
+      cmd: |
+        wevtutil epl System C:\temp\System_<날짜>.evtx
+        mpclaim -s -d > C:\temp\mpclaim_<날짜>.txt
+        msinfo32 /report C:\temp\msinfo_<날짜>.txt
+      check: "System 이벤트(evtx)·MPIO 경로·iSCSI 세션 상태·시스템 정보·스토리지 배열 로그(스토리지 담당)"
+      note: "민감정보 마스킹: 서버명·IP·IQN·도메인 계정 가림 후 전달 · 전달 승인: 시스템 담당 확인 후 보안 담당 승인 · C:\temp 가 없으면 먼저 생성"
+
+# ── AIX ──
+- id: AIX-PROC-R7-NPIVMQ-COMPAT
+  scope: id
+  products: [aix]
+  category: internal
+  match: [4E8BE8F9]
+  title: NPIV 멀티큐 미지원 — 프로세서 호환모드가 낮아 다중 큐 미사용 (AIX)
+  source: "IBM AIX 7.x 문서 — Error logging(errpt), lparstat -i, prtconf, oslevel, lspath · IBM Power HMC 프로세서 호환 모드(Processor compatibility mode) · IBM APAR IJ30734(코드 항목 근거)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 오류 상세·대상 가상 FC 어댑터 확인 (읽기 전용)
+      cmd: |
+        errpt -a -j 4E8BE8F9 | head -40
+        oslevel -s
+        lsdev -Cc adapter | grep fcs
+      check: "Description·대상 가상 FC 어댑터(fcs)·시각과 AIX TL·SP 를 기록해 IBM APAR IJ30734 적용 수준과 대조 · 다중 큐 기능만 쓰이지 않는다는 정보성 오류 — 경로가 정상이면 I/O 는 계속됨"
+      note: "적용: AIX 7.2·7.3 NPIV 클라이언트 · 권한: 일반 사용자 조회 가능"
+    - do: 프로세서 종류·현재 호환 모드 확인 (읽기 전용)
+      cmd: |
+        lparstat -i | head -30
+        prtconf | grep -i -E "Processor (Type|Implementation Mode)"
+      check: "Processor Implementation Mode 가 POWER9 미만(예 POWER8)이면 오류 문구와 일치 → 호환 모드 원인 확정 · Processor Type 은 POWER9 이상인데 모드만 낮으면 HMC 프로필 설정 차이(조정은 2차)"
+      note: "적용: AIX 7.2~7.3 · 권한: 일반 사용자 가능 · 미검증 — NPIV 다중 큐가 요구하는 최소 호환 모드(코드 항목은 POWER9 이상)를 IBM 원문 표로 대조하지 못함"
+    - do: 경로 이상 동반 여부 확인 (읽기 전용)
+      cmd: |
+        lspath | grep -v Enabled
+        errpt | head -20
+      check: "모든 경로 Enabled 이고 다른 FC 오류가 없으면 업무 영향 없음 — 계획 작업으로 처리 · Failed 경로나 FCP_ERR·VFC 오류가 함께 있으면 SAN 경로 절차(AIX-PROC-R6-SANPATH)를 먼저"
+      note: "적용: AIX 6.1~7.3 MPIO · 권한: 일반 사용자 조회 가능"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후, 계획 정지 창) HMC 에서 LPAR 프로세서 호환 모드 상향
+      cmd: |
+        lparstat -i > /tmp/lparstat_before_$(date +%Y%m%d).txt
+        # HMC: 해당 파티션 프로필 → 프로세서 → 프로세서 호환 모드를 POWER9 이상으로 변경 → 파티션 종료 후 그 프로필로 다시 활성화
+      check: "성공: 재활성화 뒤 prtconf 의 Processor Implementation Mode 가 새 모드, errpt 에 4E8BE8F9 재발 없음 · 실패: 파티션이 새 모드로 기동하지 않거나 LPM 대상 서버가 그 모드를 지원하지 않음 → 이전 모드로 되돌려 재활성화"
+      note: "사전조건: 같은 LPM(파티션 이동) 대상 서버가 모두 그 모드를 지원하는지, AIX TL·VIOS·펌웨어가 다중 큐 요구 수준인지(AIX-PROC-R6-VFCMQ 1차) 확인, mksysb 최신 · 영향: 호환 모드 변경은 파티션 종료·재활성화가 필요해 업무 중단, 낮은 세대 서버로 LPM 불가 · 승인: 시스템 담당·업무 담당(변경 관리) · 백업/롤백: 변경 전 lparstat -i 와 HMC 프로필 값 기록, 원복은 HMC 에서 이전 모드로 되돌린 뒤 재활성화 · 미검증 — HMC 메뉴 이름과 CLI(chsyscfg) 속성 이름은 HMC 판마다 달라 IBM 원문으로 대조하지 못함(IBM 지원 안내대로)"
+  - stage: 3
+    steps:
+    - do: IBM 지원 의뢰 자료
+      cmd: |
+        snap -gc
+        errpt -a -j 4E8BE8F9 > errpt_4E8BE8F9_$(date +%Y%m%d).txt ; lparstat -i > lparstat_$(date +%Y%m%d).txt
+      check: "클라이언트 snap·errpt 상세·lparstat -i·HMC 의 파티션 호환 모드 화면·VIOS ioslevel"
+      note: "민감정보 마스킹: 호스트명·IP·사용자 계정을 가린 뒤 전달(시스템 시리얼·WWPN 은 분석에 필요해 유지하되 반출 범위는 보안 담당과 협의) · 전달 승인: 시스템 담당 확인 후 보안 담당 승인"
+
+# ── Solaris ──
+- id: SOL-PROC-R7-PROCKILL
+  scope: id
+  products: [solaris]
+  category: internal
+  match: [SOL-PROCESS-KILLED]
+  title: 프로세스 강제 종료 — 신호 종료 원인(운영자·SMF·스왑 부족·자체 abort) 추적 (Solaris)
+  source: "Oracle Solaris 10/11 관리 문서 — SMF(svcs -xv·svcs -l·svcadm clear·svccfg export), swap(1M), coreadm(1M), last(1), proc(1)(pstack·pldd), DTrace proc 공급자(signal-send)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 종료 기록과 같은 시각 자원 상태 확인 (읽기 전용)
+      cmd: |
+        grep -i -E "signal|core|exited" /var/adm/messages | tail -20
+        swap -s
+        coreadm
+      check: "종료된 프로세스 이름·신호 번호·시각 기록(9 = SIGKILL 외부 강제, 6 = SIGABRT 자체 abort, 11 = SIGSEGV 프로그램 결함) · swap -s 의 available 이 거의 0 이면 메모리 부족이 원인(SOL-PROC-R5-MEMORY) · coreadm 으로 코어 저장 위치 확인"
+      note: "적용: Solaris 10/11 · 권한: /var/adm/messages 는 root"
+    - do: SMF 관리 서비스 여부·서비스 로그 확인 (읽기 전용)
+      cmd: |
+        svcs -xv
+        svcs -l <FMRI>
+        tail -50 /var/svc/log/<서비스 로그>.log
+      check: "서비스 로그에 서비스 밖에서 받은 치명 신호(received fatal signal from outside the service)가 있으면 운영자·스크립트 신호, 코어 덤프(dumped core)면 프로세스 자체 결함 → 2차 코어 분석 · maintenance 면 재시작 한도 초과"
+      note: "적용: SMF 는 Solaris 10+ · 권한: 일반 사용자 조회 가능(로그는 root) · 미검증 — 서비스 로그의 종료 사유 문구(received fatal signal from outside the service·dumped core)를 Oracle 원문으로 대조하지 못함, 문구가 다르면 로그의 Stopping because 줄로 판단"
+    - do: 그 시각 운영자 접속·자동화 작업 대조 (읽기 전용)
+      cmd: |
+        last | head -20
+        tail -20 /var/adm/sulog
+        tail -50 /var/cron/log
+      check: "종료 시각에 접속·su 기록이 있으면 해당 운영자에게 작업 여부 확인, 같은 시각 cron 작업이 있으면 그 스크립트의 kill 사용 여부 확인 · 기록이 없으면 2차 신호 송신자 추적"
+      note: "적용: Solaris 10/11 · 권한: sulog 는 root · 출력에 계정이 보이므로 공유 범위 제한"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 재발 시 신호 송신자 추적 (DTrace)
+      cmd: |
+        dtrace -n 'proc:::signal-send { @[execname, args[2], stringof(args[1]->pr_fname)] = count(); }'
+      check: "성공: 종료가 재발한 뒤 Ctrl-C 로 멈추면 [보낸 프로세스·신호 번호·받은 프로세스] 집계가 출력되어 송신 주체 확정 · 실패: 권한 오류(비전역 zone 등) → 전역 zone 에서 root 로 실행"
+      note: "사전조건: 전역 zone 의 root(또는 dtrace_proc 권한), 재발 시간대를 알고 있을 때 · 영향: 신호를 보낼 때만 기록해 부하가 작음, 실행 중 터미널 점유 · 승인: 시스템 담당 · 백업/롤백: 바꾸는 설정이 없음 — Ctrl-C 로 끝내면 원상태"
+    - do: (2차·승인 후) 원인별 복구 — SMF 서비스 재개
+      cmd: |
+        svccfg export <FMRI> > <서비스>_$(date +%Y%m%d).xml
+        svcadm clear <FMRI>
+      check: "성공: svcs <FMRI> 가 online, 재발 없음 · 실패: 다시 maintenance → 서비스 로그의 원인 수정 후 재시도, 스왑 부족이 원인이면 SOL-PROC-R5-MEMORY 로 증설"
+      note: "사전조건: 외부 신호가 원인이면 송신 주체(운영자 작업·스크립트) 정정이 먼저 · 영향: 서비스 재기동 · 승인: 업무 담당·시스템 담당 · 백업/롤백: export 한 XML 로 svccfg import"
+    - do: (2차·승인 후) 코어 파일로 종료 지점 확인
+      cmd: |
+        pstack <core파일> | head -40
+        pldd <core파일>
+      check: "성공: 스택 최상위 함수·라이브러리로 결함 위치를 정해 애플리케이션 공급업체에 전달 · 실패: 코어가 잘려 있음 → coreadm 설정·프로젝트 자원 한도 확인"
+      note: "사전조건: 원본 코어를 옮기지 말고 복사본 사용, 코어 저장 파일시스템 여유 확인 · 영향: 분석만 하므로 운영 영향 없음 · 승인: 시스템 담당 · 백업/롤백: 원본 코어 보존, 바꾸는 설정 없음"
+  - stage: 3
+    steps:
+    - do: Oracle·애플리케이션 공급업체 의뢰 자료
+      cmd: |
+        cp /var/adm/messages messages_$(date +%Y%m%d).txt
+        svcs -xv > svcs_$(date +%Y%m%d).txt
+        tar -cvf core_$(date +%Y%m%d).tar <core파일>
+      check: "messages·svcs -xv·서비스 로그·코어(pstack·pldd 결과와 함께)·DTrace 집계"
+      note: "민감정보 마스킹: 호스트명·IP·계정 가림, 코어는 메모리 내용(비밀번호·개인정보 가능)이라 반출 심사 · 전달 승인: 보안 담당"

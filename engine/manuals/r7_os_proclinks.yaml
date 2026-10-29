@@ -1,0 +1,104 @@
+# 7차 연결 감사(2026-10-16) — OS 판정 31건(검증도구\kw7\E_os.json): '이 판정 전용'으로 이어져 있으나 판정 제목 핵심어가 절차에 하나도 없던 연결을 사람이 검토했다.
+#  (a) fit_reviewed: true — 절차의 1차 명령·2차 조치가 실제로 그 판정에 맞음(낱말만 다름). reviewed 에 근거.
+#  (b) primary: true      — 더 맞는 기존 절차를 1순위로(원래 절차는 2순위로 함께 보임). 제목 핵심어가 절차에 없는 것은 fit_reviewed 도 함께.
+#  (c) 맞는 절차가 없던 6건은 r7_os_procedures.yaml 의 전용 절차(scope: id)로 만들었다 — 여기에는 없다.
+#      LNX-NMI-WATCHDOG → LNX-PROC-R7-HARDLOCKUP · LNX-HUNG-TASK → LNX-PROC-R7-HUNGTASK · LNX-SUDO-FAIL → LNX-PROC-R7-SUDO
+#      15 → WIN-PROC-R7-DISK-NOTREADY · 4E8BE8F9 → AIX-PROC-R7-NPIVMQ-COMPAT · SOL-PROCESS-KILLED → SOL-PROC-R7-PROCKILL
+links:
+# ── (a) 맞음 확인 ──
+- procedure: AIX-PROC-R5-DISK
+  match: [AIX-ERRLOG-FULL]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — 오류 로그 가득참: 1차 3단계가 /usr/lib/errdemon -l·ls -l /var/adm/ras/errlog 로 로그 크기·폭주 항목을, 1단계 df -g 로 /var 공간을 보고, 2차 2단계가 errpt -a 보관 후 errdemon -s 로 크기 확대 — 코드의 즉시·단기 조치와 같음('에러 로그'를 절차는 '오류 로그'로 씀)"
+- procedure: AIX-PROC-R5-DISK
+  match: [AIX-TMP-FULL]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — /tmp 가득참: 1차 df -g·du -sm <mount>/*·find -xdev 큰 파일, 2차 fuser -cu·tar 보관 후 정리·chfs -a size=+<n>G 증설이 /tmp(hd3)에 그대로 맞음(<mount> 에 /tmp)"
+- procedure: HPUX-PROC-R5-INTERNAL
+  match: [HPUX-CRON-FAIL]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — 크론 작업 실패: 1차 2단계 tail -50 /var/adm/cron/log 의 rc 확인, 2차 2단계 su - <user> -c 로 스크립트 재시험(rc 0 판단)이 코드 조치와 같음(절차는 'cron' 으로 표기)"
+- procedure: SOL-PROC-R5-INTERNAL
+  match: [SOL-CRON-FAIL]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — 크론 작업 실패: 1차 1단계 tail -50 /var/cron/log 의 rc 확인과 svcs -xv(cron 서비스 svc:/system/cron 상태), 2차 svcadm clear 로 cron 서비스 maintenance 복구가 맞음 — 스크립트 자체 오류의 재현·PATH 수정은 코드 항목 단기 조치에 있음"
+- procedure: AIX-PROC-R5-INTERNAL
+  match: [AIX-KERNEL-PANIC]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — 커널 패닉: 1차 errpt 로 패닉 직전 오류(SYSDUMP·DUMP_STATS LABEL), sysdumpdev -L 로 덤프 저장 확인, 3차 snap -a·시스템 덤프(vmcore) IBM 전달이 코드 조치(덤프·snap -a 로 kdb 분석 의뢰)와 같음"
+- procedure: LNX-PROC-R5-INTERNAL
+  match: [LNX-GENERAL-PROTECTION]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — 일반 보호 오류: 1차 1단계가 journalctl -k 에서 'segfault|general protection|traps:' 를 직접 찾고 /var/crash vmcore 유무를 보며, 3차 sosreport·vmcore-dmesg 수집이 코드 조치(사용자/커널 구분·crash 분석)와 맞음"
+- procedure: LNX-PROC-CAPACITY
+  match: [LNX-TOO-MANY-OPEN-FILES]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — 파일디스크립터 고갈: 1차 /proc/sys/fs/file-nr·ulimit -n·/proc/<PID>/limits 'open files'·/proc/<PID>/fd 개수·'Too many open files' 커널 기록, 2차 fs.file-max·limits.d nofile·systemd LimitNOFILE 상향이 그대로 맞음"
+- procedure: LNX-PROC-HARDWARE
+  match: [LNX-BUFFER-IO]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — 블록 I/O 오류: 1차 커널 'I/O error' 기록·multipath -ll·lsblk·smartctl -H, 2차 실패 경로 격리(multipathd fail path), 3차 SMART·multipath 수집이 코드 조치와 같음"
+- procedure: WIN-PROC-R5-STORAGE
+  match: ['51']
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — 페이징 작업 중 오류(Disk 51): 1차 1단계 이벤트 목록에 51 이 있고 Disk 7/11·Storport 129·Disk 153 과의 시간순으로 매체/경로 원인을 가르며, 2단계 Get-PhysicalDisk·mpclaim 경로 확인, 2차 chkdsk·경로 복구가 코드 조치와 맞음(페이지 파일 위치 확인은 코드 즉시 조치)"
+- procedure: WIN-PROC-INTERNAL
+  match: ['1000']
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — 애플리케이션 오류(Application Error 1000): 1차 Application 로그 Id 1000·1001(실패 모듈·예외 코드)·서비스 상태, 2차 LocalDumps 크래시 덤프 설정이 코드 조치와 같음(절차 제목은 '응용 프로그램 크래시')"
+- procedure: WIN-PROC-R5-MEMORY
+  match: ['2004']
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — 저가상메모리 감지(Resource-Exhaustion-Detector 2004): 1차 Id 2004 이벤트·Committed Bytes/Commit Limit 90% 기준·상위 PagedMemorySize64 프로세스·Win32_PageFileUsage, 2차 누수 프로세스 재기동·페이지 파일 조정이 코드 조치와 같음"
+- procedure: AIX-PROC-R6-SANPATH
+  match: [A19337FA]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — SC_DISK_SDDAPPCM_ER 스토리지 서브시스템 장애: 1차 2단계 pcmpath query adapter/device 와 'A19337FA 는 경로가 아니라 스토리지 배열 내부 부품 문제 — 스토리지 담당 확인 요청' 판단 기준이 코드 조치와 같음"
+- procedure: AIX-PROC-R6-RESERVE
+  match: [65DE6DE3]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — 요청 작업 수행 불가(SC_DISK_ERR10): 1차 errpt -a -j 65DE6DE3 SENSE 0118(예약 충돌)·노드별 reserve_policy 비교·devrsrv, 2차 정책 통일이 이 판정만을 위한 절차로 그대로 맞음"
+- procedure: AIX-PROC-R5-CONNECTION
+  match: [EC0BCCD4]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — GOENT_LINK_DOWN 이더넷 링크 다운: 1차 1단계 netstat -in·entstat -d ent<N> 의 Link Status·Media Speed·오류 카운터와 errpt 확인이 코드 즉시 조치(entstat link status)와 같음"
+- procedure: SOL-PROC-HARDWARE
+  match: [PCIEX-8000-5Y]
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — PCIe 장치 잘못된 요청(FMA fault.io.pci.device-invreq): 1차 fmadm faulty·fmdump -eV·cfgadm -al, 2차 교체 후 fmadm repaired(10 은 fmadm repair), 3차 Explorer·fmdump·prtdiag 가 FMA 진단 결함 처리 그대로 맞음"
+# ── (b) 더 맞는 기존 절차를 1순위로 ──
+- procedure: LNX-PROC-R5-LOCK
+  match: [LNX-SOFT-LOCKUP]
+  primary: true
+  reviewed: "2026-10-16 7차 — CPU 소프트락업: 'soft lockup' 스택 확보·mpstat %steal·kernel.watchdog_thresh/softlockup_panic·kdump 상태(1차), softlockup_panic 분석용 설정·커널 갱신(2차)이 있는 소프트 락업 전용 절차가 1순위 — 하드웨어 일반 절차(LNX-PROC-HARDWARE)는 2순위"
+- procedure: LNX-PROC-R5-CONNECTION
+  match: [LNX-LINK-DOWN]
+  primary: true
+  reviewed: "2026-10-16 7차 — 네트워크 링크 다운: ip -s link·ethtool(Link detected)·ethtool -S 오류 카운터·'Link is Down' 커널 기록(1차), nmcli 연결 복구·케이블/스위치 포트 교체(2차)가 있는 NIC·본딩 절차가 1순위 — 디스크 경로 격리 위주의 LNX-PROC-HARDWARE 는 2순위"
+- procedure: WIN-PROC-R5-UPSTREAM
+  match: ['1053']
+  primary: true
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — 그룹정책 사용자명 확인 실패(GroupPolicy 1053): GroupPolicy/Operational 로그·gpresult /r·nltest /dsgetdc·repadmin /replsummary(1차), DC DNS 정정·gpupdate /force(2차)가 코드 조치와 같은 그룹 정책·AD 절차가 1순위 — 인증 실패·TLS 위주의 WIN-PROC-R5-SECURITY 는 2순위(절차는 '그룹 정책'으로 띄어 씀)"
+- procedure: AIX-PROC-R6-JFS2
+  match: [C1348779]
+  primary: true
+  reviewed: "2026-10-16 7차 — JFS2 로그 I/O 오류(J2_LOG_EIO): errpt 의 J2 LABEL·대상 LV 와 같은 시각 SC_DISK_ERR·LVM_IO_FAIL 선행 여부(1차), 수정 전 snap·umount→fsck→mount(2차)가 코드 조치('umount/fsck 는 2차')와 맞는 JFS2 절차가 1순위 — 하위 디스크 경로 문제면 이 절차가 AIX-PROC-R6-LVM·AIX-PROC-HARDWARE 로 안내"
+- procedure: AIX-PROC-R6-LVM
+  match: [52715FA5]
+  primary: true
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — VG 상태영역 쓰기 실패(LVM_SA_WRTERR): lsvg·lsvg -p 의 PV STATE·쿼럼, lspath·lquerypv, errpt 원인 순서(1차), varyonvg·chpv·syncvg·replacepv(2차)가 코드 조치(lspv·lsvg -p·lspath, replacepv)와 같은 LVM 절차가 1순위 — 디스크 일반 절차(AIX-PROC-HARDWARE)는 2순위"
+- procedure: AIX-PROC-R6-SANPATH
+  match: [FE3E6B3B]
+  primary: true
+  reviewed: "2026-10-16 7차 — 요청 중 VFC 전송 이벤트(VIOS 종료·CRQ 닫힘): 3단계 VIOS 측 lsmap -all -npiv(LOGGED_IN 여부)·errlog 와 lspath 경로 확인이 있는 SAN·VIOS 경로 절차가 1순위 — 네트워크·DNS·NFS 를 함께 다루는 AIX-PROC-R5-CONNECTION 은 2순위"
+- procedure: AIX-PROC-R6-SANPATH
+  match: [AE7C4B0F, 7BFEEA1F, 26623394]
+  primary: true
+  fit_reviewed: true
+  reviewed: "2026-10-16 7차 — VFC4_ERR15 FC 링크 다운·FCA_ERR4 FC 링크 오류·FCP_ERR12 통신 프로토콜 오류: errpt -a -N fcs/fscsi·fcstat 의 Link Failure·Loss of Sync·Error Frames 카운터·lspath·VIOS lsmap -npiv(1차), SAN 복구 뒤 chpath·어댑터 교체(2차)가 코드 즉시 조치(fcstat·lspath -p fscsi<N>·lsmap -npiv)와 같은 FC 경로 절차가 1순위 — AIX-PROC-R5-CONNECTION 은 2순위"
+- procedure: SOL-PROC-R5-DISK
+  match: [SOL-FS-FULL]
+  primary: true
+  reviewed: "2026-10-16 7차 — 파일시스템 공간 고갈: df -h·du -dsk <mount>/*·zfs list -o space(1차), fuser -c 확인 후 정리·스냅숏 정리(2차)가 코드 조치(df -h·du -dsk·fuser -c)와 같은 Solaris 파일시스템 공간 절차가 1순위 — ZFS 풀 용량·DEGRADED 전용인 SOL-PROC-STORAGE 는 2순위"

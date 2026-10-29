@@ -1,0 +1,175 @@
+product: apache
+layer: web
+note: Claude 야간 수집 2026-09-18 — 벤더 공식 문서와 대조 후 확정
+codes:
+- code: AH00035
+  severity: error
+  category: security
+  title: 경로 구성요소 검색권한 없음
+  immediate:
+  - '`grep -n "AH00035" <error_log> | tail -10` 로 경로 확인 후 `namei -l <경로>` 로 x 권한 없는 디렉터리 확인'
+  - '`getenforce` 와 `ls -Z <경로>` 로 SELinux 컨텍스트(httpd_sys_content_t) 확인'
+  short:
+  - '(2차·승인 후, 롤백: 변경 전 권한·컨텍스트 기록 후 원복) 필요한 디렉터리에 최소 x 권한 부여 또는 컨텍스트 정정(semanage fcontext·restorecon)'
+  mid:
+  - '배포 권한 표준(디렉터리 755·파일 644·SELinux httpd_sys_content_t)'
+  long:
+  - '배포 자동화에 namei 권한 검증 단계를 포함'
+  vendor_cause: 'AH00035 — 요청 파일까지 가는 경로의 어느 디렉터리에 검색(실행 x) 권한이 없어 httpd 가 403 으로 거부했다. 상위 디렉터리 권한(예 홈 디렉터리 700)·SELinux 컨텍스트가 흔한 원인.'
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors)
+  versions:
+  - Apache 2.4
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 공식 메시지는 경로 구성요소의 search 권한 부족
+- code: AH00036
+  severity: error
+  category: security
+  title: 요청 경로 접근 실패
+  immediate:
+  - '`grep -n "AH00036" <error_log> | tail -10` 로 경로·errno 확인 후 `namei -l <경로>` 로 권한 확인'
+  - '`ps -o user= -C httpd | sort | uniq -c` 로 실행 계정 확인(Debian 은 apache2)'
+  short:
+  - '(2차·승인 후, 롤백: 원복) 실행 계정이 읽을 수 있도록 권한·컨텍스트 정정'
+  mid:
+  - 'DocumentRoot 권한 표준(소유자·모드·SELinux 타입)'
+  long:
+  - '배포 후 권한 자동 검증'
+  vendor_cause: 'AH00036 — 요청 경로를 접근 확인(stat·open)하는 중 실패해 요청을 처리하지 못했다. 경로 중간 권한 부족·심볼릭 링크 대상 접근 불가·SELinux 차단이 흔한 원인.'
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors)
+  versions:
+  - Apache 2.4
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 공식 로그 레벨은 error
+- code: AH00037
+  severity: error
+  category: security
+  title: 심볼릭 링크 접근 불가
+  immediate:
+  - '`grep -n "AH00037" <error_log> | tail -10` 로 링크 경로 확인 후 `ls -l <링크>` 와 `namei -l <링크대상>` 확인'
+  - '`grep -rn "FollowSymLinks\|SymLinksIfOwnerMatch" /etc/httpd/conf*` 로 해당 Directory Options 확인'
+  short:
+  - '(2차·승인 후, 롤백: 설정 원복) 필요한 디렉터리에 한해 Options FollowSymLinks 추가 또는 링크 대신 실제 경로 배포'
+  mid:
+  - '심볼릭 링크 사용 기준'
+  long:
+  - '심볼릭 링크 사용 경로 대장과 Options 변경 이력 관리'
+  vendor_cause: 'AH00037 — 심볼릭 링크를 따라가는 것이 허용되지 않았거나(Options FollowSymLinks/SymLinksIfOwnerMatch 없음) 링크 대상에 접근할 수 없어 403 이 났다.'
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors)
+  versions:
+  - Apache 2.4
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 링크 비허용 또는 대상 접근 불가
+- code: AH00098
+  severity: warn
+  category: internal
+  title: PID 파일 덮어씀(비정상 종료 흔적)
+  immediate:
+  - '`grep -n "AH00098" <error_log> | tail -5` 로 기동 시각 확인 후 직전 시각 `dmesg -T | grep -i -E "oom|out of memory" | tail -5` 와 `last -x | head` 로 비정상 종료 원인 확인'
+  - '`journalctl -u httpd --since "-1d" | tail -30` 로 직전 종료 기록 확인'
+  short:
+  - '(2차) OOM 이면 메모리 점유·MaxRequestWorkers 합계를 확인해 조정을 승인 후 적용'
+  mid:
+  - '프로세스 감시와 메모리 용량 점검'
+  long:
+  - '비정상 종료 흔적(AH00098) 경보'
+  vendor_cause: 'AH00098 — 기동 시 PidFile 이 이미 있어 덮어썼다. 직전 httpd 가 정상 종료 절차 없이 끝났다는 흔적(전원 차단·OOM·강제 종료)이다.'
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors)
+  versions:
+  - Apache 2.4
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 비정상 종료 흔적을 함께 알림
+- code: AH00112
+  severity: warn
+  category: internal
+  title: DocumentRoot 존재하지 않음
+  immediate:
+  - '`apachectl -S` 로 해당 가상호스트 DocumentRoot 확인 후 `ls -ld <DocumentRoot>` 로 존재 확인'
+  - '`findmnt <상위경로>` 로 볼륨 마운트 여부 확인'
+  short:
+  - '(2차·승인 후, 롤백: 설정 원복) 경로 오타 수정 또는 볼륨 마운트 담당에 요청 후 `apachectl -t`·graceful'
+  mid:
+  - '구성 검증(기동 전 DocumentRoot 존재 확인)'
+  long:
+  - '배포 점검표에 DocumentRoot·index 파일 존재 확인 포함'
+  vendor_cause: 'AH00112 — 설정의 DocumentRoot 경로가 존재하지 않는다는 경고다. 경로 오타·미마운트 볼륨·배포 전 기동이 흔한 원인이며 해당 가상호스트가 404/403 을 낸다.'
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors)
+  versions:
+  - Apache 2.4
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: AH00548
+  severity: warn
+  category: internal
+  title: NameVirtualHost 효력 없음(설정 불일치)
+  immediate:
+  - '`grep -rn "NameVirtualHost" /etc/httpd/conf*` 로 남은 지시어 위치 확인'
+  - '`apachectl -S` 로 가상호스트가 의도대로 매핑되는지 확인(읽기 전용)'
+  short:
+  - '(2차·승인 후, 롤백: 설정 원복) NameVirtualHost 줄을 주석 처리 후 `apachectl -t`·graceful'
+  mid:
+  - '2.2→2.4 설정 이관 점검표 적용'
+  long:
+  - '설정 시험 경고 0건 관리'
+  vendor_cause: 'AH00548 — 2.4 에서 NameVirtualHost 지시어는 효력이 없고(2.3.11 이후 폐지) 무시된다는 경고다. 2.2 설정을 그대로 옮긴 것이 원인이며 동작에는 영향이 없다.'
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors)
+  versions:
+  - Apache 2.4
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: AH01144
+  severity: warn
+  category: internal
+  title: URL 프로토콜 핸들러 없음
+  immediate:
+  - '`apachectl -M | grep proxy` 로 로드된 proxy 하위 모듈 확인'
+  - '`grep -rn "ProxyPass" /etc/httpd/conf*` 로 사용 스킴 확인 — 해당 proxy_<스킴>_module 이 없으면 확정'
+  short:
+  - '(2차·승인 후, 롤백: 설정 원복) 필요한 LoadModule 추가 후 `apachectl -t`·graceful'
+  mid:
+  - 'ProxyPass 스킴별 필요 모듈 목록을 설정 템플릿에 반영'
+  long:
+  - '설정 변경 시 `apachectl -t`·`apachectl -M` 결과 기록'
+  vendor_cause: 'AH01144 — 요청 URL 의 스킴(http·ajp·fcgi 등)을 처리할 mod_proxy 프로토콜 모듈이 없어 프록시하지 못했다. mod_proxy_http·mod_proxy_ajp 등 하위 모듈 미로드가 흔한 원인.'
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors)
+  versions:
+  - Apache 2.4
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 프록시 프로토콜 모듈 설정 문제를 지시
+- code: AH01215
+  severity: error
+  category: internal
+  title: CGI 표준오류 출력
+  immediate:
+  - '`grep -n "AH01215" <error_log> | tail -20` 로 스크립트 경로·출력 내용 확인'
+  - '`ls -l <스크립트>` 로 실행 권한·첫 줄 인터프리터 경로 확인(`head -1 <스크립트>`)'
+  short:
+  - '(2차) 스크립트 담당에 오류 내용 전달·수정 요청, 권한 수정은 승인 후(롤백: 원복)'
+  mid:
+  - 'CGI 사용 축소·대체(FastCGI) 검토'
+  long:
+  - 'CGI 오류 건수 주간 집계와 스크립트 품질 관리'
+  vendor_cause: 'AH01215 — CGI 스크립트가 표준오류(stderr)로 출력한 내용을 httpd 가 기록했다. 메시지 본문이 실제 원인이며, 헤더 전에 스크립트가 끝난 경우(Premature end of script headers)도 이 계열로 기록된다.'
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors)
+  versions:
+  - Apache 2.4
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: CGI stderr 로그 메시지
+- code: AH01276
+  severity: error
+  category: internal
+  title: 디렉터리 인덱스 제공 불가
+  immediate:
+  - '`grep -n "AH01276" <error_log> | tail -10` 로 디렉터리 경로 확인 후 `ls <디렉터리>` 로 index 파일 존재 확인'
+  - '`grep -rn "DirectoryIndex" /etc/httpd/conf*` 로 인덱스 파일 이름 설정 확인'
+  short:
+  - '(2차) 배포 누락이면 index 파일 재배포, 탐색 시도면 유지(Options Indexes 켜기는 보안상 금지)'
+  mid:
+  - '디렉터리 목록 노출 금지(Options -Indexes) 정책 유지'
+  long:
+  - '배포 점검표에 DocumentRoot·index 파일 존재 확인 포함'
+  vendor_cause: 'AH01276 — 디렉터리 요청에 DirectoryIndex 파일이 없고 Options Indexes 도 꺼져 있어 목록을 제공할 수 없어 403 이 났다. 배포 누락이나 디렉터리 탐색 시도가 흔한 원인.'
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://cwiki.apache.org/confluence/spaces/HTTPD/pages/115522360/ListOfErrors)
+  versions:
+  - Apache 2.4
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: DirectoryIndex 없음과 인덱싱 금지

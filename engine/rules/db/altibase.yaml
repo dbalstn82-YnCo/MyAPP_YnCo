@@ -1,0 +1,153 @@
+# DBMS — Altibase 시그니처
+rules:
+- id: DB-ALT-001
+  layer: db
+  product:
+  - altibase
+  match:
+    regex: deadlock detected|Deadlock
+  severity: critical
+  category: lock
+  verdict: 데드락 감지
+  immediate:
+  - "대기 관계: isql 에서 `SELECT TRANS_ID, WAIT_FOR_TRANS_ID FROM V$LOCK_WAIT;` (대기 → 보유 트랜잭션)"
+  - "보유 트랜잭션 세션·SQL: `SELECT T.ID, T.SESSION_ID, S.CLIENT_PID, S.CLIENT_APP_INFO, SUBSTR(ST.QUERY,1,100) FROM V$TRANSACTION T JOIN V$SESSION S ON S.ID=T.SESSION_ID LEFT JOIN V$STATEMENT ST ON ST.SESSION_ID=S.ID WHERE T.ID IN (SELECT WAIT_FOR_TRANS_ID FROM V$LOCK_WAIT);`"
+  - "트레이스: `grep -n -i \"deadlock\" $ALTIBASE_HOME/trc/*.log | tail -20`"
+  short:
+  - "(2차·승인 후, 롤백: 해당 없음) 반복 시 보유 세션의 클라이언트(CLIENT_PID·CLIENT_APP_INFO)를 찾아 애플리케이션에서 트랜잭션을 끝내게 하고 개발팀 통보"
+  mid:
+  - "트랜잭션 잠금 순서 통일·인덱스 보강으로 잠금 범위 축소"
+  long:
+  - "교착 발생 건수 감시와 트랜잭션 설계 표준(잠금 순서·짧은 트랜잭션) 수립"
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR 코드·문구 — 5.x~7.3 공통(6.1.1 이하 10진 코드는 파서 변환)
+- id: DB-ALT-002
+  layer: db
+  product:
+  - altibase
+  match:
+    regex: maximum number of sessions|too many sessions|session .* exceeded
+  severity: critical
+  category: connection
+  verdict: 세션 한도 초과
+  immediate:
+  - "한도·현재: isql 에서 `SELECT NAME, VALUE1 FROM V$PROPERTY WHERE NAME='MAX_CLIENT';` 와 `SELECT COUNT(*) FROM V$SESSION;` — 세션 수가 MAX_CLIENT 에 근접하면 확정"
+  - "출처 편중: `SELECT CLIENT_TYPE, CLIENT_APP_INFO, COUNT(*) FROM V$SESSION GROUP BY CLIENT_TYPE, CLIENT_APP_INFO ORDER BY 3 DESC;`"
+  short:
+  - "(2차·승인 후, 롤백: altibase.properties 백업본 복원 후 재기동) 누수 풀 재시작으로 회수, 필요 시 MAX_CLIENT 상향(재기동 필요)"
+  mid:
+  - "WAS 풀 최대값 총합 기준으로 MAX_CLIENT 재산정"
+  long:
+  - "세션 수/MAX_CLIENT 비율 80% 경고 감시와 커넥션 총량 관리 체계 수립"
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR 코드·문구 — 5.x~7.3 공통(6.1.1 이하 10진 코드는 파서 변환)
+- id: DB-ALT-003
+  layer: db
+  product:
+  - altibase
+  match:
+    regex: unable to extend|not enough (free )?space|tablespace .* full
+  severity: critical
+  category: storage
+  verdict: 테이블스페이스 공간 부족
+  immediate:
+  - "사용률: isql 에서 `SELECT NAME, TYPE, TOTAL_PAGE_COUNT*PAGE_SIZE/1024/1024 TOTAL_MB, ALLOCATED_PAGE_COUNT*PAGE_SIZE/1024/1024 ALLOC_MB FROM V$TABLESPACES;`"
+  - "데이터파일: `SELECT NAME, CURRSIZE, MAXSIZE, AUTOEXTEND FROM V$DATAFILES;` 와 `df -h <데이터파일 경로>`"
+  - "메모리 TS: `SELECT SPACE_NAME, CURRENT_SIZE, MAXSIZE, AUTOEXTEND_MODE FROM V$MEM_TABLESPACES;`"
+  short:
+  - "(2차·승인 후, 롤백: 추가 파일은 축소 불가 — 용량 계획 반영) 디스크 TS 는 데이터파일 추가·자동확장, 메모리 TS 는 MAXSIZE·MEM_MAX_DB_SIZE 범위 안에서 상향"
+  mid:
+  - "데이터 보존 기간에 따른 아카이빙·정리 정책 적용"
+  long:
+  - "테이블스페이스 사용률 85%/95% 감시와 월간 증가량 기반 용량 계획"
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR 코드·문구 — 5.x~7.3 공통(6.1.1 이하 10진 코드는 파서 변환)
+- id: DB-ALT-004
+  layer: db
+  product:
+  - altibase
+  match:
+    regex: memory allocation (failed|error)|cannot allocate memory
+  severity: critical
+  category: memory
+  verdict: 메모리 할당 실패
+  immediate:
+  - "모듈별 메모리: isql 에서 `SELECT NAME, ALLOC_SIZE, MAX_TOTAL_SIZE FROM V$MEMSTAT ORDER BY ALLOC_SIZE DESC LIMIT 10;`"
+  - "메모리 한도 설정: `SELECT NAME, VALUE1 FROM V$PROPERTY WHERE NAME IN ('MEM_MAX_DB_SIZE','EXECUTE_STMT_MEMORY_MAXIMUM','PREPARE_STMT_MEMORY_MAXIMUM');`"
+  - "OS 여유: `free -m` · `ps -o pid,rss,vsz,cmd -C altibase`"
+  short:
+  - "(2차·승인 후, 롤백: altibase.properties 백업본 복원 후 재기동) 메모리 과다 문장 튜닝 요청, 필요 시 메모리 파라미터 조정"
+  mid:
+  - "물리 메모리 대비 메모리 DB·문장 메모리 한도 재산정"
+  long:
+  - "V$MEMSTAT 상위 모듈 추세 감시와 메모리 증설 계획"
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR 코드·문구 — 5.x~7.3 공통(6.1.1 이하 10진 코드는 파서 변환)
+- id: DB-ALT-005
+  layer: db
+  product:
+  - altibase
+  match:
+    regex: server (aborted|stopped abnormally)|FATAL
+  severity: critical
+  category: internal
+  verdict: 서버 비정상 중단
+  immediate:
+  - "프로세스 생존: `ps -ef | grep [a]ltibase`"
+  - "중단 원인 자료 확보: `tail -100 $ALTIBASE_HOME/trc/altibase_boot.log` 와 `tail -100 $ALTIBASE_HOME/trc/altibase_error.log`(비정상 종료 콜스택, 7.1 trc 파일명)"
+  - "OS 기록: `dmesg -T | grep -i -E \"out of memory|segfault\" | tail`"
+  short:
+  - "(2차·승인 후, 롤백: 해당 없음 — 기동 전 trc 디렉터리 사본 보관) 원인(메모리·디스크·라이선스) 조치 후 `server start` 로 기동, 실패 시 altibase_boot.log 재확인"
+  - "벤더(알티베이스) 기술지원 문의 준비 — altibase_error.log·altibase_dump.log 첨부"
+  mid:
+  - "원인 결함 패치 적용과 재발 조건(메모리·디스크) 개선"
+  long:
+  - "이중화(Replication) 구성과 서버 생존 감시·자동 자료 보존 스크립트"
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR 코드·문구 — 5.x~7.3 공통(6.1.1 이하 10진 코드는 파서 변환)
+- id: DB-ALT-006
+  layer: db
+  product:
+  - altibase
+  match:
+    regex: \[Notify\s*:\s*Query Timeout\]\s*Query Canceled by Server
+  severity: warn
+  category: performance
+  verdict: Altibase 질의 시간 초과로 서버가 질의 취소 — 질의 지연·시간 제한 초과
+  immediate:
+  - 본문의 Session ID 기록, 같은 시각 해당 세션 질의(V$SESSION·V$STATEMENT) 확인
+  - 같은 시각 잠금 대기·체크포인트·디스크 I/O 지연 확인
+  short:
+  - QUERY_TIMEOUT 설정과 실제 질의 처리 시간 비교(2차)
+  mid:
+  - "V$STATEMENT 의 TOTAL_TIME 상위 SQL 실행계획 개선과 인덱스 보강"
+  long:
+  - 질의 성능 기준(SLO) 정의
+  versions:
+  - Altibase 6.x~7.x
+  version_note: 'altibase_boot.log ''[Notify : Query Timeout] Query Canceled by Server : Session ID = N'' — DB 자체 결함으로 단정하지 않는다'

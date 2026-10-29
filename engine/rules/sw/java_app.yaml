@@ -1,0 +1,507 @@
+# Java 애플리케이션 예외 룰 — "WAS/WEB 문제가 아닌 소스(애플리케이션) 결함" 을 구분하기 위한 룰 (2026-09-10, 실로그 JeusServer.log·Spring 앱 로그 기준)
+# layer 를 여러 개 두면 WAS 서버 로그(jeus/tomcat/…)와 앱 로그(java/mesim)에 모두 적용된다.
+# category app = 애플리케이션(소스) 결함 가능성 → 1차는 스택트레이스의 첫 '앱 패키지' 라인을 확보해 개발팀에 전달, WAS 재기동 불필요.
+rules:
+- id: APP-NPE-001
+  layer:
+  - sw
+  - was
+  product:
+  - '*'
+  match:
+    regex: java\.lang\.NullPointerException
+  severity: error
+  category: app
+  verdict: 애플리케이션 소스 결함 가능성 — NullPointerException(초기화되지 않은 객체 참조). WAS/WEB 장애가 아니라 코드·데이터 문제
+  immediate:
+  - "스택트레이스 확보(읽기): Linux `grep -n -A20 'NullPointerException' <앱로그> | tail -60` / AIX `grep -n 'NullPointerException' <앱로그> | tail -3` 후 `sed -n '<줄>,<줄+20>p' <앱로그>` / Windows `Select-String -Path <앱로그> -Pattern 'NullPointerException' -Context 0,20 | Select-Object -Last 3`"
+  - "우리 애플리케이션 패키지(예: 'at com.<회사>.')가 처음 나오는 줄(클래스명:라인)을 그대로 복사해 개발팀에 전달"
+  - "같은 화면·요청에서만 반복되는지 건수 확인: `grep -c 'NullPointerException' <앱로그>` — 특정 사용자·데이터에서만 나면 코드·데이터 문제(WAS 를 다시 띄워도 해결되지 않음)"
+  short:
+  - '2차 이관 기준: 동일 클래스·라인 반복 또는 업무 화면 오류 신고 동반 시 개발팀 소스 확인 요청'
+  mid:
+  - null 가능 값 검증 로직 보강, 입력 데이터 정합성 점검
+  long:
+  - 정적 분석·단위 테스트로 null 처리 표준화
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: NullPointerException — 14+ 는 'helpful NPE' 상세 문구 추가(클래스명 동일)
+- id: APP-CODE-002
+  layer:
+  - sw
+  - was
+  product:
+  - '*'
+  match:
+    regex: java\.lang\.(?:ClassCastException|ArrayIndexOutOfBoundsException|IndexOutOfBoundsException|StringIndexOutOfBoundsException|NumberFormatException|IllegalArgumentException|ArithmeticException|UnsupportedOperationException|NegativeArraySizeException)|java\.util\.ConcurrentModificationException|java\.time\.format\.DateTimeParseException|java\.text\.ParseException
+  exclude: 'Invalid character found in (?:method name|the request target)|Error parsing HTTP request header|The AJP Connector is configured with secretRequired'  # Tomcat 요청 형식·커넥터 설정 메시지는 앱 결함이 아님(WAS-TC-015·016, 2026-10-13)
+  severity: error
+  category: app
+  verdict: 애플리케이션 소스 결함 가능성 — 형변환·인덱스·숫자/날짜 변환·인자 오류(입력 데이터와 코드 가정 불일치)
+  immediate:
+  - "예외 종류·위치 확보(읽기): Linux/AIX `grep -nE 'ClassCastException|IndexOutOfBoundsException|NumberFormatException|IllegalArgumentException|DateTimeParseException|ParseException' <앱로그> | tail -20` / Windows `Select-String -Path <앱로그> -Pattern 'ClassCastException|NumberFormatException|IndexOutOfBounds' | Select-Object -Last 20`"
+  - "예외 메시지의 값(예: For input string 뒤 문자열·인덱스)과 스택트레이스의 앱 패키지 첫 줄을 확보해 개발팀 전달"
+  - "특정 입력값·화면에서만 나는지 확인 — 인프라 조치 대상 아님"
+  short:
+  - '2차 이관 기준: 업무 영향(화면 오류·처리 실패) 동반 또는 반복 발생'
+  mid:
+  - 입력 검증·예외 처리 보강
+  long:
+  - 데이터 형식 계약(스키마) 정의와 테스트 케이스 추가
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: APP-STATE-003
+  layer:
+  - sw
+  - was
+  product:
+  - '*'
+  match:
+    regex: java\.lang\.IllegalStateException
+  severity: warn
+  category: app
+  verdict: 애플리케이션 상태 오류(IllegalStateException) — 호출 순서·생명주기 가정 위반(코드 문제 가능성, 응답 완료 후 쓰기 등)
+  immediate:
+  - "발생 건수·추이(읽기): Linux/AIX `grep -c 'IllegalStateException' <앱로그>` 와 `grep -n 'IllegalStateException' <앱로그> | tail -20` / Windows `(Select-String -Path <앱로그> -Pattern 'IllegalStateException').Count` — 평소 대비 급증이면 최근 배포 기능 의심"
+  - "예외 메시지(예: response already committed, No thread-bound request)와 앱 패키지 첫 줄을 개발팀 전달, 특정 기능에 국한되는지 확인"
+  short:
+  - '2차 이관 기준: 사용자 오류 신고 동반 또는 급증'
+  mid:
+  - 요청 처리 흐름(리다이렉트/포워드 후 출력 등) 코드 점검
+  long:
+  - 프레임워크 사용 규약 교육·코드 리뷰
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: APP-RECURSION-004
+  layer:
+  - sw
+  - was
+  product:
+  - '*'
+  match:
+    regex: java\.lang\.StackOverflowError
+  severity: critical
+  category: app
+  verdict: 애플리케이션 소스 결함 가능성 — StackOverflowError(무한 재귀·순환 호출). 해당 요청 스레드 실패, 반복 시 WAS 불안정
+  immediate:
+  - "반복 구간 확보(읽기): Linux `grep -n -A60 'StackOverflowError' <앱로그> | tail -80` / AIX `grep -n 'StackOverflowError' <앱로그> | tail -3` 후 `sed -n '<줄>,<줄+60>p' <앱로그>` / Windows `Select-String -Path <앱로그> -Pattern 'StackOverflowError' -Context 0,60 | Select-Object -Last 1`"
+  - "같은 메서드가 반복되는 앱 패키지 구간을 개발팀에 즉시 전달"
+  - "특정 요청·데이터(순환 참조 데이터)에서만 나는지 같은 시각 access log 의 URI 와 대조 — WAS 를 다시 띄우는 것은 임시 회피일 뿐"
+  short:
+  - '2차 이관 기준: 즉시 이관(재발 시 WAS 전체 영향 가능)'
+  mid:
+  - 재귀 종료 조건·순환 참조 데이터 방어 로직 추가
+  long:
+  - 스택 크기(-Xss) 조정은 근본 해결이 아님 — 코드 수정 우선
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: StackOverflowError — 공통
+- id: APP-DEPLOY-005
+  layer:
+  - sw
+  - was
+  product:
+  - '*'
+  match:
+    regex: java\.lang\.(?:NoClassDefFoundError|ClassNotFoundException|NoSuchMethodError|NoSuchFieldError|UnsatisfiedLinkError|IncompatibleClassChangeError|VerifyError)
+  severity: error
+  category: app
+  verdict: 배포·라이브러리 문제 가능성 — 클래스/메서드 미존재(누락 jar·버전 충돌·불완전 배포). 소스 빌드/배포 산출물 확인 대상
+  immediate:
+  - "누락 클래스 위치(읽기): Linux/AIX `grep -l '<패키지/경로/클래스>.class' <앱경로>/WEB-INF/lib/*.jar` (jar 안 파일 이름은 압축되지 않아 grep 으로 찾힘) 또는 `jar tf <jar> | grep <클래스>` — 어느 jar 에도 없으면 배포 누락"
+  - "중복·버전 충돌(읽기): `ls <앱경로>/WEB-INF/lib/` / Windows `Get-ChildItem <앱경로>\\WEB-INF\\lib | Sort-Object Name` — 같은 라이브러리 두 판(예: x-1.2.jar·x-1.3.jar)이 함께 있으면 충돌 의심"
+  - "예외 메시지의 클래스명과 최근 배포(언제·무엇) 이력 대조 — 배포 직후면 산출물 누락 의심, 해당 기능만 영향인지 확인(전체 장애 아님)"
+  short:
+  - '2차 이관 기준: 배포 담당·개발팀에 즉시 전달(라이브러리 누락·중복 jar 확인)'
+  mid:
+  - 배포 산출물 검증(의존 jar 목록 비교) 절차화
+  long:
+  - 빌드 파이프라인에서 의존성 충돌 검사
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: NoClassDefFoundError/ClassNotFoundException 등 — 공통(9+ 모듈 관련 문구 추가)
+- id: APP-SQL-006
+  layer:
+  - sw
+  - was
+  product:
+  - '*'
+  match:
+    regex: BadSqlGrammarException|org\.apache\.ibatis\.exceptions\.PersistenceException|org\.apache\.ibatis\.binding\.BindingException|TooManyResultsException|InvalidDataAccessApiUsageException|MyBatisSystemException
+  severity: error
+  category: app
+  verdict: 애플리케이션 SQL/매핑 결함 가능성 — SQL 문법·MyBatis 매핑·결과 건수 가정 오류(DB 장애 아님)
+  immediate:
+  - "SQL·매퍼 오류 확보(읽기): Linux/AIX `grep -nE 'BadSqlGrammarException|BindingException|TooManyResultsException|PersistenceException|ORA-[0-9]{5}|TBR-[0-9]+' <앱로그> | tail -20` / Windows `Select-String -Path <앱로그> -Pattern 'BadSqlGrammar|BindingException|ORA-\\d{5}' | Select-Object -Last 20`"
+  - "예외에 포함된 SQL 문(또는 매퍼 ID)과 DB 오류 코드(ORA-/TBR- 등)를 개발팀 전달"
+  - "DB 자체는 정상 응답 중인지(다른 화면 조회 가능) 확인 — DB 를 다시 띄우거나 다시 접속할 대상 아님"
+  short:
+  - '2차 이관 기준: 특정 화면·배치 실패 지속 시 개발팀(소스) 우선, DB 담당은 스키마 변경 여부만 확인'
+  mid:
+  - SQL 리뷰·매퍼 테스트 추가, 스키마 변경 배포 절차 연동
+  long:
+  - SQL 정적 검증 도구 도입
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: APP-DATA-007
+  layer:
+  - sw
+  - was
+  product:
+  - '*'
+  match:
+    regex: com\.fasterxml\.jackson\.(?:core\.JsonParseException|databind\.JsonMappingException|databind\.exc\.\w+)|org\.json\.JSONException|com\.google\.gson\.JsonSyntaxException|javax\.xml\.bind\.UnmarshalException|org\.xml\.sax\.SAXParseException
+  severity: warn
+  category: app
+  verdict: 데이터 형식 불일치 — JSON/XML 파싱·매핑 실패(연동 상대 전문 형식 변경 또는 코드 가정 불일치)
+  immediate:
+  - "파싱 실패 위치 확보(읽기): Linux/AIX `grep -nE 'JsonParseException|JsonMappingException|MismatchedInputException|JSONException|JsonSyntaxException|SAXParseException|UnmarshalException' <앱로그> | tail -20` / Windows `Select-String -Path <앱로그> -Pattern 'Json|SAXParse|Unmarshal' | Select-Object -Last 20` — 필드명·line/column 기록"
+  - "어떤 연동(호출 대상) 응답인지 확보하고 상대 시스템 배포·형식 변경 여부를 먼저 확인(우리 코드 문제인지 상대 쪽인지 구분)"
+  short:
+  - '2차 이관 기준: 연동 실패 건수 지속 증가 시 개발팀·상대 기관 동시 문의'
+  mid:
+  - 전문 스키마 검증·버전 관리
+  long:
+  - 연동 계약(스키마) 변경 통보 절차
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: APP-TX-008
+  layer:
+  - sw
+  - was
+  product:
+  - '*'
+  match:
+    regex: org\.springframework\.transaction\.TransactionTimedOutException|UnexpectedRollbackException|TransactionSystemException
+  severity: error
+  category: performance
+  verdict: 트랜잭션 타임아웃/롤백 — 긴 처리(DB 지연·대량 처리) 또는 예외 후 잘못된 트랜잭션 처리(코드 문제 가능)
+  immediate:
+  - "타임아웃 값·발생 업무 확보(읽기): Linux/AIX `grep -nE 'TransactionTimedOutException|UnexpectedRollbackException|TransactionSystemException' <앱로그> | tail -20` / Windows `Select-String -Path <앱로그> -Pattern 'TransactionTimedOut|UnexpectedRollback' | Select-Object -Last 20` — 메시지의 timeout 값과 업무(배치·대량 조회) 기록"
+  - "같은 시각 DB 응답 지연(잠금·느린 쿼리) 여부를 DB 담당과 확인 — DB 정상이면 앱 트랜잭션 범위 문제"
+  short:
+  - '2차 이관 기준: DB 정상인데 반복되면 개발팀(트랜잭션 범위·예외 처리) 검토'
+  mid:
+  - 트랜잭션 범위 축소·타임아웃 재산정
+  long:
+  - 대량 처리 비동기화
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: APP-CONC-009
+  layer:
+  - sw
+  - was
+  product:
+  - '*'
+  match:
+    regex: OptimisticLockException|ObjectOptimisticLockingFailureException|StaleObjectStateException|DeadlockLoserDataAccessException|CannotAcquireLockException
+  severity: warn
+  category: lock
+  verdict: 동시 갱신 충돌·잠금 실패 — 같은 데이터 동시 수정(설계·사용 패턴 문제). DB 데드락이면 DB 쪽 근거 대조
+  immediate:
+  - "앱 쪽 충돌 건수(읽기): Linux/AIX `grep -nE 'OptimisticLock|StaleObjectState|DeadlockLoser|CannotAcquireLock' <앱로그> | tail -20` / Windows `Select-String -Path <앱로그> -Pattern 'OptimisticLock|DeadlockLoser|CannotAcquireLock' | Select-Object -Last 20`"
+  - "같은 시각 DB 데드락 근거(읽기): Oracle `grep -n 'ORA-00060' <alert_SID.log 경로> | tail -10` — 있으면 DB 판정과 함께 봄"
+  - "어느 화면·배치가 같은 데이터를 동시에 수정하는지 발생 시각의 배치 일정과 대조"
+  short:
+  - '2차 이관 기준: 반복 시 개발팀(락 순서·재시도 로직) 검토'
+  mid:
+  - 재시도·락 순서 표준화
+  long:
+  - 동시성 설계 검토
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: APP-POOL-010
+  layer:
+  - sw
+  - was
+  product:
+  - '*'
+  match:
+    regex: CannotGetJdbcConnectionException|Cannot get a connection, pool error|Timeout waiting for idle object|HikariPool.*(?:Connection is not available|request timed out)|PoolInitializationException|DataAccessResourceFailureException|java\.sql\.SQLRecoverableException
+  severity: critical
+  category: connection
+  verdict: DB 커넥션 풀 고갈·DB 연결 불가 — WAS 풀 소진(커넥션 반납 누락·느린 쿼리) 또는 DB/리스너 접속 불가. 소스 문제(반납 누락)와 DB 장애 구분 필요
+  immediate:
+  - DB 리스너·인스턴스 정상 여부(다른 앱 접속 가능?)를 DB 담당과 확인 — DB 정상이면 풀 고갈(앱 측) 가능
+  - WAS 콘솔에서 데이터소스 풀 사용량(active/idle/wait) 값을 기록
+  short:
+  - '2차 이관 기준: DB 정상 + 풀 고갈 반복 → 개발팀(커넥션 반납·긴 트랜잭션) / DB 접속 불가 → DB·네트워크'
+  mid:
+  - 풀 크기·타임아웃 재산정, 커넥션 누수 탐지 옵션(removeAbandoned/leakDetection)
+  long:
+  - 커넥션 사용 패턴 코드 리뷰
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: APP-LDAP-011
+  layer:
+  - sw
+  - was
+  product:
+  - '*'
+  match:
+    regex: javax\.naming\.CommunicationException|javax\.naming\.ServiceUnavailableException|LDAP.*(?:connect|Connection).*(?:refused|timed out|reset)|org\.springframework\.ldap\.CommunicationException
+  severity: critical
+  category: upstream
+  verdict: LDAP(인증 디렉터리) 연결 실패 — 인증 서버 미응답·네트워크 문제(로그인 전면 실패 가능). 소스 문제 아님
+  immediate:
+  - "예외 메시지의 LDAP 서버 주소:포트 도달 시험(읽기): Linux `nc -zvw3 <ldap_host> 389`(LDAPS 636) / AIX `telnet <ldap_host> 389` / Windows `Test-NetConnection <ldap_host> -Port 389` — 실패면 인증 서버·네트워크 담당 통보"
+  - "로그인 실패 신고가 있는지, 다른 WAS 에서도 같은 시각 발생하는지 확인(앱을 다시 띄울 필요 없음)"
+  short:
+  - '2차 이관 기준: 즉시(인증 서버·네트워크 담당)'
+  mid:
+  - LDAP 이중화·연결 타임아웃/재시도 설정
+  long:
+  - 인증 서버 헬스체크
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: APP-AUTH-012
+  layer:
+  - sw
+  - was
+  product:
+  - '*'
+  match:
+    regex: javax\.naming\.AuthenticationException|org\.springframework\.security\.authentication\.(?:BadCredentialsException|LockedException|DisabledException|AccountExpiredException|CredentialsExpiredException)|javax\.naming\.NameNotFoundException
+  severity: warn
+  category: security
+  verdict: 인증 실패(자격증명 불일치·계정 잠금/만료·계정 없음) — 정상 실패일 수 있음, 급증 시 공격·설정 변경 의심
+  immediate:
+  - "실패 건수(읽기): Linux/AIX `grep -cE 'BadCredentialsException|LockedException|DisabledException|AccountExpiredException|AuthenticationException' <앱로그>` / Windows `(Select-String -Path <앱로그> -Pattern 'BadCredentials|LockedException|AuthenticationException').Count` — 평소 대비 급증인지 비교"
+  - "특정 계정 반복인지 다수 계정 동시인지 구분 — 다수 계정 동시 급증이면 보안 담당 통보"
+  - "인증 정책·비밀번호 변경 작업이 같은 시각에 있었는지 확인"
+  short:
+  - '2차 이관 기준: 다수 계정 동시 실패 또는 단시간 급증'
+  mid:
+  - 계정 잠금 정책·알림
+  long:
+  - 인증 실패 대시보드
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: APP-HTTP-013
+  layer:
+  - sw
+  - was
+  product:
+  - '*'
+  match:
+    regex: org\.springframework\.web\.client\.(?:ResourceAccessException|HttpServerErrorException|HttpClientErrorException)|feign\.RetryableException|feign\.FeignException|java\.net\.http\.HttpTimeoutException
+  severity: error
+  category: upstream
+  verdict: 외부/내부 API 호출 실패 — 상대 서비스 오류 응답(5xx)·요청 오류(4xx)·연결/응답 시간 초과(상대 시스템 또는 구간 문제)
+  immediate:
+  - "대상 URL·상태코드 확보(읽기): Linux/AIX `grep -nE 'HttpServerErrorException|HttpClientErrorException|ResourceAccessException|FeignException|RetryableException|HttpTimeoutException' <앱로그> | tail -20` — 5xx·timeout 이면 상대 시스템, 4xx 면 우리 요청(코드·설정) 가능"
+  - "상대 포트 도달 시험(읽기): Linux `nc -zvw3 <host> <port>` / Windows `Test-NetConnection <host> -Port <port>` — 실패 시작 시각과 상대 시스템 작업 이력 대조"
+  short:
+  - '2차 이관 기준: 5xx·timeout 지속 → 상대 담당 / 4xx 반복 → 개발팀'
+  mid:
+  - 타임아웃·재시도·서킷브레이커 설정
+  long:
+  - 연동 구간 헬스체크
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: APP-REDIS-014
+  layer:
+  - sw
+  - was
+  product:
+  - '*'
+  match:
+    regex: redis\.clients\.jedis\.exceptions\.Jedis\w*Exception|io\.lettuce\.core\.Redis\w*Exception|RedisConnectionFailureException
+  severity: critical
+  category: upstream
+  verdict: Redis(캐시/세션 저장소) 연결 실패 — 캐시 서버 다운·네트워크·풀 고갈. 소스 문제 아님(세션·캐시 기능 전면 영향 가능)
+  immediate:
+  - "Redis 도달·응답(읽기): Linux `nc -zvw3 <redis_host> <port>` / Windows `Test-NetConnection <redis_host> -Port <port>`, redis-cli 가 있으면 `redis-cli -h <redis_host> -p <port> ping`(인증을 쓰면 캐시 담당이 수행) — PONG 이 아니면 Redis 쪽 문제"
+  - "예외 메시지의 Redis 주소:포트와 다른 서버에서도 동시 발생하는지 확인, 캐시 담당에게 프로세스·메모리 상태 확인 요청(앱을 다시 띄우지 말 것)"
+  short:
+  - '2차 이관 기준: 즉시(캐시 담당)'
+  mid:
+  - Redis 이중화·클라이언트 타임아웃 설정
+  long:
+  - 캐시 장애 시 우회(fallback) 설계
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: APP-THREAD-015
+  layer:
+  - sw
+  - was
+  product:
+  - '*'
+  match:
+    regex: java\.util\.concurrent\.RejectedExecutionException|java\.util\.concurrent\.TimeoutException|TaskRejectedException
+  severity: error
+  category: thread
+  verdict: 스레드 풀 포화·비동기 작업 시간 초과 — 처리량 초과 또는 느린 하위 작업(코드 병목 가능)
+  immediate:
+  - "발생 건수(읽기): Linux/AIX `grep -cE 'RejectedExecutionException|TaskRejectedException|TimeoutException' <앱로그>` / Windows `(Select-String -Path <앱로그> -Pattern 'RejectedExecution|TaskRejected').Count`"
+  - "같은 시각 요청량(읽기): `awk '{print substr($4,2,17)}' <access.log> | uniq -c | tail -20`(공통 로그 형식, 분당 건수) — 평소 대비 급증이면 처리량 초과, 평소 수준이면 DB/연동 지연 확인"
+  - "특정 기능(배치·대량 조회)에서만 나는지 확인"
+  short:
+  - '2차 이관 기준: 지속 시 엔지니어(스레드 덤프는 2차 수행)'
+  mid:
+  - 스레드 풀 크기·큐 정책 재산정
+  long:
+  - 느린 작업 비동기 분리
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: APP-CLIENT-016
+  layer:
+  - sw
+  - was
+  product:
+  - '*'
+  match:
+    regex: 'org\.apache\.catalina\.connector\.ClientAbortException|java\.io\.IOException: Broken pipe|java\.net\.SocketException: Connection reset by peer|jeus\.servlet\.\w*ClientAbort'
+  severity: info
+  category: performance
+  verdict: 클라이언트 선종료(응답 중 브라우저 닫힘·프록시 타임아웃) — 단독으로는 장애 아님, 급증 시 응답 지연 신호
+  immediate:
+  - "발생 건수 추이(읽기): Linux/AIX `grep -cE 'ClientAbortException|Broken pipe|Connection reset by peer' <앱로그>` / Windows `(Select-String -Path <앱로그> -Pattern 'ClientAbort|Broken pipe').Count` — 평소 대비 급증했는지 비교"
+  - "같은 시각 응답 지연 판정이 있는지 확인 — 단독으로만 나면 장애 아님"
+  short:
+  - '2차 이관 기준: 응답 지연 판정과 동반 급증 시'
+  mid:
+  - 느린 응답 URL 개선
+  long:
+  - 응답 시간 관리
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: APP-FILE-017
+  layer:
+  - sw
+  - was
+  product:
+  - '*'
+  match:
+    regex: 'java\.nio\.file\.NoSuchFileException|java\.io\.FileNotFoundException|java\.nio\.file\.AccessDeniedException|java\.io\.IOException: No space left on device'
+  severity: error
+  category: storage
+  verdict: 파일 접근 실패 — 경로/권한/디스크 공간 문제(설정·운영 문제, 소스 문제 아님)
+  immediate:
+  - "예외 경로 존재·권한(읽기): Linux/AIX `ls -ld <path> <상위디렉터리>` 와 `id <WAS실행계정>` / Windows `Get-Acl <path> | Format-List` — 실행 계정에 권한이 없으면 권한 원인"
+  - "'No space left' 이면 사용률 확인: Linux `df -h <path>`·`df -i <path>` / AIX `df -g <path>` / Windows `Get-PSDrive <드라이브문자>` — 파일 삭제는 2차 승인 후"
+  short:
+  - '2차 이관 기준: 디스크 90% 이상 또는 경로 누락 반복'
+  mid:
+  - 경로 설정 표준화·용량 감시
+  long:
+  - 로그·임시파일 보존 정책
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: APP-SSL-018
+  layer:
+  - sw
+  - was
+  product:
+  - '*'
+  match:
+    regex: javax\.net\.ssl\.SSL\w*Exception|sun\.security\.validator\.ValidatorException|PKIX path building failed|CertificateExpiredException
+  severity: critical
+  category: security
+  verdict: SSL/TLS 연결 실패 — 인증서 만료·신뢰 저장소 미등록·프로토콜 불일치(설정 문제, 소스 문제 아님)
+  immediate:
+  - "대상 인증서 만료일·발급자(읽기, Linux/AIX): `openssl s_client -connect <host>:<port> -servername <host> </dev/null 2>/dev/null | openssl x509 -noout -subject -issuer -enddate` — notAfter 가 지났으면 만료 확정"
+  - "신뢰 저장소 등록 여부(읽기): `keytool -list -cacerts`(JDK 9+, 비밀번호 질문은 Enter — 무결성 미검증 목록만 표시) / JDK 8 `keytool -list -keystore $JAVA_HOME/jre/lib/security/cacerts` — PKIX 오류인데 대상 CA 가 없으면 미등록 원인"
+  - "최근 인증서 교체·JDK 변경 작업 여부 대조(8u291·11.0.11 이후 TLS 1.0/1.1 기본 비활성)"
+  short:
+  - '2차 이관 기준: 즉시(인증서 담당)'
+  mid:
+  - 인증서 만료 알림·신뢰 저장소 관리
+  long:
+  - TLS 정책 표준화
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: SSL 예외·PKIX 문구 — 공통(8u291/11.0.11 TLS 1.0/1.1 비활성 후 handshake_failure 증가)
+- id: APP-MEM-019
+  layer:
+  - sw
+  - was
+  product:
+  - '*'
+  match:
+    regex: 'java\.lang\.OutOfMemoryError: (?:Metaspace|PermGen space|unable to create (?:new )?native thread|Direct buffer memory|GC overhead limit exceeded)'
+  severity: critical
+  category: memory
+  verdict: JVM 메모리 한계(Metaspace/스레드/Direct 버퍼/GC 과부하) — 힙 고갈과 구분되는 원인. 설정·누수(코드) 모두 가능
+  immediate:
+  - "예외 종류 확정(읽기): `grep -nE 'OutOfMemoryError: (Metaspace|PermGen|unable to create|Direct buffer|GC overhead)' <앱로그> | tail -10` — 종류(Metaspace / native thread / Direct buffer / GC overhead)를 그대로 기록"
+  - "native thread 면 스레드 수·한도(읽기): Linux `ps -o nlwp= -p <PID>` 와 `grep -i processes /proc/<PID>/limits` / AIX `ps -o thcount -p <PID>` — 한도에 가까우면 스레드 누수·ulimit 원인"
+  - "최근 배포·트래픽 급증 여부 확인, 재기동 전 2차에 알림(덤프는 2차 수행)"
+  short:
+  - '2차 이관 기준: 즉시'
+  mid:
+  - Metaspace/스레드 상한 재산정, 누수 분석
+  long:
+  - 메모리 사용 추이 관리
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: PermGen(≤7)/Metaspace(8+)/native thread/Direct buffer 문구 모두 포함
+- id: APP-JEUS-SESSION-020
+  layer:
+  - was
+  - sw
+  product:
+  - '*'
+  match:
+    regex: SESSION-2512|Exception occur during notify HttpSessionAttributeListener
+  severity: warn
+  category: internal
+  verdict: JEUS 세션 리스너 알림 중 예외(SESSION-2512) — 세션 속성 리스너(중복 로그인 방지 등) 처리 실패. 로그인 자체 성공 여부 확인
+  immediate:
+  - "예외 확보(읽기): `grep -n -A5 'SESSION-2512' $DOMAIN_HOME/servers/<server>/logs/JeusServer.log | tail -30` (AIX 는 `grep -n` 후 `sed -n '<줄>,<줄+5>p'`) — 바로 아래 예외 메시지(예: This session manager does not support Prevent Duplicate Login Service) 기록"
+  - "실제 로그인·화면 이동이 정상인지 확인 — 정상이면 기능(중복 로그인 방지) 미지원 설정 문제로 2차 전달"
+  short:
+  - '2차 이관 기준: 로그인 실패 신고 동반 시 즉시, 아니면 정기 점검 항목'
+  mid:
+  - JEUS 세션 매니저 설정(분산 세션·중복 로그인 방지 지원)과 앱 리스너 요구사항 일치 여부 검토
+  long:
+  - 세션 관리 방식 표준화
+  versions:
+  - JEUS 7
+  - JEUS 8/8.5
+  - JEUS 9/9.1
+  version_note: SESSION-2512 — JEUS 7+ 실로그 확인

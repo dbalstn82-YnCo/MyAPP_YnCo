@@ -1,0 +1,263 @@
+# 5차 보강(2026-10-16) — GPT 핵심 코드 대조에서 빠진 CUBRID 코드 추가.
+# 근거: CUBRID 공식 소스 저장소 src/base/error_code.h (develop·v10.2.16·v11.0·v11.2·v11.3·v11.4 태그에서 번호·ER_ 이름 동일 확인)
+#       메시지: msg/en_US.utf8/cubrid.msg $set 5 (MSGCAT_SET_ERROR), -72 는 CUBRID 11.4 매뉴얼 'Transaction and Lock'(교착 해소 예시)
+#       명령: CUBRID 11.4 매뉴얼 admin_utils(spacedb·lockdb·tranlist·paramdump·backupdb -D·_lgat/_bkvinf)·control(server/broker status, SQL 로그 경로)
+# 코드 표기: 로그 'ERROR CODE = -n' → 사전 '-n'(따옴표 문자열)
+product: cubrid
+layer: db
+note: 5차 보강 — 공식 소스(error_code.h·메시지 카탈로그)·매뉴얼과 대조해 추가
+codes:
+- code: '-3'
+  severity: error
+  category: memory
+  title: 가상 메모리 부족
+  vendor_cause: "ER_OUT_OF_VIRTUAL_MEMORY — 'Out of virtual memory: unable to allocate N memory bytes' 로 요청한 메모리를 할당하지 못함. OS 메모리·스왑 고갈, 프로세스 메모리 한도(ulimit), 과대한 버퍼 파라미터나 대량 정렬·조인이 흔한 원인."
+  vendor_url: https://github.com/CUBRID/cubrid/blob/develop/src/base/error_code.h
+  immediate:
+  - "`free -m` 과 `ps -eo pid,rss,vsz,comm --sort=-rss | head -10` 로 OS 여유 메모리와 cub_server·cub_cas 프로세스 크기 확인"
+  - "`grep -n \"ERROR CODE = -3,\" $CUBRID/log/server/<db>_*.err | tail -10` 로 발생 시각·빈도 확인, `ulimit -a` 로 실행 계정의 메모리 한도 확인"
+  - "`cubrid paramdump <db> | grep -iE \"data_buffer_size|sort_buffer_size\"` 로 메모리 파라미터 확인(읽기 전용)"
+  short:
+  - "(2차·승인 후, 롤백: cubrid.conf 백업본 복원 후 재기동) 메모리를 과다 사용하는 질의를 확인해 중지 요청하고, 필요하면 cubrid.conf 의 버퍼 파라미터를 물리 메모리에 맞게 조정"
+  mid:
+  - "발생 시각의 SQL 로그($CUBRID/log/broker/sql_log)에서 대량 정렬·조인 질의를 찾아 튜닝하고 서버 메모리 증설 필요성 산정"
+  long:
+  - "서버 메모리·스왑 사용률 80%/90% 감시 임계를 등록하고 버퍼 파라미터를 용량 계획에 반영"
+  versions:
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: error_code.h 의 번호·ER_ 이름이 v10.2.16·v11.0·v11.2·v11.3·v11.4·develop 에서 동일. 10.1 이하는 미대조
+  source: "공식 문서 대조(2026-10-16 5차 보강)"
+- code: '-9'
+  severity: error
+  category: storage
+  title: 볼륨 생성(포맷) 공간 부족
+  vendor_cause: "ER_IO_FORMAT_OUT_OF_SPACE — 디스크 볼륨을 지정한 페이지 수로 만들(포맷할) OS 공간이 부족함(메시지에 요청 크기와 현재 가용 공간 표시). 볼륨 추가·자동 확장 시 데이터 디렉터리 파일시스템이 가득 찬 경우가 흔한 원인."
+  vendor_url: https://github.com/CUBRID/cubrid/blob/develop/src/base/error_code.h
+  immediate:
+  - "메시지의 볼륨 경로·요청 크기·가용 공간을 기록하고 `df -h <볼륨 경로의 파일시스템>` 으로 실제 여유 확인"
+  - "`cubrid spacedb -s <db>` 로 볼륨별 사용·여유 페이지 확인(읽기 전용) — 여유가 거의 없으면 2차 DBA 즉시 호출"
+  short:
+  - "(2차·승인 후, 롤백: 추가한 볼륨은 데이터가 들어가면 되돌리기 어려우므로 경로·크기를 사전 승인) 파일시스템 공간 확보 후 `cubrid addvoldb` 로 다른 파일시스템에 볼륨 추가"
+  mid:
+  - "볼륨 자동 확장 경로와 파일시스템 여유를 함께 산정하고 데이터·임시 볼륨 위치를 분리"
+  long:
+  - "데이터 파일시스템 사용률 80%/90% 와 spacedb 여유 페이지 감시 임계 등록"
+  versions:
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: error_code.h 의 번호·ER_ 이름이 v10.2.16~v11.4·develop 에서 동일. 10.1 이하는 미대조
+  source: "공식 문서 대조(2026-10-16 5차 보강)"
+- code: '-15'
+  severity: critical
+  category: disk
+  title: 장치 공간 부족으로 페이지 쓰기 실패
+  vendor_cause: "ER_IO_WRITE_OUT_OF_SPACE — OS 장치 공간이 부족해 볼륨의 페이지를 쓰지 못함. 데이터·로그 볼륨이 있는 파일시스템 100% 도달(덤프·백업·로그 파일 누적)이 흔한 원인이며 트랜잭션 실패가 이어진다."
+  vendor_url: https://github.com/CUBRID/cubrid/blob/develop/src/base/error_code.h
+  immediate:
+  - "메시지의 볼륨 경로로 `df -h <파일시스템>` 과 `df -i <파일시스템>` 확인 — 사용률 100% 또는 inode 고갈이면 확정"
+  - "`du -sh <파일시스템>/* 2>/dev/null | sort -rh | head` 로 공간을 차지한 디렉터리 식별(삭제는 2차·담당자 승인 후), `dmesg -T | tail -20` 으로 디스크 오류 동반 여부 확인"
+  short:
+  - "(2차·승인 후, 롤백: 정리 대상 파일은 지우기 전 다른 파일시스템으로 이동·보관) 불필요한 백업·덤프·오래된 아카이브 로그를 정리하거나 파일시스템 증설"
+  mid:
+  - "데이터·로그·백업 경로를 서로 다른 파일시스템으로 분리하고 백업 보존 주기를 정함"
+  long:
+  - "파일시스템 사용률 85%/95% 감시 임계를 등록하고 증가율 기반 증설 계획 수립"
+  versions:
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: error_code.h 의 번호·ER_ 이름이 v10.2.16~v11.4·develop 에서 동일. 10.1 이하는 미대조
+  source: "공식 문서 대조(2026-10-16 5차 보강)"
+- code: '-24'
+  severity: warn
+  category: storage
+  title: 볼륨 공간 거의 소진
+  vendor_cause: "ER_DISK_ALMOST_OUT_OF_SPACE — 볼륨의 여유 페이지가 거의 없음(메시지에 전체·여유 페이지 수 표시). 데이터 증가·대량 적재·임시 공간 사용 급증이 흔한 원인이며 방치하면 -36(DB 공간 부족)으로 이어질 수 있다."
+  vendor_url: https://github.com/CUBRID/cubrid/blob/develop/src/base/error_code.h
+  immediate:
+  - "`cubrid spacedb -s <db>` 로 볼륨 종류별 전체·여유 페이지 확인(읽기 전용) — 메시지의 볼륨 여유 비율이 5% 미만이면 2차 호출"
+  - "`df -h <볼륨 경로의 파일시스템>` 으로 볼륨 자동 추가·새 볼륨 생성에 쓸 OS 여유 확인(남은 공간이 볼륨 1개 크기보다 작으면 2차에 디스크 요청)"
+  short:
+  - "(2차·승인 후, 롤백: 볼륨 추가 전 경로·크기 사전 승인, 추가 후에는 되돌리기 어려움) `cubrid addvoldb` 로 볼륨 추가 또는 불필요 데이터 정리"
+  mid:
+  - "테이블별 증가량을 측정해 볼륨 추가 시점을 미리 계획하고 대량 적재 일정과 맞춤"
+  long:
+  - "spacedb 여유 페이지 비율 20%/10% 감시 임계를 등록하고 월별 용량 추이 보고"
+  versions:
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: error_code.h 의 번호·ER_ 이름이 v10.2.16~v11.4·develop 에서 동일. 10.1 이하는 미대조
+  source: "공식 문서 대조(2026-10-16 5차 보강)"
+- code: '-36'
+  severity: critical
+  category: storage
+  title: 데이터베이스 공간 부족
+  vendor_cause: "ER_FILE_NOT_ENOUGH_PAGES_IN_DATABASE — 데이터베이스에 요청한 페이지를 내줄 공간이 없음(Out of disk space in database). 볼륨이 가득 차고 자동 확장·볼륨 추가가 막힌 상태로, 쓰기 트랜잭션이 실패한다."
+  vendor_url: https://github.com/CUBRID/cubrid/blob/develop/src/base/error_code.h
+  immediate:
+  - "`cubrid spacedb -s <db>` 로 볼륨별 여유 페이지 확인 — 여유 0 에 가까우면 확정, 2차 DBA 즉시 호출"
+  - "`df -h <볼륨 경로의 파일시스템>` 과 `grep -n \"ERROR CODE = -36,\" $CUBRID/log/server/<db>_*.err | tail -10` 으로 OS 여유·발생 시작 시각 확인"
+  short:
+  - "(2차·승인 후, 롤백: 볼륨 추가 전 경로·크기 사전 승인, 추가 후에는 되돌리기 어려움) 파일시스템 공간 확보 후 `cubrid addvoldb -p data <db>` 로 데이터 볼륨 추가"
+  mid:
+  - "공간을 급격히 쓴 테이블·배치를 찾아 보존 주기·파티션 정리 기준을 세움"
+  long:
+  - "spacedb 여유 비율과 파일시스템 사용률을 함께 감시하고 증설 리드타임을 반영한 임계(여유 20%) 운영"
+  versions:
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: error_code.h 의 번호·ER_ 이름이 v10.2.16~v11.4·develop 에서 동일. 10.1 이하는 미대조
+  source: "공식 문서 대조(2026-10-16 5차 보강)"
+- code: '-72'
+  severity: error
+  category: lock
+  title: 시스템에 의한 트랜잭션 강제 취소(교착 해소)
+  vendor_cause: "ER_LK_UNILATERALLY_ABORTED — 트랜잭션이 시스템에 의해 일방적으로 취소됨. 매뉴얼 예시처럼 교착 상태(deadlock)를 풀기 위해 한쪽 트랜잭션을 롤백할 때 나타나며, 같은 행을 서로 다른 순서로 갱신하는 업무가 흔한 원인."
+  vendor_url: https://www.cubrid.org/manual/en/11.4/sql/transaction.html
+  immediate:
+  - "`grep -n \"DEADLOCK\" $CUBRID/log/server/<db>_*.event | tail -20` 으로 교착 이벤트와 관련 클라이언트·SQL 확인"
+  - "`cubrid lockdb <db> | head -80` 과 `cubrid tranlist <db>` 로 현재 잠금 대기·장시간 트랜잭션 확인(읽기 전용)"
+  short:
+  - "애플리케이션은 취소된 트랜잭션을 재시도하도록 하고, 같은 시각 반복되면 (2차·승인 후, 롤백: 없음 — 종료된 트랜잭션은 업무 재처리) `cubrid killtran -i <tran_index> <db>` 로 장시간 점유 트랜잭션 정리"
+  mid:
+  - "교착 이벤트의 SQL 쌍을 모아 테이블·행 갱신 순서를 통일하고 트랜잭션 범위를 짧게 조정"
+  long:
+  - "시간당 교착 건수 감시 임계(예: 5건) 등록, 배포 전 동시성 시험에 교착 시나리오 포함"
+  versions:
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: error_code.h 의 번호·ER_ 이름이 v10.2.16~v11.4·develop 에서 동일, 교착 해소 예시는 11.4 매뉴얼. 이벤트 로그(.event) DEADLOCK 기록은 10.2 매뉴얼 기준. 10.1 이하는 미대조
+  source: "공식 문서 대조(2026-10-16 5차 보강)"
+- code: '-82'
+  severity: critical
+  category: storage
+  title: 로그 볼륨 마운트 실패
+  vendor_cause: "ER_LOG_MOUNT_FAIL — 로그 디스크 볼륨/파일(<db>_lgat 등)을 마운트할 수 없음. 로그 파일 누락·이동, 경로(databases.txt) 불일치, 권한·소유자 변경, 파일시스템 미마운트가 흔한 원인이며 DB 가 기동되지 못한다."
+  vendor_url: https://github.com/CUBRID/cubrid/blob/develop/src/base/error_code.h
+  immediate:
+  - "메시지의 로그 볼륨 경로를 기록하고 `cat $CUBRID_DATABASES/databases.txt` 로 해당 DB 의 로그 경로 확인"
+  - "`ls -l <로그 경로>/<db>_lgat <로그 경로>/<db>_lginf` 로 파일 존재·소유자·권한 확인, `df -h <로그 경로>` 와 `mount | grep <마운트 지점>` 으로 파일시스템 상태 확인"
+  short:
+  - "(2차·승인 후, 롤백: 작업 전 데이터·로그 볼륨 전체 사본 확보) 경로·권한 원인이면 원래대로 복구 후 기동, 로그 파일이 손상·유실됐으면 백업으로 `cubrid restoredb` 복구"
+  mid:
+  - "로그 볼륨 경로를 databases.txt 와 함께 형상관리하고 스토리지 마운트 자동화(fstab) 점검"
+  long:
+  - "정기 백업·복원 훈련으로 로그 볼륨 유실 시 복구 시간을 검증"
+  versions:
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: error_code.h 의 번호·ER_ 이름이 v10.2.16~v11.4·develop 에서 동일, <db>_lgat·_lginf 파일 이름은 11.4 매뉴얼 admin_utils 기준. 10.1 이하는 미대조
+  source: "공식 문서 대조(2026-10-16 5차 보강)"
+- code: '-100'
+  severity: error
+  category: storage
+  title: 데이터베이스 백업 실패
+  vendor_cause: "ER_LOG_DBBACKUP_FAIL — 데이터베이스 백업을 수행할 수 없음. 백업 대상 경로의 공간 부족·권한 문제, 백업 중 볼륨 읽기 오류가 흔한 원인이며 함께 찍힌 앞선 오류 코드가 실제 원인을 가리킨다."
+  vendor_url: https://github.com/CUBRID/cubrid/blob/develop/src/base/error_code.h
+  immediate:
+  - "백업 작업 출력과 `grep -n \"ERROR CODE\" $CUBRID/log/server/<db>_*.err | tail -20` 으로 -100 직전의 원래 오류 코드 확인"
+  - "백업 경로(-D 미지정 시 databases.txt 의 로그 디렉터리)에 대해 `df -h <백업 경로>` 와 `ls -ld <백업 경로>` 로 공간·권한 확인"
+  short:
+  - "(2차·승인 후, 롤백: 실패한 백업 조각은 보관 후 정리) 원인 해소 뒤 `cubrid backupdb -D <백업 경로> <db>` 로 백업 재수행하고 <db>_bkvinf 갱신 확인"
+  mid:
+  - "백업 경로를 데이터·로그와 다른 파일시스템으로 분리하고 백업 크기 대비 여유 공간 기준(2배) 수립"
+  long:
+  - "백업 성공 여부를 매일 자동 점검해 실패 시 경보, 분기별 복원 훈련 수행"
+  versions:
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: error_code.h 의 번호·ER_ 이름이 v10.2.16~v11.4·develop 에서 동일, backupdb -D 기본 경로 설명은 11.4 매뉴얼 기준. 10.1 이하는 미대조
+  source: "공식 문서 대조(2026-10-16 5차 보강)"
+- code: '-191'
+  severity: error
+  category: connection
+  title: 서버 접속 불가
+  vendor_cause: "ER_NET_CANT_CONNECT_SERVER — 지정한 호스트의 DB 서버에 접속할 수 없음. DB 서버(cub_server) 미기동, cub_master 포트(cubrid_port_id) 차단, 호스트 이름 해석 실패가 흔한 원인."
+  vendor_url: https://github.com/CUBRID/cubrid/blob/develop/src/base/error_code.h
+  immediate:
+  - "DB 서버에서 `cubrid server status` 와 `ps -ef | grep -E \"[c]ub_master|[c]ub_server\"` 로 대상 DB 서버 기동 여부 확인"
+  - "`grep -E \"^cubrid_port_id\" $CUBRID/conf/cubrid.conf` 로 포트를 확인하고 접속 측에서 `nc -zvw3 <server> <port>` 와 `getent hosts <server>` 로 도달·이름 해석 확인"
+  short:
+  - "(2차·승인 후, 롤백: 기동 전 상태·로그 보관) 서버가 내려가 있으면 원인(.err 로그) 확인 후 `cubrid server start <db>`, 방화벽이면 포트 허용 요청"
+  mid:
+  - "접속 실패 시각과 서버 기동·중지 이력을 대조하고 HA 구성이면 절체 이력 확인"
+  long:
+  - "cub_server 프로세스·포트 생존 감시를 등록하고 접속 실패 건수 임계 경보 운영"
+  versions:
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: error_code.h 의 번호·ER_ 이름이 v10.2.16~v11.4·develop 에서 동일, cubrid_port_id 는 11.4 매뉴얼 control 기준. 10.1 이하는 미대조
+  source: "공식 문서 대조(2026-10-16 5차 보강)"
+- code: '-195'
+  severity: error
+  category: connection
+  title: 서버 통신 오류
+  vendor_cause: "ER_NET_SERVER_COMM_ERROR — 클라이언트(CAS 등)와 DB 서버 사이 통신 중 오류가 발생함(메시지에 세부 사유). 서버 프로세스 비정상 종료·재기동, 네트워크 순단, 장시간 유휴 연결의 방화벽 끊김이 흔한 원인."
+  vendor_url: https://github.com/CUBRID/cubrid/blob/develop/src/base/error_code.h
+  immediate:
+  - "`cubrid server status` 와 `ps -ef | grep -E \"[c]ub_server\"` 로 서버 생존·기동 시각 확인, `ls -lt $CUBRID/log/server/ | head` 로 같은 시각 서버 오류 로그 확인"
+  - "`cubrid broker status -f` 로 CAS 상태·대기 확인(읽기 전용) — 여러 CAS 에서 동시 발생이면 서버 측, 일부면 네트워크·방화벽 측"
+  short:
+  - "(2차·승인 후, 롤백: 재시작 전 broker 상태 출력 보관) 서버가 정상이면 영향 받은 브로커만 `cubrid broker reset <broker>` 로 연결 재설정(`cubrid broker restart` 는 전체 브로커 재시작이라 일정 협의 필요), 서버 비정상 종료면 core·.err 확보 후 재기동"
+  mid:
+  - "통신 오류 시각을 서버 재기동·네트워크 장비 로그와 대조하고 방화벽 세션 유지 시간과 연결 유휴 시간 정합"
+  long:
+  - "CAS·서버 통신 오류 건수 감시 임계 등록, 서버 비정상 종료 시 core 자동 수집 설정"
+  versions:
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: error_code.h 의 번호·ER_ 이름이 v10.2.16~v11.4·develop 에서 동일. 10.1 이하는 미대조
+  source: "공식 문서 대조(2026-10-16 5차 보강)"
+- code: '-493'
+  severity: warn
+  category: internal
+  title: SQL 구문 오류
+  vendor_cause: "ER_PT_SYNTAX — SQL 구문 분석 오류('Syntax: …' 뒤에 오류 위치 표시). 애플리케이션 SQL 작성 오류·예약어 사용·버전 간 문법 차이가 원인이며 DB 장애는 아니다."
+  vendor_url: https://github.com/CUBRID/cubrid/blob/develop/src/base/error_code.h
+  immediate:
+  - "애플리케이션 로그에서 실패 SQL 전문과 호출 모듈을 확인해 영향 업무 범위만 파악(DB 상태 이상 아님)"
+  - "SQL 로그가 켜져 있으면 `grep -n \"<SQL 일부>\" $CUBRID/log/broker/sql_log/<broker>_<n>.sql.log | tail -10` 으로 실제 전달된 문장 확인 — 배포 직후 급증이면 배포 담당에 즉시 공유"
+  short:
+  - "개발 담당에 SQL 수정 요청 — 오류 위치 표시 부분의 예약어·따옴표·버전별 문법 차이 확인"
+  mid:
+  - "CUBRID 버전 업그레이드·이관 시 SQL 호환성 시험 목록을 만들어 사전 검증"
+  long:
+  - "배포 후 -493 건수 급증 감시 임계를 등록하고 SQL 정적 검사를 배포 파이프라인에 포함"
+  versions:
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: error_code.h 의 번호·ER_ 이름이 v10.2.16~v11.4·develop 에서 동일, SQL 로그 경로는 11.4 매뉴얼 control 기준(SQL_LOG=ON 일 때만 생성). 10.1 이하는 미대조
+  source: "공식 문서 대조(2026-10-16 5차 보강)"

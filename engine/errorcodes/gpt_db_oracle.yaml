@@ -1,0 +1,544 @@
+product: oracle
+layer: db
+note: GPT 협업 수집분 — 벤더 공식 문서와 대조 후 확정
+codes:
+- code: ORA-00600
+  severity: critical
+  category: internal
+  title: 내부 오류
+  immediate:
+  - "`grep -n -A4 \"ORA-00600\" <alert_SID.log> | tail -40` 로 첫 인수([kxxx] 등)·incident 번호·trace 경로 기록 — 같은 첫 인수 반복 여부가 판단 기준 (경로: `select value from v$diag_info where name='Diag Trace';`, 11g+)"
+  - "11g+: `adrci exec=\"show homes\"` 뒤 `adrci exec=\"set homepath <home>; show problem; show incident -mode basic\"` 로 problem·incident 목록 확인 (10gR2 는 user_dump_dest 의 trace)"
+  - "영향 범위: `select instance_name, status from v$instance;` 와 앱 오류 건수 — OPEN 이고 특정 SQL 에서만 나면 해당 세션 한정"
+  short:
+  - "(2차·승인 후, 롤백: 해당 없음 — 업무 담당 합의) 반복 유발 SQL·세션이 특정되면 해당 배치·기능을 잠시 멈추고(필요 시 세션 종료), `adrci` 의 `ips pack incident <n> in <dir>` 로 SR 자료 묶음 생성"
+  - AHF 진단자료를 수집하고 동일 오류의 알려진 버그를 확인
+  mid:
+  - 적용 버전의 RU와 one-off 패치를 검토해 검증환경에서 적용
+  long:
+  - 정기 RU 정책과 회귀시험으로 내부 오류 재발을 예방
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/ora-00600/)
+  vendor_cause: Oracle 프로세스가 저수준의 예기치 않은 내부 상태를 만났으며 첫 인수가 내부 메시지 번호다.
+  vendor_action: My Oracle Support의 ORA-00600 Lookup을 사용하고 ADR incident·trace와 오류 전후 변경·작업·OS/DB 상태 정보를 수집한다.
+  vendor_url: https://docs.oracle.com/en/error-help/db/ora-00600/
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: ORA 코드 번호·의미는 10gR2~26ai 동일 — alert log 형식만 12.2 부터 ISO8601 시각(파서가 고전·ISO 두 형식 처리)
+- code: ORA-07445
+  severity: critical
+  category: internal
+  title: 프로세스 예외 코어덤프
+  immediate:
+  - "`grep -n -A4 \"ORA-07445\" <alert_SID.log> | tail -40` 로 예외 함수명([kxxx()+])·시그널(SIGSEGV 등)·trace 경로 기록"
+  - "11g+: `adrci exec=\"set homepath <home>; show incident -mode basic\"` 와 `ls -lt <ADR Home>/cdump | head` 로 incident·core 생성 확인"
+  - "반복 프로세스: `head -40 <trace 파일>` 의 프로그램명·모듈·SQL 로 같은 SQL·모듈 반복인지 확인 — 같으면 해당 기능 한정 결함"
+  short:
+  - AHF 진단자료와 OS 이벤트를 분석하고 알려진 결함을 대조
+  mid:
+  - 검증된 RU 또는 벤더 권고 패치를 적용
+  long:
+  - OS와 DB 패치 수명주기를 통합하고 장애 재현시험을 정례화
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/ora-07445/)
+  vendor_cause: 코어 파일을 생성해야 하는 운영체제 예외가 발생한 Oracle 내부 오류다.
+  vendor_action: My Oracle Support의 ORA-07445 Lookup을 사용하고 ADR incident·trace와 오류 전후 변경·작업·OS/DB 상태 정보를 수집한다.
+  vendor_url: https://docs.oracle.com/en/error-help/db/ora-07445/
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: ORA 코드 번호·의미는 10gR2~26ai 동일 — alert log 형식만 12.2 부터 ISO8601 시각(파서가 고전·ISO 두 형식 처리)
+- code: ORA-00020
+  severity: critical
+  category: capacity
+  title: 최대 프로세스 초과
+  immediate:
+  - "프로세스 한도: `select resource_name, current_utilization, max_utilization, limit_value from v$resource_limit where resource_name='processes';` — 95% 이상이면 확정"
+  - "출처 편중: `select machine, program, count(*) cnt from v$session where type='USER' group by machine, program order by cnt desc fetch first 10 rows only;` (12c+)"
+  short:
+  - "(2차·승인 후, 롤백: 원래 PROCESSES 로 SCOPE=SPFILE 재설정) 누수 WAS 풀 재시작으로 회수, 필요 시 `alter system set processes=<값> scope=spfile;` 후 계획 재기동"
+  mid:
+  - PROCESSES 증설을 산정하고 계획 재기동으로 반영
+  long:
+  - 세션 수요 예측과 연결풀 표준을 수립
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/ora-00020/)
+  vendor_cause: PROCESSES 초기화 파라미터에 지정된 프로세스 수 한도에 도달했다.
+  vendor_action: 기존 연결을 종료하거나 PROCESSES 값을 늘린 뒤 인스턴스를 재시작한다.
+  vendor_url: https://docs.oracle.com/en/error-help/db/ora-00020/
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: ORA 코드 번호·의미는 10gR2~26ai 동일 — alert log 형식만 12.2 부터 ISO8601 시각(파서가 고전·ISO 두 형식 처리)
+- code: ORA-00060
+  severity: error
+  category: lock
+  title: 교착상태 발생
+  immediate:
+  - "`grep -n \"ORA-00060\" <alert_SID.log> | tail -10` 로 trace 경로 확인 뒤 `grep -n -A25 \"Deadlock graph\" <trace 파일> | head -60` — 서로 기다리는 세션·SQL 확인"
+  - "trace 의 'Rows waited on' 객체: `select owner, object_name, object_type from dba_objects where object_id=<obj#>;` — 같은 테이블 쌍이 반복되면 접근 순서 문제, 대기 모드가 S(4) 면 FK 미인덱스·ITL 의심"
+  - "희생 트랜잭션 재시도 결과를 앱 로그로 확인 — 재시도로 정상 처리되면 업무 영향 없음"
+  short:
+  - 교착 SQL과 객체의 잠금 순서를 분석
+  mid:
+  - 트랜잭션 범위를 줄이고 객체 접근 순서를 통일
+  long:
+  - 동시성 설계 표준과 deadlock 자동수집 체계를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/ora-00060/)
+  vendor_cause: 트랜잭션들이 자원을 기다리며 서로 교착상태에 빠졌다.
+  vendor_action: trace 파일에서 관련 트랜잭션과 자원을 확인하고 필요하면 다시 시도한다.
+  vendor_url: https://docs.oracle.com/en/error-help/db/ora-00060/
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: ORA 코드 번호·의미는 10gR2~26ai 동일 — alert log 형식만 12.2 부터 ISO8601 시각(파서가 고전·ISO 두 형식 처리)
+- code: ORA-00054
+  severity: warn
+  category: lock
+  title: 자원 잠금 충돌
+  immediate:
+  - "대기·보유 세션: `select sid, serial#, username, blocking_session, event, seconds_in_wait, sql_id from v$session where blocking_session is not null;` (10g+)"
+  - "대상 객체 잠금 보유: `select l.session_id, s.serial#, s.username, s.status, s.last_call_et, l.locked_mode from v$locked_object l join dba_objects o on o.object_id=l.object_id join v$session s on s.sid=l.session_id where o.object_name=upper('<table>');` — INACTIVE·last_call_et 큰 세션이 보유하면 미커밋 원인"
+  - "DDL 이면 `select value from v$parameter where name='ddl_lock_timeout';` (11g+) — 0 이면 즉시 실패, 업무 영향이 적으면 잠시 뒤 재시도"
+  short:
+  - "(2차·승인 후, 롤백: 불가 — 종료 세션의 미커밋 변경은 취소됨) 업무 담당 확인 뒤 `alter system kill session '<sid>,<serial#>' immediate;`, DDL 은 한가한 시간에 ddl_lock_timeout 지정 후 수행"
+  - 장기 트랜잭션의 COMMIT/ROLLBACK 시점을 점검
+  mid:
+  - DDL과 배치 작업 시간을 분리하고 잠금 대기정책을 정비
+  long:
+  - 온라인 변경 절차와 잠금 영향 사전점검을 표준화
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/ora-00054/)
+  vendor_cause: 다른 세션이 지정 자원의 잠금을 보유해 현재 세션이 잠금을 획득하지 못했다.
+  vendor_action: 다시 시도해 잠금 해제를 확인하고 계속되면 잠금 세션·자원을 식별해 해당 세션의 트랜잭션을 종료한 뒤 재시도한다.
+  vendor_url: https://docs.oracle.com/en/error-help/db/ora-00054/
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: ORA 코드 번호·의미는 10gR2~26ai 동일 — alert log 형식만 12.2 부터 ISO8601 시각(파서가 고전·ISO 두 형식 처리)
+- code: ORA-01555
+  severity: error
+  category: undo
+  title: 스냅샷 너무 오래됨
+  immediate:
+  - "`select begin_time, maxquerylen, maxqueryid, tuned_undoretention, ssolderrcnt, nospaceerrcnt from v$undostat where begin_time > sysdate-1/24 order by begin_time;` (10g+) — maxquerylen 이 tuned_undoretention 보다 길면 장기 조회 원인"
+  - "`select name, value from v$parameter where name in ('undo_retention','undo_tablespace','undo_management');` 와 `select tablespace_name, retention from dba_tablespaces where contents='UNDO';` — RETENTION GUARANTEE 여부 확인"
+  - "실패 SQL: `select sql_id, sql_text from v$sql where sql_id='<maxqueryid>';` 와 같은 시각 대량 DML·배치 일정 대조, 실패 조회는 부하 적은 시간에 재시도"
+  short:
+  - UNDO_RETENTION과 undo 사용량, tuned retention을 점검
+  mid:
+  - UNDO tablespace 용량과 배치 커밋 단위를 조정
+  long:
+  - 장기조회 SLA 기반 undo 용량계획과 모니터링을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/ora-01555/)
+  vendor_cause: 일관된 읽기에 필요한 rollback 레코드가 다른 writer에 의해 덮어써졌다.
+  vendor_action: Automatic Undo Management이면 UNDO_RETENTION을 늘리고, 아니면 더 큰 rollback segment를 사용한다.
+  vendor_url: https://docs.oracle.com/en/error-help/db/ora-01555/
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: ORA 코드 번호·의미는 10gR2~26ai 동일 — alert log 형식만 12.2 부터 ISO8601 시각(파서가 고전·ISO 두 형식 처리)
+- code: ORA-01653
+  severity: error
+  category: storage
+  title: 테이블 공간 확장 실패
+  immediate:
+  - "사용률: `select tablespace_name, round(used_percent,1) pct from dba_tablespace_usage_metrics where tablespace_name='<TS>';`"
+  - "AUTOEXTEND 여지: `select file_name, round(bytes/1024/1024) mb, autoextensible, round(maxbytes/1024/1024) max_mb from dba_data_files where tablespace_name='<TS>';` 와 `df -h <datafile 경로>`"
+  short:
+  - "(2차·승인 후, 롤백: 추가 파일은 축소 불가 — 용량 계획 반영) `alter tablespace <TS> add datafile '<path>' size 4G autoextend on maxsize 32G;` 후 실패 DML 재실행"
+  mid:
+  - 세그먼트 증가율과 보존정책을 기준으로 용량을 재산정
+  long:
+  - tablespace 용량예측과 선제 증설 기준을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/ora-01653/)
+  note: 해당 테이블 쓰기 작업 실패로 단독 코드만으로 서비스 전체 중단을 뜻하지 않음
+  vendor_cause: INSERT/UPDATE에 추가 공간이 필요하지만 시스템이 해당 테이블스페이스를 확장하지 못했다.
+  vendor_action: 데이터파일을 resize/add하거나 AUTOEXTEND를 활성화하고, 필요하면 저장공간·MAXSIZE 또는 BIGFILE 테이블스페이스 크기를 늘린다.
+  vendor_url: https://docs.oracle.com/en/error-help/db/ora-01653/
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: ORA 코드 번호·의미는 10gR2~26ai 동일 — alert log 형식만 12.2 부터 ISO8601 시각(파서가 고전·ISO 두 형식 처리)
+- code: ORA-01654
+  severity: error
+  category: storage
+  title: 인덱스 공간 확장 실패
+  immediate:
+  - "사용률: `select tablespace_name, round(used_percent,1) pct from dba_tablespace_usage_metrics where tablespace_name='<TS>';`"
+  - "인덱스 크기·AUTOEXTEND: `select segment_name, round(bytes/1024/1024) mb from dba_segments where segment_name=upper('<index>');` 와 `select file_name, autoextensible, round(maxbytes/1024/1024) max_mb from dba_data_files where tablespace_name='<TS>';`"
+  short:
+  - "(2차·승인 후, 롤백: 추가 파일은 축소 불가 — 용량 계획 반영) 인덱스 테이블스페이스에 데이터파일 추가 또는 자동확장 설정 후 실패 작업 재실행"
+  mid:
+  - 인덱스 구조와 불필요 인덱스를 정비하고 용량을 재산정
+  long:
+  - 인덱스 성장률 기반 용량계획과 정기 점검을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/ora-01654/)
+  note: 해당 인덱스 확장 작업 실패로 단독 코드만으로 서비스 전체 중단을 뜻하지 않음
+  vendor_cause: 지정 테이블스페이스에서 인덱스 세그먼트에 필요한 익스텐트를 할당하지 못했다.
+  vendor_action: ALTER TABLESPACE ADD DATAFILE로 해당 테이블스페이스에 하나 이상의 파일을 추가한다.
+  vendor_url: https://docs.oracle.com/en/error-help/db/ora-01654/
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: ORA 코드 번호·의미는 10gR2~26ai 동일 — alert log 형식만 12.2 부터 ISO8601 시각(파서가 고전·ISO 두 형식 처리)
+- code: ORA-00257
+  severity: critical
+  category: disk
+  title: 아카이버 오류
+  immediate:
+  - "목적지·FRA: `select dest_id, status, error from v$archive_dest where status<>'INACTIVE';` 와 `select file_type, percent_space_used, percent_space_reclaimable from v$recovery_area_usage;`"
+  - "공간: `df -h <archive_dest>` — 100% 이면 DB 쓰기 전면 중단 상태이므로 즉시 DBA 호출(정리는 2차)"
+  short:
+  - "(2차·승인 후, 롤백: 정리 대상 목록 기록) RMAN 에서 백업 완료 아카이브만 `delete noprompt archivelog all backed up 1 times to device type <disk|sbt>;` 로 정리하거나 FRA 한도 상향"
+  mid:
+  - FRA 또는 아카이브 영역 용량을 증설하고 백업주기를 조정
+  long:
+  - 아카이브 증가율 예측과 자동 임계치 경보를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/ora-00257/)
+  vendor_cause: 아카이버가 리두 로그 아카이브 중 오류를 받았으며 주원인은 대상 공간 부족 또는 MANDATORY 대상 실패다.
+  vendor_action: alert log와 trace 파일을 확인해 상세 오류 정보를 조사한다.
+  vendor_url: https://docs.oracle.com/en/error-help/db/ora-00257/
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: ORA 코드 번호·의미는 10gR2~26ai 동일 — alert log 형식만 12.2 부터 ISO8601 시각(파서가 고전·ISO 두 형식 처리)
+- code: ORA-19809
+  severity: critical
+  category: capacity
+  title: 복구영역 한도 초과
+  immediate:
+  - "FRA 한도·사용: `select space_limit/1024/1024 limit_mb, space_used/1024/1024 used_mb, space_reclaimable/1024/1024 reclaim_mb from v$recovery_file_dest;`"
+  - "유형별 점유: `select file_type, percent_space_used, percent_space_reclaimable from v$recovery_area_usage;` — reclaimable 이 작으면 백업 미완료로 자동 재사용 불가"
+  short:
+  - "(2차·승인 후, 롤백: 정리 대상 목록 기록·한도는 원래 값으로) RMAN `crosscheck archivelog all; delete noprompt obsolete;` 또는 `alter system set db_recovery_file_dest_size=<값> scope=both;`"
+  mid:
+  - FRA 크기와 보존정책을 업무량에 맞게 재산정
+  long:
+  - 복구정책과 FRA 용량계획을 통합 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/ora-19809/)
+  vendor_cause: DB_RECOVERY_FILE_DEST_SIZE로 지정한 복구 파일 한도를 초과했다.
+  vendor_action: RMAN 백업·보존/아카이브 삭제 정책을 조정하거나 디스크와 한도를 늘리거나 RMAN으로 복구 영역 파일을 삭제한다.
+  vendor_url: https://docs.oracle.com/en/error-help/db/ora-19809/
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: Fast Recovery Area(10g 도입) — 10gR2 이상 공통
+- code: ORA-19815
+  severity: warn
+  category: capacity
+  title: 복구영역 사용률 경고
+  immediate:
+  - "사용량·reclaimable: `select space_limit/1024/1024 limit_mb, space_used/1024/1024 used_mb, space_reclaimable/1024/1024 reclaim_mb from v$recovery_file_dest;`"
+  - "유형별: `select file_type, percent_space_used, percent_space_reclaimable from v$recovery_area_usage;`"
+  - "백업 성공 여부: `select start_time, status, input_type from v$rman_backup_job_details where start_time > sysdate-2 order by start_time;` (10gR2+)"
+  short:
+  - "(2차·승인 후, 롤백: 정리 대상 목록 기록·한도는 원래 값으로) RMAN `crosscheck archivelog all; delete noprompt obsolete;` 와 백업 완료 아카이브 정리, 부족하면 `alter system set db_recovery_file_dest_size=<값> scope=both;`"
+  mid:
+  - FRA 크기와 로그 보존기간을 재조정
+  long:
+  - 예측 기반 FRA 임계치와 자동정리 정책을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/ora-19815/)
+  vendor_cause: "DB_RECOVERY_FILE_DEST(FRA) 사용률이 경고 임계(85%·97%)를 넘음 — 아카이브·백업 누적, 백업 실패로 회수 불가 파일 증가, FRA 한도 과소가 원인. 100% 가 되면 ORA-19809·ORA-00257 로 DB 가 멈춤."
+  vendor_action: 디스크와 DB_RECOVERY_FILE_DEST_SIZE를 늘리거나 RMAN 백업·정책 조정·복구 영역 파일 삭제 중 하나를 수행한다.
+  vendor_url: https://docs.oracle.com/en/error-help/db/ora-19815/
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: Fast Recovery Area 사용률 경고 — 10gR2 이상 공통
+- code: ORA-03114
+  severity: error
+  category: connection
+  title: DB 연결 끊김
+  immediate:
+  - "인스턴스 생존: `ps -ef | grep [o]ra_pmon_<SID>` 와 `select instance_name, status from v$instance;` — pmon 이 없으면 인스턴스 다운(ORA-01034 절차)"
+  - "`grep -nE \"ORA-0(0600|7445|0603|0028)\" <alert_SID.log> | tail -20` — 같은 시각 내부 오류·세션 종료 기록이 있으면 서버 측 원인"
+  - "`lsnrctl status <listener>` 와 클라이언트 `tnsping <alias>` — 리스너 정상이고 위 기록이 없으면 네트워크·방화벽 원인"
+  short:
+  - "원인 해소 뒤 애플리케이션 연결 풀 재연결 — 풀의 연결 검증(validation) 설정 여부 확인"
+  - 선행 ORA 오류와 세션 종료 원인을 확인
+  mid:
+  - 연결풀 검증과 재접속 로직을 보완
+  long:
+  - DB 상태기반 연결 헬스체크와 자동복구 정책을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/ora-03114/)
+  vendor_cause: 클라이언트와 서버 프로세스 연결이 없으며 인스턴스 중단, 서버 프로세스 치명 오류 또는 네트워크 단절 가능성이 있다.
+  vendor_action: DB alert log에서 중단·프로세스 종료를 확인하고 네트워크와 SQL*Net 설정을 점검해 문제 해결 후 작업을 다시 시도한다.
+  vendor_url: https://docs.oracle.com/en/error-help/db/ora-03114/
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: ORA 코드 번호·의미는 10gR2~26ai 동일 — alert log 형식만 12.2 부터 ISO8601 시각(파서가 고전·ISO 두 형식 처리)
+- code: ORA-12170
+  severity: error
+  category: connection
+  title: 접속 시간 초과
+  immediate:
+  - "클라이언트에서 `tnsping <alias>` 와 `nc -zvw3 <db_host> <port>` — 시간초과면 경로·방화벽, 거부면 리스너 미기동"
+  - "서버 기록: `grep -n -A6 \"TNS-12535\" <alert_SID.log> | tail -40` (11g+) — 'Client address' 로 시간초과 클라이언트와 반복 여부 확인"
+  - "`grep -inE \"CONNECT_TIMEOUT|RECV_TIMEOUT\" $ORACLE_HOME/network/admin/sqlnet.ora` (TNS_ADMIN 지정 시 그 경로) 로 현재 timeout 설정 확인"
+  short:
+  - SQLNET과 CONNECT_TIMEOUT 설정 및 네트워크 지연을 점검
+  mid:
+  - 네트워크 경로와 접속 타임아웃 기준을 조정
+  long:
+  - 구간별 네트워크 지연 모니터링과 이중화를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/ora-12170/)
+  vendor_cause: 네트워크·시스템 지연, 방화벽, 연결 불가 또는 DoS 공격 등으로 연결 요청이 제한 시간 내 완료되지 않았다.
+  vendor_action: 연결성과 방화벽을 확인하고 관련 CONNECT/RECV timeout을 늘리며 악성 클라이언트가 의심되면 출처를 식별해 접근을 제한한다.
+  vendor_url: https://docs.oracle.com/en/error-help/db/ora-12170/
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: ORA 코드 번호·의미는 10gR2~26ai 동일 — alert log 형식만 12.2 부터 ISO8601 시각(파서가 고전·ISO 두 형식 처리)
+- code: ORA-12514
+  severity: error
+  category: connection
+  title: 서비스 미등록
+  immediate:
+  - "`lsnrctl services <listener>` — 요청 SERVICE_NAME 이 목록에 없으면 확정"
+  - "DB 측: `select name, value from v$parameter where name in ('service_names','local_listener');` 와 `select name from v$active_services;` — 서비스가 없거나 local_listener 가 리스너 주소와 다르면 동적 등록 실패"
+  - "12c+ CDB: `select name, open_mode from v$pdbs;` — 대상 PDB 가 MOUNTED 면 서비스 미등록(PDB 미오픈)"
+  short:
+  - "(2차·승인 후, 롤백: 원래 값) `alter system set local_listener='<주소>' scope=both;` 뒤 `alter system register;`, PDB 미오픈이면 `alter pluggable database <pdb> open;`"
+  - SERVICE_NAMES와 local_listener, 동적 등록 상태를 점검
+  mid:
+  - 서비스 등록 구성을 표준화하고 재기동 절차를 검증
+  long:
+  - 리스너 서비스 등록 상태를 상시 모니터링
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/ora-12514/)
+  vendor_cause: 요청 서비스명이 리스너에 동적 등록되지 않았거나 listener.ora에 정적으로 구성되지 않았다.
+  vendor_action: 연결 문자열·DB/PDB 상태·SERVICE_NAME을 확인하고 잠시 후 재시도하며 필요하면 lsnrctl services로 등록 상태를 확인한다.
+  vendor_url: https://docs.oracle.com/en/error-help/db/ora-12514/
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: ORA 코드 번호·의미는 10gR2~26ai 동일 — alert log 형식만 12.2 부터 ISO8601 시각(파서가 고전·ISO 두 형식 처리)
+- code: ORA-12516
+  severity: critical
+  category: capacity
+  title: 가용 핸들러 없음
+  immediate:
+  - "한도: `select resource_name, current_utilization, limit_value from v$resource_limit where resource_name in ('processes','sessions');`"
+  - "리스너 핸들러 상태: `lsnrctl services <listener>` — `state:blocked` 또는 established 급증 확인"
+  short:
+  - "(2차·승인 후, 롤백: 원래 PROCESSES 값) 누수 연결 회수(WAS 풀 재시작) 후 필요 시 PROCESSES 상향(재기동)"
+  mid:
+  - 피크 접속량 기준으로 프로세스 용량을 증설
+  long:
+  - 접속 용량 예측과 연결풀 상한 정책을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/ora-12516/)
+  vendor_cause: 요청 서비스의 가용 핸들러 중 클라이언트가 요청한 프로토콜 스택을 지원하는 핸들러가 없었다.
+  vendor_action: 연결 문자열을 확인하고 잠시 후 다시 연결하며 CONNECTION_ID로 trace를 추적하고 필요하면 리스너 핸들러 상태를 확인한다.
+  vendor_url: https://docs.oracle.com/en/error-help/db/ora-12516/
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: ORA 코드 번호·의미는 10gR2~26ai 동일 — alert log 형식만 12.2 부터 ISO8601 시각(파서가 고전·ISO 두 형식 처리)
+- code: ORA-12519
+  severity: critical
+  category: capacity
+  title: 서비스 핸들러 부족
+  immediate:
+  - "한도: `select resource_name, current_utilization, limit_value from v$resource_limit where resource_name='processes';`"
+  - "리스너 서비스 핸들러: `lsnrctl services <listener>` 의 handler state(ready/blocked)와 refused 건수"
+  short:
+  - "(2차·승인 후, 롤백: 원래 PROCESSES 값) 누수 연결 회수 후 PROCESSES 상향(재기동), 접속 폭주면 listener.ora `CONNECTION_RATE_<listener>`(11gR2+) 검토"
+  mid:
+  - 접속 수요에 맞게 프로세스와 서비스 구성을 재산정
+  long:
+  - 연결 수용량 임계치와 조기경보를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/ora-12519/)
+  vendor_cause: 리스너가 클라이언트 연결에 적합한 가용 서비스 핸들러를 찾지 못했다.
+  vendor_action: lsnrctl services로 인스턴스가 리스너에 등록되어 있고 연결을 수락 중인지 확인한다.
+  vendor_url: https://docs.oracle.com/en/error-help/db/ora-12519/
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: ORA 코드 번호·의미는 10gR2~26ai 동일 — alert log 형식만 12.2 부터 ISO8601 시각(파서가 고전·ISO 두 형식 처리)
+- code: ORA-01114
+  severity: critical
+  category: disk
+  title: 데이터블록 쓰기 오류
+  immediate:
+  - "메시지의 file# 로 `select file#, name, status from v$datafile where file#=<n>;` — 없으면 tempfile(번호 = DB_FILES+n): `select file#, name from v$tempfile;`"
+  - "`df -h <파일 경로>` 와 `dmesg | tail -50` (AIX `errpt | head -20`) — 공간 100%·장치 오프라인·I/O 오류 확인"
+  - "`grep -n -A6 \"ORA-01114\" <alert_SID.log> | tail -40` 로 동반 OS 오류(ORA-27072·Linux-x86_64 Error: n) 확인"
+  short:
+  - "(2차·승인 후, 롤백: 해당 없음) 장치 복구 전까지 대상 테이블스페이스 대량 쓰기 배치를 멈추고, 임시파일이면 다른 경로에 tempfile 추가"
+  - 파일시스템 용량과 I/O 오류, ASM 또는 SAN 상태를 점검
+  mid:
+  - 스토리지 결함을 교체하고 DB 무결성을 검증
+  long:
+  - I/O 경로 이중화와 스토리지 예측진단을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/ora-01114/)
+  vendor_cause: 파일이 있는 장치가 오프라인이거나 임시파일인 경우 장치 공간이 부족할 수 있다.
+  vendor_action: 장치 접근을 복구하거나 불필요한 파일을 제거해 공간을 확보한다.
+  vendor_url: https://docs.oracle.com/en/error-help/db/ora-01114/
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: ORA 코드 번호·의미는 10gR2~26ai 동일 — alert log 형식만 12.2 부터 ISO8601 시각(파서가 고전·ISO 두 형식 처리)
+- code: ORA-01157
+  severity: critical
+  category: storage
+  title: 데이터파일 접근 실패
+  immediate:
+  - "`select file#, name, status, error from v$datafile_header where error is not null;` 와 `select * from v$recover_file;` — 접근 못 하는 파일 목록 확인"
+  - "OS: oracle 계정으로 `ls -l '<datafile 경로>'` 와 `df -h <마운트 지점>` — 파일 없음·권한 불일치·마운트 해제면 원인 확정, ASM 이면 `asmcmd lsdg` 로 디스크그룹 MOUNTED 여부"
+  - "`grep -n -A8 \"ORA-01157\" <alert_SID.log> | tail -40` 로 DBWR trace 경로와 OS 오류 번호 확인"
+  short:
+  - "(2차·승인 후, 롤백: 해당 없음) 마운트·권한을 바로잡아 파일을 접근 가능하게 한 뒤 `alter system check datafiles;` 또는 DB open, 파일 손실이면 RMAN 복원"
+  - ALTER SYSTEM CHECK DATAFILES와 파일 권한, 경로, 마운트를 검증
+  mid:
+  - 필요 시 백업에서 복구하고 스토리지 장애 원인을 제거
+  long:
+  - 데이터파일 다중경로와 백업 복구훈련을 정례화
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/ora-01157/)
+  vendor_cause: 백그라운드 프로세스가 데이터파일을 찾지 못했거나 이미 사용 중이라 잠그지 못했다.
+  vendor_action: 운영체제에서 파일을 DB가 사용할 수 있게 한 뒤 DB를 열거나 ALTER SYSTEM CHECK DATAFILES를 실행한다.
+  vendor_url: https://docs.oracle.com/en/error-help/db/ora-01157/
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: ORA 코드 번호·의미는 10gR2~26ai 동일 — alert log 형식만 12.2 부터 ISO8601 시각(파서가 고전·ISO 두 형식 처리)
+- code: ORA-00313
+  severity: critical
+  category: storage
+  title: 리두로그 열기 실패
+  immediate:
+  - "대상 멤버: `select group#, status, member from v$logfile;` 와 `select group#, sequence#, status, archived from v$log;`"
+  - "파일·스토리지: `ls -l <member>` · `dmesg -T | grep -i \"i/o error\" | tail` — 같은 그룹의 다른 멤버가 정상인지 확인"
+  short:
+  - "(2차·승인 후, 롤백: 해당 없음 — 조치 후 즉시 백업) 다른 멤버가 정상이면 손상 멤버 drop 후 재추가(`alter database drop logfile member '<m>'`·`add logfile member`), 그룹 전체 손상은 DBA·SR 판단"
+  mid:
+  - 정상 멤버를 기반으로 손상 멤버를 재구성
+  long:
+  - redo 멀티플렉싱과 저장장치 장애 감시를 표준화
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/ora-00313/)
+  vendor_cause: 온라인 로그를 열 수 없으며 파일을 찾지 못했을 가능성이 있다.
+  vendor_action: 동반 오류를 확인하고 해당 로그를 사용할 수 있게 한다.
+  vendor_url: https://docs.oracle.com/en/error-help/db/ora-00313/
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: ORA 코드 번호·의미는 10gR2~26ai 동일 — alert log 형식만 12.2 부터 ISO8601 시각(파서가 고전·ISO 두 형식 처리)
+- code: ORA-27072
+  severity: critical
+  category: disk
+  title: 파일 I/O 오류
+  immediate:
+  - "`grep -n -A6 \"ORA-27072\" <alert_SID.log> | tail -40` 로 대상 파일과 동반 'Linux-x86_64 Error: <n>'(errno) 확인 — 5(EIO)면 하부 I/O, 28(ENOSPC)면 공간"
+  - "OS: `dmesg -T | tail -50` (AIX `errpt | head -20`, Solaris `tail -50 /var/adm/messages`) 로 같은 시각 디스크·HBA 오류 확인"
+  - "ASM 사용 시 `asmcmd lsdg` 와 `asmcmd lsdsk -k` — OFFLINE·MISSING 디스크가 있으면 스토리지 원인"
+  short:
+  - OS 로그와 파일시스템, ASM 또는 SAN I/O 오류를 분석
+  mid:
+  - 결함 디스크와 경로를 교체하고 데이터 무결성을 검증
+  long:
+  - 스토리지 다중경로와 I/O 오류 예측 모니터링을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/ora-27072/)
+  vendor_cause: read/write/readv/writev 시스템 호출이 오류를 반환했으며 추가 정보는 I/O 시작 블록 번호를 나타낸다.
+  vendor_action: errno를 확인한다.
+  vendor_url: https://docs.oracle.com/en/error-help/db/ora-27072/
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: ORA 코드 번호·의미는 10gR2~26ai 동일 — alert log 형식만 12.2 부터 ISO8601 시각(파서가 고전·ISO 두 형식 처리)

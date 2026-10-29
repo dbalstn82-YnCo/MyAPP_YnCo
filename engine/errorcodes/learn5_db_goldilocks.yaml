@@ -1,0 +1,44 @@
+product: goldilocks
+layer: db
+note: 룰 학습 5차(2026-10-15) — 오류 표기 ERR-28000(내부번호) → 사전 키 ERR-<내부번호>. 서버 system.trc 에 늘 기록된다는 근거는 없다(gsql·애플리케이션 출력)
+codes:
+- code: ERR-16004
+  severity: error
+  category: security
+  title: 사용자명·비밀번호 틀려 로그인 거부
+  immediate:
+  - "gsql·애플리케이션 로그에서 같은 계정·접속 출처의 반복 실패 건수와 시각을 집계(비밀번호 값은 기록하지 않음)"
+  - "gsql 에서 `SELECT USER_NAME, PROGRAM_NAME, CLIENT_ADDRESS, LOGON_TIME FROM V$SESSION WHERE USER_NAME = '<user>';` 로 같은 계정의 정상 세션 존재 여부 확인 — 정상 세션이 있으면 특정 애플리케이션 설정 문제"
+  short:
+  - "(2차) 계정 잠금 정책·애플리케이션 접속 설정(데이터소스 비밀번호) 점검, 비밀번호 변경은 계정 관리자 승인 후 애플리케이션과 동시에 반영"
+  mid:
+  - "접속 계정을 애플리케이션별로 분리하고 비밀번호 변경 시 데이터소스 반영 절차를 표준화"
+  long:
+  - "로그인 실패(ERR-16004) 건수를 계정·출처별로 감시하고 짧은 시간 다발 시 보안 담당 경보"
+  source: 룰 학습 5차(2026-10-15) — GPT 14차 벤더 문서 대조 + 원문 재확인
+  vendor_cause: 사용자명 또는 비밀번호가 맞지 않아 로그인 거부
+  vendor_action: ''
+  vendor_url: https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/ko/775292360ce2ccd9
+  versions:
+  - GOLDILOCKS 26c
+  version_note: ERR-28000(16004)
+- code: ERR-16312
+  severity: warn
+  category: security
+  title: 비밀번호 만료
+  immediate:
+  - "`grep -n \"16312\" <애플리케이션 로그> | tail -20` 으로 만료 계정·접속 프로그램·시각 확인(비밀번호 값은 기록하지 않음) (26c)"
+  - "gsql 로 DBA 접속 후 `SELECT * FROM V$SESSION;` 에서 같은 계정을 쓰는 다른 프로그램(영향 범위) 확인 (V$ 뷰·칼럼은 26c 매뉴얼 기준 — 20c·22c 에서 칼럼이 다르면 `SELECT *` 로 확인)"
+  short:
+  - 비밀번호 변경은 계정 담당 승인 후(2차)
+  mid:
+  - 서비스 계정 비밀번호 만료 정책 점검
+  long:
+  - 계정 수명 관리
+  source: 룰 학습 5차(2026-10-15) — GPT 14차 벤더 문서 대조 + 원문 재확인
+  vendor_cause: 비밀번호가 만료됨 — 침해가 아니라 계정 상태
+  vendor_action: ''
+  vendor_url: https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/de7e8dcd976fc245
+  versions:
+  - GOLDILOCKS 26c
+  version_note: ERR-28000(16312)

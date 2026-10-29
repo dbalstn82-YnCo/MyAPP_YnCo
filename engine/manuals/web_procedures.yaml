@@ -1,0 +1,453 @@
+# WEB 계층 조치 절차 카탈로그 — Apache 2.4 · nginx · IIS 10 · WebtoB 5/6 공식 매뉴얼 기준 (2026-09-11)
+# 2026-10-16 안전 강화(GPT 45차 관문): 1차 = 읽기 전용·적용 버전·권한 명시 / 2차 = 사전조건·영향·승인·백업/롤백 + 성공/실패 판단 / 3차 = 민감정보 마스킹·전달 승인
+procedures:
+# ── Apache HTTP Server ──
+- id: APA-PROC-CAPACITY
+  products: [apache]
+  category: capacity
+  match: [WEB-APA-001, LEG-AH-MAXWORKERS, AH00161, AH00484, AH00287]
+  title: MaxRequestWorkers 도달 (AH00161) · 워커 부족
+  source: "Apache 2.4 'MPM Common Directives (MaxRequestWorkers, ServerLimit, ThreadsPerChild)'·'mod_status'·'Apache Performance Tuning' — httpd.apache.org/docs/2.4/mod/mpm_common.html"
+  stages:
+  - stage: 1
+    steps:
+    - do: 워커 사용률·MPM 확인 (읽기 전용)
+      cmd: |
+        httpd -V | grep -i "mpm\|Server version" ; apachectl -M 2>/dev/null | grep -i mpm
+        curl -s "http://localhost/server-status?auto" | egrep "BusyWorkers|IdleWorkers|ReqPerSec|Scoreboard"
+        grep -c "AH00161\|MaxRequestWorkers" /var/log/httpd/error_log ; ss -tan state established '( sport = :80 or sport = :443 )' | wc -l
+      check: IdleWorkers 0·BusyWorkers = MaxRequestWorkers 이고 접속 수가 평소의 2배 이상이면 트래픽 폭주 또는 백엔드 지연(워커가 backend 대기로 묶임)
+      note: "적용: Apache 2.4 (2.2 는 MaxRequestWorkers 대신 MaxClients·오류 코드 AH 없음) · 경로: RHEL 계열 /var/log/httpd, Debian/Ubuntu 는 /var/log/apache2·apache2ctl · server-status 는 mod_status 가 켜져 있고 localhost 허용일 때만 · 권한: 로그 읽기 권한(보통 root 또는 apache 그룹)"
+    - do: 폭주 출처·백엔드 지연 여부 확인
+      cmd: |
+        tail -n 20000 /var/log/httpd/access_log | awk '{print $1}' | sort | uniq -c | sort -rn | head
+        curl -s "http://localhost/server-status" | grep -o 'W</b>' | wc -l   # 응답 쓰기(W) 상태 워커 수
+        curl -s "http://localhost/server-status?auto" | grep "^Scoreboard" | awk '{s=$2; print "W:", gsub(/W/,"",s), " K:", gsub(/K/,"",$2)}'   # Scoreboard 기준 W·K 개수(ExtendedStatus 무관)
+      check: 특정 IP 편중이면 비정상 접근(보안 담당), W/K 상태 다수면 백엔드(WAS) 지연
+      note: "적용: Apache 2.4 · 첫 줄은 최근 2만 줄만 읽음(대용량 로그 전체 정렬 금지) · 'W</b>' 계산은 ExtendedStatus On(2.4 기본)일 때만 맞음 · 권한: 로그 읽기 권한 · 출력의 IP 는 보고서에 옮길 때 가림"
+  - stage: 2
+    steps:
+    - do: MPM 워커 한도 조정 (event MPM 기준)
+      config:
+        file: /etc/httpd/conf.modules.d/00-mpm.conf 또는 httpd.conf (IfModule mpm_event_module)
+        snippet: |
+          <IfModule mpm_event_module>
+            StartServers             4
+            ServerLimit             20      # 활성 자식 16(=1024/64) + graceful 여유 4
+            ThreadsPerChild         64
+            ThreadLimit             64
+            MaxRequestWorkers     1024      # = 16 × ThreadsPerChild — ServerLimit × ThreadsPerChild 보다 작게 둔다
+            MaxConnectionsPerChild 10000
+            MaxSpareThreads        256
+            MinSpareThreads         64
+          </IfModule>
+          KeepAlive On  KeepAliveTimeout 5  MaxKeepAliveRequests 100  Timeout 60
+        note: "ServerLimit 을 MaxRequestWorkers/ThreadsPerChild 와 똑같이(16) 두면 graceful 재시작 때 요청을 마무리 중인 옛 자식 프로세스가 스코어보드 칸을 계속 차지해 새 자식이 들어갈 칸이 없다 — error_log 에 AH00288(scoreboard is full, not at MaxRequestWorkers)이 나고 그동안 워커가 모자란다. 그래서 예시는 MaxRequestWorkers 1024 를 그대로 두고 ServerLimit 만 20 으로 올려 칸 4개를 남겼다(근거: Apache 2.4 event MPM 문서 'Graceful process termination and Scoreboard usage' — 2.4.24+ 는 ServerLimit 까지의 남는 칸을 종료 중 자식에 쓴다 ·ThreadLimit·ServerLimit 이 커지면 공유 메모리만 조금 늘고 실제 스레드 수는 MaxRequestWorkers 가 정함). prefork MPM 이면 MaxRequestWorkers ≤ ServerLimit(256 기본). 메모리 = 프로세스당 RSS × MaxRequestWorkers 이내"
+      cmd: |
+        apachectl configtest && apachectl graceful
+      check: "성공: server-status 의 IdleWorkers > 0 유지, error_log 에 AH00161 미발생 · 실패: configtest 가 'Syntax OK' 가 아니면 graceful 을 하지 않음(설정 원복), graceful 뒤 AH00161 지속이면 원인은 백엔드 지연 → 아래 프록시 타임아웃 단계"
+      note: "사전조건: 백엔드(WAS) 지연이 원인이 아님을 1차에서 확인, 서버 메모리 여유(프로세스 RSS × MaxRequestWorkers) 계산 · 영향: graceful 은 진행 중 요청을 끝낸 뒤 자식 교체(ServerLimit·ThreadLimit 변경은 graceful 로 반영되지 않아 재기동 필요 — 짧은 서비스 중단) · 승인: 웹 운영 담당·변경 관리 · 백업/롤백: 변경 전 cp 00-mpm.conf 00-mpm.conf.bak.<날짜>, 이상 시 백업본 복원 후 configtest·graceful · 적용: Apache 2.4 event/worker MPM (2.2 는 MaxClients)"
+    - do: 백엔드 대기 워커 억제 (proxy 타임아웃 단축)
+      config:
+        file: httpd.conf / proxy 설정
+        snippet: |
+          ProxyTimeout 60
+          ProxyPass "/app" "http://<WAS_HOST>:8080/app" connectiontimeout=5 timeout=60 retry=10
+      check: "성공: 백엔드 지연 시 워커가 60초 내 회수, BusyWorkers 가 한도 아래로 안정 · 실패: 정상 업무 중 60초 넘는 요청(대용량 다운로드·보고서)이 504 로 끊기면 해당 경로만 timeout 상향"
+      note: "사전조건: 업무별 최대 정상 응답 시간 확인(WAS 담당) · 영향: 타임아웃보다 오래 걸리는 요청은 502/504 로 끊김 · 승인: 웹·WAS 담당·변경 관리 · 백업/롤백: 설정 파일 백업 후 수정, 이상 시 백업본 복원 → apachectl configtest && apachectl graceful · 적용: Apache 2.4 mod_proxy (2.2 도 같은 파라미터)"
+  - stage: 3
+    steps:
+    - do: 의뢰·분석 자료
+      cmd: |
+        tar czf httpd_$(hostname)_$(date +%Y%m%d).tgz /etc/httpd/conf /etc/httpd/conf.d /etc/httpd/conf.modules.d /var/log/httpd/error_log* /var/log/httpd/access_log*
+        httpd -V ; httpd -t -D DUMP_MODULES
+      check: 설정 전체·error/access 로그(장애 전후 1시간)·server-status 캡처·버전/모듈
+      note: "민감정보 마스킹: 전달 전 access_log 의 클라이언트 IP·요청 URL 파라미터(토큰·주민번호 등)·쿠키/세션 ID, 설정의 내부 호스트명·IP·인증 정보(AuthUserFile 경로·ProxyPass 대상)를 가림 — 로그는 장애 전후 구간만 잘라 전달 · 전달 승인: 보안 담당·고객사 승인 후 반출"
+
+- id: APA-PROC-UPSTREAM
+  products: [apache]
+  category: upstream
+  match: [WEB-APA-002, LEG-AH-503, LEG-AH-PROXY-TIMEOUT, AH01102, AH01079, AH00898, AH01110, AH00959, AH01114]
+  title: 백엔드(WAS) 연계 실패 — 502/503 (AH01102 · AH00898 · AH01079)
+  source: "Apache 2.4 'mod_proxy (ProxyPass timeout/retry/connectiontimeout, BalancerMember status)'·'mod_proxy_balancer (balancer-manager)'·'mod_proxy_ajp' — httpd.apache.org/docs/2.4/mod/mod_proxy.html"
+  stages:
+  - stage: 1
+    steps:
+    - do: 백엔드 상태·프록시 오류 확인 (읽기 전용)
+      cmd: |
+        grep -n "AH01102\|AH00898\|AH01079\|AH01114\|AH00959" /var/log/httpd/error_log | tail -20
+        curl -sv http://<WAS_HOST>:8080/ -o /dev/null 2>&1 | tail -5 ; nc -zvw3 <WAS_HOST> 8080
+        curl -s "http://localhost/balancer-manager" | grep -o 'Status[^<]*' | head   # balancer 사용 시
+      check: 백엔드 포트 접속 실패·응답 없음이면 WAS 장애(WAS 담당 통보). 접속되는데 timeout 이면 WAS 처리 지연
+      note: "적용: Apache 2.4 mod_proxy·mod_proxy_balancer (2.2 는 AH 코드 없이 'proxy: error reading status line' 등 문구) · balancer-manager 는 조회(GET, 파라미터 없음)만 — 상태 변경은 2차 · 권한: 로그 읽기 권한, WAS 포트로의 네트워크 접근"
+  - stage: 2
+    steps:
+    - do: 장애 멤버 제외·복구 후 재투입 (balancer-manager 또는 설정)
+      cmd: |
+        # balancer-manager(웹) 에서 멤버 Disabled 체크 → Submit / 복구 후 해제
+        curl -s "http://localhost/balancer-manager?b=mycluster&w=http://<WAS_HOST>:8080&nonce=<nonce>&w_status_D=1"
+      check: "성공: balancer-manager 에서 해당 멤버 Status 가 Dis, 나머지 멤버로 요청 정상 처리(502/503 감소) · 실패: 남은 멤버 부하 급증·503 지속이면 즉시 재투입(w_status_D=0) 후 WAS 담당과 용량 협의"
+      note: "사전조건: 남은 멤버가 전체 부하를 감당할 수 있는지 확인, nonce 는 balancer-manager 화면에서 확인 · 영향: 제외된 멤버의 고정 세션(stickysession) 사용자는 다른 멤버로 옮겨져 재로그인 필요할 수 있음 · 승인: 웹·WAS 담당 · 백업/롤백: 설정 파일 변경 없음(메모리 상태) — 복구 후 w_status_D=0 로 재투입, 재기동하면 설정값으로 돌아감 · 적용: Apache 2.4 (2.2 도 balancer-manager 있음, 파라미터 이름 다름) — 웹 화면 사용 권장"
+      verify_note: "미검증 — balancer-manager 를 GET 쿼리로 변경할 수 있는지(2.4 하위 버전별 POST·Referer 검사 여부)와 파라미터 이름을 공식 문서에서 확인하지 못함"
+    - do: 프록시 타임아웃·재시도·헬스체크 설정
+      config:
+        file: /etc/httpd/conf.d/proxy.conf
+        snippet: |
+          ProxyRequests Off
+          <Proxy "balancer://mycluster">
+            BalancerMember "http://was1:8080" route=was1 connectiontimeout=5 timeout=60 retry=30 ping=1 ttl=300
+            BalancerMember "http://was2:8080" route=was2 connectiontimeout=5 timeout=60 retry=30 ping=1 ttl=300
+            ProxySet lbmethod=byrequests stickysession=JSESSIONID|jsessionid failonstatus=503
+          </Proxy>
+          ProxyPass "/app" "balancer://mycluster/app"
+          ProxyPassReverse "/app" "balancer://mycluster/app"
+          # AJP 사용 시 secret: BalancerMember "ajp://was1:8009" secret=<same-secret>
+      cmd: |
+        apachectl configtest && apachectl graceful
+      check: "성공: error_log 에 AH01114/AH00959 미발생, 502/503 응답 비율 0 · 실패: configtest 오류면 반영하지 않음, graceful 뒤 502 증가면 백업본 복원"
+      note: "사전조건: WAS 측 route(jvmRoute)·AJP secret 값 확인, 1차에서 WAS 자체 장애가 아님을 확인 · 영향: graceful 중 기존 요청은 완료, 설정 오류 시 해당 경로 전체 502 · 승인: 웹·WAS 담당·변경 관리 · 백업/롤백: cp proxy.conf proxy.conf.bak.<날짜>, 이상 시 복원 후 configtest·graceful · 적용: Apache 2.4 (secret= 는 2.4.42+ mod_proxy_ajp, ping 은 AJP·HTTP 모두 2.4)"
+  - stage: 3
+    steps:
+    - do: 의뢰·분석 자료
+      cmd: |
+        tar czf httpd_proxy_$(date +%Y%m%d).tgz /etc/httpd/conf.d /var/log/httpd/error_log* /var/log/httpd/access_log*
+      check: 프록시 설정·로그 + WAS 측 로그(동시 수집)
+      note: "민감정보 마스킹: 설정의 AJP secret·내부 WAS 호스트명/IP, 로그의 클라이언트 IP·요청 파라미터·쿠키/JSESSIONID 를 가린 뒤 전달, 로그는 장애 구간만 · 전달 승인: 보안 담당 승인 후 반출"
+
+- id: APA-PROC-SECURITY
+  products: [apache]
+  category: security
+  match: [LEG-AH-403, LEG-AH-SSL, LEG-AH-WARN-CERT-EXPIRE, AH01630, AH01797, AH02032, AH02217]
+  title: 접근 거부(403 AH01630/AH01797)·SSL 인증서·TLS 오류
+  source: "Apache 2.4 'Access Control (Require all granted / ip)'·'mod_ssl (SSLCertificateFile, SSLProtocol, SSLCipherSuite)'·'Upgrading to 2.4 (Require 문법)' — httpd.apache.org/docs/2.4/howto/access.html"
+  stages:
+  - stage: 1
+    steps:
+    - do: 거부 출처·인증서 상태 확인
+      cmd: |
+        grep -n "AH01630\|AH01797\|AH02032\|AH02565" /var/log/httpd/error_log | tail -20
+        openssl x509 -in /etc/pki/tls/certs/<server>.crt -noout -dates -subject
+        openssl s_client -connect localhost:443 -servername <host> </dev/null 2>/dev/null | openssl x509 -noout -dates
+      check: notAfter 가 지났으면 만료. 정상 사용자 IP 가 거부되면 Require 설정 오류(2.2 Order/Allow 문법 잔존)
+      note: "적용: Apache 2.4 mod_authz_core·mod_ssl (2.2 는 Order/Allow·AH 코드 없음) · 인증서(.crt)만 읽고 개인키(.key)는 열지 않음 · 권한: 로그·인증서 읽기 권한(root 또는 apache 그룹)"
+  - stage: 2
+    steps:
+    - do: 접근 제어 문법 정정 (2.4 Require)
+      config:
+        file: httpd.conf / 가상호스트 conf
+        snippet: |
+          <Directory "/var/www/app">
+            Require all granted
+            # 특정 대역만: Require ip 10.0.0.0/8 192.168.0.0/16
+          </Directory>
+          # 2.2 잔존 문법(Order allow,deny / Allow from all)은 mod_access_compat 없이는 무시됨 → 위 Require 로 교체
+      cmd: |
+        apachectl configtest && apachectl graceful
+      check: "성공: 정상 사용자 200 응답, error_log 에 AH01630 미발생 · 실패: 차단해야 할 대역까지 200 이 나오면(과다 허용) 즉시 백업본 복원"
+      note: "사전조건: 허용해야 할 IP 대역·경로를 보안 담당과 확정 · 영향: Require all granted 는 해당 디렉터리를 전체 공개 — 잘못 적용하면 비공개 경로 노출 · 승인: 보안 담당·웹 운영 담당 · 백업/롤백: 수정 전 conf 파일 백업, 이상 시 복원 후 configtest·graceful · 적용: Apache 2.4 (2.2 는 Order/Allow 문법 그대로 사용)"
+    - do: 인증서 교체·TLS 설정
+      config:
+        file: /etc/httpd/conf.d/ssl.conf
+        snippet: |
+          SSLEngine on
+          SSLCertificateFile      /etc/pki/tls/certs/<server>.crt
+          SSLCertificateKeyFile   /etc/pki/tls/private/<server>.key
+          SSLCertificateChainFile /etc/pki/tls/certs/<chain>.crt
+          SSLProtocol             all -SSLv3 -TLSv1 -TLSv1.1
+          SSLCipherSuite          HIGH:!aNULL:!MD5:!3DES
+          SSLHonorCipherOrder     on
+      cmd: |
+        openssl x509 -noout -modulus -in <server>.crt | openssl md5 ; openssl rsa -noout -modulus -in <server>.key | openssl md5   # 키/인증서 쌍 일치 확인
+        apachectl configtest && apachectl graceful
+      check: "성공: 두 md5 값 일치, openssl s_client 핸드셰이크 성공(Verify return code: 0), AH02032/AH02565 미발생 · 실패: md5 불일치면 교체 중단(키·인증서 쌍 재확인), graceful 뒤 기동 오류면 기존 인증서로 복원"
+      note: "사전조건: 새 인증서 체인·키 쌍 확인, TLS1.0/1.1 만 쓰는 구형 클라이언트 유무 확인 · 영향: 프로토콜 축소 시 구형 클라이언트 접속 불가, 키 비밀번호가 걸려 있으면 graceful 시 기동 멈춤 · 승인: 보안 담당·웹 운영 담당 · 백업/롤백: 기존 crt/key/ssl.conf 를 날짜 붙여 보관, 이상 시 복원 후 graceful · 적용: Apache 2.4 (2.4.8+ 는 SSLCertificateChainFile 대신 SSLCertificateFile 에 체인 포함 권장), RSA 키 기준 — EC 키는 openssl pkey -pubout 비교 · 개인키 내용·비밀번호는 화면·보고서에 남기지 않음"
+  - stage: 3
+    steps:
+    - do: 의뢰·분석 자료
+      cmd: |
+        tar czf httpd_ssl_$(date +%Y%m%d).tgz /etc/httpd/conf.d/ssl.conf /var/log/httpd/ssl_error_log* /var/log/httpd/error_log*
+      check: ssl.conf·인증서 체인 정보·오류 로그
+      note: "민감정보 마스킹: 개인키(.key) 파일은 절대 포함하지 않음, 설정·로그의 호스트명·IP·클라이언트 IP·요청 파라미터를 가림 · 전달 승인: 보안 담당 승인 후 반출"
+
+- id: APA-PROC-INTERNAL
+  products: [apache]
+  category: internal
+  match: [LEG-AH-START, AH00072, AH00526, AH00052, AH00558, AH00015, AH00016, LEG-APACHE-AH00124-20D6]
+  title: 기동 실패·설정 오류·자식 프로세스 비정상 종료 (AH00072 · AH00526 · AH00052)
+  source: "Apache 2.4 'Starting Apache (apachectl configtest)'·'Stopping and Restarting (graceful)'·'Log Files (LogLevel, CoreDumpDirectory)' — httpd.apache.org/docs/2.4/invoking.html"
+  stages:
+  - stage: 1
+    steps:
+    - do: 설정 검사·포트 점유·최근 오류 확인 (읽기 전용)
+      cmd: |
+        apachectl configtest
+        ss -ltnp | grep -E ":(80|443)\b" ; systemctl status httpd --no-pager | head -15
+        grep -n "AH00072\|AH00526\|AH00052\|AH00558\|Segmentation" /var/log/httpd/error_log | tail -20
+      check: "'Syntax OK' 가 아니면 설정 오류 줄 번호 기록. 포트 점유 시 PID 기록. AH00052(exit signal) 반복이면 모듈 크래시"
+      note: "적용: Apache 2.4 · RHEL 계열 httpd, Debian/Ubuntu 는 apache2ctl configtest·systemctl status apache2 · configtest 는 설정을 읽기만 함(서비스 영향 없음) · 권한: ss -p 의 PID 표시는 root 필요"
+  - stage: 2
+    steps:
+    - do: 설정 오류 정정 후 재기동 / 포트 충돌 해소
+      cmd: |
+        apachectl configtest && systemctl restart httpd
+        # 포트 점유 프로세스가 잔존 httpd 면: systemctl stop httpd; pkill -TERM httpd; systemctl start httpd
+      check: "성공: systemctl active, error_log 에 AH00094 'Command line' + resuming normal operations · 실패: 재기동 실패면 journalctl -u httpd 로 원인 확인 후 직전 정상 설정으로 복원"
+      note: "사전조건: configtest 'Syntax OK', 포트 점유 PID 가 httpd 잔존인지 확인(다른 서비스면 종료 금지) · 영향: restart·stop 동안 서비스 중단 · 승인: 웹 운영 담당·변경 관리(업무 시간이면 L4 우회 후) · 백업/롤백: 수정 전 설정 파일 백업, 기동 실패 시 백업본 복원 후 start · 적용: Apache 2.4 systemd 환경(RHEL 7+), Debian 은 apache2"
+    - do: 자식 크래시(AH00052) 시 코어 덤프 설정·문제 모듈 격리
+      config:
+        file: httpd.conf
+        snippet: |
+          CoreDumpDirectory /var/tmp/httpd-core     # 디렉터리 apache 소유·쓰기 가능, ulimit -c unlimited(systemd LimitCORE=infinity)
+          LogLevel warn proxy:info ssl:info
+        note: "최근 추가·갱신한 모듈(mod_security·mod_jk 등)을 순서대로 비활성화해 재현 여부 확인"
+      check: "성공: 크래시 시 코어 파일 생성 → gdb backtrace 를 3차 자료로 · 실패: 코어 미생성이면 LimitCORE·디렉터리 권한·kernel.core_pattern 재확인"
+      note: "사전조건: /var/tmp 여유 공간(코어는 프로세스 메모리 크기) · 영향: 반영에 재기동 필요, 코어 파일이 디스크를 채울 수 있고 메모리 내용(세션·개인정보)이 담김 · 승인: 웹 운영 담당·보안 담당 · 백업/롤백: httpd.conf 백업, 수집 후 CoreDumpDirectory·LimitCORE 원복 · 적용: Apache 2.4 (LogLevel 모듈별 지정은 2.4 전용)"
+  - stage: 3
+    steps:
+    - do: 의뢰·분석 자료
+      cmd: |
+        tar czf httpd_core_$(date +%Y%m%d).tgz /etc/httpd /var/log/httpd/error_log* /var/tmp/httpd-core/ 2>/dev/null
+        httpd -V ; rpm -q httpd mod_ssl mod_security 2>/dev/null
+      check: 설정·로그·코어(backtrace)·패키지 버전
+      note: "민감정보 마스킹: /etc/httpd 안의 개인키(conf.d·pki 경로)·htpasswd 파일은 빼고, 로그의 클라이언트 IP·요청 파라미터·쿠키, 설정의 호스트명·IP 를 가림 — 코어 파일은 메모리 내용(세션·개인정보) 포함이므로 원본 대신 backtrace 만 전달 · 전달 승인: 보안 담당 승인 후 반출"
+
+# ── nginx ──
+- id: NGX-PROC-UPSTREAM
+  products: [nginx]
+  category: upstream
+  match: [WEB-NGX-005, WEB-NGX-006]
+  title: upstream 타임아웃·연결 실패 (502/504)
+  source: "nginx 'ngx_http_upstream_module (server max_fails/fail_timeout, proxy_next_upstream)'·'ngx_http_proxy_module (proxy_connect_timeout/proxy_read_timeout)' — nginx.org/en/docs/http/ngx_http_upstream_module.html"
+  stages:
+  - stage: 1
+    steps:
+    - do: 오류·백엔드 상태 확인 (읽기 전용)
+      cmd: |
+        grep -n "upstream timed out\|connect() failed\|no live upstreams" /var/log/nginx/error.log | tail -20
+        nginx -T 2>/dev/null | grep -A5 "upstream " | head -30
+        nc -zvw3 <WAS_HOST> 8080 ; curl -sv http://<WAS_HOST>:8080/ -o /dev/null 2>&1 | tail -3
+      check: 접속 실패면 백엔드 장애(WAS 담당). 'no live upstreams' 면 모든 멤버가 fail_timeout 동안 격리된 상태
+      note: "적용: nginx 1.9+ (nginx -T 는 1.9.2+, 하위는 nginx -t 와 설정 파일 직접 확인) · nginx -T 는 설정을 출력만 함 — head 로 제한 · 권한: 설정·로그 읽기에 root 필요한 경우 많음"
+  - stage: 2
+    steps:
+    - do: upstream 헬스·타임아웃·재시도 설정
+      config:
+        file: /etc/nginx/conf.d/<site>.conf
+        snippet: |
+          upstream was_pool {
+            server was1:8080 max_fails=3 fail_timeout=30s;
+            server was2:8080 max_fails=3 fail_timeout=30s;
+            keepalive 64;
+          }
+          server { location /app/ {
+            proxy_pass http://was_pool;
+            proxy_connect_timeout 5s; proxy_send_timeout 60s; proxy_read_timeout 60s;
+            proxy_next_upstream error timeout http_502 http_503; proxy_next_upstream_tries 2;
+            proxy_http_version 1.1; proxy_set_header Connection ""; } }
+      cmd: |
+        nginx -t && nginx -s reload
+      check: "성공: nginx -t 'syntax is ok · test is successful', error.log 에 upstream timed out 감소, 502/504 비율 0 · 실패: nginx -t 오류면 reload 하지 않음, reload 뒤 502 증가면 백업본 복원 후 다시 reload"
+      note: "사전조건: WAS 측 keepalive·타임아웃 값 확인, 비멱등 요청(POST)이 재시도되면 안 되는 업무인지 확인 · 영향: reload 는 새 워커로 교체(연결 유지), proxy_next_upstream 은 같은 요청을 다른 멤버로 재전송 · 승인: 웹·WAS 담당·변경 관리 · 백업/롤백: cp <site>.conf <site>.conf.bak.<날짜>, 이상 시 복원 후 nginx -t && nginx -s reload · 적용: nginx 1.7.5+ (proxy_next_upstream_tries), 1.9.13+ 는 POST 등 비멱등 요청을 기본 재시도하지 않음"
+  - stage: 3
+    steps:
+    - do: 의뢰·분석 자료
+      cmd: |
+        nginx -T > nginx_config_$(date +%Y%m%d).txt 2>&1 ; tar czf nginx_$(date +%Y%m%d).tgz nginx_config_*.txt /var/log/nginx/error.log* /var/log/nginx/access.log*
+        nginx -v 2>&1
+      check: 전체 설정 덤프·로그·버전 + WAS 측 로그
+      note: "민감정보 마스킹: nginx -T 덤프의 내부 호스트명·IP·auth_basic 파일 경로·proxy_set_header 의 토큰/인증 헤더, 로그의 클라이언트 IP·요청 파라미터·쿠키를 가림(로그는 장애 구간만) · 전달 승인: 보안 담당 승인 후 반출"
+
+- id: NGX-PROC-CAPACITY
+  products: [nginx]
+  category: capacity
+  match: [WEB-NGX-010]
+  title: worker_connections 부족·파일 디스크립터 한도
+  source: "nginx 'Core functionality (worker_processes, worker_rlimit_nofile)'·'ngx_core_module events (worker_connections)' — nginx.org/en/docs/ngx_core_module.html"
+  stages:
+  - stage: 1
+    steps:
+    - do: 현재 한도·연결 수 확인
+      cmd: |
+        grep -n "worker_connections are not enough\|Too many open files" /var/log/nginx/error.log | tail -10
+        nginx -T 2>/dev/null | grep -E "worker_processes|worker_connections|worker_rlimit_nofile"
+        for p in $(pgrep -f "nginx: worker"); do grep "open files" /proc/$p/limits; done | sort | uniq -c ; ss -s
+      check: 연결 수가 worker_processes × worker_connections 에 근접하거나 워커의 nofile 한도가 1024 면 부족
+      note: "적용: nginx 1.9.2+ (nginx -T), Linux /proc · 한도는 실제 요청을 처리하는 워커 프로세스 기준(worker_rlimit_nofile 은 워커에만 적용 — 마스터 PID 의 limits 는 다를 수 있음) · 권한: 다른 사용자 프로세스의 /proc/<pid>/limits 읽기는 root"
+  - stage: 2
+    steps:
+    - do: 워커·연결·FD 한도 상향
+      config:
+        file: /etc/nginx/nginx.conf
+        snippet: |
+          worker_processes auto;
+          worker_rlimit_nofile 65535;
+          events { worker_connections 16384; multi_accept on; use epoll; }
+          # systemd: /etc/systemd/system/nginx.service.d/override.conf → [Service] LimitNOFILE=65535
+      cmd: |
+        systemctl daemon-reload ; nginx -t && systemctl restart nginx
+      check: "성공: 오류 미발생, 워커 /proc/<pid>/limits 의 open files 65535 · 실패: nginx -t 오류면 restart 하지 않음, 기동 실패면 백업 nginx.conf·override.conf 복원 후 start"
+      note: "사전조건: OS fs.file-max·메모리 여유 확인, 업무 영향이 적은 시간 · 영향: restart 동안 수 초 서비스 중단(reload 로는 LimitNOFILE 이 반영되지 않음) · 승인: 웹 운영 담당·변경 관리 · 백업/롤백: nginx.conf·override.conf 백업, 이상 시 복원 → systemctl daemon-reload → nginx -t → systemctl restart nginx · 적용: nginx 1.x Linux(use epoll 은 Linux 전용), systemd 환경"
+  - stage: 3
+    steps:
+    - do: 의뢰·분석 자료
+      cmd: |
+        nginx -T > nginx_config_$(date +%Y%m%d).txt 2>&1 ; ss -s > ss_$(date +%Y%m%d).txt
+      check: 설정·연결 통계·로그
+      note: "민감정보 마스킹: 설정 덤프의 내부 호스트명·IP·인증 헤더/토큰·인증서 경로, 로그의 클라이언트 IP·요청 파라미터·쿠키를 가림 · 전달 승인: 보안 담당 승인 후 반출"
+
+# ── IIS ──
+- id: IIS-PROC-INTERNAL
+  products: [iis]
+  category: internal
+  match: [WEB-IIS-002, IIS-WAS-5002, IIS-WAS-5009, IIS-WAS-5011, IIS-WAS-5059, 500.19, 500.21, 503.2, 503.3]
+  title: 응용 프로그램 풀 중지·빠른 실패 보호(5002/5059) · 500.19 설정 오류
+  source: "Microsoft Learn 'IIS Application Pool health monitoring (Rapid-Fail Protection)'·'HTTP 500.19 troubleshooting'·'Failed Request Tracing' — learn.microsoft.com/iis/troubleshoot"
+  stages:
+  - stage: 1
+    steps:
+    - do: 앱 풀·사이트 상태·이벤트 확인 (읽기 전용 PowerShell)
+      cmd: |
+        Import-Module WebAdministration; Get-ChildItem IIS:\AppPools | Select Name,State ; Get-Website | Select Name,State
+        Get-WinEvent -LogName System -MaxEvents 200 | Where-Object { $_.ProviderName -like 'Microsoft-Windows-WAS' } | Select TimeCreated,Id,Message | Format-List | Out-File was_events.txt
+        Get-ChildItem $env:SystemRoot\System32\LogFiles\HTTPERR | Sort LastWriteTime -Desc | Select -First 1 | Get-Content -Tail 50
+      check: 앱 풀 Stopped + 이벤트 5002(빠른 실패 보호)면 워커 프로세스 반복 크래시(5009/5011 원인 이벤트 기록)
+      note: "적용: IIS 8.5(Windows Server 2012 R2)·IIS 10(2016/2019/2022), WebAdministration 모듈 · HTTPERR(HTTP.sys) 로그 기본 위치는 %SystemRoot%\\System32\\LogFiles\\HTTPERR(사이트 W3C 로그 C:\\inetpub\\logs\\LogFiles 와 다름 — 레지스트리 ErrorLoggingDir 로 바꿨으면 그 경로) · 조회만 함(Start/Stop/Restart 금지 — 2차) · 권한: 관리자 권한 PowerShell(IIS: 드라이브·HTTPERR 폴더 접근)"
+  - stage: 2
+    steps:
+    - do: 앱 풀 재시작 및 빠른 실패 보호·재활용 설정 조정
+      cmd: |
+        Restart-WebAppPool -Name "<AppPool>"   # 또는 Start-WebAppPool
+        Set-ItemProperty IIS:\AppPools\<AppPool> -Name failure.rapidFailProtectionMaxCrashes -Value 10
+        Set-ItemProperty IIS:\AppPools\<AppPool> -Name failure.rapidFailProtectionInterval -Value ([TimeSpan]::FromMinutes(5))
+        Set-ItemProperty IIS:\AppPools\<AppPool> -Name recycling.periodicRestart.time -Value ([TimeSpan]::FromHours(0)); Set-ItemProperty IIS:\AppPools\<AppPool> -Name recycling.periodicRestart.schedule -Value @{value="03:00:00"}
+      check: "성공: 앱 풀 Started 유지, 이벤트 5002 미발생 · 실패: 재시작 직후 다시 Stopped(5002)면 크래시 원인 미해결 — 설정을 되돌리고 3차(덤프) 수집"
+      note: "사전조건: 5009/5011 이벤트로 크래시 원인(모듈·예외) 기록, 크래시 덤프가 필요하면 재시작 전에 수집 · 영향: 재시작 시 해당 풀의 진행 중 요청·InProc 세션 유실, MaxCrashes 상향은 크래시를 감추므로 원인 해결 전 임시 조치 · 승인: 웹 운영 담당·변경 관리 · 백업/롤백: 변경 전 %windir%\\System32\\inetsrv\\appcmd.exe add backup <이름> 으로 applicationHost.config 백업, 이상 시 appcmd restore backup <이름> · 적용: IIS 8.5/10 PowerShell(WebAdministration)"
+    - do: 500.19 설정 오류 — web.config 잠금/모듈 누락 해소
+      config:
+        file: C:\inetpub\wwwroot\<site>\web.config / %windir%\System32\inetsrv\config\applicationHost.config
+        snippet: |
+          <!-- applicationHost.config 에서 해당 섹션 잠금 해제 -->  <section name="handlers" overrideModeDefault="Allow" />
+          <!-- 필요한 기능 설치 -->  Install-WindowsFeature Web-Asp-Net45, Web-Windows-Auth
+      cmd: |
+        %windir%\system32\inetsrv\appcmd.exe list config "<site>" -section:system.webServer/handlers
+        %windir%\system32\inetsrv\appcmd.exe unlock config -section:system.webServer/handlers
+      check: "성공: 사이트 200 응답, 500.19 하위 코드(0x8007000d 등) 사라짐 · 실패: 하위 코드가 바뀌어 계속되면(예: 0x8007000d=web.config 문법/모듈 누락) 잠금 해제를 되돌리고 해당 코드 기준으로 원인 재확인"
+      note: "사전조건: 500.19 화면의 하위 오류 코드·설정 원본 줄 기록 · 영향: 섹션 잠금 해제는 모든 사이트의 web.config 가 그 섹션을 덮어쓸 수 있게 함(보안 설정 우회 가능), 기능 설치는 재부팅이 필요할 수 있음 · 승인: 웹 운영 담당·보안 담당 · 백업/롤백: appcmd add backup <이름> 으로 백업 후 변경, 이상 시 appcmd restore backup <이름> · 적용: IIS 8.5/10 — 명령은 cmd.exe 기준(PowerShell 에서는 & $env:windir\\system32\\inetsrv\\appcmd.exe 로 실행), Install-WindowsFeature 는 Windows Server 전용(클라이언트 OS 는 Enable-WindowsOptionalFeature)"
+  - stage: 3
+    steps:
+    - do: Microsoft 케이스 자료 (FREB 추적·덤프)
+      cmd: |
+        %windir%\system32\inetsrv\appcmd.exe list config -section:system.webServer/tracing/traceFailedRequests
+        # FREB 활성: IIS 관리자 › 사이트 › Failed Request Tracing Rules › 상태 코드 500-599  → %SystemDrive%\inetpub\logs\FailedReqLogFiles
+        # 워커 크래시: DebugDiag 2 Collection 규칙(Crash, w3wp.exe) 으로 덤프 수집
+      check: FREB xml·HTTPERR·System/Application 이벤트·applicationHost.config·DebugDiag 덤프
+      note: "민감정보 마스킹: FREB xml 의 요청 헤더·쿠키·쿼리 문자열, applicationHost.config 의 앱 풀 계정 비밀번호(processModel password·암호화 값)·연결 문자열, 로그의 클라이언트 IP·호스트명을 가림 — w3wp 덤프는 메모리(세션·개인정보) 포함이므로 별도 보안 승인 · 전달 승인: 보안 담당 승인 후 Microsoft 케이스에 업로드 · FREB 규칙 활성화는 디스크·성능 영향이 있어 2차 승인 후 켜고 수집 후 끔"
+
+- id: IIS-PROC-CAPACITY
+  products: [iis]
+  category: capacity
+  match: [WEB-IIS-001, WEB-IIS-HTTPERR-001, WEB-IIS-HTTPERR-002, IIS-HTTPERR-QUEUEFULL, IIS-HTTPERR-CONNLIMIT, 503.2]
+  title: 요청 큐 초과·연결 한도 (HTTPERR QueueFull · 503)
+  source: "Microsoft Learn 'HTTP.sys error log (HTTPERR reason phrases)'·'Application pool queue length (queueLength)'·'Site limits (connectionTimeout, maxConnections)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: HTTPERR 사유·큐 상태 확인
+      cmd: |
+        Get-ChildItem $env:SystemRoot\System32\LogFiles\HTTPERR | Sort LastWriteTime -Desc | Select -First 1 | Get-Content -Tail 200 | Select-String "QueueFull|Connection_Abandoned|Timer_ConnectionIdle" | Group-Object { $_.Line.Split(' ')[-2] } | Select Count,Name
+        Get-Counter '\HTTP Service Request Queues(*)\CurrentQueueSize','\Web Service(_Total)\Current Connections' -SampleInterval 5 -MaxSamples 3
+        Import-Module WebAdministration; Get-ItemProperty IIS:\AppPools\<AppPool> -Name queueLength
+      check: CurrentQueueSize 가 queueLength(기본 1000)에 도달하고 QueueFull 반복이면 처리 지연(워커·백엔드) 또는 폭주
+      note: "적용: IIS 8.5/10 (HTTPERR 기본 경로 %SystemRoot%\\System32\\LogFiles\\HTTPERR — 레지스트리 ErrorLoggingDir 로 바꿨으면 그 경로) · Get-Counter 는 5초×3회만 · 조회만 함 · 권한: 관리자 권한 PowerShell(IIS: 드라이브는 WebAdministration 모듈 필요)"
+  - stage: 2
+    steps:
+    - do: 큐 길이·연결 한도·유휴 타임아웃 조정 및 앱 풀 분리
+      cmd: |
+        Set-ItemProperty IIS:\AppPools\<AppPool> -Name queueLength -Value 5000
+        Set-ItemProperty "IIS:\Sites\<site>" -Name limits.connectionTimeout -Value ([TimeSpan]::FromSeconds(60))
+        Get-ItemProperty "IIS:\Sites\<site>" -Name limits.maxConnections   # 기본 4294967295(무제한) — 낮게 설정돼 있을 때만 아래로 원복
+        # Set-ItemProperty "IIS:\Sites\<site>" -Name limits.maxConnections -Value 4294967295
+        # 트래픽 급증 출처 제한: Set-WebConfigurationProperty -Filter system.webServer/security/dynamicIpSecurity/denyByRequestRate -Name enabled -Value $true -PSPath "IIS:\Sites\<site>"
+      check: "성공: HTTPERR QueueFull 미발생, CurrentQueueSize 안정 · 실패: 큐를 늘려도 계속 차면 원인은 처리 지연(백엔드·워커) — 큐 값은 원복하고 백엔드 조치, 응답 시간이 길어지면(큐 대기) 즉시 원복"
+      note: "사전조건: 1차에서 폭주 출처·백엔드 지연 여부 확인, 서버 메모리 여유 · 영향: queueLength 변경은 앱 풀 재활용을 일으킬 수 있음(진행 중 요청·InProc 세션 영향), 큐 확대는 대기 시간만 늘릴 수 있음, dynamicIpSecurity 는 정상 사용자 차단 위험 · 승인: 웹 운영 담당·변경 관리(차단 정책은 보안 담당) · 백업/롤백: appcmd add backup <이름> 으로 applicationHost.config 백업, 이상 시 appcmd restore backup <이름> · 적용: IIS 8.5/10 (queueLength 최대 65535, dynamicIpSecurity 는 IP 및 도메인 제한 기능 설치 필요)"
+  - stage: 3
+    steps:
+    - do: Microsoft 케이스 자료
+      cmd: |
+        Get-Counter -ListSet 'Web Service','HTTP Service Request Queues' | Out-File counters.txt ; Copy-Item C:\inetpub\logs\LogFiles -Destination iislogs_$(Get-Date -Format yyyyMMdd) -Recurse
+        Copy-Item $env:SystemRoot\System32\LogFiles\HTTPERR -Destination httperr_$(Get-Date -Format yyyyMMdd) -Recurse
+      check: HTTPERR·W3C 로그·성능 카운터·applicationHost.config
+      note: "민감정보 마스킹: W3C·HTTPERR 로그의 클라이언트 IP·사용자 계정(cs-username)·쿼리 문자열(cs-uri-query)·쿠키, applicationHost.config 의 계정 비밀번호·연결 문자열, 서버 호스트명을 가림 — LogFiles 전체 복사는 용량이 클 수 있어 장애 전후 날짜 파일만 · 전달 승인: 보안 담당 승인 후 반출"
+
+# ── WebtoB ──
+- id: WTB-PROC-CAPACITY
+  products: [webtob]
+  category: capacity
+  match: [WEB-WTB-001, WEB-WTB-002, LEG-WEBTOB-MAXPROC, HTH0113, WEB-WTB-004]
+  title: 클라이언트 큐·MaxProc 한계 (max q for svr · JSV premature client close)
+  source: "WebtoB 5 Administrator's Guide '환경 파일(http.m) NODE › MaxUser/MaxProc/HTH, SERVER › MinProc/MaxProc/MaxQCount'·'wsadmin (st, cfg)' — docs.tmaxsoft.com/ko/webtob/5"
+  stages:
+  - stage: 1
+    steps:
+    - do: 프로세스·큐 상태 확인 (읽기 전용)
+      cmd: |
+        $WEBTOBDIR/bin/wsadmin -i "st -p" ; $WEBTOBDIR/bin/wsadmin -i "st -s" ; $WEBTOBDIR/bin/wsadmin -i "st -v"
+        # 5.4 관리자 가이드 표기: wsadmin 진입 후 stat -v <server> / stat -p <server> / stat -t / stat -j <jsv>
+        grep -n "max q for svr\|HTH0113\|premature client close" $WEBTOBDIR/log/system.log $WEBTOBDIR/log/error.log 2>/dev/null | tail -20
+      check: st -s 의 qcount 가 MaxQCount 에 근접·JSV 가 모두 RUN 상태면 WAS 처리 지연으로 큐 적체. HTH0113 만 다수면 클라이언트 선종료(정보성)
+      note: "적용: WebtoB 4.1/5 (http.m 기반), WebtoB 6 은 설정 형식이 다름(wsadmin 조회 명령은 같은 계열) · wsadmin 은 조회(st/stat)만 — down·boot·set 계열 명령 금지 · 권한: WebtoB 설치 계정(공유메모리 접근)"
+      verify_note: "미검증 — wsadmin -i \"<명령>\" 형태로 한 줄 실행이 지원되는 버전 범위를 공식 문서에서 확인하지 못함(지원되지 않으면 wsadmin 진입 후 st -p 등 입력)"
+  - stage: 2
+    steps:
+    - do: HTH·MaxUser·JSV 프로세스 수·큐 한도 조정 (JEUS 워커 수와 동시 조정)
+      config:
+        file: $WEBTOBDIR/config/http.m → wscfl -i http.m 로 컴파일
+        snippet: |
+          *NODE  webtob  WEBTOBDIR="/app/webtob", SHMKEY=54000, DOCROOT="/app/webtob/docs", PORT="80", HTH=4, MaxUser=8192, JSVPORT=9900, Timeout=60
+          *SERVER  MyGroup  SVGNAME=jsvg, MinProc=20, MaxProc=50, MaxQCount=200, SvrType=JSV, ASQCount=20
+          # JEUS webtob-listener thread-pool number 를 MaxProc 와 일치
+        note: "MaxUser = HTH × 2048 이내(5.x). 변경 후 wscfl -i http.m 컴파일 → wsdown -i → wsboot"
+      cmd: |
+        $WEBTOBDIR/bin/wscfl -i $WEBTOBDIR/config/http.m && $WEBTOBDIR/bin/wsdown -i && $WEBTOBDIR/bin/wsboot
+      check: "성공: st -s 에서 qcount 0 근접, max q for svr 미발생, st -p 에서 WSM/HTL/HTH 모두 RDY · 실패: wscfl 오류(CFL-)면 down 하지 않음, wsboot 실패면 백업 http.m 으로 재컴파일 후 wsboot"
+      note: "사전조건: JEUS webtob-listener thread-pool 수를 함께 조정할 계획 확정, OS 공유메모리(kernel.shmmax)·ulimit 여유 확인 · 영향: wsdown~wsboot 동안 웹 서비스 전면 중단 · 승인: 웹·WAS 담당·변경 관리(업무 외 시간 또는 L4 우회 후) · 백업/롤백: cp http.m http.m.bak.<날짜>·cp wsconfig wsconfig.bak.<날짜>, 이상 시 백업 http.m 으로 wscfl 재컴파일 → wsboot · 적용: WebtoB 4.1/5 (http.m), WebtoB 6 은 YAML 설정·적용 절차가 다름"
+  - stage: 3
+    steps:
+    - do: TmaxSoft 의뢰 자료
+      cmd: |
+        tar czf webtob_$(hostname)_$(date +%Y%m%d).tgz $WEBTOBDIR/config/http.m $WEBTOBDIR/log/ ; $WEBTOBDIR/bin/wsadmin -v
+      check: http.m·system/error/access 로그·st 출력·WebtoB 버전(Fix 레벨)·JEUS 연동 로그
+      note: "민감정보 마스킹: http.m 의 호스트명·IP·SSL 인증서 비밀번호(PassPhrase 등), access 로그의 클라이언트 IP·요청 파라미터·쿠키/세션 ID 를 가림(로그는 장애 구간만) · 전달 승인: 보안 담당 승인 후 TmaxSoft 에 반출"
+
+- id: WTB-PROC-INTERNAL
+  products: [webtob]
+  category: internal
+  match: [LEG-WEBTOB-DOWN, LEG-WEBTOB-CONFIG, LEG-WTB-CONFIG-ERR, LEG-WTB-PROCESS-DOWN, CFL-05010, WEB-WTB-003]
+  title: 기동 실패·설정 컴파일 오류(CFL)·프로세스 다운
+  source: "WebtoB 5 Administrator's Guide '기동과 종료(wsboot/wsdown)'·'환경 파일 컴파일(wscfl)'·'공유 메모리(SHMKEY)' / WebtoB 6 Administrator's Guide(YAML 설정·wsadmin)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 프로세스·공유메모리·설정 검사 (읽기 전용)
+      cmd: |
+        $WEBTOBDIR/bin/wsadmin -i "st -p" ; ps -ef | grep -E "[w]sm|[h]th|[h]tl" ; ipcs -m | grep "$(id -un)"
+        $WEBTOBDIR/bin/wscfl -i $WEBTOBDIR/config/http.m -o /tmp/wsconfig.test   # 문법 검사만(운영 바이너리 미변경)
+        tail -n 50 $WEBTOBDIR/log/system.log
+      check: CFL- 오류 줄 번호 기록. wsm 없음+ipcs 공유메모리 잔존이면 비정상 종료 잔여
+      note: "적용: WebtoB 4.1/5 (http.m·wscfl), WebtoB 6 은 설정 형식이 다름 · wscfl 은 반드시 -o 로 임시 경로에 출력(-o 없이 실행하면 운영 wsconfig 를 덮어씀 — 그 경우 실행하지 말고 2차) · ipcs 는 소유자(사용자명) 열로 걸러 봄 · 권한: WebtoB 설치 계정"
+      verify_note: "미검증 — wscfl 의 -o(출력 파일 지정) 옵션 지원 버전과 wsadmin -i 한 줄 실행 지원 여부를 공식 문서에서 확인하지 못함"
+  - stage: 2
+    steps:
+    - do: 잔존 공유메모리 정리 후 재기동
+      cmd: |
+        $WEBTOBDIR/bin/wsdown -i ; ipcrm -M <SHMKEY>   # 잔존 시에만
+        $WEBTOBDIR/bin/wscfl -i $WEBTOBDIR/config/http.m && $WEBTOBDIR/bin/wsboot
+      check: "성공: st -p 에서 WSM/HTL/HTH 모두 RDY, system.log 에 기동 오류 없음 · 실패: wsboot 가 공유메모리 오류로 실패하면 ipcs -m 으로 같은 키 잔존 재확인, CFL- 오류면 백업 http.m 으로 재컴파일"
+      note: "사전조건: wsm 프로세스가 없음을 확인(살아 있는 인스턴스의 공유메모리 삭제 금지), SHMKEY 가 http.m 값과 일치하고 같은 서버의 다른 WebtoB 인스턴스 키가 아님을 확인 · 영향: 재기동 동안 웹 서비스 중단 · 승인: 웹 운영 담당·변경 관리 · 백업/롤백: http.m·wsconfig 백업, 기동 실패 시 백업본으로 재컴파일 후 wsboot(공유메모리 삭제는 되돌릴 수 없으므로 대상 확인 필수) · 적용: WebtoB 4.1/5, Linux/UNIX ipcrm"
+  - stage: 3
+    steps:
+    - do: TmaxSoft 의뢰 자료
+      cmd: |
+        tar czf webtob_boot_$(date +%Y%m%d).tgz $WEBTOBDIR/config $WEBTOBDIR/log ; $WEBTOBDIR/bin/wsadmin -v ; ulimit -a
+      check: 설정·로그·버전·ulimit
+      note: "민감정보 마스킹: config 폴더의 SSL 인증서 개인키·비밀번호 파일은 빼고, 설정의 호스트명·IP, 로그의 클라이언트 IP·요청 파라미터·세션 ID 를 가림 · 전달 승인: 보안 담당 승인 후 TmaxSoft 에 반출"

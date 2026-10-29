@@ -1,0 +1,263 @@
+product: cubrid
+layer: db
+note: GPT 협업 수집분 — 벤더 공식 문서와 대조 후 확정
+codes:
+- code: '-4'
+  severity: error
+  category: internal
+  title: 작업 인터럽트됨
+  immediate:
+  - "`grep -nE \"CODE = -4([^0-9]|$)\" $CUBRID/log/server/<db>_*.err | tail -20` 로 발생 시각·Tran 번호·CLIENT(호스트:프로그램) 확인 — 같은 시각 다수면 일괄 취소·종료 신호 의심"
+  - "`cubrid broker status -b -f` 의 CANCELED·LONG-Q 증가와 `$CUBRID/log/broker/sql_log/<broker>_<n>.sql.log` 의 같은 시각 질의 확인 — 취소/타임아웃 원인 구분"
+  - "같은 시각 서버 종료 여부는 `cubrid server status` 와 `$CUBRID/log/<hostname>_master.err` 로 확인(읽기 전용)"
+  short:
+  - "(2차) 타임아웃 원인이면 해당 SQL 실행계획(`;plan` 또는 sql_trace_execution_plan)으로 튜닝 후 cubrid_broker.conf MAX_QUERY_TIMEOUT·애플리케이션 queryTimeout 값을 업무 SLA 와 맞춰 조정(승인 후, 롤백: 원래 값으로 복원 후 cubrid broker reset <broker>)"
+  mid:
+  - "장시간 질의는 LONG_QUERY_TIME(브로커) 초과 목록으로 정기 추출해 인덱스·질의 개선, 일괄 작업은 업무 시간 밖으로 분리"
+  long:
+  - "broker status 의 CANCELED·LONG-Q 수치와 server .err 의 -4 건수를 감시 지표로 등록(평시 대비 3배 이상 경보)"
+  source: GPT 수집·벤더 문서 대조 완료(https://www.cubrid.org/manual/en/latest/admin/control.html)
+  note: ER_INTERRUPTED
+  vendor_cause: "ER_INTERRUPTED — 진행 중이던 질의·트랜잭션이 중단 요청을 받아 멈췄다는 뜻. 흔한 원인은 사용자/애플리케이션 취소, 브로커 MAX_QUERY_TIMEOUT·드라이버 queryTimeout 만료, cubrid killtran 으로 인한 종료, 서버 종료 중 처리 중단."
+  vendor_action: ''
+  vendor_url: https://www.cubrid.org/manual/en/11.4/admin/admin_utils.html
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: '서버 오류 번호(음수)·ER_ 이름은 8.4~11.4 동일 — cub_server.log/cub_broker 오류 로그 ''Time: MM/DD/YY hh:mm:ss.mmm - ERROR *** file … ERROR CODE = -n'' 형식 공통'
+- code: '-68'
+  severity: error
+  category: internal
+  title: 클래스명 불일치 유형1
+  immediate:
+  - "`grep -nE \"CODE = -68([^0-9]|$)\" $CUBRID/log/server/<db>_*.err | tail -20` 로 발생 시각·Tran·CLIENT 와 직전 오류 확인, 같은 시각 DDL(CREATE/DROP/RENAME) 수행 여부를 브로커 SQL 로그(`$CUBRID/log/broker/sql_log/`)에서 확인"
+  - "`cubrid tranlist <db>` 로 장시간 열린 DDL 트랜잭션 존재 여부 확인(읽기 전용) — 재현 시 해당 테이블 이름·작업 기록"
+  short:
+  - "(2차·승인 후) 업무 영향이 적은 시간에 `cubrid checkdb -C --check-class-name <db>` 로 클래스 이름 일관성 점검(부하 발생, 롤백: 점검만 하므로 불필요 — --repair 는 백업 뒤 제조사 지시로만)"
+  mid:
+  - "동일 이름 객체에 대한 동시 DDL 을 배포 절차에서 직렬화하고, 반복되면 CUBRID 패치 버전(같은 계열 최신 패치) 적용 검토"
+  long:
+  - "server .err 의 -68 발생 건수 감시 등록, DDL 변경은 변경관리 창구로 일원화"
+  verify_note: "미검증 — -68(ER_LC_INCONSISTENT_CLASSNAME_TYPE1)의 발생 조건을 CUBRID 공식 매뉴얼에서 확인하지 못함(소스 error_code.h 이름 기준 서술)"
+  source: GPT 수집·벤더 문서 대조 완료(https://github.com/CUBRID/cubrid/blob/develop/src/base/error_code.h)
+  note: ER_LC_INCONSISTENT_CLASSNAME_TYPE1
+  vendor_cause: "ER_LC_INCONSISTENT_CLASSNAME_TYPE1 — 서버 locator 의 클래스(테이블) 이름 테이블과 실제 카탈로그 상태가 어긋난 내부 불일치. 동시 DDL(같은 이름 CREATE/DROP/RENAME) 경합이나 비정상 종료 뒤 카탈로그 불일치에서 보고된다."
+  vendor_action: ''
+  vendor_url: https://github.com/CUBRID/cubrid/blob/develop/src/base/error_code.h
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: '서버 오류 번호(음수)·ER_ 이름은 8.4~11.4 동일 — cub_server.log/cub_broker 오류 로그 ''Time: MM/DD/YY hh:mm:ss.mmm - ERROR *** file … ERROR CODE = -n'' 형식 공통'
+- code: '-111'
+  severity: error
+  category: internal
+  title: 서버 다운으로 트랜잭션 중단
+  immediate:
+  - "`cubrid server status` 와 `ps -ef | grep cub_server` 로 서버 기동 상태 확인, `ls -lt $CUBRID/log/server/ | head` 로 최근 .err 파일과 서버가 다시 올라온 시각 확인"
+  - "`tail -100 $CUBRID/log/server/<db>_<최근>.err` 와 `dmesg -T | grep -i \"out of memory\" | tail` 로 다운 원인(크래시·OOM) 확인, core 파일 존재는 `ls -l $CUBRID/core* <db경로>/core* 2>/dev/null` 로만 확인"
+  - "HA 구성이면 `cubrid heartbeat status` 로 노드 역할(master/slave) 변화와 현재 active 노드 확인"
+  short:
+  - "(2차·승인 후) 서버가 내려가 있으면 원인 자료(.err·core) 보존 후 `cubrid server start <db>` 로 기동(롤백: 기동 실패 시 .err 확인 뒤 제조사 지원), 중단된 거래는 애플리케이션 재처리 대상 목록으로 정리"
+  mid:
+  - "다운 원인별 조치 — OOM 이면 data_buffer_size·max_clients 와 OS 메모리 재산정, 크래시면 core·.err 로 제조사 패치 확인"
+  long:
+  - "cub_server 프로세스 생존·재기동 감시와 .err 의 fatal/-111 건수 경보 등록, HA 구성으로 단일 장애점 제거"
+  source: GPT 수집·벤더 문서 대조 완료(https://github.com/CUBRID/cubrid/blob/develop/src/base/error_code.h)
+  note: ER_TM_SERVER_DOWN_UNILATERALLY_ABORTED
+  vendor_cause: "ER_TM_SERVER_DOWN_UNILATERALLY_ABORTED — 클라이언트(CAS·csql)가 처리 중이던 트랜잭션을 DB 서버(cub_server) 다운·연결 단절 때문에 일방적으로 중단했다는 뜻. 서버 비정상 종료(크래시·OOM kill·관리자 정지)나 HA 절체가 흔한 원인."
+  vendor_action: ''
+  vendor_url: https://github.com/CUBRID/cubrid/blob/develop/src/base/error_code.h
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: '서버 오류 번호(음수)·ER_ 이름은 8.4~11.4 동일 — cub_server.log/cub_broker 오류 로그 ''Time: MM/DD/YY hh:mm:ss.mmm - ERROR *** file … ERROR CODE = -n'' 형식 공통'
+- code: '-131'
+  severity: error
+  category: internal
+  title: REGU 시스템 오류
+  immediate:
+  - "`grep -nE \"CODE = -131([^0-9]|$)\" $CUBRID/log/server/<db>_*.err | tail -20` 로 발생 시각·Tran·CLIENT 확인, 직전 줄의 다른 오류(-2 메모리 부족 등) 함께 기록"
+  - "같은 시각 브로커 SQL 로그(`$CUBRID/log/broker/sql_log/<broker>_<n>.sql.log`)에서 실패한 SQL 원문 확보 — 같은 SQL 에서만 반복되는지 확인"
+  short:
+  - "(2차) 실패 SQL 을 개발 DB 에서 재현해 식·형변환을 바꾼 우회 SQL 을 마련, 재현되면 SQL·.err·`cubrid_rel` 버전 정보를 제조사에 전달"
+  mid:
+  - "재현 SQL 기준으로 같은 계열 최신 패치 적용 여부 검토, 우회 SQL 은 애플리케이션 배포 절차로 반영"
+  long:
+  - "server .err 의 내부 오류(-131 등) 건수를 감시 지표로 등록하고 패치 적용 이력 관리"
+  verify_note: "미검증 — -131(ER_REGU_SYSTEM)의 구체 발생 조건을 CUBRID 공식 매뉴얼에서 확인하지 못함"
+  source: GPT 수집·벤더 문서 대조 완료(https://github.com/CUBRID/cubrid/blob/develop/src/base/error_code.h)
+  note: ER_REGU_SYSTEM
+  vendor_cause: "ER_REGU_SYSTEM — 질의 실행기의 regu 변수(식·연산 평가) 처리 중 발생한 내부 시스템 오류. 특정 질의 형태·자료형 조합에서 나는 엔진 결함이나 메모리 부족이 원인인 경우가 많다."
+  vendor_action: ''
+  vendor_url: https://github.com/CUBRID/cubrid/blob/develop/src/base/error_code.h
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: '서버 오류 번호(음수)·ER_ 이름은 8.4~11.4 동일 — cub_server.log/cub_broker 오류 로그 ''Time: MM/DD/YY hh:mm:ss.mmm - ERROR *** file … ERROR CODE = -n'' 형식 공통'
+- code: '-234'
+  severity: error
+  category: disk
+  title: 메서드 파일 없음
+  immediate:
+  - "`grep -nE \"CODE = -234([^0-9]|$)\" $CUBRID/log/server/<db>_*.err | tail -10` 로 오류 메시지의 파일 경로 확인 후 `ls -l <path>` 로 존재·권한 확인"
+  - "`ls -ld $(dirname <path>)` 와 `id` 로 CUBRID 실행 계정이 해당 경로를 읽을 수 있는지 확인(변경 없이 확인만)"
+  short:
+  - "(2차·승인 후) 누락된 메서드 파일을 배포본에서 같은 경로로 복원하거나 권한을 맞춤(롤백: 복원 전 파일 목록·권한 기록, 문제 시 원상태로)"
+  mid:
+  - "메서드 파일 배포 경로를 구성관리 대상으로 등록하고 배포 절차에 파일 존재 점검 단계 추가"
+  long:
+  - "DB 서버 이전·업그레이드 점검표에 메서드 파일 경로 확인 항목 추가"
+  verify_note: "미검증 — -234 의 정확한 ER_ 이름과 메시지 원문을 CUBRID 공식 매뉴얼에서 확인하지 못함(제목 기준 서술)"
+  source: GPT 수집·벤더 문서 대조 완료(https://github.com/CUBRID/cubrid/blob/develop/src/base/error_code.h)
+  note: ER_SM_METHOD_FILE_NOT_FOUND
+  vendor_cause: "메서드(사용자 정의 C/Java 메서드) 실행에 필요한 메서드 파일을 찾지 못함 — 클래스에 등록된 메서드 파일 경로가 바뀌었거나 파일이 배포되지 않았거나 실행 계정이 읽을 수 없을 때 발생."
+  vendor_action: ''
+  vendor_url: https://github.com/CUBRID/cubrid/blob/develop/src/base/error_code.h
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: '서버 오류 번호(음수)·ER_ 이름은 8.4~11.4 동일 — cub_server.log/cub_broker 오류 로그 ''Time: MM/DD/YY hh:mm:ss.mmm - ERROR *** file … ERROR CODE = -n'' 형식 공통'
+- code: '-411'
+  severity: error
+  category: storage
+  title: B-tree 키 타입 오류
+  immediate:
+  - "`grep -nE \"CODE = -411([^0-9]|$)\" $CUBRID/log/server/<db>_*.err | tail -20` 로 발생 시각·Tran 확인, 같은 시각 SQL 로그에서 대상 테이블·인덱스 식별"
+  - "`cubrid server status` 로 서버 상태 확인, 같은 테이블에 대한 최근 ALTER(자료형 변경) 이력을 변경관리 기록에서 확인"
+  short:
+  - "(2차·승인 후) 업무 영향이 적은 시간에 `cubrid checkdb -C --check-btree <db> <schema.table>` 로 해당 테이블 인덱스 점검(부하 발생), 불일치면 인덱스 재생성 계획 수립(롤백: 재생성 전 인덱스 DDL 보관)"
+  - "(2차·승인 후) 서버가 응답하지 않는 경우에만 .err 보존 후 `cubrid server restart <db>` (롤백: 기동 실패 시 제조사 지원)"
+  mid:
+  - "자료형 변경 DDL 수행 후 인덱스 점검(checkdb --check-btree)을 표준 절차로 포함, 반복 시 같은 계열 최신 패치 적용"
+  long:
+  - "server .err 의 인덱스 관련 오류 건수 감시와 분기별 checkdb 점검 일정 운영"
+  verify_note: "미검증 — -411 의 정확한 ER_ 이름(ER_BTREE_INVALID_KEYTYPE 여부)을 CUBRID 공식 매뉴얼에서 확인하지 못함"
+  source: GPT 수집·벤더 문서 대조 완료(https://github.com/CUBRID/cubrid/blob/develop/src/base/error_code.h)
+  note: ER_BTREE_INVALID_KEYTYPE
+  vendor_cause: "B-tree 인덱스 처리 중 키 자료형이 인덱스 정의와 맞지 않는 내부 오류. 인덱스 손상, 자료형 변경 뒤 인덱스 불일치, 엔진 결함이 원인일 수 있다."
+  vendor_action: ''
+  vendor_url: https://github.com/CUBRID/cubrid/blob/develop/src/base/error_code.h
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: '서버 오류 번호(음수)·ER_ 이름은 8.4~11.4 동일 — cub_server.log/cub_broker 오류 로그 ''Time: MM/DD/YY hh:mm:ss.mmm - ERROR *** file … ERROR CODE = -n'' 형식 공통'
+- code: '-582'
+  severity: error
+  category: storage
+  title: 알 수 없는 볼륨 용도
+  immediate:
+  - "`grep -nE \"CODE = -582([^0-9]|$)\" $CUBRID/log/server/<db>_*.err | tail -10` 로 대상 볼륨 이름 확인"
+  - "`cubrid spacedb -s <db>` 로 볼륨별 용도·여유 확인, `ls -l <db경로>/<db>_*` 와 `<db경로>/<db>_vinf` 로 볼륨 파일 목록 대조(읽기 전용)"
+  short:
+  - "(2차·승인 후) 오프라인 점검 창에서 `cubrid checkdb -S --check-file-tracker <db>` 로 볼륨·파일 추적 정보 점검(서버 정지 필요, 롤백: 점검 전 cubrid backupdb 완료 확인)"
+  mid:
+  - "볼륨 손상이면 최신 백업으로 restoredb 복구 계획 수립, 볼륨 파일은 DB 전용 파일시스템에만 두도록 배치 표준화"
+  long:
+  - "spacedb 결과의 볼륨 수·용도 변화를 정기 기록하고 스토리지 I/O 오류(dmesg) 감시 연계"
+  verify_note: "미검증 — -582 발생 조건과 복구 절차를 CUBRID 공식 매뉴얼에서 확인하지 못함(ER_ 이름 기준 서술)"
+  source: GPT 수집·벤더 문서 대조 완료(https://github.com/CUBRID/cubrid/blob/develop/src/base/error_code.h)
+  note: ER_DISK_UNKNOWN_PURPOSE
+  vendor_cause: "ER_DISK_UNKNOWN_PURPOSE — 볼륨 헤더의 용도(permanent data/temp 등)를 식별할 수 없다는 내부 오류. 볼륨 헤더 손상이나 잘못된 볼륨 파일 연결, 엔진 결함이 원인일 수 있다."
+  vendor_action: ''
+  vendor_url: https://github.com/CUBRID/cubrid/blob/develop/src/base/error_code.h
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: '서버 오류 번호(음수)·ER_ 이름은 8.4~11.4 동일 — cub_server.log/cub_broker 오류 로그 ''Time: MM/DD/YY hh:mm:ss.mmm - ERROR *** file … ERROR CODE = -n'' 형식 공통'
+- code: '-963'
+  severity: error
+  category: internal
+  title: 쿼리 실행 시간 초과
+  immediate:
+  - "`cubrid broker status -b` 의 LONG-Q·ERR-Q 와 `cubrid tranlist <db>` 의 실행 시간 긴 트랜잭션 확인(읽기 전용)"
+  - "`$CUBRID/log/broker/sql_log/<broker>_<n>.sql.log` 에서 같은 시각 실패 SQL·소요 시간 확보, `cubrid lockdb -o /var/tmp/lockdb_<db>.txt <db>` 로 잠금 대기 동반 여부 확인"
+  short:
+  - "(2차) 실패 SQL 의 실행계획 확인(csql `;plan detail`)과 인덱스 보강안 작성, 잠금 대기가 원인이면 블로킹 트랜잭션 처리는 업무 담당 승인 후 `cubrid killtran -i <tran_index> <db>`(롤백: 종료된 거래는 애플리케이션 재처리)"
+  mid:
+  - "LONG_QUERY_TIME 기준 장기 질의 목록을 주기적으로 추출해 튜닝, MAX_QUERY_TIMEOUT 을 업무별 SLA 에 맞춰 문서화"
+  long:
+  - "broker LONG-Q·평균 응답 시간 감시 임계 등록, 대량 조회는 배치 시간대로 분리"
+  vendor_cause: "질의 실행 시간 제한 초과로 분류된 코드 — 브로커 MAX_QUERY_TIMEOUT 이나 애플리케이션 queryTimeout 이 만료되어 질의가 중단된 상태로 보고된다. 큰 범위 스캔·잠금 대기·실행계획 변화가 흔한 원인."
+  verify_note: "미검증 — -963 번호가 질의 시간 초과를 뜻하는지 CUBRID 공식 문서에서 확인하지 못함(기존 note: 공식 확인 불가)"
+  source: GPT 수집·공식 문서 미확인(보류)(https://www.cubrid.org/manual/en/latest/admin/control.html)
+  note: 쿼리 실행 시간초과 코드로 공식 확인 불가
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: 쿼리 실행 시간 초과 코드 — 공식 확인 불가(코드 note 참고)
+- code: '-10004'
+  severity: error
+  category: internal
+  title: CAS 잘못된 인자
+  immediate:
+  - "`cubrid broker status -f <broker>` 로 해당 CAS 의 클라이언트 IP·드라이버 버전 확인, `$CUBRID/log/broker/error_log/<broker>_<n>.err` 의 같은 시각 오류 확인"
+  - "같은 시각 `$CUBRID/log/broker/sql_log/<broker>_<n>.sql.log` 에서 실패 요청의 SQL·바인드 개수 확인 — 특정 애플리케이션·드라이버에만 몰리는지 판단"
+  short:
+  - "(2차) 드라이버 버전을 서버(`cubrid_rel`)와 같은 계열로 맞추는 교체안 작성 후 애플리케이션 담당 승인 하에 배포(롤백: 기존 드라이버 jar 보관 후 원복)"
+  mid:
+  - "애플리케이션별 JDBC/CCI 드라이버 버전 목록을 관리하고 서버 업그레이드 시 호환성 시험에 포함"
+  long:
+  - "broker ERR-Q 와 error_log 의 -10004 건수 감시, 드라이버 버전 표준 운영"
+  source: GPT 수집·벤더 문서 대조 완료(https://www.cubrid.org/manual/en/latest/admin/control.html)
+  note: CAS_ER_ARGS
+  vendor_cause: "CAS_ER_ARGS(-10004) Invalid argument — 드라이버(JDBC/CCI)가 CAS 에 보낸 요청 인자가 잘못됐다는 뜻. 드라이버와 브로커 버전 불일치, 애플리케이션의 잘못된 바인드·API 사용이 흔한 원인."
+  vendor_action: ''
+  vendor_url: https://www.cubrid.org/manual/en/latest/admin/control.html
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: CAS(브로커) 오류 -10xxx 는 8.4~11.4 동일

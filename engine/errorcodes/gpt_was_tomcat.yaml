@@ -1,0 +1,299 @@
+product: tomcat
+layer: was
+note: GPT 협업 수집분 — 벤더 공식 문서와 대조 후 확정 · 2026-10-16 G7a 4단 보강(1차 읽기 전용화, 재기동·정리·롤백은 2차로 이동)
+codes:
+- code: TOMCAT-HEAP-OOM
+  severity: critical
+  category: memory
+  title: 힙 메모리 고갈
+  immediate:
+  - "`jstat -gcutil <PID> 1000 5` 로 Old(O) 사용률·FGC 증가 확인 — O 95% 이상 유지·FGC 연속 증가면 힙 고갈 확정"
+  - "`ls -lt $CATALINA_BASE/*.hprof $CATALINA_BASE/logs/*.hprof 2>/dev/null | head` 로 HeapDumpOnOutOfMemoryError 덤프 생성 여부 확인, 없으면 `jmap -histo <PID> | head -30`(live 옵션 없이 — Full GC 유발 안 함)으로 상위 객체만 기록(전체 힙덤프는 서비스 정지 위험 — 2차)"
+  - "`grep -n -B5 'java.lang.OutOfMemoryError' $CATALINA_BASE/logs/catalina.out | tail -30` 로 최초 발생 시각·스레드 확인, 같은 시각 트래픽·배포 이력 대조"
+  short:
+  - "(2차·승인 후, 롤백: 우회 해제·이전 설정 복원) LB 에서 해당 노드 트래픽 우회 → `jcmd <PID> GC.heap_dump <path>/heap.hprof`(디스크 여유 확인 후) → Tomcat 재기동으로 서비스 복구"
+  mid:
+  - "힙덤프(Eclipse MAT) 로 누수 객체 확인 후 수정, setenv.sh -Xms/-Xmx·세션 수·캐시 크기를 워크로드 기준으로 재산정"
+  long:
+  - "-XX:+HeapDumpOnOutOfMemoryError·-XX:HeapDumpPath 표준화, Old 영역 사용률 85% 경보와 메모리 회귀 부하시험 운영"
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  vendor_cause: 'Java heap space 영역이 가득 차 GC 후에도 객체를 할당하지 못해 java.lang.OutOfMemoryError: Java heap space 가 발생한 상태. 메모리 누수(세션·캐시·정적 컬렉션), 대용량 조회 결과 적재, 워크로드 대비 작은 -Xmx 가 흔한 원인.'
+  versions:
+  - Tomcat 5.5
+  - Tomcat 6.0
+  - Tomcat 7.0
+  - Tomcat 8.0/8.5
+  - Tomcat 9.0
+  - Tomcat 10.0/10.1
+  - Tomcat 11.0
+  version_note: 문구 기반 별칭 — Tomcat 5.5~11.0 공통(JVM·커넥터·JDBC 풀 공통 문구)
+- code: TOMCAT-METASPACE-OOM
+  severity: critical
+  category: memory
+  title: 메타스페이스 고갈
+  immediate:
+  - "`jstat -gcutil <PID> 1000 5` 로 M(Metaspace, Java 8+) 또는 P(PermGen, Java 7 이하) 사용률 확인 — 95% 이상이면 확정"
+  - "`jmap -histo <PID> | grep WebappClassLoader` 의 #instances 로 남은 웹앱 클래스로더 수 확인(live 옵션 없이) — 배포 앱 수보다 많으면 redeploy 누수(TOMCAT-CLASSLOADER-LEAK 경고 동반 여부 확인)"
+  - "`grep -n -E 'Undeploying|Deploying|Reloading' $CATALINA_BASE/logs/catalina.out | tail -20` 로 최근 반복 배포(redeploy) 이력 확인 — 추가 redeploy 는 2차 판단 전까지 보류 요청"
+  short:
+  - "(2차·승인 후, 롤백: 이전 setenv.sh 복원) 클래스 히스토그램 보존 후 Tomcat 재기동으로 Metaspace 회수, 운영 중 hot redeploy 금지 조치"
+  mid:
+  - "-XX:MaxMetaspaceSize(Java 8+)/-XX:MaxPermSize(Java 7 이하) 재산정, 클래스로더 누수(스레드·ThreadLocal·드라이버) 수정"
+  long:
+  - "배포 회귀시험과 로드 클래스 수·Metaspace 추세 감시(85% 경보)"
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  vendor_cause: '클래스 메타데이터 영역(Java 8+ Metaspace, Java 7 이하 PermGen)이 고갈되어 OutOfMemoryError: Metaspace/PermGen space 가 발생한 상태. 반복 재배포로 인한 WebappClassLoader 누수, 동적 프록시·스크립트 엔진의 클래스 과다 생성, 작은 MaxMetaspaceSize 가 흔한 원인.'
+  versions:
+  - Tomcat 5.5
+  - Tomcat 6.0
+  - Tomcat 7.0
+  - Tomcat 8.0/8.5
+  - Tomcat 9.0
+  - Tomcat 10.0/10.1
+  - Tomcat 11.0
+  version_note: PermGen(Java 7 이하) / Metaspace(Java 8+) 두 문구 모두
+- code: TOMCAT-GC-OVERHEAD
+  severity: critical
+  category: memory
+  title: GC 과부하
+  immediate:
+  - "`jstat -gcutil <PID> 1000 10` 로 FGC·FGCT 증가 속도와 Old(O) 사용률 확인 — 매 초 Full GC 가 반복되면 확정"
+  - "GC 로그(`-Xlog:gc` 또는 -Xloggc 지정 경로)에서 `grep -c 'Pause Full' <gc.log>` 로 Full GC 빈도·정지 시간 확인, `jmap -histo <PID> | head -30` 으로 상위 객체 기록(live 옵션 없이)"
+  short:
+  - "(2차·승인 후, 롤백: 우회 해제·이전 설정 복원) LB 에서 노드 우회 후 힙덤프 확보(디스크 여유 확인) 및 Tomcat 재기동, 원인 객체를 개발 담당에 전달"
+  mid:
+  - "할당률·장기 생존 객체 분석 후 코드 개선, -Xmx·GC 알고리즘(G1)·-XX:MaxGCPauseMillis 를 시험 환경에서 검증 후 반영"
+  long:
+  - "GC 정지 시간 SLO(예: 1분 중 GC 시간 10% 이하) 감시와 메모리 용량계획·부하시험"
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  vendor_cause: 'JVM 이 실행 시간의 대부분(기본 98%)을 GC 에 쓰고도 힙을 거의 회수하지 못해 OutOfMemoryError: GC overhead limit exceeded 를 낸 상태(Parallel GC 계열). 힙 고갈 직전의 누수·과다 객체 생성이 흔한 원인.'
+  versions:
+  - Tomcat 5.5
+  - Tomcat 6.0
+  - Tomcat 7.0
+  - Tomcat 8.0/8.5
+  - Tomcat 9.0
+  - Tomcat 10.0/10.1
+  - Tomcat 11.0
+  version_note: 문구 기반 별칭 — Tomcat 5.5~11.0 공통(JVM·커넥터·JDBC 풀 공통 문구)
+- code: TOMCAT-POOL-EXHAUSTED
+  severity: critical
+  category: capacity
+  title: DB 커넥션풀 고갈
+  immediate:
+  - "`jcmd <PID> Thread.print | grep -c -E 'getConnection|borrowObject|PooledConnection'` 와 `| grep -B2 -A10 getConnection | head -60` 로 대기 스레드 수·대기 지점 확인 — 다수가 풀 대기면 고갈 확정"
+  - "`nc -zvw3 <db_host> <db_port>` 로 DB 도달성 확인, DBA 에 해당 계정 세션 수·장시간 SQL·락 대기 확인 요청 — DB 측 지연이면 원인은 DB"
+  - "`grep -n -E 'Timeout waiting for idle object|Cannot get a connection|PoolExhausted|abandoned' $CATALINA_BASE/logs/catalina.out | tail -20` 로 발생 시각·logAbandoned 스택 확인"
+  short:
+  - "(2차·승인 후, 롤백: context.xml 백업 복원) DB 원인 해소가 우선, 누수면 removeAbandoned·logAbandoned 로 미반환 코드 확인 후 수정 배포, 풀 maxActive(maxTotal) 조정은 DB 세션 한도 안에서"
+  mid:
+  - "풀 크기(maxActive/maxTotal)·대기(maxWait/maxWaitMillis)와 SQL 응답시간 개선, try-with-resources 로 반납 보장"
+  long:
+  - "풀 사용률(numActive/maxActive) 80% 경보와 누수 탐지 설정 상시 운영"
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  vendor_cause: JDBC 커넥션 풀(tomcat-jdbc·DBCP)의 활성 연결이 상한에 도달해 대기 시간(maxWait) 안에 연결을 빌리지 못한 상태. 연결 미반납(누수), DB 쪽 느린 SQL·락 대기, 풀 크기 부족이 흔한 원인.
+  vendor_url: https://tomcat.apache.org/tomcat-9.0-doc/jdbc-pool.html
+  versions:
+  - Tomcat 5.5
+  - Tomcat 6.0
+  - Tomcat 7.0
+  - Tomcat 8.0/8.5
+  - Tomcat 9.0
+  - Tomcat 10.0/10.1
+  - Tomcat 11.0
+  version_note: 문구 기반 별칭 — Tomcat 5.5~11.0 공통(JVM·커넥터·JDBC 풀 공통 문구)
+- code: TOMCAT-CLIENT-ABORT
+  severity: warn
+  category: connection
+  title: 클라이언트 요청 중단
+  immediate:
+  - "`grep -c 'ClientAbortException' $CATALINA_BASE/logs/catalina.out` 와 시간대별 `grep 'ClientAbortException' ... | cut -c1-16 | uniq -c` 로 단발인지 대량 발생인지 구분"
+  - "같은 시각 LB·프록시 로그의 타임아웃(504·499 등)과 해당 URI 처리 시간 대조 — 대량이고 처리 시간이 길면 서버 지연이 원인"
+  short:
+  - "(2차) 느린 URI 의 후단 지연 분석·개선, 프록시 read timeout 과 서버 처리 시간 상관분석 결과를 개발·인프라 담당에 전달"
+  mid:
+  - "응답시간 개선과 LB·프록시·Tomcat 타임아웃 계층 정렬(바깥쪽이 더 길게)"
+  long:
+  - "연결 중단률과 응답시간 SLO 를 통합 감시"
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  vendor_cause: 응답을 쓰는 중 클라이언트(브라우저·프록시)가 먼저 연결을 끊어 ClientAbortException(IOException) 이 난 상태. 사용자 취소·새로고침, 프록시 타임아웃, 느린 응답이 흔한 원인이며 단발은 장애가 아니다.
+  versions:
+  - Tomcat 5.5
+  - Tomcat 6.0
+  - Tomcat 7.0
+  - Tomcat 8.0/8.5
+  - Tomcat 9.0
+  - Tomcat 10.0/10.1
+  - Tomcat 11.0
+  version_note: 문구 기반 별칭 — Tomcat 5.5~11.0 공통(JVM·커넥터·JDBC 풀 공통 문구)
+- code: TOMCAT-CONNECTION-RESET
+  severity: error
+  category: connection
+  title: 연결 강제 종료
+  immediate:
+  - '`grep -n -B5 -A15 -E ''Connection reset|ClientAbortException'' "$CATALINA_BASE/logs/catalina.out" | tail -80` 로 스택을 보고 클라이언트 쪽(요청 읽기·ClientAbortException)인지 후단(JDBC·HTTP 클라이언트)인지 구분'
+  - 후단이면 `nc -zvw3 <backend_host> <port>` 로 도달성 확인 (접속 시험 1회 — 보안 정책상 금지된 환경이면 생략), 같은 시각 LB·방화벽 유휴 세션 정리 이력 확인 — 일정 간격으로 반복되면 유휴 타임아웃 원인
+  short:
+  - "(2차·승인 후, 롤백: 이전 설정 복원) 후단 풀에 유휴 연결 검사(testWhileIdle·validationQuery) 적용, keepAliveTimeout 을 LB 유휴 타임아웃보다 짧게 조정"
+  mid:
+  - "KeepAlive·프록시 타임아웃·연결 재사용 정책을 구간별로 정렬"
+  long:
+  - "구간별 연결 품질과 reset 비율 상시 감시"
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  vendor_cause: '상대방이 TCP RST 를 보내 연결이 강제로 끊긴 상태(java.net.SocketException: Connection reset). 방화벽·LB 의 유휴 세션 정리, 상대 프로세스 재기동, 네트워크 장비 장애가 흔한 원인.'
+  versions:
+  - Tomcat 5.5
+  - Tomcat 6.0
+  - Tomcat 7.0
+  - Tomcat 8.0/8.5
+  - Tomcat 9.0
+  - Tomcat 10.0/10.1
+  - Tomcat 11.0
+  version_note: 문구 기반 별칭 — Tomcat 5.5~11.0 공통(JVM·커넥터·JDBC 풀 공통 문구)
+- code: TOMCAT-BROKEN-PIPE
+  severity: warn
+  category: connection
+  title: 응답 전송 연결 끊김
+  immediate:
+  - "`grep -c 'Broken pipe' $CATALINA_BASE/logs/catalina.out` 로 빈도 확인, 같은 시각 접근 로그에서 해당 URI 응답 크기(%b)·처리 시간 확인 — 대용량·장시간 응답에 집중되면 프록시 타임아웃 의심"
+  - "같은 시각 Tomcat 자체 오류(OOM·스레드 고갈) 동반 여부 확인 — 동반 없으면 클라이언트 측 종료로 서버 장애 아님"
+  short:
+  - "(2차·승인 후, 롤백: 이전 설정 복원) 대용량 응답 API 의 스트리밍·압축 적용, 프록시 read timeout 과 처리 시간 정렬"
+  mid:
+  - "응답 크기 상한·페이지 처리, 다운로드는 별도 경로 분리"
+  long:
+  - "Broken pipe 추세와 장기응답 API 목록 지속 관리"
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  vendor_cause: '응답을 쓰는 동안 상대가 이미 연결을 닫아 java.io.IOException: Broken pipe 가 난 상태. 클라이언트·프록시 타임아웃, 대용량 응답 중 사용자 취소가 흔한 원인.'
+  versions:
+  - Tomcat 5.5
+  - Tomcat 6.0
+  - Tomcat 7.0
+  - Tomcat 8.0/8.5
+  - Tomcat 9.0
+  - Tomcat 10.0/10.1
+  - Tomcat 11.0
+  version_note: 문구 기반 별칭 — Tomcat 5.5~11.0 공통(JVM·커넥터·JDBC 풀 공통 문구)
+- code: TOMCAT-ADDRESS-IN-USE
+  severity: critical
+  category: connection
+  title: 포트 중복 사용
+  immediate:
+  - "`grep -n -B2 'Address already in use' $CATALINA_BASE/logs/catalina.out | tail -10` 로 충돌 포트 확인 후 `ss -ltnp | grep ':<port> '` 로 점유 PID·프로세스 확인"
+  - "`ps -ef | grep org.apache.catalina.startup.Bootstrap | grep -v grep` 로 같은 CATALINA_BASE 의 Tomcat 이 이미 떠 있는지(중복 기동) 확인 — 이미 정상 기동 중이면 새 기동만 실패한 것"
+  short:
+  - "(2차·승인 후, 롤백: server.xml 백업 복원) 남은 구 프로세스 정리(소유자 확인 후 정상 종료 우선) 또는 Connector·Server shutdown 포트 변경 후 Tomcat 기동"
+  mid:
+  - "포트 대장으로 인스턴스별 HTTP·AJP·shutdown·JMX 포트 표준화, CATALINA_PID 로 PID 관리"
+  long:
+  - "기동 전 포트 점검과 단일 인스턴스 보장(systemd 서비스화) 자동화"
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  vendor_cause: 'Connector 나 shutdown 포트를 바인드하려 했으나 다른 프로세스가 이미 사용 중이라 java.net.BindException: Address already in use 가 난 상태. 이전 Tomcat 프로세스 미종료(중복 기동), 다른 서비스와 포트 겹침이 흔한 원인.'
+  vendor_url: https://tomcat.apache.org/tomcat-9.0-doc/config/http.html
+  versions:
+  - Tomcat 5.5
+  - Tomcat 6.0
+  - Tomcat 7.0
+  - Tomcat 8.0/8.5
+  - Tomcat 9.0
+  - Tomcat 10.0/10.1
+  - Tomcat 11.0
+  version_note: 문구 기반 별칭 — Tomcat 5.5~11.0 공통(JVM·커넥터·JDBC 풀 공통 문구)
+- code: TOMCAT-TOO-MANY-OPEN-FILES
+  severity: critical
+  category: capacity
+  title: 파일 디스크립터 고갈
+  immediate:
+  - "`ls /proc/<PID>/fd | wc -l` 와 `grep 'Max open files' /proc/<PID>/limits` 로 사용량·한도 확인 — 90% 이상이면 확정"
+  - "`ls -l /proc/<PID>/fd | awk '{print $NF}' | sed -E 's/[0-9]+/N/g' | sort | uniq -c | sort -rn | head` 로 소켓·파일 유형별 분포 확인, `ss -tan | awk '{print $1}' | sort | uniq -c` 로 CLOSE_WAIT 누적 여부 확인(누적이면 앱 연결 미종료)"
+  short:
+  - "(2차·승인 후, 롤백: limits.conf·서비스 유닛 백업 복원) LimitNOFILE(또는 limits.conf nofile) 상향 후 Tomcat 재기동, CLOSE_WAIT 누적이면 해당 후단 연결 미종료 코드 수정"
+  mid:
+  - "FD 한도를 maxConnections + 풀 크기 + 로그 파일 수 기준으로 재산정, 누수 코드 수정"
+  long:
+  - "프로세스 FD 사용률 80% 경보와 장기 증가 추세 감시"
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  vendor_cause: 'Tomcat 프로세스가 열 수 있는 파일 디스크립터(소켓·파일) 한도에 도달해 java.io.IOException/SocketException: Too many open files 가 발생한 상태. 낮은 nofile 한도, CLOSE_WAIT 소켓 누적·파일 미종료 누수, 접속 급증이 흔한 원인.'
+  vendor_url: https://tomcat.apache.org/tomcat-9.0-doc/config/http.html
+  versions:
+  - Tomcat 5.5
+  - Tomcat 6.0
+  - Tomcat 7.0
+  - Tomcat 8.0/8.5
+  - Tomcat 9.0
+  - Tomcat 10.0/10.1
+  - Tomcat 11.0
+  version_note: 문구 기반 별칭 — Tomcat 5.5~11.0 공통(JVM·커넥터·JDBC 풀 공통 문구)
+- code: TOMCAT-NO-SPACE
+  severity: critical
+  category: disk
+  title: 디스크 공간 고갈
+  immediate:
+  - "`df -h $CATALINA_BASE $CATALINA_BASE/logs` 와 `df -i $CATALINA_BASE/logs` 로 블록·inode 사용률 확인 — 95% 이상이면 확정"
+  - "`du -sh $CATALINA_BASE/logs $CATALINA_BASE/temp $CATALINA_BASE/work 2>/dev/null` 와 `find $CATALINA_BASE -xdev -type f -size +500M -exec ls -lh {} \\; 2>/dev/null | head` 로 큰 파일(catalina.out·hprof 덤프) 식별(정리는 2차)"
+  short:
+  - "(2차·승인 후, 롤백: 정리 전 압축본을 다른 볼륨에 보관) 오래된 회전 로그·분석 끝난 hprof 덤프 정리, catalina.out 은 copytruncate 방식으로만 비우고 증설은 시스템 담당과"
+  mid:
+  - "logging.properties maxDays·AccessLogValve maxDays·catalina.out logrotate 와 덤프 경로(HeapDumpPath) 별도 볼륨 지정"
+  long:
+  - "디스크 증가율 예측과 85%/95% 경보, 선제 증설 계획"
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  vendor_cause: 'Tomcat 이 쓰는 파일시스템(로그·temp·work·덤프 경로)의 공간이 없어 java.io.IOException: No space left on device 가 난 상태. 회전되지 않는 catalina.out, 누적된 접근 로그·힙덤프, 업로드 임시 파일이 흔한 원인.'
+  vendor_url: https://tomcat.apache.org/tomcat-9.0-doc/logging.html
+  versions:
+  - Tomcat 5.5
+  - Tomcat 6.0
+  - Tomcat 7.0
+  - Tomcat 8.0/8.5
+  - Tomcat 9.0
+  - Tomcat 10.0/10.1
+  - Tomcat 11.0
+  version_note: 문구 기반 별칭 — Tomcat 5.5~11.0 공통(JVM·커넥터·JDBC 풀 공통 문구)
+- code: TOMCAT-ACCEPT-FAILED
+  severity: critical
+  category: connection
+  title: 소켓 수락 실패
+  immediate:
+  - "`grep -n -A5 -E 'Socket accept failed|Acceptor' $CATALINA_BASE/logs/catalina.out | tail -20` 로 원인 예외(Too many open files·SocketException) 확인"
+  - "`ls /proc/<PID>/fd | wc -l` 와 `grep 'Max open files' /proc/<PID>/limits` 로 FD 확인, `ss -ltn '( sport = :<port> )'` 의 Recv-Q/Send-Q 로 accept 대기열(acceptCount) 포화 여부 확인"
+  short:
+  - "(2차·승인 후, 롤백: 설정 백업 복원) FD 고갈이면 한도 상향·누수 수정, 대기열 포화면 앞단 LB 에서 유입 제한 후 Connector acceptCount·maxConnections 와 OS somaxconn 함께 조정·재기동"
+  mid:
+  - "커넥터·OS 네트워크 큐·동시 접속 용량을 부하시험으로 산정"
+  long:
+  - "연결 수용량 부하시험과 accept 실패율 감시"
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  vendor_cause: Connector 의 Acceptor 스레드가 새 소켓을 accept 하지 못한 상태. 파일 디스크립터 고갈, OS listen 대기열(acceptCount·somaxconn) 포화, 네트워크 오류가 흔한 원인.
+  vendor_url: https://tomcat.apache.org/tomcat-9.0-doc/config/http.html
+  versions:
+  - Tomcat 5.5
+  - Tomcat 6.0
+  - Tomcat 7.0
+  - Tomcat 8.0/8.5
+  - Tomcat 9.0
+  - Tomcat 10.0/10.1
+  - Tomcat 11.0
+  version_note: 문구 기반 별칭 — Tomcat 5.5~11.0 공통(JVM·커넥터·JDBC 풀 공통 문구)
+- code: TOMCAT-CONTEXT-START-FAILED
+  severity: critical
+  category: internal
+  title: 웹앱 기동 실패
+  immediate:
+  - "`grep -n -B30 -E 'startup failed due to previous errors|One or more listeners failed to start|One or more Filters failed to start' $CATALINA_BASE/logs/catalina.out | grep -E 'SEVERE|ERROR|Exception|Caused by' | tail -20` 로 실패 Context 와 직전 원인 확인"
+  - "`grep -n -E 'Exception|Caused by' $CATALINA_BASE/logs/localhost.$(date +%Y-%m-%d).log | head -20` 로 리스너·필터 상세 스택 확인, 직전 배포·설정 변경 이력 대조"
+  short:
+  - "(2차·승인 후, 롤백: 이전 정상 WAR·설정 보관본 재배포) 원인 수정본 재배포 또는 직전 정상 배포본으로 되돌린 뒤 Manager start/reload"
+  mid:
+  - "리스너·필터·클래스 로딩·설정 파일 오류 원인을 수정하고 배포 패키지 의존성 정비"
+  long:
+  - "배포 전 기동 검증·자동 롤백·헬스체크 운영"
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  vendor_cause: 웹앱 Context 가 리스너·필터 기동 실패 등 앞선 오류 때문에 시작되지 못해(startup failed due to previous errors) 해당 앱 전체가 404/503 인 상태. 설정 파일 오류, DB 연결 실패, 누락 라이브러리가 흔한 원인.
+  vendor_url: https://tomcat.apache.org/tomcat-9.0-doc/config/context.html
+  versions:
+  - Tomcat 7.0
+  - Tomcat 8.0/8.5
+  - Tomcat 9.0
+  - Tomcat 10.0/10.1
+  - Tomcat 11.0
+  version_note: '''Context [..] startup failed due to previous errors''·''One or more listeners failed to start'' 는 7.0 이후(6.0 은 ''Error listenerStart'' → TOMCAT-LISTENER-FAIL)'

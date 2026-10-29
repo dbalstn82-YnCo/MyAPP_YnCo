@@ -1,0 +1,298 @@
+product: mssql
+layer: db
+note: GPT 협업 수집분 — 벤더 공식 문서와 대조 후 확정
+codes:
+- code: MSSQL-802
+  severity: critical
+  category: memory
+  title: 버퍼풀 메모리 부족
+  immediate:
+  - "메모리 상태: `SELECT physical_memory_in_use_kb/1024 AS sql_mb, memory_utilization_percentage, process_physical_memory_low FROM sys.dm_os_process_memory;` 와 `SELECT total_physical_memory_kb/1024 AS total_mb, available_physical_memory_kb/1024 AS avail_mb, system_memory_state_desc FROM sys.dm_os_sys_memory;` — 'Available physical memory is low' 면 OS 압박 (2012~2022, 읽기 전용)"
+  - "설정·큰 소비자: `SELECT name, value_in_use FROM sys.configurations WHERE name IN ('max server memory (MB)','min server memory (MB)');` · `SELECT TOP 10 type, SUM(pages_kb)/1024 AS mb FROM sys.dm_os_memory_clerks GROUP BY type ORDER BY mb DESC;` — 버퍼풀 외 clerk 가 크면 그쪽이 원인"
+  - "메모리 grant 대기: `SELECT session_id, requested_memory_kb, granted_memory_kb, wait_time_ms FROM sys.dm_exec_query_memory_grants WHERE granted_memory_kb IS NULL;` — 대기 행이 많으면 대형 정렬·해시 쿼리 원인"
+  short:
+  - "(2차·승인 후, 롤백: 이전 값 기록 후 같은 명령으로 원복) 동거 프로세스 메모리 확보 또는 `EXEC sp_configure 'max server memory (MB)', <MB>; RECONFIGURE;` 로 상한 조정(show advanced options 필요) — 큰 grant 쿼리 세션은 업무 담당 확인 후 종료"
+  mid:
+  - 버퍼풀 수요에 맞게 메모리 구성과 서버 용량을 조정
+  long:
+  - 메모리 SLO와 성능 카운터 기반 예측관리를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/sql/relational-databases/errors-events/mssqlserver-802-database-engine-error?view=sql-server-ver17)
+  vendor_cause: 버퍼 풀이 가득 찼고 더 이상 확장할 수 없음
+  vendor_action: 다른 프로세스의 메모리 사용과 SQL 메모리 설정·부하를 확인하고 필요 시 max server memory 증가 또는 캐시 해제
+  vendor_url: https://learn.microsoft.com/en-us/sql/relational-databases/errors-events/mssqlserver-802-database-engine-error?view=sql-server-ver17
+  versions:
+  - SQL Server 2005
+  - SQL Server 2008/2008 R2
+  - SQL Server 2012
+  - SQL Server 2014
+  - SQL Server 2016
+  - SQL Server 2017
+  - SQL Server 2019
+  - SQL Server 2022
+  - SQL Server 2025
+  version_note: 'Msg 번호·Severity·State 체계는 2005~2025 동일 — ERRORLOG ''YYYY-MM-DD hh:mm:ss.nn spidNN Error: n, Severity: n, State: n.'' 형식 공통'
+- code: MSSQL-1204
+  severity: error
+  category: lock
+  title: LOCK 자원 확보 실패
+  immediate:
+  - "잠금 수 많은 세션: `SELECT TOP 10 request_session_id, COUNT(*) AS lock_cnt FROM sys.dm_tran_locks GROUP BY request_session_id ORDER BY lock_cnt DESC;` — 한 세션이 수십만 개 이상이면 대량 트랜잭션 원인 (2012~2022, 읽기 전용 — 잠금이 매우 많으면 조회도 무거우니 1회만)"
+  - "lock 메모리와 고정 한도: `SELECT type, SUM(pages_kb)/1024 AS mb FROM sys.dm_os_memory_clerks WHERE type = 'OBJECTSTORE_LOCK_MANAGER' GROUP BY type;` 와 `SELECT value_in_use FROM sys.configurations WHERE name = 'locks';` — locks 가 0(동적) 이 아니면 고정 상한이 원인 후보"
+  - "장기 트랜잭션: `SELECT s.session_id, s.host_name, s.program_name, t.transaction_begin_time FROM sys.dm_tran_active_transactions t JOIN sys.dm_tran_session_transactions st ON st.transaction_id = t.transaction_id JOIN sys.dm_exec_sessions s ON s.session_id = st.session_id ORDER BY t.transaction_begin_time;`"
+  short:
+  - "(2차·승인 후, 롤백: KILL 한 세션의 트랜잭션은 롤백되어 되돌릴 수 없고 대량이면 롤백 시간이 김 — 세션·SQL 기록 선행) 업무 담당 확인 후 대량 잠금 세션 `KILL <session_id>;`, 'locks' 가 고정값이면 0(동적)으로 되돌리는 것 검토(서비스 재시작 필요)"
+  mid:
+  - 대량 트랜잭션을 분할하고 메모리 및 잠금 구성을 재산정
+  long:
+  - 잠금 자원 임계치와 대량작업 사전검증을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/sql/relational-databases/errors-events/mssqlserver-1204-database-engine-error?view=sql-server-ver17)
+  note: LOCK 자원 고갈로 해당 문장이 실패하지만 단독 코드만으로 서비스 중단을 뜻하지 않음
+  vendor_cause: 메모리 부족, Lock Manager 메모리 한도, 비기본 locks 설정 또는 1211/1224 추적 플래그로 잠금 자원 고갈
+  vendor_action: 메모리 소비를 줄이거나 max server memory를 늘리고, 잠금 과다 트랜잭션 종료·locks 기본값 복원·추적 플래그 점검
+  vendor_url: https://learn.microsoft.com/en-us/sql/relational-databases/errors-events/mssqlserver-1204-database-engine-error?view=sql-server-ver17
+  versions:
+  - SQL Server 2005
+  - SQL Server 2008/2008 R2
+  - SQL Server 2012
+  - SQL Server 2014
+  - SQL Server 2016
+  - SQL Server 2017
+  - SQL Server 2019
+  - SQL Server 2022
+  - SQL Server 2025
+  version_note: 'Msg 번호·Severity·State 체계는 2005~2025 동일 — ERRORLOG ''YYYY-MM-DD hh:mm:ss.nn spidNN Error: n, Severity: n, State: n.'' 형식 공통'
+- code: MSSQL-1222
+  severity: error
+  category: lock
+  title: 잠금 요청 시간초과
+  immediate:
+  - "blocking 체인: `SELECT session_id, blocking_session_id, wait_type, wait_time, wait_resource, DB_NAME(database_id) AS db FROM sys.dm_exec_requests WHERE blocking_session_id <> 0;` — blocking_session_id 를 따라가 자신은 대기하지 않는 세션이 원점 (2012~2022, 읽기 전용)"
+  - "원점 세션 정보: `SELECT session_id, login_name, host_name, program_name, status, open_transaction_count, last_request_end_time FROM sys.dm_exec_sessions WHERE session_id = <원점 session_id>;` — status 가 sleeping 인데 open_transaction_count > 0 이면 커밋 누락 애플리케이션"
+  - "원점 세션의 마지막 SQL: `SELECT event_info FROM sys.dm_exec_input_buffer(<session_id>, NULL);` (2014 SP2·2016+) 또는 `DBCC INPUTBUFFER(<session_id>);`"
+  short:
+  - "(2차·승인 후, 롤백: KILL 한 세션의 트랜잭션은 롤백되어 되돌릴 수 없음 — 세션·SQL 기록 선행) 업무 담당 확인 후 원점 세션 `KILL <session_id>;`"
+  - "(2차) 1222 는 문장만 실패하고 트랜잭션은 자동 롤백되지 않으므로 애플리케이션이 `@@TRANCOUNT` 확인 후 롤백·재시도하도록 보강"
+  mid:
+  - 장기 트랜잭션과 쿼리, 인덱스를 개선
+  long:
+  - 잠금대기 기준과 배치 동시성 정책을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/sql/relational-databases/errors-events/mssqlserver-1222-database-engine-error?view=sql-server-ver17)
+  vendor_cause: 다른 트랜잭션이 필요한 자원의 잠금을 쿼리 대기 가능 시간보다 오래 보유함
+  vendor_action: 잠금 보유 트랜잭션을 찾아 적절하면 종료 후 재실행; 반복되면 잠금 제한시간이나 장시간 잠금 트랜잭션 수정
+  vendor_url: https://learn.microsoft.com/en-us/sql/relational-databases/errors-events/mssqlserver-1222-database-engine-error?view=sql-server-ver17
+  versions:
+  - SQL Server 2005
+  - SQL Server 2008/2008 R2
+  - SQL Server 2012
+  - SQL Server 2014
+  - SQL Server 2016
+  - SQL Server 2017
+  - SQL Server 2019
+  - SQL Server 2022
+  - SQL Server 2025
+  version_note: 'Msg 번호·Severity·State 체계는 2005~2025 동일 — ERRORLOG ''YYYY-MM-DD hh:mm:ss.nn spidNN Error: n, Severity: n, State: n.'' 형식 공통'
+- code: MSSQL-825
+  severity: critical
+  category: hardware
+  title: 디스크 읽기 재시도 성공
+  immediate:
+  - "ERRORLOG 의 825 줄에서 파일·offset·실패 횟수 기록: `EXEC xp_readerrorlog 0, 1, N'succeeded after failing';` — 같은 파일에서 반복되면 해당 볼륨 I/O 경로 이상 (2012~2022, 읽기 전용)"
+  - "의심 페이지: `SELECT database_id, file_id, page_id, event_type, error_count, last_update_date FROM msdb.dbo.suspect_pages ORDER BY last_update_date DESC;` — 행이 있으면 823/824 손상도 이미 발생한 것"
+  - "같은 시각 OS 디스크 이벤트: `Get-WinEvent -FilterHashtable @{LogName='System'; Level=1,2,3; StartTime=(Get-Date).AddDays(-1)} | Where-Object ProviderName -match 'disk|storport|Ntfs' | Select-Object -First 30` — 있으면 하드웨어·드라이버 원인"
+  short:
+  - "(2차·승인 후, 롤백: 데이터 변경 없는 검사지만 I/O 부하가 커 업무 외 시간) `DBCC CHECKDB (<db>) WITH NO_INFOMSGS, ALL_ERRORMSGS;` 로 무결성 확인, 스토리지 담당에 해당 LUN·다중경로·컨트롤러 펌웨어 진단 요청"
+  mid:
+  - 문제 I/O 부품을 선제 교체하고 펌웨어를 검증
+  long:
+  - 예측진단과 825 이벤트 즉시경보를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/sql/relational-databases/errors-events/mssqlserver-825-database-engine-error?view=sql-server-ver17)
+  note: 읽기는 재시도로 성공했지만 공식 문서가 DB 무결성 위협과 데이터 손실 가능성을 명시하므로 critical이 타당함
+  vendor_cause: 읽기 작업을 한 번 이상 재시도해야 했으며 이는 디스크 하드웨어의 중대한 문제를 나타냄
+  vendor_action: 오류 로그를 확인하고 디스크·컨트롤러·어레이 카드·드라이버를 점검하며 제조사 진단 도구와 최신 드라이버 사용
+  vendor_url: https://learn.microsoft.com/en-us/sql/relational-databases/errors-events/mssqlserver-825-database-engine-error?view=sql-server-ver17
+  versions:
+  - SQL Server 2005
+  - SQL Server 2008/2008 R2
+  - SQL Server 2012
+  - SQL Server 2014
+  - SQL Server 2016
+  - SQL Server 2017
+  - SQL Server 2019
+  - SQL Server 2022
+  - SQL Server 2025
+  version_note: read-retry 는 2005 도입
+- code: MSSQL-832
+  severity: critical
+  category: hardware
+  title: 메모리 페이지 변조
+  immediate:
+  - "ERRORLOG 의 832 줄 기록(DB·파일·page·expected/actual checksum): `EXEC xp_readerrorlog 0, 1, N'should have been constant';` (2012~2022, 읽기 전용)"
+  - "하드웨어 메모리 오류: `Get-WinEvent -FilterHashtable @{LogName='System'; ProviderName='Microsoft-Windows-WHEA-Logger'} -MaxEvents 20` — WHEA 메모리 오류가 있으면 하드웨어 원인 유력"
+  - "SQL 프로세스에 로드된 외부 모듈: `SELECT name, company, file_version FROM sys.dm_os_loaded_modules WHERE company IS NULL OR company NOT LIKE 'Microsoft%';` — 백신·필터·모니터링 DLL 이 보이면 원인 후보"
+  short:
+  - "(2차·승인 후, 롤백: 데이터 변경 없는 검사지만 I/O 부하가 커 업무 외 시간) `DBCC CHECKDB (<db>) WITH NO_INFOMSGS, ALL_ERRORMSGS;` 로 디스크상 손상 여부 확인, 서버 제조사 메모리 진단은 서비스 중단 일정 승인 후"
+  mid:
+  - 불량 메모리 또는 원인 구성요소를 교체하고 패치를 적용
+  long:
+  - ECC와 하드웨어 진단, 무결성 검사 정책을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/sql/relational-databases/errors-events/mssqlserver-832-database-engine-error?view=sql-server-ver17)
+  vendor_cause: SQL 프로세스 내 잘못된 쓰기 스레드 또는 하드웨어·OS 문제로 메모리의 DB 페이지가 외부에서 변경·손상됨
+  vendor_action: 하드웨어·메모리·CPU와 드라이버/OS를 점검하고 외부 DLL·필터를 확인하며 즉시 DBCC CHECKDB 실행
+  vendor_url: https://learn.microsoft.com/en-us/sql/relational-databases/errors-events/mssqlserver-832-database-engine-error?view=sql-server-ver17
+  versions:
+  - SQL Server 2005
+  - SQL Server 2008/2008 R2
+  - SQL Server 2012
+  - SQL Server 2014
+  - SQL Server 2016
+  - SQL Server 2017
+  - SQL Server 2019
+  - SQL Server 2022
+  - SQL Server 2025
+  version_note: 'Msg 번호·Severity·State 체계는 2005~2025 동일 — ERRORLOG ''YYYY-MM-DD hh:mm:ss.nn spidNN Error: n, Severity: n, State: n.'' 형식 공통'
+- code: MSSQL-833
+  severity: warn
+  category: disk
+  title: 장시간 I/O 발생
+  immediate:
+  - "ERRORLOG 의 833 줄에서 파일·DB·발생 횟수 기록: `EXEC xp_readerrorlog 0, 1, N'longer than 15 seconds';` (2012~2022, 읽기 전용)"
+  - "파일별 누적 지연: `SELECT DB_NAME(database_id) AS db, file_id, io_stall_read_ms/NULLIF(num_of_reads,0) AS avg_read_ms, io_stall_write_ms/NULLIF(num_of_writes,0) AS avg_write_ms FROM sys.dm_io_virtual_file_stats(NULL, NULL) ORDER BY avg_read_ms DESC;` — 서비스 기동 이후 누적치이므로 833 파일이 상위인지로 판단"
+  - "현재 디스크 지연: `Get-Counter '\\PhysicalDisk(*)\\Avg. Disk sec/Read','\\PhysicalDisk(*)\\Avg. Disk sec/Write' -SampleInterval 5 -MaxSamples 6` — 수십 ms 이상 지속이면 스토리지 병목"
+  short:
+  - "(2차) 스토리지 담당에 해당 볼륨·LUN 지연과 다중경로 상태 확인 요청, 같은 시각 백업·CHECKDB·인덱스 재구성 작업 일정 이동(승인 후, 롤백: 원래 일정 복귀)"
+  mid:
+  - 스토리지 성능과 다중경로, 파일 배치를 개선
+  long:
+  - I/O 지연 SLO와 지속 latency 모니터링을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/sql/relational-databases/errors-events/mssqlserver-833-database-engine-error?view=sql-server-ver17)
+  vendor_cause: I/O 경로의 하드웨어·구성·펌웨어·드라이버·필터·용량 문제 등으로 읽기/쓰기가 15초 이상 지연됨
+  vendor_action: 시스템·하드웨어 로그 확인, 드라이버·펌웨어 갱신과 I/O 진단 수행; 필요 시 SQL 데이터 파일을 활성 백신 검사에서 제외
+  vendor_url: https://learn.microsoft.com/en-us/sql/relational-databases/errors-events/mssqlserver-833-database-engine-error?view=sql-server-ver17
+  versions:
+  - SQL Server 2005
+  - SQL Server 2008/2008 R2
+  - SQL Server 2012
+  - SQL Server 2014
+  - SQL Server 2016
+  - SQL Server 2017
+  - SQL Server 2019
+  - SQL Server 2022
+  - SQL Server 2025
+  version_note: 15초 초과 I/O 감지는 2000 SP4/2005 이후
+- code: MSSQL-18456
+  severity: error
+  category: security
+  title: 로그인 인증 실패
+  immediate:
+  - "ERRORLOG 의 Reason·State·CLIENT 기록: `EXEC xp_readerrorlog 0, 1, N'Login failed';` — State 2/5 계정 없음, 8 비밀번호 불일치, 18 비밀번호 변경 필요, 38/40 기본·요청 DB 접근 불가, 58 SQL 인증 미허용 (2012~2022, 읽기 전용)"
+  - "인증 모드: `SELECT SERVERPROPERTY('IsIntegratedSecurityOnly');` — 1 이면 Windows 인증 전용"
+  - "계정 상태: `SELECT name, is_disabled, LOGINPROPERTY(name,'IsLocked') AS is_locked, LOGINPROPERTY(name,'IsExpired') AS is_expired, default_database_name FROM sys.sql_logins WHERE name = N'<user>';` — 비밀번호 값은 기록하지 않는다"
+  short:
+  - "(2차·승인 후, 롤백: 변경 전 계정 속성 기록) 원인별로 계정 잠금 해제·기본 DB 정정(`ALTER LOGIN <user> WITH DEFAULT_DATABASE = <db>;`)·연결 문자열 수정 — 인증 모드 변경은 서비스 재시작 필요, 보안 담당 승인"
+  mid:
+  - 계정과 인증 구성을 표준화하고 비밀정보 관리를 개선
+  long:
+  - 인증 실패율 모니터링과 최소권한 정책을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/sql/relational-databases/errors-events/mssqlserver-18456-database-engine-error?view=sql-server-ver17)
+  vendor_cause: 잘못된 자격증명, 암호 만료 또는 잘못된 인증 모드 등 인증 실패로 연결 시도가 거부됨
+  vendor_action: 오류의 정확한 로그인 유형·상태를 확인하고 문서의 해당 사례에 따라 인증 모드·자격증명·도메인 문제를 수정
+  vendor_url: https://learn.microsoft.com/en-us/sql/relational-databases/errors-events/mssqlserver-18456-database-engine-error?view=sql-server-ver17
+  versions:
+  - SQL Server 2005
+  - SQL Server 2008/2008 R2
+  - SQL Server 2012
+  - SQL Server 2014
+  - SQL Server 2016
+  - SQL Server 2017
+  - SQL Server 2019
+  - SQL Server 2022
+  - SQL Server 2025
+  version_note: 'Msg 번호·Severity·State 체계는 2005~2025 동일 — ERRORLOG ''YYYY-MM-DD hh:mm:ss.nn spidNN Error: n, Severity: n, State: n.'' 형식 공통'
+- code: MSSQL-17826
+  severity: critical
+  category: connection
+  title: 네트워크 라이브러리 실패
+  immediate:
+  - "서비스 상태: `Get-Service MSSQL*` — Stopped 면 기동 실패 (읽기 전용)"
+  - "서버가 내려가 있으면 ERRORLOG 파일 직접 확인: `Get-Content '<path>\\MSSQL\\Log\\ERRORLOG' -Tail 80` — 17826 바로 앞의 17182(TDSSNIClient)·17190·26014(인증서) 기록이 실제 원인, 0x2740 이면 포트 사용 중"
+  - "포트 점유: `Get-NetTCPConnection -LocalPort <port> -State Listen` (Windows Server 2012+) — 다른 OwningProcess 가 같은 포트를 잡고 있으면 원인"
+  short:
+  - "(2차·승인 후, 롤백: 변경 전 Configuration Manager 프로토콜·인증서 설정 기록) 인증서 바인딩 교체·해제 또는 포트 변경 후 서비스 시작 — 성공: ERRORLOG 'Server is listening on' 출력"
+  mid:
+  - 네트워크 및 TLS 구성을 표준화하고 필요한 업데이트를 적용
+  long:
+  - 인증서 수명주기와 시작 전 구성검증을 자동화
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/sql/relational-databases/errors-events/mssqlserver-17826-database-engine-error?view=sql-server-ver17)
+  vendor_cause: TDS 리스너와 네트워크 라이브러리 초기화가 실패함; 보통 17182·17120 같은 구체 오류와 함께 발생
+  vendor_action: SQL Server 오류 로그에서 함께 발생한 구체 오류를 확인해 조치하고 프로토콜·TLS 구성을 올바르게 설정
+  vendor_url: https://learn.microsoft.com/en-us/sql/relational-databases/errors-events/mssqlserver-17826-database-engine-error?view=sql-server-ver17
+  versions:
+  - SQL Server 2005
+  - SQL Server 2008/2008 R2
+  - SQL Server 2012
+  - SQL Server 2014
+  - SQL Server 2016
+  - SQL Server 2017
+  - SQL Server 2019
+  - SQL Server 2022
+  - SQL Server 2025
+  version_note: 'Msg 번호·Severity·State 체계는 2005~2025 동일 — ERRORLOG ''YYYY-MM-DD hh:mm:ss.nn spidNN Error: n, Severity: n, State: n.'' 형식 공통'
+- code: MSSQL-17182
+  severity: critical
+  category: connection
+  title: TDS 초기화 실패
+  immediate:
+  - "ERRORLOG 의 error·status code 기록: 기동 중이면 `EXEC xp_readerrorlog 0, 1, N'TDSSNIClient';`, 내려가 있으면 `Get-Content '<path>\\MSSQL\\Log\\ERRORLOG' -Tail 80` — error 0x2740 은 포트 사용 중, 0x80092004 는 인증서를 찾지 못함 (읽기 전용)"
+  - "인증서 바인딩: `Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Microsoft SQL Server\\<MSSQLxx.인스턴스>\\MSSQLServer\\SuperSocketNetLib' | Select-Object Certificate, ForceEncryption` 후 `Get-ChildItem Cert:\\LocalMachine\\My | Where-Object Thumbprint -eq '<지문>' | Select-Object Subject, NotAfter` — 없거나 NotAfter 경과면 원인"
+  - "포트 점유: `Get-NetTCPConnection -LocalPort <port> -State Listen` (Windows Server 2012+) — 다른 프로세스가 잡고 있으면 원인"
+  short:
+  - "(2차·승인 후, 롤백: 변경 전 레지스트리 Certificate 값·포트 설정 기록) 유효 인증서로 교체(서비스 계정 개인키 읽기 권한 포함) 또는 포트 충돌 해소 후 서비스 시작 — 성공: ERRORLOG 'Server is listening on'"
+  verify_note: "미검증 — TDSSNIClient status code 값별 의미는 공식 문서에서 확인하지 못함(0x2740·0x80092004 는 Windows 오류 코드 기준)"
+  mid:
+  - SNI와 TLS 구성을 표준화하고 취약 구성을 제거
+  long:
+  - 기동 전 네트워크 구성검사와 인증서 경보를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/sql/relational-databases/errors-events/mssqlserver-17182-database-engine-error?view=sql-server-ver17)
+  vendor_cause: 네트워크 프로토콜, TCP 포트, TLS 인증서·버전·레지스트리 또는 OS 문제로 SNI 초기화가 실패할 수 있음
+  vendor_action: 오류의 OS·status code를 확인하고 잘못된 프로토콜 설정과 TLS/SSL 인증서·버전·레지스트리 구성을 수정
+  vendor_url: https://learn.microsoft.com/en-us/sql/relational-databases/errors-events/mssqlserver-17182-database-engine-error?view=sql-server-ver17
+  versions:
+  - SQL Server 2005
+  - SQL Server 2008/2008 R2
+  - SQL Server 2012
+  - SQL Server 2014
+  - SQL Server 2016
+  - SQL Server 2017
+  - SQL Server 2019
+  - SQL Server 2022
+  - SQL Server 2025
+  version_note: 'Msg 번호·Severity·State 체계는 2005~2025 동일 — ERRORLOG ''YYYY-MM-DD hh:mm:ss.nn spidNN Error: n, Severity: n, State: n.'' 형식 공통'
+- code: MSSQL-17120
+  severity: critical
+  category: thread
+  title: 백그라운드 스레드 실패
+  immediate:
+  - "ERRORLOG 에서 실패한 스레드명과 직전 오류 기록: 기동 중이면 `EXEC xp_readerrorlog 0, 1, N'could not spawn';`, 내려가 있으면 `Get-Content '<path>\\MSSQL\\Log\\ERRORLOG' -Tail 80` (2012~2022, 읽기 전용)"
+  - "같은 시각 OS 자원 부족: `Get-WinEvent -FilterHashtable @{LogName='System'; Level=1,2,3; StartTime=(Get-Date).AddHours(-2)} | Select-Object -First 30 TimeCreated, ProviderName, Id, Message` — Resource-Exhaustion-Detector(2004) 가 있으면 가상 메모리 부족"
+  - "메모리 여유: `Get-CimInstance Win32_OperatingSystem | Select-Object FreePhysicalMemory, FreeVirtualMemory` (KB) 와 기동 중이면 `SELECT max_workers_count FROM sys.dm_os_sys_info;` · `SELECT COUNT(*) FROM sys.dm_os_workers;`"
+  short:
+  - "(2차·승인 후, 롤백: 변경 전 값 기록) 동거 프로세스 정리·페이지 파일 확장 등 OS 메모리 확보 후 서비스 시작, 'max worker threads' 를 기본(0) 외 값으로 바꿔 둔 경우 원복 검토"
+  mid:
+  - 원인 자원을 증설하거나 설정 오류를 수정하고 패치를 검토
+  long:
+  - 스레드와 메모리 자원 포화 모니터링을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/sql/relational-databases/errors-events/mssqlserver-17120-database-engine-error?view=sql-server-ver17)
+  vendor_cause: 시스템·SQL 메모리 부족, SQL Server 종료 중 또는 구성·자원 문제로 서비스 기동에 실패해 백그라운드 스레드 생성 불가
+  vendor_action: System·SQL 오류 로그의 선행 오류를 진단하고 메모리 부족·프로토콜 구성 문제를 해결한 뒤 작업을 재시도
+  vendor_url: https://learn.microsoft.com/en-us/sql/relational-databases/errors-events/mssqlserver-17120-database-engine-error?view=sql-server-ver17
+  versions:
+  - SQL Server 2005
+  - SQL Server 2008/2008 R2
+  - SQL Server 2012
+  - SQL Server 2014
+  - SQL Server 2016
+  - SQL Server 2017
+  - SQL Server 2019
+  - SQL Server 2022
+  - SQL Server 2025
+  version_note: 'Msg 번호·Severity·State 체계는 2005~2025 동일 — ERRORLOG ''YYYY-MM-DD hh:mm:ss.nn spidNN Error: n, Severity: n, State: n.'' 형식 공통'

@@ -1,0 +1,337 @@
+product: goldilocks
+layer: db
+note: GPT 협업 수집분 — 벤더 공식 문서와 대조 후 확정
+codes:
+- code: ERR-11004
+  severity: error
+  category: disk
+  title: 파일 복제 실패
+  immediate:
+  - "`grep -n \"11004\" $GOLDILOCKS_DATA/trc/system.trc | tail -10` 로 대상 파일·경로 확인 후 `ls -ld <path>` 로 존재·소유자 확인"
+  - "`df -h <path>` 로 대상 파일시스템 여유 확인(95% 이상이면 공간 원인)"
+  short:
+  - "(2차·승인 후) 경로 생성·권한 정정 또는 공간 확보 후 해당 작업 재수행(롤백: 변경 전 권한·경로 기록 후 원복)"
+  mid:
+  - 반복되는 파일 복제 실패와 디스크 상태를 점검한다.
+  long:
+  - 파일 복제 경로의 권한과 용량을 정기적으로 관리한다.
+  vendor_cause: "Unable to duplicate a file — 파일 복제(백업·로그 아카이브 등)에 실패했다는 뜻(오류 메시지 매뉴얼: 파일 권한·디스크 여유·대상 경로 확인). 대상 경로 없음·권한 부족·공간 부족이 흔한 원인."
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4)
+  versions:
+  - GOLDILOCKS 3.1
+  - GOLDILOCKS 20c.1
+  - GOLDILOCKS 22c.1
+  - GOLDILOCKS 26c.1
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: Unable to duplicate a file
+- code: ERR-11005
+  severity: error
+  category: lock
+  title: 파일 잠금 실패
+  immediate:
+  - "`grep -n \"11005\" $GOLDILOCKS_DATA/trc/system.trc | tail -10` 로 대상 파일 확인 후 `fuser -v <file>` 또는 `lsof <file>` 로 사용 중인 프로세스 확인"
+  - "같은 데이터 디렉터리를 쓰는 다른 인스턴스·백업 작업이 도는지 `ps -ef | grep -i goldilocks` 로 확인"
+  short:
+  - "(2차·승인 후) 잠금을 잡은 작업이 끝난 뒤 재시도, 중복 인스턴스면 해당 인스턴스 정리(롤백: 정리 전 프로세스·명령행 기록)"
+  mid:
+  - 반복 잠금 충돌의 프로세스와 발생 시간을 점검한다.
+  long:
+  - 동일 파일에 대한 동시 접근 작업을 운영 절차로 관리한다.
+  vendor_cause: "File Lock Error — 파일 잠금 획득에 실패했다는 뜻(매뉴얼: 다른 프로세스 사용 여부 확인 후 대기·재시도). 다른 인스턴스나 백업 도구가 같은 파일을 잡고 있는 경우가 흔한 원인."
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4)
+  versions:
+  - GOLDILOCKS 3.1
+  - GOLDILOCKS 20c.1
+  - GOLDILOCKS 22c.1
+  - GOLDILOCKS 26c.1
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: File Lock Error
+- code: ERR-11007
+  severity: error
+  category: disk
+  title: 파일 열기 실패
+  immediate:
+  - "오류 메시지의 파일 경로를 `grep -n \"11007\" $GOLDILOCKS_DATA/trc/system.trc | tail -10` 로 확인 후 `ls -l <file>` 로 존재·권한 확인"
+  - "`df -h <파일 경로의 디렉터리>` 와 `mount | grep <마운트지점>` 으로 파일시스템 마운트 상태 확인"
+  short:
+  - "(2차·승인 후) 마운트·권한 복구 또는 올바른 경로로 정정(롤백: 변경 전 권한·경로 기록)"
+  mid:
+  - 디스크 상태와 파일 접근 오류의 재발 여부를 점검한다.
+  long:
+  - 중요 파일의 경로와 권한을 구성관리로 유지한다.
+  vendor_cause: "Unable to open the file — 파일이 없거나 접근 권한이 없거나 다른 프로세스가 잠근 상태라 열지 못함(매뉴얼). 데이터파일 경로 변경·마운트 누락·권한 변경이 흔한 원인."
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4)
+  versions:
+  - GOLDILOCKS 3.1
+  - GOLDILOCKS 20c.1
+  - GOLDILOCKS 22c.1
+  - GOLDILOCKS 26c.1
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: Unable to open the file
+- code: ERR-11013
+  severity: error
+  category: disk
+  title: 파일 동기화 실패
+  immediate:
+  - "`dmesg -T | grep -i -E \"I/O error|EXT4-fs error|XFS\" | tail -20` 로 스토리지 오류 확인"
+  - "`grep -n \"11013\" $GOLDILOCKS_DATA/trc/system.trc | tail -10` 으로 대상 파일·시각 기록, `df -h $GOLDILOCKS_DATA` 로 파일시스템 상태 확인"
+  short:
+  - "(2차·승인 후) 스토리지 담당과 경로·디스크 점검, 파일시스템 무결성 점검은 DB 정지 후 읽기 전용 모드(-n)로 먼저 수행(롤백: 점검 전 백업 확인)"
+  mid:
+  - 필요한 파일시스템 무결성 점검을 수행한다.
+  long:
+  - 스토리지 I/O 오류를 운영 감시 항목에 포함한다.
+  vendor_cause: "Unable to sync the file — 파일시스템 동기화(fsync)에 실패했다는 뜻(매뉴얼: 디스크 상태 확인·파일시스템 무결성 점검). 디스크 I/O 오류·스토리지 경로 장애가 흔한 원인."
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4)
+  versions:
+  - GOLDILOCKS 3.1
+  - GOLDILOCKS 20c.1
+  - GOLDILOCKS 22c.1
+  - GOLDILOCKS 26c.1
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: Unable to sync the file
+- code: ERR-11015
+  severity: error
+  category: disk
+  title: 파일 절단 실패
+  immediate:
+  - "`grep -n \"11015\" $GOLDILOCKS_DATA/trc/system.trc | tail -10` 로 대상 파일 확인 후 `ls -l <file>` 로 소유자·권한 확인"
+  - "`df -h <path>` 로 대상 파일시스템 여유 확인"
+  short:
+  - "(2차·승인 후) 권한 정정 또는 공간 확보 후 해당 작업 재수행(롤백: 변경 전 권한 기록)"
+  mid:
+  - 해당 파일시스템의 공간 사용 추세를 점검한다.
+  long:
+  - 파일 증가량에 맞춰 저장공간 용량 계획을 관리한다.
+  vendor_cause: "Unable to truncate the file — 파일 크기 변경(축소/확장)에 실패했다는 뜻(매뉴얼: 파일 권한·디스크 공간 확인). 권한 부족이나 공간 부족이 흔한 원인."
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4)
+  versions:
+  - GOLDILOCKS 3.1
+  - GOLDILOCKS 20c.1
+  - GOLDILOCKS 22c.1
+  - GOLDILOCKS 26c.1
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 권한 부족 또는 디스크 공간 부족으로 발생해 capacity로 한정할 수 없음
+- code: ERR-11017
+  severity: error
+  category: capacity
+  title: 파이프 생성 실패
+  immediate:
+  - "`ulimit -n` 과 `ls /proc/<PID>/fd | wc -l` 로 GOLDILOCKS 프로세스의 열린 파일 수가 한도에 가까운지 확인"
+  - "`cat /proc/sys/fs/file-nr` 와 `ps -eLf | wc -l` 로 시스템 전체 파일 핸들·스레드 수 확인"
+  short:
+  - "(2차·승인 후) 불필요 프로세스 정리 또는 nofile 한도 상향(/etc/security/limits.conf, 롤백: 원래 값 복원 후 재로그인)"
+  mid:
+  - 프로세스와 파일 디스크립터 등의 시스템 한도를 점검한다.
+  long:
+  - 프로세스 자원 사용량과 시스템 한도를 지속적으로 관리한다.
+  vendor_cause: "Unable to create a pipe — 시스템 자원 부족으로 pipe 를 만들지 못함(매뉴얼: 자원 사용량 확인·불필요 프로세스 정리). 열린 파일 수(nofile) 한도 도달이나 프로세스 수 과다가 흔한 원인."
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4)
+  versions:
+  - GOLDILOCKS 3.1
+  - GOLDILOCKS 20c.1
+  - GOLDILOCKS 22c.1
+  - GOLDILOCKS 26c.1
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 시스템 자원 부족으로 pipe 생성 실패
+- code: ERR-11019
+  severity: error
+  category: capacity
+  title: 시스템 자원 부족
+  immediate:
+  - "`free -m`, `ulimit -a`, `cat /proc/sys/fs/file-nr` 로 메모리·사용자 한도·파일 핸들 사용량 확인"
+  - "`ipcs -s | wc -l` 과 `ipcs -m` 으로 IPC 자원 사용량 확인, 같은 시각 system.trc 오류 확인"
+  short:
+  - "(2차·승인 후) 부족한 자원 종류에 맞춰 불필요 프로세스 정리 또는 커널/사용자 한도 상향(롤백: 원래 값 기록 후 복원)"
+  mid:
+  - 반복적으로 부족해지는 시스템 자원을 식별한다.
+  long:
+  - 시스템 자원 용량과 임계치를 운영 기준으로 관리한다.
+  vendor_cause: "Insufficient resource — 시스템 자원(메모리·파일 핸들·프로세스 등)이 부족함(매뉴얼: 자원 사용량 확인·불필요 프로세스 정리). 커널 한도 도달이나 다른 프로세스의 자원 점유가 흔한 원인."
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4)
+  versions:
+  - GOLDILOCKS 3.1
+  - GOLDILOCKS 20c.1
+  - GOLDILOCKS 22c.1
+  - GOLDILOCKS 26c.1
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: Insufficient resource
+- code: ERR-11023
+  severity: error
+  category: thread
+  title: 스레드 속성 설정 실패
+  immediate:
+  - "`ulimit -s` 와 `ulimit -u` 로 스택 크기·사용자 프로세스(스레드) 한도 확인"
+  - "`ps -o nlwp -p <PID>` 로 GOLDILOCKS 프로세스 스레드 수 확인, `cat /proc/sys/kernel/threads-max` 와 비교"
+  short:
+  - "(2차·승인 후) 스레드 관련 한도(limits.conf nproc·stack) 조정(롤백: 원래 값 기록 후 복원)"
+  mid:
+  - 프로세스별 스레드 수와 한도 도달 여부를 점검한다.
+  long:
+  - 스레드 한도와 사용량을 시스템 용량 계획에 반영한다.
+  vendor_cause: "Unable to set thread attribute — 스레드 속성(스택 크기 등) 설정에 실패했다는 뜻(매뉴얼: 속성 값과 시스템 스레드 한도 확인). 스택 크기 설정 오류나 OS 한도가 원인."
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4)
+  versions:
+  - GOLDILOCKS 3.1
+  - GOLDILOCKS 20c.1
+  - GOLDILOCKS 22c.1
+  - GOLDILOCKS 26c.1
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: Unable to set thread attribute
+- code: ERR-11038
+  severity: error
+  category: lock
+  title: 객체 사용 중
+  immediate:
+  - "gsql 에서 `SELECT TABLE_SCHEMA, TABLE_NAME, LOCK_MODE FROM V$LOCKED_OBJECT;` 로 잠긴 객체 확인"
+  - "gsql 에서 `SELECT GRANT_TRANS_ID, REQUEST_TRANS_ID FROM V$LOCK_WAIT;` 와 `SELECT TRANS_ID, SESSION_ID, START_TIME FROM V$TRANSACTION;` 으로 점유 트랜잭션·세션 확인"
+  short:
+  - "(2차·승인 후) 점유 작업이 끝난 뒤 재시도, 장시간 점유 세션 정리는 업무 담당 확인 후(롤백: 정리된 작업은 재실행)"
+  mid:
+  - 반복 점유 작업의 실행시간과 동시 접근 상태를 확인한다.
+  long:
+  - 공유 객체에 대한 동시 작업을 운영 절차로 관리한다.
+  vendor_cause: "The given object was busy — 대상 자원을 다른 작업이 사용 중이라 처리하지 못함(매뉴얼: 해제 후 재시도). DDL·백업과 업무 작업이 같은 객체를 동시에 쓰는 경우가 흔한 원인."
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4)
+  versions:
+  - GOLDILOCKS 3.1
+  - GOLDILOCKS 20c.1
+  - GOLDILOCKS 22c.1
+  - GOLDILOCKS 26c.1
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: The given object was busy
+- code: ERR-11039
+  severity: error
+  category: internal
+  title: 작업 시간 초과
+  immediate:
+  - "`grep -n \"11039\" $GOLDILOCKS_DATA/trc/system.trc | tail -10` 로 시간 초과 작업 확인, 같은 시각 `vmstat 5 3` 으로 CPU·I/O 대기 확인"
+  - "gsql 에서 `SELECT SESSION_ID, WAIT_EVENT_NAME, WAIT_TIME FROM V$SESSION_WAIT;` 로 대기 이벤트 확인"
+  short:
+  - "(2차) 대기 원인 해소가 우선, 필요 시 관련 timeout property 조정(승인 후, 롤백: 이전 값 기록 후 복원)"
+  mid:
+  - 반복 timeout 구간의 시스템 자원 사용량을 점검한다.
+  long:
+  - 작업별 적정 timeout과 성능 기준을 정기적으로 검토한다.
+  vendor_cause: "Operation timed out — 작업이 제한 시간을 넘겨 실패함(매뉴얼: timeout 값 조정·시스템 성능 확인). 잠금 대기·자원 부족·클러스터 노드 응답 지연이 흔한 원인."
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4)
+  versions:
+  - GOLDILOCKS 3.1
+  - GOLDILOCKS 20c.1
+  - GOLDILOCKS 22c.1
+  - GOLDILOCKS 26c.1
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: Operation timed out
+- code: ERR-11046
+  severity: error
+  category: capacity
+  title: 버퍼 공간 부족
+  immediate:
+  - "애플리케이션·gsql 로그에서 오류 직전 SQL 과 대상 컬럼·데이터 길이 확인"
+  - "`grep -n \"11046\" $GOLDILOCKS_DATA/trc/system.trc | tail -10` 로 서버 측 기록 여부와 발생 빈도 확인"
+  short:
+  - "(2차) 애플리케이션 바인드 버퍼(ODBC/JDBC 컬럼 버퍼) 크기를 컬럼 최대 길이에 맞게 수정, 개발 담당 배포 승인 후 반영"
+  mid:
+  - 반복 발생하는 입력 데이터 크기를 점검한다.
+  long:
+  - 최대 처리 데이터 크기에 맞춰 버퍼 용량 기준을 관리한다.
+  vendor_cause: "given buffer does not have enough space — 전달된 버퍼가 데이터보다 작다는 뜻(매뉴얼: 데이터 크기 확인·버퍼 용량 증가). 애플리케이션 바인드 버퍼 크기 부족이나 예상보다 긴 데이터가 흔한 원인."
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4)
+  versions:
+  - GOLDILOCKS 3.1
+  - GOLDILOCKS 20c.1
+  - GOLDILOCKS 22c.1
+  - GOLDILOCKS 26c.1
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: given buffer does not have enough space
+- code: ERR-11047
+  severity: error
+  category: connection
+  title: 네트워크 주소 오류
+  immediate:
+  - "애플리케이션 DSN·odbc.ini 의 HOST 값과 `getent hosts <host>` 결과를 대조"
+  - "클러스터면 gsql 에서 `SELECT MEMBER_NAME, HOST, PORT FROM V$CLUSTER_LOCATION;` 로 등록된 노드 주소 확인(26c 매뉴얼 뷰)"
+  short:
+  - "(2차·승인 후) 잘못된 주소 설정 정정(롤백: 변경 전 설정 파일 사본 보관)"
+  mid:
+  - 관련 노드의 주소 설정을 함께 점검한다.
+  long:
+  - 클러스터와 서버의 네트워크 주소를 구성관리로 유지한다.
+  vendor_cause: "invalid network address — 설정된 네트워크 주소 형식이 올바르지 않다는 뜻(매뉴얼: 주소 형식 확인·유효한 IP 사용). 접속 설정(DSN·클러스터 위치)의 오타가 흔한 원인."
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4)
+  versions:
+  - GOLDILOCKS 3.1
+  - GOLDILOCKS 20c.1
+  - GOLDILOCKS 22c.1
+  - GOLDILOCKS 26c.1
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: invalid network address
+- code: ERR-58010
+  severity: error
+  category: connection
+  title: 클러스터 소켓 단절
+  immediate:
+  - "gsql 에서 `SELECT MEMBER_ID, MEMBER_POSITION, STATUS FROM V$CLUSTER_MEMBER;` 와 `SELECT * FROM V$CLUSTER_CONNECTION;` 으로 노드 상태·연결 확인"
+  - "`ping -c 5 <peer_host>` 로 노드 간 네트워크 확인, system.trc 의 같은 시각 기록 확인"
+  short:
+  - "(2차·승인 후) 네트워크 복구 뒤 노드 재연결은 제조사 운영 절차에 따라 수행(롤백: 재연결 전 클러스터 상태 조회 결과 보관)"
+  mid:
+  - 소켓 단절 시점의 네트워크와 노드 로그를 점검한다.
+  long:
+  - 노드 간 네트워크 가용성을 지속적으로 감시한다.
+  vendor_cause: "클러스터 노드 사이의 socket 연결이 끊김 — 노드 간 네트워크 단절·상대 노드 정지가 흔한 원인."
+  verify_note: "미검증 — ERR-58010 메시지 원문과 조치 문구를 SUNJESOFT 26c 오류 메시지 매뉴얼에서 찾지 못함(제목 기준 서술)"
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4)
+  versions:
+  - GOLDILOCKS 3.1
+  - GOLDILOCKS 20c.1
+  - GOLDILOCKS 22c.1
+  - GOLDILOCKS 26c.1
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 노드 사이 socket connection 단절
+- code: ERR-58012
+  severity: error
+  category: upstream
+  title: Failover 진행 중
+  immediate:
+  - "gsql 에서 `SELECT MEMBER_ID, MEMBER_POSITION, STATUS, IS_GLOBAL_COORD FROM V$CLUSTER_MEMBER;` 로 현재 노드 역할·상태 확인"
+  - "system.trc 에서 failover 시작·완료 기록 시각 확인(`grep -n -i failover $GOLDILOCKS_DATA/trc/system.trc | tail -20`)"
+  short:
+  - "(2차·승인 후) failover 완료 확인 뒤 노드 재가입 재시도(롤백: 재가입 전 클러스터 상태 조회 결과 보관)"
+  mid:
+  - failover 완료 후 전체 클러스터 노드 상태를 확인한다.
+  long:
+  - failover와 노드 재가입 순서를 운영 절차로 관리한다.
+  vendor_cause: "failover 가 진행 중일 때 노드 재가입(join)을 시도해 거부됨 — 절체 완료 전 재가입 시도가 원인."
+  verify_note: "미검증 — ERR-58012 메시지 원문을 SUNJESOFT 26c 오류 메시지 매뉴얼에서 찾지 못함(제목 기준 서술)"
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4)
+  versions:
+  - GOLDILOCKS 3.1
+  - GOLDILOCKS 20c.1
+  - GOLDILOCKS 22c.1
+  - GOLDILOCKS 26c.1
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: failover 중 노드 재가입 시도
+- code: ERR-58015
+  severity: error
+  category: connection
+  title: 클러스터 연결 시간초과
+  immediate:
+  - "`ping -c 5 <peer_host>` 로 왕복 지연 확인, gsql 에서 `SELECT PROPERTY_NAME, PROPERTY_VALUE FROM V$PROPERTY WHERE PROPERTY_NAME LIKE 'CLUSTER%';` 로 클러스터 timeout 관련 property 확인"
+  - "gsql 에서 `SELECT MEMBER_NAME, HOST, PORT FROM V$CLUSTER_LOCATION;` 로 join 대상 주소 확인"
+  short:
+  - "(2차·승인 후) 원격 노드 지연 원인 해소 후 필요 시 연결 timeout property 상향(롤백: 이전 값 기록 후 복원)"
+  mid:
+  - 원격 노드의 연결 지연과 join 소요시간을 반복 확인한다.
+  long:
+  - 클러스터 연결 지연 기준과 timeout 값을 정기적으로 관리한다.
+  vendor_cause: "클러스터 join 중 원격 노드 연결 시간이 설정값을 초과함 — 원격 노드 응답 지연·네트워크 지연이 흔한 원인."
+  verify_note: "미검증 — ERR-58015 메시지와 property 이름(CLUSTER_CONNECTION_TIMEOUT_SEC)을 SUNJESOFT 26c 매뉴얼에서 확인하지 못함"
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4)
+  versions:
+  - GOLDILOCKS 3.1
+  - GOLDILOCKS 20c.1
+  - GOLDILOCKS 22c.1
+  - GOLDILOCKS 26c.1
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 클러스터 join 중 원격 노드 연결시간이 설정값 초과

@@ -1,0 +1,14 @@
+TNSLSNR for Linux: Version 19.0.0.0.0 - Production
+Log messages written to /u01/app/oracle/diag/tnslsnr/db1/listener/alert/log.xml
+09-SEP-2026 13:58:01 * (CONNECT_DATA=(SERVICE_NAME=orcl)(CID=(PROGRAM=JDBC Thin Client)(HOST=was1)(USER=app))) * (ADDRESS=(PROTOCOL=tcp)(HOST=10.0.0.5)(PORT=51201)) * establish * orcl * 0
+09-SEP-2026 14:00:12 * service_update * orcl * 0
+09-SEP-2026 14:02:11 * (CONNECT_DATA=(SERVICE_NAME=orcl)(CID=(PROGRAM=JDBC Thin Client)(HOST=was1)(USER=app))) * (ADDRESS=(PROTOCOL=tcp)(HOST=10.0.0.5)(PORT=51234)) * establish * orcl * 12514
+TNS-12514: TNS:listener does not currently know of service requested in connect descriptor
+09-SEP-2026 14:02:13 * (CONNECT_DATA=(SERVICE_NAME=orcl)(CID=(PROGRAM=JDBC Thin Client)(HOST=was1)(USER=app))) * (ADDRESS=(PROTOCOL=tcp)(HOST=10.0.0.5)(PORT=51236)) * establish * orcl * 12518
+TNS-12518: TNS:listener could not hand off client connection
+ TNS-12547: TNS:lost contact
+  TNS-12560: TNS:protocol adapter error
+09-SEP-2026 14:02:20 * (CONNECT_DATA=(SERVICE_NAME=orcl)(CID=(PROGRAM=sqlplus)(HOST=db1)(USER=oracle))) * (ADDRESS=(PROTOCOL=tcp)(HOST=10.0.0.9)(PORT=40001)) * establish * orcl * 12505
+TNS-12505: TNS:listener does not currently know of SID given in connect descriptor
+09-SEP-2026 14:05:30 * service_update * orcl * 0
+09-SEP-2026 14:05:41 * (CONNECT_DATA=(SERVICE_NAME=orcl)(CID=(PROGRAM=JDBC Thin Client)(HOST=was1)(USER=app))) * (ADDRESS=(PROTOCOL=tcp)(HOST=10.0.0.5)(PORT=51300)) * establish * orcl * 0

@@ -1,0 +1,539 @@
+# 근거 매뉴얼·작성 기준 — 7차 '연결 적합성' 검토 DB 묶음 A (Oracle · Tibero · Altibase), 2026-10-16
+# 목적: '이 판정 전용'으로 붙어 있지만 절차가 그 판정을 진단하지 않던 연결(knowledge_link_audit 의 '제목 핵심어 0' 대기열) 중
+#       기존 절차 어느 것도 맞지 않는 판정에 전용 절차(scope: id)를 만든다. 맞는 연결·더 나은 기존 절차는 r7_dba_proclinks.yaml 로 잇는다.
+#       기존 절차 파일은 고치지 않는다.
+# Oracle: Database Error Messages(docs.oracle.com/error-help/db/ — ORA-00445·ORA-00494·ORA-01628·ORA-01630 원문 확인 2026-10-16)·
+#         19c Database Reference(V$RESOURCE_LIMIT·V$DIAG_INFO·V$SESSION·V$PROCESS·V$SYSTEM_EVENT·V$CONTROLFILE·V$RMAN_STATUS·V$LOG_HISTORY·
+#         DBA_ROLLBACK_SEGS·DBA_SEGMENTS·V$TRANSACTION·DBA_TABLESPACES·DBA_USERS·DATABASE_PROPERTIES·V$TEMPSEG_USAGE)·
+#         SQL Language Reference(ALTER ROLLBACK SEGMENT·storage_clause·CREATE TEMPORARY TABLESPACE·ALTER USER·ALTER TABLESPACE DEFAULT STORAGE)·
+#         Administrator's Guide(Managing Undo·ADRCI IPS)·Database Installation Guide for Linux(Resource Limits)
+# Altibase: Altibase FAQ(docs.altibase.com — ERR-11183 pageId=16876409·ERR-5104D Connection timeout·ERR-41059 Task pool overflow 원문 확인 2026-10-16)·
+#           7.1 General Reference(성능 뷰 V$PROPERTY·V$TABLESPACES·V$DATAFILES·V$STATEMENT·V$MEMSTAT·V$SESSION·V$SERVICE_THREAD·V$TRANSACTION·V$VERSION)·
+#           Administrator's Manual(altibase.properties·trc 로그·ALTER DATABASE … SESSION CLOSE)
+# Tibero: Tibero 6/7 참조 안내서(초기화 파라미터 TOTAL_SHM_SIZE·DB_CACHE_SIZE, V$PARAMETERS·DBA_DATA_FILES)·관리자 안내서(기동과 종료 tbdown/tbboot,
+#         테이블스페이스 관리 ALTER DATABASE DATAFILE … AUTOEXTEND, 로그 $TB_HOME/instance/$TB_SID/log/slog)·에러 참조 안내서 TBR-24031
+#         (조치 문구는 코드 사전 vendor_action 기준 — 이번에 직접 열람하지 못해 verify_note 로 표시)
+# 작성 기준: 검증도구/knowledge_spec.md (1차 읽기 전용 · 2차 사전조건·영향·승인·백업/롤백 + 성공/실패 · 3차 민감정보 마스킹·전달 승인 · 확인 못 한 이름은 verify_note)
+# 접속 방식: Oracle 은 OS 인증(sqlplus / as sysdba), Tibero·Altibase 는 'tbsql <user>' · 'isql -s localhost -u <user>' 로 접속해 비밀번호를 프롬프트에서 입력한 뒤
+#            'SQL>' · 'iSQL>' 줄을 차례로 입력한다(명령행·heredoc 첫 줄에 비밀번호를 두지 않는다 — ps·셸 이력 노출 방지).
+procedures:
+# ══════════════════════════ Oracle ══════════════════════════
+- id: ORA-PROC-R7-BGSTART
+  scope: id
+  products: [oracle]
+  category: internal
+  match: [ORA-00445]
+  title: 백그라운드 프로세스 시작 지연·실패 — OS 자원(프로세스 수·메모리·CPU) 부족 확인 (ORA-00445)
+  source: "Oracle Database Error Messages (ORA-00445: background process did not start after n seconds — Action: 백그라운드가 죽으며 남긴 trace 확인)·19c 'Database Reference (V$RESOURCE_LIMIT, V$DIAG_INFO)'·'Administrator's Guide 9 Diagnosing and Resolving Problems (ADRCI IPS)'·'Database Installation Guide for Linux (Resource Limits: nproc)'"
+  verify_note: "미검증 — 공식 오류 문서의 조치는 'trace 확인'뿐이며, 흔한 원인(OS 프로세스 수 한도·메모리·CPU 과부하로 프로세스 생성이 늦음)은 현장 경험 기준이다. 대기 초는 버전별 내부 값이라 적지 않음"
+  stages:
+  - stage: 1
+    steps:
+    - do: 시작하지 못한 백그라운드 프로세스 이름·동반 오류·인스턴스 생존 확인 (읽기 전용)
+      cmd: |
+        grep -n -B2 -A8 "ORA-00445" $ORACLE_BASE/diag/rdbms/<db>/<SID>/trace/alert_<SID>.log | tail -40
+        grep -n -E "ORA-27300|ORA-27301|ORA-27302|ORA-04030|Instance terminated" $ORACLE_BASE/diag/rdbms/<db>/<SID>/trace/alert_<SID>.log | tail -20
+        ps -ef | grep -E "[o]ra_pmon_<SID>"
+      check: "ORA-00445 줄의 프로세스 이름(예: J000·Pnnn)과 대기 초를 기록 · 같은 시각 ORA-27300/27301(fork·메모리 할당 실패)이 있으면 OS 자원 한도가 원인(ORA-27300 판정 함께 확인) · 'Instance terminated' 가 뒤따르거나 pmon 이 없으면 인스턴스 다운 → DBA 즉시 · 정상: 일회성이고 pmon 존재"
+      note: "적용: 11g+ ADR 경로(10gR2 는 background_dump_dest) · 권한: oracle OS 계정 · alert log·trace 는 지우거나 옮기지 말 것(증거)"
+    - do: 백그라운드 프로세스를 띄우지 못한 OS 자원 확인 — 프로세스 수·메모리·CPU (읽기 전용)
+      cmd: |
+        ulimit -u ; ps -u oracle | wc -l
+        free -m ; vmstat 1 5
+        uptime
+      check: "ps 개수가 ulimit -u(max user processes)에 근접하면 프로세스 수 한도 · free 의 available 이 거의 0 이고 vmstat si/so 가 계속 0 이 아니면 메모리 부족 · vmstat r 이 CPU 수의 2배 이상이면 CPU 과부하로 기동 지연 · 정상: 모두 여유"
+      note: "적용: Linux (AIX 는 svmon -G·vmstat 1 5, 프로세스 한도 lsattr -El sys0 -a maxuproc) · 권한: DB 를 띄운 oracle 계정 세션에서 실행(ulimit 은 계정·세션 기준)"
+    - do: DB 프로세스 한도·실패 프로세스 trace 위치 확인 (읽기 전용, 인스턴스가 열려 있을 때만)
+      cmd: |
+        sqlplus -s / as sysdba <<'EOF'
+        set lines 200
+        select resource_name, current_utilization, max_utilization, limit_value from v$resource_limit where resource_name in ('processes','sessions');
+        select value from v$diag_info where name='Diag Trace';
+        EOF
+        ls -lt <Diag Trace 경로> | head -10
+      check: "max_utilization 이 limit_value 에 닿았으면 PROCESSES 한도로 새 프로세스를 못 띄운 것(ORA-00020 계열 — ORA-PROC-CONNECTION 판정 참고) · 오류 시각의 <SID>_<프로세스이름>_<PID>.trc 가 있으면 그 trace 의 첫 오류가 실제 원인 · 정상: 한도 여유"
+      note: "적용: 11g+ · 권한: SYSDBA 또는 SELECT_CATALOG_ROLE(1차는 DBA 에게 결과 요청) · 인스턴스가 내려갔으면 SQL 은 생략하고 trace 디렉터리만 확인"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 원인 자원 해소 — oracle 계정 프로세스 수 한도 상향 또는 폭주 원인 정리
+      cmd: |
+        cp -p /etc/security/limits.conf /etc/security/limits.conf.bak_$(date +%Y%m%d)
+        vi /etc/security/limits.conf    # oracle soft/hard nproc <값> (설치 안내서 최소값 이상)
+      check: "성공: oracle 재로그인 후 ulimit -u 새 값, 이후 ORA-00445 미발생 · 실패: 값이 반영되지 않음 → systemd 로 기동하는 경우 서비스 단위 LimitNPROC 확인, 메모리·CPU 원인이면 한도 상향으로 해결되지 않으므로 부하 원인(배치·접속 폭주) 조치"
+      note: "사전조건: 1차에서 원인이 프로세스 수 한도로 확인됨, 접속 누수·배치 폭주가 원인이면 그쪽 먼저 해소 · 영향: limits.conf 는 새 로그인·새로 띄운 프로세스부터 적용(DB 는 다음 기동 때) · 승인: 시스템 담당·DBA · 백업/롤백: limits.conf.bak_<날짜> 복원 · 적용: Linux (OS 한도 상세는 ORA-PROC-R6-OSCALL 2차 단계와 같음)"
+    - do: (2차·승인 후, 조건부) 인스턴스가 종료된 경우에만 — 자원 원인 해소 뒤 기동
+      cmd: |
+        # 조건: 1차에서 pmon 없음 + alert log 'Instance terminated' 확인. 인스턴스가 열려 있으면 이 단계를 건너뜀
+        sqlplus -s / as sysdba <<'EOF'
+        startup;
+        select instance_name, status from v$instance;
+        EOF
+      check: "성공: status OPEN, alert log 'Completed: ALTER DATABASE OPEN', 같은 프로세스의 ORA-00445 재발 없음 · 실패: 기동 중 다시 ORA-00445·ORA-27300 → 자원 원인 미해결이므로 기동 반복 금지, 3차"
+      note: "사전조건: alert log·trace 보존(IPS 패키지 먼저 생성 권장), 자원 원인 해소 확인 · 영향: 기동 중 인스턴스 복구로 시간 소요 · 승인: DBA·서비스 담당 · 백업/롤백: 기동 자체는 데이터 변경 없음, 실패 시 shutdown abort 후 원인 분석 · 적용: 11gR2~19c (RAC/Restart 는 srvctl start database -d <db>)"
+  - stage: 3
+    steps:
+    - do: Oracle SR 자료 (IPS 패키지·OS 자원 기록)
+      cmd: |
+        adrci exec="set home diag/rdbms/<db>/<SID>; ips create package time '<start>' to '<end>'; ips generate package 1 in /tmp"
+        { ulimit -a ; free -m ; vmstat 1 5 ; ps -u oracle | wc -l ; } > ora_bgstart_os_$(date +%Y%m%d).txt
+      check: "IPS zip(alert·실패 프로세스 trace)·OS 자원 기록·DB 버전·패치 목록($ORACLE_HOME/OPatch/opatch lspatches)"
+      note: "민감정보 마스킹: trace 의 SQL 바인드값·사용자명·호스트명·IP 를 확인하고 가림 · 전달 승인: DBA 확인 후 보안 담당 승인"
+
+- id: ORA-PROC-R7-ENQHOLD
+  scope: id
+  products: [oracle]
+  category: lock
+  match: [ORA-00494]
+  title: 인큐(enqueue) 장시간 점유 — 보유 프로세스·컨트롤파일(CF) I/O 지연 확인 (ORA-00494)
+  source: "Oracle Database Error Messages (ORA-00494: enqueue held for too long by 'inst, osid' — Action: 실패한 명령 재실행, 인시던트 정보로 Oracle Support 문의)·19c 'Database Reference (V$SESSION, V$PROCESS, V$SYSTEM_EVENT, V$CONTROLFILE, V$RMAN_STATUS, V$LOG_HISTORY)'·'Administrator's Guide 9 Diagnosing and Resolving Problems (ADRCI incident, IPS)'"
+  verify_note: "미검증 — ORA-00494 뒤 인스턴스가 보유 프로세스를 정리(종료)하는 동작과 허용 시간은 버전·내부 설정에 따라 다르며 공식 오류 문서에 없다. 내부(밑줄) 파라미터 조정은 Oracle Support 지시 없이 하지 않는다"
+  stages:
+  - stage: 1
+    steps:
+    - do: 인큐 이름·보유 프로세스(osid)·인스턴스 종료 여부 확인 (읽기 전용)
+      cmd: |
+        grep -n -B2 -A6 "ORA-00494" $ORACLE_BASE/diag/rdbms/<db>/<SID>/trace/alert_<SID>.log | tail -40
+        grep -n -E "ORA-00239|ORA-00494|Instance terminated" $ORACLE_BASE/diag/rdbms/<db>/<SID>/trace/alert_<SID>.log | tail -20
+        adrci exec="set home diag/rdbms/<db>/<SID>; show incident -mode basic"
+      check: "메시지의 인큐 이름([CF] = 컨트롤파일)과 'inst <n>, osid <PID>' 기록 · ORA-00239 가 같이 있거나 'Instance terminated' 가 이어지면 인스턴스가 종료됨 → DBA 즉시 · 정상: 일회성, 인스턴스 유지"
+      note: "적용: 11g+ ADR · 권한: oracle OS 계정 · 이 오류는 블로킹 세션(행 잠금) 문제가 아니므로 업무 세션 종료로 풀리지 않는다"
+    - do: 보유 프로세스가 무엇이며 무엇을 기다리는지 확인 (읽기 전용)
+      cmd: |
+        ps -o pid,stat,etime,args -p <PID>
+        sqlplus -s / as sysdba <<'EOF'
+        set lines 200
+        select s.sid, s.program, s.event, s.state, s.seconds_in_wait from v$session s join v$process p on p.addr=s.paddr where p.spid='<PID>';
+        EOF
+      check: "program 이 LGWR·CKPT·ARCn·RMAN 등이고 event 가 control file parallel write·control file sequential read 등 I/O 대기면 스토리지 지연이 원인 · ps STAT 가 D(I/O 대기)로 계속되면 같은 판단 · 정상: 프로세스가 이미 사라졌고 재발 없음"
+      note: "적용: 10gR2~19c · 권한: oracle OS 계정, SYSDBA 또는 SELECT_CATALOG_ROLE(1차는 DBA 에게 결과 요청) · AIX·Solaris ps 도 -o pid,stat,etime,args 사용 가능"
+    - do: 컨트롤파일 I/O·동시 갱신 작업(RMAN·로그 스위치) 확인 (읽기 전용)
+      cmd: |
+        iostat -x 5 3
+        sqlplus -s / as sysdba <<'EOF'
+        set lines 200
+        select event, total_waits, round(time_waited/100) sec from v$system_event where event like 'control file%';
+        select name from v$controlfile;
+        select sid, operation, status, start_time from v$rman_status where start_time > sysdate-1/24 order by start_time;
+        select to_char(first_time,'YYYY-MM-DD HH24') hr, count(*) from v$log_history where first_time > sysdate-1 group by to_char(first_time,'YYYY-MM-DD HH24') order by 1;
+        EOF
+      check: "컨트롤파일이 있는 디스크의 await·%util 이 높으면 스토리지 지연 · 오류 시각에 RMAN 작업이나 로그 스위치 폭주(시간당 10회 이상)가 겹치면 컨트롤파일 갱신 경합 · 정상: I/O 지연 없음"
+      note: "적용: Linux iostat(sysstat), AIX 는 iostat -D 5 3 · 권한: SELECT_CATALOG_ROLE · 조회만 하며 잠금을 잡지 않음"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 경합 원인 분리 — RMAN 백업 시각을 대량 배치·로그 스위치 폭주 시간과 분리
+      cmd: |
+        crontab -l > /tmp/crontab_oracle_$(date +%Y%m%d).bak
+        crontab -e        # RMAN 백업 시각 조정
+      check: "성공: 다음 같은 시간대에 ORA-00494 미발생, control file 대기 감소 · 실패: 지속 → 스토리지 담당과 컨트롤파일 디스크 I/O 경로 점검(다중화 사본을 덜 바쁜 디스크로 옮기는 것은 재기동이 필요한 별도 변경), 로그 스위치 폭주면 리두 크기 판정(ORA-PROC-R6-REDOSIZE) 참고"
+      note: "사전조건: 백업 담당과 새 일정 합의 · 영향: 백업 시작 시각 변경 · 승인: DBA·백업 담당 · 백업/롤백: crontab 사본(첫 줄)으로 원복(crontab /tmp/crontab_oracle_<날짜>.bak) · 보유 백그라운드 프로세스(LGWR·CKPT 등)를 kill 하면 인스턴스가 종료되므로 하지 않는다"
+    - do: (2차·승인 후, 조건부) 인스턴스가 종료된 경우에만 — 스토리지 상태 확인 뒤 기동
+      cmd: |
+        # 조건: 1차에서 'Instance terminated' 확인, 스토리지 I/O 오류가 해소됨
+        sqlplus -s / as sysdba <<'EOF'
+        startup;
+        select instance_name, status from v$instance;
+        EOF
+      check: "성공: status OPEN, alert log 'Completed: ALTER DATABASE OPEN' · 실패: MOUNT 에서 멈춤·ORA-00210/ORA-00202(컨트롤파일 열기 실패) → 컨트롤파일 판정(ORA-PROC-R6-CTLFILE)으로, 기동 반복 금지"
+      note: "사전조건: alert log·incident 보존(IPS 패키지 먼저 생성), 스토리지 담당이 I/O 오류 해소 확인 · 영향: 기동 중 인스턴스 복구 시간 소요 · 승인: DBA·서비스 담당 · 백업/롤백: 기동 자체는 데이터 변경 없음, 실패 시 shutdown abort 후 3차 · 적용: 11gR2~19c (RAC/Restart 는 srvctl start instance)"
+  - stage: 3
+    steps:
+    - do: Oracle SR 자료 (ORA-00494 인시던트 패키지 필수)
+      cmd: |
+        adrci exec="set home diag/rdbms/<db>/<SID>; ips create package incident <incident_id>; ips generate package 1 in /tmp"
+        iostat -x 5 3 > ora_enq_iostat_$(date +%Y%m%d).txt
+      check: "IPS zip(alert·보유 프로세스 trace·인시던트)·iostat·v$system_event 결과·RMAN/배치 일정"
+      note: "민감정보 마스킹: trace 의 SQL 바인드값·사용자명·호스트명·IP·디스크 경로의 업무명 가림 · 전달 승인: DBA 확인 후 보안 담당 승인"
+
+- id: ORA-PROC-R7-RBSMAXEXT
+  scope: id
+  products: [oracle]
+  category: undo
+  match: [ORA-01628]
+  title: 롤백 세그먼트 최대 익스텐트(MAXEXTENTS) 도달 — UNDO 관리 방식·대량 트랜잭션 확인 (ORA-01628)
+  source: "Oracle Database Error Messages (ORA-01628: max # extents reached for rollback segment — Action: MAXEXTENTS 가 시스템 최대보다 작으면 올린다)·19c 'SQL Language Reference (ALTER ROLLBACK SEGMENT, storage_clause MAXEXTENTS)'·'Database Reference (DBA_ROLLBACK_SEGS, DBA_SEGMENTS, V$TRANSACTION, UNDO_MANAGEMENT)'·'Administrator's Guide (Managing Undo)'"
+  verify_note: "미검증 — 롤백 세그먼트에 MAXEXTENTS UNLIMITED 를 줄 수 있는지는 테이블스페이스 관리 방식·버전에 따라 제약이 있어 확인하지 못함(아래는 구체 값으로 상향), 자동 UNDO(AUTO) 세그먼트의 시스템 최대 익스텐트 값은 버전별로 확인하지 못함"
+  stages:
+  - stage: 1
+    steps:
+    - do: UNDO 관리 방식과 한도에 닿은 롤백 세그먼트 확인 (읽기 전용)
+      cmd: |
+        sqlplus -s / as sysdba <<'EOF'
+        set lines 200 pages 100
+        select name, value from v$parameter where name in ('undo_management','undo_tablespace','rollback_segments');
+        select segment_name, tablespace_name, max_extents, status from dba_rollback_segs;
+        select segment_name, segment_type, extents, max_extents from dba_segments where segment_type in ('ROLLBACK','TYPE2 UNDO') order by extents desc fetch first 10 rows only;
+        EOF
+      check: "오류 메시지의 세그먼트에서 extents = max_extents 면 확정 · undo_management MANUAL 이면 수동 롤백 세그먼트 한도(2차 상향 대상) · AUTO 이면 시스템 최대에 닿을 만큼 큰 단일 트랜잭션이 원인(커밋 단위 문제) · 정상: 최대에 닿은 세그먼트 없음"
+      note: "적용: 10gR2~19c (fetch first 는 12c+, 11gR2 는 rownum 서브쿼리) · 권한: SYSDBA 또는 SELECT_CATALOG_ROLE — 1차는 DBA 에게 결과 요청"
+    - do: 롤백 공간을 크게 쓰는 트랜잭션·배치 식별 (읽기 전용)
+      cmd: |
+        sqlplus -s / as sysdba <<'EOF'
+        set lines 200
+        select s.sid, s.serial#, s.username, s.program, t.used_ublk, t.start_time from v$transaction t join v$session s on s.taddr=t.addr order by t.used_ublk desc fetch first 10 rows only;
+        EOF
+        grep -n -B5 "ORA-01628" <app_log> | tail -40
+      check: "used_ublk 가 압도적으로 큰 세션 하나(대량 UPDATE·DELETE 배치)가 있으면 커밋 단위가 원인 · 앱 로그의 실패 SQL·배치 이름 기록 · 정상: 큰 트랜잭션 없음(오류 시점에 이미 롤백됨 — 배치 이름으로 판단)"
+      note: "적용: 10gR2~19c · 권한: SELECT_CATALOG_ROLE · 조회만 하며 잠금을 잡지 않음"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 수동 롤백 세그먼트의 MAXEXTENTS 상향 (UNDO_MANAGEMENT=MANUAL 일 때)
+      cmd: |
+        sqlplus -s / as sysdba <<'EOF'
+        select segment_name, max_extents from dba_rollback_segs where segment_name=upper('<rbs>');
+        alter rollback segment <rbs> storage (maxextents <새 값>);
+        select segment_name, max_extents from dba_rollback_segs where segment_name=upper('<rbs>');
+        EOF
+      check: "성공: 마지막 조회에 새 max_extents, 같은 배치 재실행 시 ORA-01628 미발생 · 실패: 오류(시스템 최대 초과·테이블스페이스 여유 없음 ORA-01650) → 커밋 단위 분할 또는 롤백 테이블스페이스 확장(ORA-PROC-R5-CAPACITY)"
+      note: "사전조건: 첫 조회로 현재 max_extents 기록, 롤백 테이블스페이스 여유 확인 · 영향: 온라인 수행, 큰 트랜잭션이 더 많은 롤백 공간을 쓰게 됨 · 승인: DBA · 백업/롤백: 기록한 이전 값으로 alter rollback segment <rbs> storage (maxextents <이전값>) · 적용: 수동 UNDO 관리 환경"
+    - do: (2차·승인 후) 배치 커밋 단위 분할 또는 자동 UNDO 관리 전환 계획
+      config:
+        file: 배치 SQL·애플리케이션 / SPFILE(자동 UNDO 전환 시)
+        snippet: |
+          -- 배치: 대량 DML 을 키 범위·건수 단위로 나눠 커밋(업무 정합성은 개발팀 확인)
+          -- 자동 UNDO 전환(재기동 필요):
+          create undo tablespace <undo_ts> datafile '<path>' size 4G autoextend on next 512M maxsize 32G;
+          alter system set undo_tablespace=<undo_ts> scope=spfile;
+          alter system set undo_management=AUTO scope=spfile;
+        note: "사전조건: create pfile='/tmp/init_<SID>_before.ora' from spfile 로 현재 설정 백업, 디스크 여유 확인 · 영향: undo_management 변경은 재기동 필요(서비스 중단), 배치 분할은 처리 시간 변화 · 승인: DBA·서비스 담당·개발팀 · 백업/롤백: 백업 pfile 로 기동해 이전 설정 복귀"
+      check: "성공: 재기동 후 v$parameter undo_management AUTO, 배치 정상 완료 · 실패: 기동 오류 → 백업 pfile(startup pfile=/tmp/init_<SID>_before.ora)로 기동 후 원인 확인"
+  - stage: 3
+    steps:
+    - do: Oracle SR 자료
+      cmd: |
+        sqlplus -s / as sysdba <<'EOF' > ora_rbs_$(date +%Y%m%d).txt
+        select name, value from v$parameter where name in ('undo_management','undo_tablespace','rollback_segments');
+        select segment_name, tablespace_name, initial_extent, next_extent, max_extents, status from dba_rollback_segs;
+        EOF
+      check: "UNDO 설정·롤백 세그먼트 저장 매개변수·실패 배치 이름·alert log 발췌"
+      note: "민감정보 마스킹: 배치·스키마 이름의 업무명, 사용자명·호스트명을 가린 뒤 전달 · 전달 승인: DBA 확인 후 보안 담당 승인"
+
+- id: ORA-PROC-R7-TEMPMAXEXT
+  scope: id
+  products: [oracle]
+  category: storage
+  match: [ORA-01630]
+  title: 임시 세그먼트 최대 익스텐트(MAXEXTENTS) 한도 — 딕셔너리 관리·영구 테이블스페이스를 임시로 사용 (ORA-01630)
+  source: "Oracle Database Error Messages (ORA-01630: max # extents reached in temp segment in tablespace — Action: 테이블스페이스 maxextents 상향, 이미 시스템 최대면 pctincrease 상향)·19c 'SQL Language Reference (CREATE TEMPORARY TABLESPACE, ALTER USER … TEMPORARY TABLESPACE, ALTER TABLESPACE … DEFAULT STORAGE)'·'Database Reference (DBA_TABLESPACES, DBA_USERS, DATABASE_PROPERTIES, V$TEMPSEG_USAGE)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 오류가 난 테이블스페이스의 관리 방식·저장 한도 확인 (읽기 전용)
+      cmd: |
+        sqlplus -s / as sysdba <<'EOF'
+        set lines 200
+        select tablespace_name, contents, extent_management, allocation_type, max_extents, pct_increase from dba_tablespaces where tablespace_name=upper('<TS>');
+        select property_value from database_properties where property_name='DEFAULT_TEMP_TABLESPACE';
+        select username, temporary_tablespace from dba_users where username=upper('<user>');
+        EOF
+      check: "<TS> 는 오류 메시지의 테이블스페이스 · extent_management DICTIONARY 이거나 contents PERMANENT(영구 테이블스페이스를 임시로 사용)면 익스텐트 한도에 걸리는 구조 → 확정 · 사용자 temporary_tablespace 가 로컬 관리 TEMPORARY 테이블스페이스가 아니면 2차 전환 대상 · 정상: LOCAL·TEMPORARY"
+      note: "적용: 10gR2~19c · 권한: SYSDBA 또는 SELECT_CATALOG_ROLE — 1차는 DBA 에게 결과 요청"
+    - do: 임시 공간을 크게 쓰는 세션·SQL 식별 (읽기 전용)
+      cmd: |
+        sqlplus -s / as sysdba <<'EOF'
+        set lines 200
+        select s.sid, s.username, u.sql_id, u.tablespace, u.segtype, u.blocks from v$tempseg_usage u join v$session s on s.saddr=u.session_addr order by u.blocks desc fetch first 10 rows only;
+        EOF
+        grep -n -B5 "ORA-01630" <app_log> | tail -40
+      check: "특정 sql_id 의 대량 정렬·해시(segtype SORT·HASH)가 크면 그 SQL 이 직접 원인 — 실행계획 개선 요청 · 정상: 오류 뒤 사용 해제(앱 로그의 실패 SQL 로 판단)"
+      note: "적용: 10gR2+ (fetch first 는 12c+) · 권한: SELECT_CATALOG_ROLE · 조회만 하며 잠금을 잡지 않음"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 사용자 임시 공간을 로컬 관리 임시 테이블스페이스(TEMPFILE)로 전환
+      cmd: |
+        sqlplus -s / as sysdba <<'EOF'
+        select username, temporary_tablespace from dba_users where username=upper('<user>');
+        create temporary tablespace <temp_new> tempfile '<path>' size 4G autoextend on next 512M maxsize 32G;
+        alter user <user> temporary tablespace <temp_new>;
+        EOF
+      check: "성공: dba_users 의 temporary_tablespace 가 <temp_new>, 같은 SQL 재실행 시 ORA-01630 미발생 · 실패: ORA-01119/27040(경로·권한)·디스크 부족 → 경로·여유 확인"
+      note: "사전조건: 첫 조회로 기존 임시 테이블스페이스 이름 기록, 디스크(ASM) 여유 확인 · 영향: 새 세션부터 새 임시 공간 사용, 온라인 수행 · 승인: DBA · 백업/롤백: alter user <user> temporary tablespace <기존TS> 로 되돌림, 쓰지 않게 된 새 임시 테이블스페이스는 DBA 판단으로 정리 · 적용: 10gR2~19c (DB 기본값을 바꾸려면 alter database default temporary tablespace <temp_new> — 영향 범위가 전체 사용자)"
+    - do: (2차·승인 후) 당장 전환이 어려우면 딕셔너리 관리 테이블스페이스의 기본 저장 한도 상향 (제조사 조치)
+      cmd: |
+        sqlplus -s / as sysdba <<'EOF'
+        select tablespace_name, max_extents, pct_increase from dba_tablespaces where tablespace_name=upper('<TS>');
+        alter tablespace <TS> default storage (maxextents <새 값>);
+        EOF
+      check: "성공: dba_tablespaces max_extents 새 값, 재실행 시 ORA-01630 미발생 · 실패: 오류(로컬 관리 테이블스페이스라 default storage 변경 불가 등) → 위 단계(임시 테이블스페이스 전환)로"
+      note: "사전조건: 첫 조회로 이전 max_extents·pct_increase 기록 · 영향: 이후 새로 만들어지는 임시 세그먼트부터 적용 · 승인: DBA · 백업/롤백: alter tablespace <TS> default storage (maxextents <이전값>) 로 되돌림 · 적용: 딕셔너리 관리 테이블스페이스(구버전에서 이관된 DB)"
+  - stage: 3
+    steps:
+    - do: Oracle SR 자료
+      cmd: |
+        sqlplus -s / as sysdba <<'EOF' > ora_temp_$(date +%Y%m%d).txt
+        select tablespace_name, contents, extent_management, allocation_type, max_extents, pct_increase from dba_tablespaces;
+        select username, temporary_tablespace from dba_users;
+        EOF
+      check: "테이블스페이스 관리 방식·사용자별 임시 공간·실패 SQL(sql_id)·alert log 발췌"
+      note: "민감정보 마스킹: 사용자명·스키마 이름의 업무명, 호스트명·데이터파일 경로를 가린 뒤 전달 · 전달 승인: DBA 확인 후 보안 담당 승인"
+
+# ══════════════════════════ Altibase ══════════════════════════
+- id: ALT-PROC-R7-TEMPPAGE
+  scope: id
+  products: [altibase]
+  category: capacity
+  match: [ERR-11183]
+  title: TEMP 페이지영역 부족 — 디스크 임시 테이블 페이지 한도(TEMP_MAX_PAGE_COUNT)와 임시 테이블스페이스 최대 크기 불일치 (ERR-11183)
+  source: "Altibase FAQ 'ERR-11183 (70019) Insufficient page descriptor area in the temp table' (docs.altibase.com pageId=16876409 — TEMP_MAX_PAGE_COUNT = 디스크 임시 테이블스페이스 최대 크기 합계 ÷ 8192, TOTAL_WA_SIZE·SORT_AREA_SIZE·HASH_AREA_SIZE 연동, 6.3.1~7.1.0.5.0 발생·7.1.0.5.1 BUG-48369 수정)·Altibase 7.1 General Reference '성능 뷰(V$PROPERTY, V$TABLESPACES, V$DATAFILES, V$STATEMENT, V$MEMSTAT, V$VERSION)'"
+  verify_note: "미검증 — FAQ 본문에 SQL 예시가 없어 V$DATAFILES 의 최대 크기 컬럼(MAXSIZE)·단위(페이지/바이트)를 공식 문서로 확인하지 못함, FAQ 의 16G 예시값(2096128)과 계산값(2097152)이 다름 — 계산식 기준으로 산정"
+  stages:
+  - stage: 1
+    steps:
+    - do: TEMP 페이지 한도·Work Area 프로퍼티와 디스크 임시 테이블스페이스 크기 확인 (읽기 전용)
+      cmd: |
+        isql -s localhost -u sys -silent          # 비밀번호는 접속 프롬프트에서 입력(-p 값·heredoc 에 두지 않음)
+        iSQL> SELECT NAME, VALUE1 FROM V$PROPERTY WHERE NAME IN ('TEMP_MAX_PAGE_COUNT','TOTAL_WA_SIZE','SORT_AREA_SIZE','HASH_AREA_SIZE');
+        iSQL> SELECT ID, NAME, TYPE, TOTAL_PAGE_COUNT, ALLOCATED_PAGE_COUNT FROM V$TABLESPACES;
+        iSQL> SELECT SPACEID, NAME, CURRSIZE, MAXSIZE, AUTOEXTEND FROM V$DATAFILES;
+        iSQL> quit
+      check: "디스크 임시 테이블스페이스(V$TABLESPACES 의 임시 유형) 데이터파일들의 최대 크기 합계(바이트) ÷ 8192 가 TEMP_MAX_PAGE_COUNT 보다 크면 FAQ 의 발생 조건과 일치 → 확정 · 정상: 합계 ÷ 8192 ≤ TEMP_MAX_PAGE_COUNT"
+      note: "적용: Altibase 6.3.1~7.1.0.5.0 (FAQ 기준) · 권한: sys — 1차는 DBA 에게 결과 요청 · isql 을 실행해 비밀번호를 프롬프트에서 입력한 뒤 iSQL> 줄을 차례로 입력"
+    - do: 서버 버전과 실패 시각의 대형 정렬·해시 쿼리 확인 (읽기 전용)
+      cmd: |
+        isql -s localhost -u sys -silent          # 비밀번호는 접속 프롬프트에서 입력
+        iSQL> SELECT * FROM V$VERSION;
+        iSQL> SELECT SESSION_ID, TOTAL_TIME, USED_MEMORY, QUERY FROM V$STATEMENT WHERE EXECUTE_FLAG = 1 ORDER BY TOTAL_TIME DESC LIMIT 10;
+        iSQL> quit
+        grep -n -B5 "ERR-11183" <app_log> | tail -40
+      check: "버전이 7.1.0.5.1 이상이면 FAQ 상 이 결함 범위 밖 — 기술지원 확인 대상 · 실패 시각에 디스크 테이블 대상 대형 SORT·GROUP BY·HASH JOIN 이 있었으면 그 쿼리가 TEMP 를 넘긴 것 · 정상: 일회성"
+      note: "적용: Altibase 6.5/7.x (V$STATEMENT 컬럼은 7.1 기준) · 권한: sys"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) TEMP_MAX_PAGE_COUNT 와 연동 Work Area 프로퍼티를 임시 테이블스페이스 최대 크기에 맞춤 (FAQ 조치)
+      cmd: |
+        cp -p $ALTIBASE_HOME/conf/altibase.properties $ALTIBASE_HOME/conf/altibase.properties.bak_$(date +%Y%m%d)
+        isql -s localhost -u sys          # 비밀번호는 프롬프트에서 입력
+        iSQL> ALTER SYSTEM SET TEMP_MAX_PAGE_COUNT = <임시 테이블스페이스 최대 크기 합계 바이트 ÷ 8192>;
+        iSQL> ALTER SYSTEM SET TOTAL_WA_SIZE = <256 × TEMP_MAX_PAGE_COUNT>;
+        iSQL> ALTER SYSTEM SET SORT_AREA_SIZE = <2 × TEMP_MAX_PAGE_COUNT>;
+        iSQL> ALTER SYSTEM SET HASH_AREA_SIZE = <8 × TEMP_MAX_PAGE_COUNT>;
+        iSQL> SELECT NAME, VALUE1 FROM V$PROPERTY WHERE NAME IN ('TEMP_MAX_PAGE_COUNT','TOTAL_WA_SIZE','SORT_AREA_SIZE','HASH_AREA_SIZE');
+        iSQL> quit
+      check: "성공: V$PROPERTY 에 새 값, 같은 쿼리 재실행 시 ERR-11183 미발생, altibase.properties 에도 반영됐는지 확인(FAQ: ALTER SYSTEM 값이 재기동 뒤에도 유지) · 실패: ALTER SYSTEM 오류 → properties 수정 후 계획 재기동 · 메모리 사용 증가가 크면(V$MEMSTAT·OS free) 이전 값으로 되돌림"
+      note: "사전조건: 1차에서 최대 크기 합계 산정, 현재 4개 값 기록, 서버 여유 메모리 확인 · 영향: TOTAL_WA_SIZE 상향은 서버 메모리 사용 증가(FAQ) · 승인: DBA·서비스 담당 · 백업/롤백: 기록한 이전 값으로 ALTER SYSTEM SET 재설정, properties 는 .bak_<날짜> 복원 · 적용: Altibase 6.3.1~7.1.0.5.0"
+    - do: (2차·승인 후) 근본 조치 — BUG-48369 수정판(7.1.0.5.1 이상) 적용 계획
+      check: "성공: 패치 후 같은 쿼리에서 ERR-11183 미발생 · 실패: 패치 후 재발 → 3차"
+      note: "사전조건: 기술지원과 대상 패치 버전·이중화 양쪽 동시 적용 여부 확인 · 영향: 패치 적용 동안 서비스 중단 · 승인: DBA·서비스 담당(변경 관리) · 백업/롤백: 패치 전 전체 백업·이전 패키지 보관 후 원복 절차 준비"
+  - stage: 3
+    steps:
+    - do: Altibase 기술지원 자료
+      cmd: |
+        tar czf altibase_temp_$(date +%Y%m%d).tgz $ALTIBASE_HOME/conf/altibase.properties $ALTIBASE_HOME/trc/
+      check: "properties·trc 로그·V$PROPERTY/V$TABLESPACES/V$DATAFILES 조회 결과·V$VERSION·실패 쿼리"
+      note: "민감정보 마스킹: properties 의 IP·포트·경로, trc 로그·쿼리의 사용자명·클라이언트 IP·리터럴 값을 가린 뒤 전달 · 전달 승인: DBA 확인 후 보안 담당 승인"
+
+- id: ALT-PROC-R7-CONNTIMEOUT
+  scope: id
+  products: [altibase]
+  category: connection
+  match: [ERR-5104D]
+  title: 연결 시간초과 — 서버 응답 없음(네트워크·방화벽·서버 미기동·과부하)·클라이언트 CONNECTION_TIMEOUT (ERR-5104D)
+  source: "Altibase FAQ 'ERR-5104D Connection timeout' (클라이언트가 CONNECTION_TIMEOUT 안에 서버 응답을 받지 못함 — 조치: 네트워크 연결 확인)·Altibase 7.1 Administrator's Manual 'altibase.properties(PORT_NO)'·'trc 로그(altibase_boot.log)'·General Reference '성능 뷰(V$SESSION, V$PROPERTY — MAX_CLIENT)'"
+  verify_note: "미검증 — 클라이언트(JDBC·ODBC·CLI) 쪽 연결 시간초과 속성의 실제 이름·단위·기본값을 공식 문서로 확인하지 못함(FAQ 는 CONNECTION_TIMEOUT 이라고만 씀) — 1차는 설정 파일에서 timeout 항목을 찾는 방식으로 적음"
+  stages:
+  - stage: 1
+    steps:
+    - do: 클라이언트에서 서버까지 도달·포트 응답 확인 (읽기 전용, 클라이언트 서버에서)
+      cmd: |
+        ping -c 5 <server>
+        nc -zvw3 <server> <PORT_NO>
+        grep -n -i -E "timeout|jdbc:Altibase" <app_config> | head -20
+      check: "ping 손실·nc 'timed out' 이면 네트워크·방화벽 구간 원인(네트워크 담당) · nc 'refused' 면 서버가 그 포트에서 리슨하지 않음(서버 측 확인) · nc 가 즉시 succeeded 인데 앱만 시간초과면 앱 연결 시간초과 값이 너무 짧거나 접속 직후 서버 응답 지연 · 정상: 손실 없음·succeeded"
+      note: "nc -zvw3 는 포트 연결만 시험하는 선택적 능동 점검(데이터 전송 없음) — 운영 방화벽 정책상 허용될 때만 · 적용: Linux/Unix (Windows 는 Test-NetConnection <server> -Port <PORT_NO>) · 권한: 일반 사용자 · ping 이 막힌 망이면 nc 결과로 판단"
+    - do: 서버 프로세스·리슨 포트·부하 확인 (읽기 전용, DB 서버에서)
+      cmd: |
+        ps -ef | grep [a]ltibase
+        grep -n "^PORT_NO" $ALTIBASE_HOME/conf/altibase.properties
+        ss -ltn | grep <PORT_NO>
+        vmstat 1 5
+        tail -50 $ALTIBASE_HOME/trc/altibase_boot.log
+      check: "프로세스 없음 → 서버 다운(서버 비정상 중단 판정 ALT-PROC-R5-INTERNAL 으로) · PORT_NO 가 앱 접속 포트와 다르거나 LISTEN 없음 → 포트 불일치·미기동 · vmstat r 이 CPU 수의 2배 이상·free 0 근처면 서버 과부하로 응답 지연 · boot.log 의 같은 시각 기동·종료 기록 확인 · 정상: 프로세스·LISTEN 있음, 부하 여유"
+      note: "적용: Linux (ss 없으면 netstat -an | grep <PORT_NO>, AIX 는 netstat -an) · 권한: altibase OS 계정"
+    - do: 접속 수 한도 근접 여부 확인 (읽기 전용)
+      cmd: |
+        isql -s localhost -u sys -silent          # 비밀번호는 접속 프롬프트에서 입력
+        iSQL> SELECT NAME, VALUE1 FROM V$PROPERTY WHERE NAME IN ('MAX_CLIENT','PORT_NO');
+        iSQL> SELECT COUNT(*) FROM V$SESSION;
+        iSQL> quit
+      check: "세션 수가 MAX_CLIENT 근처면 접속 폭주로 신규 접속 처리 지연(세션 한도 판정 ALT-PROC-CONNECTION 참고) · 정상: MAX_CLIENT 의 80% 미만"
+      note: "적용: Altibase 6.5/7.x · 권한: sys — 1차는 DBA 에게 결과 요청"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 클라이언트 연결 시간초과 값을 실제 접속 소요 시간에 맞게 조정
+      cmd: |
+        cp -p <app_config> <app_config>.bak_$(date +%Y%m%d)
+        vi <app_config>        # 연결 시간초과 속성 값 조정(속성 이름은 드라이버 매뉴얼 확인)
+      check: "성공: 앱 재기동 후 ERR-5104D 미발생, 정상 접속 시간 안에 연결 · 실패: 값을 늘려도 지속 → 네트워크·서버 원인이므로 값 원복 후 네트워크 담당과 구간 점검"
+      note: "사전조건: 1차에서 네트워크·서버가 정상이고 값이 짧은 것으로 확인됨 · 영향: 값을 늘리면 장애 시 앱이 더 오래 기다림 · 승인: 애플리케이션 담당·DBA · 백업/롤백: .bak_<날짜> 복원 후 앱 재기동"
+    - do: (2차·승인 후) 네트워크·방화벽 구간 조치 요청 (네트워크 담당 수행)
+      check: "성공: 클라이언트에서 nc 즉시 succeeded, ERR-5104D 미발생 · 실패: 지속 → 양쪽 패킷 캡처를 네트워크 담당과 협의"
+      note: "사전조건: 1차 ping·nc 결과와 발생 시각 목록 전달 · 영향: 방화벽 정책 변경은 다른 서비스에도 영향 · 승인: 네트워크·보안 담당 · 백업/롤백: 변경 전 정책 사본을 네트워크 담당이 보관하고 문제 시 원복"
+  - stage: 3
+    steps:
+    - do: Altibase 기술지원 자료
+      cmd: |
+        { ping -c 5 <server> ; nc -zvw3 <server> <PORT_NO> ; } > alt_conn_test_$(date +%Y%m%d).txt 2>&1
+        tar czf altibase_conntimeout_$(date +%Y%m%d).tgz $ALTIBASE_HOME/trc/altibase_boot.log $ALTIBASE_HOME/conf/altibase.properties alt_conn_test_$(date +%Y%m%d).txt
+      check: "도달 시험 결과·boot.log·properties·앱 연결 설정(비밀번호 제외)·발생 시각 목록"
+      note: "민감정보 마스킹: 서버·클라이언트 IP·호스트명·계정명을 가리고 연결 설정의 비밀번호 항목은 빼고 전달 · 전달 승인: DBA 확인 후 보안 담당 승인"
+
+- id: ALT-PROC-R7-TASKPOOL
+  scope: id
+  products: [altibase]
+  category: thread
+  match: [ERR-41059]
+  title: 태스크 풀 오버플로 — 접속 폭주·미정리 태스크·서비스 스레드 포화·트랜잭션 테이블 한도 (ERR-41059)
+  source: "Altibase FAQ 'ERR-41059 Task pool overflow' (원인: 신규 접속 증가·연결 종료 뒤 태스크 미정리·모든 서비스 스레드 EXECUTE·TRANSACTION_TABLE_SIZE 초과 / 조치: MAX_CLIENT 상향·애플리케이션의 연결 종료 확인·TRANSACTION_TABLE_SIZE 상향·ulimit 열린 파일 수 확인)·Altibase 7.1 General Reference '성능 뷰(V$SERVICE_THREAD, V$SESSION, V$STATEMENT, V$TRANSACTION, V$PROPERTY)'·Administrator's Manual 'ALTER DATABASE … SESSION CLOSE'"
+  verify_note: "미검증 — V$SERVICE_THREAD 의 컬럼(TYPE·STATE·RUN_MODE)·V$TRANSACTION 행이 활성 트랜잭션만인지, MAX_CLIENT·TRANSACTION_TABLE_SIZE 의 동적 변경 가능 여부를 공식 문서로 확인하지 못함(아래는 properties 수정 후 재기동 기준)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 서비스 스레드 상태·접속 수·트랜잭션 수를 한도와 대조 (읽기 전용)
+      cmd: |
+        isql -s localhost -u sys -silent          # 비밀번호는 접속 프롬프트에서 입력(-p 값·heredoc 에 두지 않음)
+        iSQL> SELECT TYPE, STATE, RUN_MODE, COUNT(*) FROM V$SERVICE_THREAD GROUP BY TYPE, STATE, RUN_MODE;
+        iSQL> SELECT NAME, VALUE1 FROM V$PROPERTY WHERE NAME IN ('MAX_CLIENT','TRANSACTION_TABLE_SIZE');
+        iSQL> SELECT COUNT(*) FROM V$SESSION;
+        iSQL> SELECT COUNT(*) FROM V$TRANSACTION;
+        iSQL> quit
+      check: "서비스 스레드 대부분이 EXECUTE 면 스레드 포화 · 세션 수 ≈ MAX_CLIENT 면 접속 폭주 · 트랜잭션 수 ≈ TRANSACTION_TABLE_SIZE 면 트랜잭션 테이블 한도(FAQ 원인 4가지 중 해당 항목) · 정상: 모두 한도의 80% 미만"
+      note: "적용: Altibase 7.1 컬럼 기준(6.x 는 일부 컬럼 다를 수 있음) · 권한: sys — 1차는 DBA 에게 결과 요청 · 스레드가 포화되면 isql 접속도 늦을 수 있음"
+    - do: 스레드를 오래 붙잡는 문장·미정리 연결을 만드는 클라이언트 확인 (읽기 전용)
+      cmd: |
+        isql -s localhost -u sys -silent          # 비밀번호는 접속 프롬프트에서 입력
+        iSQL> SELECT SESSION_ID, TOTAL_TIME, QUERY FROM V$STATEMENT WHERE EXECUTE_FLAG = 1 ORDER BY TOTAL_TIME DESC LIMIT 10;
+        iSQL> SELECT CLIENT_APP_INFO, COUNT(*) FROM V$SESSION GROUP BY CLIENT_APP_INFO ORDER BY 2 DESC LIMIT 10;
+        iSQL> quit
+      check: "TOTAL_TIME 이 긴 문장이 여럿이면 장시간 문장이 스레드를 점유 · 특정 CLIENT_APP_INFO 에 세션이 몰리고 계속 늘면 그 애플리케이션의 연결 미반환(FAQ 원인 2) · 정상: 장시간 문장·편중 없음"
+      note: "적용: Altibase 6.5/7.x (LIMIT 절은 Altibase SQL) · 권한: sys"
+    - do: OS 열린 파일(소켓) 한도 확인 (읽기 전용, FAQ 참고 항목)
+      cmd: |
+        ps -ef | grep [a]ltibase
+        su - <altibase_user> -c 'ulimit -n'
+        ls /proc/<PID>/fd | wc -l
+      check: "열린 FD 수가 ulimit -n 에 닿았으면 소켓 한도 원인(FD 한도 판정 ERR-71016 과 같은 조치) · 정상: 한도의 80% 미만"
+      note: "적용: Linux (AIX 는 procfiles <PID> | wc -l) · 권한: root 또는 altibase 계정"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 미정리·장시간 세션 정리 (업무 확인 후, FAQ 조치 — 서버를 멈출 수 없을 때)
+      cmd: |
+        isql -s localhost -u sys          # 비밀번호는 프롬프트에서 입력
+        iSQL> ALTER DATABASE <db_name> SESSION CLOSE <session_id>;
+        iSQL> SELECT COUNT(*) FROM V$SESSION;
+        iSQL> quit
+      check: "성공: 세션 수 감소, 신규 접속 성공·ERR-41059 미발생 · 실패: DB 이름 오류 → SELECT DB_NAME FROM V$DATABASE 로 확인 후 재실행, 세션이 다시 쌓이면 애플리케이션 연결 반환 결함으로 개발팀 전달"
+      note: "사전조건: 대상 세션의 CLIENT_APP_INFO·문장을 업무 담당이 확인(배치·결산이면 종료 금지), 조회 결과 보관 · 영향: 해당 세션 트랜잭션 롤백, 애플리케이션 연결 오류 · 승인: DBA·업무 담당 · 백업/롤백: 세션 종료는 되돌릴 수 없음 — 롤백된 작업은 업무 담당이 재실행 · 적용: Altibase 6.5/7.x"
+    - do: (2차·승인 후) MAX_CLIENT·TRANSACTION_TABLE_SIZE·열린 파일 한도 상향 (FAQ 조치, 계획 재기동)
+      cmd: |
+        cp -p $ALTIBASE_HOME/conf/altibase.properties $ALTIBASE_HOME/conf/altibase.properties.bak_$(date +%Y%m%d)
+        cp -p /etc/security/limits.conf /etc/security/limits.conf.bak_$(date +%Y%m%d)
+        vi $ALTIBASE_HOME/conf/altibase.properties     # MAX_CLIENT = <값> / TRANSACTION_TABLE_SIZE = <값>
+        vi /etc/security/limits.conf                   # <altibase_user> soft/hard nofile <값>
+        server stop ; server start
+      check: "성공: V$PROPERTY 에 새 값·ulimit -n 새 값, ERR-41059 미발생 · 실패: server start 실패(공유 메모리·메모리 부족, trc/altibase_boot.log) → 백업본 복원 후 server start"
+      note: "사전조건: 1차에서 한도 원인 확인, 연결 미반환 결함이면 애플리케이션 수정 우선, 서버 메모리 여유 확인 · 영향: server stop~start 동안 DB 전체 중단(메모리 DB 는 로딩 시간) · 승인: DBA·서비스 담당·시스템 담당(limits) · 백업/롤백: properties·limits.conf .bak_<날짜> 복원 후 재기동"
+  - stage: 3
+    steps:
+    - do: Altibase 기술지원 자료
+      cmd: |
+        tar czf altibase_taskpool_$(date +%Y%m%d).tgz $ALTIBASE_HOME/conf/altibase.properties $ALTIBASE_HOME/trc/
+      check: "properties·trc 로그·V$SERVICE_THREAD/V$SESSION/V$STATEMENT 조회 결과·ulimit·발생 시각"
+      note: "민감정보 마스킹: CLIENT_APP_INFO·클라이언트 IP·사용자명·쿼리 리터럴 값을 가린 뒤 전달 · 전달 승인: DBA 확인 후 보안 담당 승인"
+
+# ══════════════════════════ Tibero ══════════════════════════
+- id: TBR-PROC-R7-OSMEM
+  scope: id
+  products: [tibero]
+  category: memory
+  match: [TBR-1068]
+  title: 시스템(OS) 메모리 부족 — Tibero 공유 메모리 설정·다른 프로세스 점유·OS 메모리 고갈 종료 (TBR-1068)
+  source: "Tibero 6/7 참조 안내서 '초기화 파라미터(TOTAL_SHM_SIZE, DB_CACHE_SIZE)'·관리자 안내서 '기동과 종료(tbdown/tbboot)'·'로그($TB_HOME/instance/$TB_SID/log/slog)' — TBR-1068 메시지 자체는 공식 문서 미확인"
+  verify_note: "미검증 — TBR-1068 의 공식 메시지·조치를 Tibero 에러 참조 안내서에서 확인하지 못함(코드 사전 verify_note 와 같음, 제목 '시스템 메모리 부족' 기준), 버전별 메모리 파라미터 이름(TOTAL_SHM_SIZE 외 MEMORY_TARGET 등)은 tip 파일과 v$parameters 로 실제 이름 확인 후 사용"
+  stages:
+  - stage: 1
+    steps:
+    - do: OS 메모리 여유·상위 점유 프로세스·메모리 고갈 종료 기록 확인 (읽기 전용)
+      cmd: |
+        free -m ; vmstat 5 3
+        ps -eo pid,user,rss,args --sort=-rss | head -15
+        dmesg -T | grep -i -E "out of memory|killed process" | tail
+      check: "free 의 available 이 물리 메모리의 5% 미만이거나 vmstat si/so 가 계속 0 이 아니면 메모리 부족 확정 · 상위 RSS 가 Tibero 가 아닌 프로세스면 다른 프로세스 점유 · dmesg 에 tbsvr 관련 'Killed process' 가 있으면 OS 가 Tibero 프로세스를 종료함 → DBA 즉시 · 정상: 여유 충분, 고갈 기록 없음"
+      note: "적용: Linux (AIX 는 svmon -G·vmstat 5 3·errpt | head, Solaris 는 vmstat 5 3·prstat -s rss) · 권한: 일반 사용자(dmesg 는 root 필요할 수 있음)"
+    - do: Tibero 메모리 설정·공유 메모리·발생 기록 확인 (읽기 전용)
+      cmd: |
+        grep -i -E "SHM_SIZE|MEMORY|CACHE_SIZE" $TB_HOME/config/$TB_SID.tip
+        ipcs -m
+        grep -h "TBR-1068" $TB_HOME/instance/$TB_SID/log/slog/* 2>/dev/null | tail -10
+        ps -ef | grep [t]bsvr
+      check: "tip 의 TOTAL_SHM_SIZE 와 프로세스 메모리 합이 물리 메모리 여유를 넘으면 설정 과다 · tbsvr 가 없으면 인스턴스 다운(기동 실패 판정 TBR-PROC-INTERNAL 1차도 함께) · 정상: 설정이 물리 메모리 안, tbsvr 존재"
+      note: "적용: Tibero 6/7 로그 경로 · 권한: Tibero 설치 OS 계정"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) Tibero 공유 메모리 크기 조정 (설정 과다일 때, 계획 재기동)
+      cmd: |
+        cp -p $TB_HOME/config/$TB_SID.tip $TB_HOME/config/$TB_SID.tip.bak_$(date +%Y%m%d)
+        vi $TB_HOME/config/$TB_SID.tip     # TOTAL_SHM_SIZE=<물리 메모리 여유 안의 값> (DB_CACHE_SIZE 는 그 범위 안)
+        tbdown immediate ; tbboot
+      check: "성공: tbboot 정상, v$parameters 에 새 값, free 여유 확보·TBR-1068 미발생 · 실패: 기동 실패 → tip 백업본으로 원복 후 tbboot, 버퍼 캐시 부족(TBR-1015)이 생기면 메모리 증설로 방향 전환"
+      note: "사전조건: 1차에서 설정 과다가 원인으로 확인, 다른 프로세스 점유가 원인이면 그 프로세스 담당이 먼저 조치 · 영향: 재기동 동안 서비스 중단, 공유 메모리 축소는 캐시 효율 저하 · 승인: DBA·서비스 담당 · 백업/롤백: tip .bak_<날짜> 복원 후 tbboot · 적용: Tibero 6/7"
+    - do: (2차·승인 후) 메모리 증설 또는 다른 프로세스 분리 요청 (시스템 담당 수행)
+      check: "성공: free 여유가 평소 부하에서 20% 이상, TBR-1068 미발생 · 실패: 지속 → 3차"
+      note: "사전조건: 1차 free·ps·dmesg 결과 전달 · 영향: 증설은 서버 정지 필요할 수 있음 · 승인: 시스템 담당·서비스 담당 · 백업/롤백: 증설 전 tip·설정 백업, 프로세스 분리는 이전 배치 일정 사본 보관"
+  - stage: 3
+    steps:
+    - do: TmaxTibero 기술지원 자료
+      cmd: |
+        { free -m ; vmstat 5 3 ; ipcs -m ; } > tibero_mem_os_$(date +%Y%m%d).txt
+        tar czf tibero_osmem_$(date +%Y%m%d).tgz $TB_HOME/config/$TB_SID.tip $TB_HOME/instance/$TB_SID/log/slog tibero_mem_os_$(date +%Y%m%d).txt
+      check: "tip·slog·OS 메모리 기록·dmesg 발췌·버전"
+      note: "민감정보 마스킹: 호스트명·IP·사용자명, ps 출력의 명령 인자(경로·계정)를 가린 뒤 전달 · 전달 승인: DBA 확인 후 보안 담당 승인"
+
+- id: TBR-PROC-R7-MAXFILES
+  scope: id
+  products: [tibero]
+  category: capacity
+  match: [TBR-24031]
+  title: 데이터파일 추가 한도(MAXDATAFILES) 초과 — 파일 수 확인·기존 파일 자동확장으로 우회 (TBR-24031)
+  source: "Tibero 에러 참조 안내서 'TBR-24031'(조치: MAXDATAFILES 값을 확인하고 필요하면 수정 — 코드 사전 vendor_action·vendor_url 기준)·관리자 안내서 '테이블스페이스 관리(ALTER DATABASE DATAFILE … AUTOEXTEND)'·참조 안내서 'DBA_DATA_FILES, V$PARAMETERS'"
+  verify_note: "미검증 — 에러 참조 안내서를 이번에 직접 열람하지 못함(조치 문구는 코드 사전 기준), 현재 MAXDATAFILES 값을 조회하는 뷰·파라미터 이름과 상향 방법(컨트롤파일 재생성 등)을 공식 문서로 확인하지 못함, DBA_DATA_FILES 의 AUTOEXTENSIBLE·MAXBYTES 컬럼은 Oracle 호환 이름 기준"
+  stages:
+  - stage: 1
+    steps:
+    - do: 실패한 작업·현재 데이터파일 수·한도 관련 파라미터 확인 (읽기 전용)
+      cmd: |
+        grep -h "TBR-24031" $TB_HOME/instance/$TB_SID/log/slog/* 2>/dev/null | tail -10
+        tbsql <dba_user>          # 비밀번호는 접속 프롬프트에서 입력
+        SQL> select count(*) from dba_data_files;
+        SQL> select tablespace_name, count(*) from dba_data_files group by tablespace_name order by 2 desc;
+        SQL> select name, value from v$parameters where name like '%FILE%';
+        SQL> quit
+      check: "데이터파일 추가(ADD DATAFILE·CREATE TABLESPACE) 시각에 TBR-24031 이 있고 파일 수가 늘지 않으면 한도 도달 확정 · 한도 값이 조회되지 않으면 DB 생성 스크립트(MAXDATAFILES)·기술지원으로 확인 · 추가 작업은 2차 판단 전 반복하지 않음"
+      note: "적용: Tibero 6/7 · 권한: DBA 조회 권한 · tbsql 을 실행해 비밀번호를 프롬프트에서 입력한 뒤 SQL> 줄을 차례로 입력"
+    - do: 파일 수를 늘리지 않고 확장할 수 있는 기존 데이터파일 확인 (읽기 전용)
+      cmd: |
+        tbsql <dba_user>          # 비밀번호는 접속 프롬프트에서 입력
+        SQL> select file_name, round(bytes/1024/1024) mb, autoextensible, round(maxbytes/1024/1024) max_mb from dba_data_files where tablespace_name=upper('<TS>');
+        SQL> select name, value from v$parameters where name='DB_BLOCK_SIZE';
+        SQL> quit
+        df -h <data_dir>
+      check: "autoextensible NO 이거나 max_mb 가 블록 크기별 상한보다 작은 파일이 있으면 그 파일 확장으로 공간 확보 가능 · 디스크 여유가 없으면 확장도 불가(디스크 증설 먼저) · 정상(우회 불가): 모든 파일이 이미 상한까지 자동확장"
+      note: "적용: Tibero 6/7 · 권한: DBA 조회 권한, df 는 Tibero OS 계정"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 기존 데이터파일 자동확장·최대 크기 상향으로 우회 (파일 수 늘리지 않음)
+      cmd: |
+        tbsql <dba_user>          # 비밀번호는 접속 프롬프트에서 입력
+        SQL> alter database datafile '<path>' autoextend on next 512M maxsize <블록 크기 상한 이내>;
+        SQL> select file_name, autoextensible, round(maxbytes/1024/1024) max_mb from dba_data_files where file_name='<path>';
+        SQL> quit
+      check: "성공: autoextensible YES·새 최대 크기, 테이블스페이스 공간 부족 해소 · 실패: 크기 범위 오류(TBR-7107) → 블록 크기별 상한 이내로, 디스크 부족 → 증설 요청"
+      note: "사전조건: 1차에서 대상 파일·디스크 여유 확인, 변경 전 autoextensible·max 값 기록 · 영향: 온라인 수행, 파일이 커지며 디스크 사용 증가 · 승인: DBA(변경 관리) · 백업/롤백: 기록한 이전 값으로 alter database datafile '<path>' autoextend off(또는 이전 maxsize) 로 되돌림 · 적용: Tibero 6/7"
+    - do: (2차·승인 후) MAXDATAFILES 상향 — 기술지원과 방법·작업 시간 확정 후 수행
+      check: "성공: 한도 상향 뒤 ADD DATAFILE 성공·TBR-24031 미발생 · 실패: 작업 실패 → 사전 백업으로 복구"
+      note: "사전조건: TmaxTibero 기술지원과 상향 방법(컨트롤파일 재생성 여부)·지원 버전 확인 · 영향: 컨트롤파일 관련 작업이면 DB 정지 필요 · 승인: DBA·서비스 담당(변경 관리) · 백업/롤백: 작업 전 전체 백업(데이터파일·컨트롤파일·tip)이 롤백 수단"
+  - stage: 3
+    steps:
+    - do: TmaxTibero 기술지원 자료
+      cmd: |
+        tar czf tibero_maxfiles_$(date +%Y%m%d).tgz $TB_HOME/config/$TB_SID.tip $TB_HOME/instance/$TB_SID/log/slog
+      check: "tip·slog·데이터파일 수/한도 조회 결과·DB 생성 스크립트(있으면)·버전"
+      note: "민감정보 마스킹: 데이터파일 경로·테이블스페이스 이름의 업무명, 호스트명·IP 를 가린 뒤 전달 · 전달 승인: DBA 확인 후 보안 담당 승인"

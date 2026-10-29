@@ -1,0 +1,8 @@
+[Unit]
+Description=LogTriage uploads retention cleanup (delete uploaded log originals older than LOGTRIAGE_UPLOAD_KEEP_DAYS)
+
+[Service]
+Type=oneshot
+User=logtriage
+EnvironmentFile=-/etc/logtriage/server.env
+ExecStart=/bin/bash -c 'D="${LOGTRIAGE_UPLOAD_KEEP_DAYS:-14}"; N=$(find /opt/logtriage/uploads -type f -mtime +"$D" -print -delete | wc -l); echo "uploads cleanup: keep=${D}d deleted=$N"'

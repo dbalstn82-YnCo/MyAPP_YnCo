@@ -1,0 +1,389 @@
+# 기존 'AI 로그분석기 v2.2' 내장 룰에서 변환 반입(tools/import_legacy_rules.py) — 중복(코드·패턴) 제외
+# 심각도 CRITICAL→critical HIGH→error MEDIUM→warn LOW→info · immediate_actions→즉시 · root_actions→중기 · negative_patterns→exclude
+rules:
+- id: LEG-VMW-HA-FAIL
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:HA.*failover)|(?:vSphere HA.*initiated)|(?:VM.*restarted.*HA)|(?:host.*failed.*HA)|(?:HA.*agent.*error)|(?:vCenter.*HA.*warning)
+  severity: critical
+  category: hardware
+  verdict: VMware HA 장애 — VMware HA 이벤트. ESXi 호스트 장애로 VM 자동 재시작
+  immediate:
+  - "vCenter › 클러스터 › 모니터 › 이벤트에서 HA 이벤트·장애 호스트·다시 켜진 VM 확인 (PowerCLI 읽기: `Get-VIEvent -Start (Get-Date).AddHours(-2) -MaxSamples 2000 | Where-Object { $_.FullFormattedMessage -match 'vSphere HA' } | Select-Object CreatedTime,FullFormattedMessage`)"
+  - "장애 ESXi 호스트: iLO·iDRAC 원격 화면에서 PSOD(보라색 화면)·전원·하드웨어 이벤트 로그(IML/SEL) 확인, 응답하면 ESXi 셸에서 `esxcli system stats uptime get`(재부팅 여부)·`tail -100 /var/log/fdm.log`(HA 에이전트)"
+  - "다시 켜진 VM 의 업무 정상 여부를 서비스 담당과 확인(애플리케이션 헬스체크)"
+  short:
+  - (2차·승인 후) 장애 호스트를 유지보수 모드로 두고 로그 번들 수집·원인 분석, 복구 후 DRS 로 재배치
+  - '영향: VM 서비스 일시 중단 후 다른 호스트에서 재기동.'
+  mid:
+  - 장애 ESXi 호스트 원인 분석 및 복구
+  - HA 클러스터 설계 재검토 (n+1 여유)
+  - VM 재시작 우선순위 설정
+  long:
+  - HA 여유 용량(호스트 1대 장애 허용) 정기 점검과 HA 이벤트 알림
+  source_note: 'legacy-analyzer-v2.2 virtual_hw_rules.json VMW-HA-FAIL (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-VMW-DATASTORE-FULL
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:datastore.*full)|(?:datastore.*threshold.*warning)|(?:cannot.*allocate.*disk.*vmware)|(?:snapshot.*commit.*fail.*vmware)|(?:thin.*provision.*overcommit)
+  severity: error
+  category: disk
+  verdict: VMware 데이터스토어 용량 부족 — VMware 데이터스토어 용량 초과
+  immediate:
+  - '데이터스토어 여유(읽기): ESXi `esxcli storage filesystem list` — Free 가 5% 이하면 VM 정지 위험'
+  - '용량 원인 확인: 스냅샷 델타 `ls -lh /vmfs/volumes/<datastore>/<vm>/` 와 스왑(.vswp) 파일 크기'
+  - 'Thin 초과 할당: vCenter › 데이터스토어 › 요약의 프로비저닝 용량 대 실제 용량 비교'
+  short:
+  - '(2차·승인 후, 롤백: 불가 — 삭제 전 업무 담당 확인) 불필요 스냅샷 통합·Storage vMotion·데이터스토어 확장으로 여유 확보'
+  - '영향: VM 정지 또는 성능 저하.'
+  mid:
+  - 스토리지 추가 또는 데이터스토어 확장
+  - 스냅샷 보존 정책(개수·기간) 최적화
+  - VM 마이그레이션으로 부하 분산
+  long:
+  - 데이터스토어 사용률 80%/90% 알람과 Thin 초과 할당 상한 정책
+  source_note: 'legacy-analyzer-v2.2 virtual_hw_rules.json VMW-DATASTORE-FULL (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-VMW-VSAN-ERROR
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:vSAN.*error)|(?:vSAN.*health.*critical)|(?:vSAN.*disk.*fault)|(?:vSAN.*resync)|(?:vSAN.*network.*partition)|(?:vSAN.*object.*inaccessible)
+  severity: critical
+  category: storage
+  verdict: vSAN 오류 — VMware vSAN 스토리지 오류
+  immediate:
+  - vCenter › 클러스터 › 모니터 › vSAN › Skyline Health(이전 판은 Health)에서 실패 항목 확인
+  - '클러스터 멤버(읽기): ESXi `esxcli vsan cluster get` — 멤버 수가 클러스터 호스트 수보다 적으면 네트워크 파티션'
+  - 'vSAN 네트워크: `esxcli vsan network list` 와 `vmkping -I <vmk> <peer_vsan_ip>`'
+  short:
+  - (2차·승인 후) 장애 디스크 교체·네트워크 복구 후 재동기화(Resync) 완료 확인, 유지보수 모드 진입 시 데이터 이전 옵션 선택
+  - '영향: vSAN 기반 VM 스토리지 접근 불가.'
+  mid:
+  - 장애 디스크 교체 후 재구성
+  - vSAN 네트워크 복구
+  - 접근 불가 객체는 VM 백업에서 복구
+  long:
+  - vSAN Health 알람 연동과 vSAN 호환표(HCL) 기준 드라이버·펌웨어 유지
+  source_note: 'legacy-analyzer-v2.2 virtual_hw_rules.json VMW-VSAN-ERROR (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-VMW-HOST-DISCONNECT
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:host.*disconnected.*vCenter)|(?:ESXi.*not.*responding)|(?:host.*unreachable.*vsphere)|(?:ESXi.*connection.*lost)|(?:host.*disconnected)
+  severity: critical
+  category: hardware
+  verdict: ESXi 호스트 연결 끊김 — ESXi 호스트와 vCenter 연결 끊김
+  immediate:
+  - "관리 네트워크 도달(읽기): Linux `ping -c 5 <esxi_mgmt_ip>` 와 `nc -zvw3 <esxi_mgmt_ip> 443` / Windows `Test-NetConnection <esxi_mgmt_ip> -Port 443` — 443 무응답이면 hostd 무응답 또는 네트워크 문제"
+  - "ESXi 콘솔(DCUI·iLO 원격)에서 호스트 응답·PSOD 여부 확인, 셸이 되면 `esxcli network ip interface ipv4 get` 로 vmk0 IP 확인"
+  - "vCenter 이벤트에서 연결 단절 시각과 HA 동작 여부 확인"
+  short:
+  - '(2차·승인 후, 롤백: VM 영향 없음 확인 후 진행) ESXi 관리 에이전트 재시작(`/etc/init.d/hostd restart`·`/etc/init.d/vpxa restart`) 후 vCenter 재연결'
+  - '영향: 해당 호스트 VM 관리 불가, HA 장애 감지 가능.'
+  mid:
+  - (2차·승인 후) VM 이전 후 ESXi 호스트 재기동
+  - VMware 관리 에이전트 재시작 (services.sh restart)
+  - 네트워크 스위치 포트 확인
+  long:
+  - 호스트 연결 상태 알람과 관리 네트워크 이중화(vmk0 업링크 2개)
+  source_note: 'legacy-analyzer-v2.2 virtual_hw_rules.json VMW-HOST-DISCONNECT (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-VMW-SNAPSHOT-WARN
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:snapshot.*warning.*vmware)|(?:snapshot.*too.*old)|(?:snapshot.*chain.*long)|(?:snapshot.*delta.*large)|(?:consolidation.*needed)
+  severity: warn
+  category: hardware
+  verdict: VMware 스냅샷 경고 — VMware VM 스냅샷 오래됨 또는 스냅샷 체인 과다
+  immediate:
+  - 'VM 스냅샷 개수·생성일 조회(읽기): vCenter › VM › 스냅샷 관리 또는 `vim-cmd vmsvc/get.snapshotinfo <vmid>`'
+  - 통합 필요(Consolidation needed) 경고 여부를 vCenter VM 요약 화면에서 확인
+  - '델타 디스크 크기: `ls -lh /vmfs/volumes/<datastore>/<vm>/`'
+  short:
+  - '(2차·승인 후, 롤백: 불가 — 삭제 전 VM 백업 확인) 업무 담당 승인 후 스냅샷 삭제·통합(Consolidate), 대용량은 비업무 시간'
+  - '영향: 디스크 공간 고갈, VM 성능 저하.'
+  mid:
+  - 스냅샷 정책 수립 (최대 3개, 최대 7일)
+  - 스냅샷 정기 정리 자동화
+  - VM 백업 솔루션 도입
+  long:
+  - 스냅샷 경과 일수 감시 알람과 백업 솔루션 스냅샷 잔존 점검
+  source_note: 'legacy-analyzer-v2.2 virtual_hw_rules.json VMW-SNAPSHOT-WARN (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-VMW-MIGRATION-FAIL
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:vMotion.*fail)|(?:live migration.*error)|(?:migration.*timeout)|(?:vMotion.*network.*error)|(?:VM.*migration.*failed)
+  severity: error
+  category: hardware
+  verdict: vMotion/Live Migration 실패 — VM 실시간 마이그레이션(vMotion) 실패
+  immediate:
+  - vCenter 작업·이벤트에서 vMotion 실패 사유(호환성·네트워크·시간 초과) 확인
+  - 'vMotion 네트워크(읽기): `vmkping -I <vmotion_vmk> <대상호스트_vMotion_IP>` — 점보프레임이면 `vmkping -I <vmk> -d -s 8972 <ip>`'
+  - 대상 호스트 자원·데이터스토어 접근 여부 확인
+  short:
+  - (2차·승인 후) 원인 해소 후 vMotion 재시도, CPU 호환 문제면 EVC 모드 검토
+  - '영향: VM 이중화 및 부하분산 실패.'
+  mid:
+  - vMotion 전용 네트워크 대역폭 확인
+  - 공유 스토리지 연결 확인
+  - VM 메모리 크기 검토
+  long:
+  - vMotion 네트워크 MTU·대역 표준화와 마이그레이션 실패 알람
+  source_note: 'legacy-analyzer-v2.2 virtual_hw_rules.json VMW-MIGRATION-FAIL (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-VMW-DRS-WARN
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:DRS.*recommendation)|(?:DRS.*imbalance)|(?:DRS.*migration.*fail)|(?:cluster.*imbalanced)
+  severity: warn
+  category: hardware
+  verdict: VMware DRS 경고 — VMware DRS 클러스터 불균형 또는 권장사항 미적용
+  immediate:
+  - "vCenter › 클러스터 › 모니터 › vSphere DRS 에서 권장 사항·불균형 지표 확인 (PowerCLI 읽기: `Get-DrsRecommendation -Cluster <cluster>`)"
+  - "호스트별 사용률(읽기): PowerCLI `Get-VMHost -Location <cluster> | Select-Object Name,CpuUsageMhz,CpuTotalMhz,MemoryUsageGB,MemoryTotalGB` — 특정 호스트만 80% 이상이면 불균형 확정"
+  short:
+  - '(2차·승인 후, 롤백: 이동 전 VM 위치 기록) 권장 사항 수동 적용 또는 문제 VM 의 선호도 규칙 확인'
+  - '영향: 특정 ESXi 호스트 과부하.'
+  mid:
+  - DRS 마이그레이션 권장사항 수동 적용
+  - DRS 자동화 수준 검토
+  - 클러스터 ESXi 호스트 추가
+  long:
+  - DRS 자동화 수준·이주 임계 정책 문서화와 클러스터 용량 분기 점검
+  source_note: 'legacy-analyzer-v2.2 virtual_hw_rules.json VMW-DRS-WARN (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-KVM-VM-CRASH
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:KVM.*crash)|(?:qemu.*error)|(?:kvm.*guest.*crash)|(?:libvirt.*error)|(?:VM.*stopped.*unexpectedly.*kvm)
+  severity: critical
+  category: hardware
+  verdict: KVM VM 비정상 종료 — KVM 가상머신 비정상 종료
+  immediate:
+  - 'VM 상태·종료 사유(읽기): `virsh domstate <vm> --reason` — crashed 여부'
+  - 'QEMU 로그: `tail -50 /var/log/libvirt/qemu/<vm>.log` 와 `journalctl -u libvirtd --since ''-1 hour'' | tail -50`'
+  - '호스트 메모리 고갈 원인 여부: `journalctl -k --since ''-1 hour'' | grep -iE ''out of memory|qemu''`'
+  short:
+  - '(2차·승인 후, 롤백: 기동 전 디스크 이미지 백업 확인) 원인 확인 후 `virsh start <vm>` 로 기동, 호스트 메모리 고갈이면 할당 재조정'
+  - '영향: 해당 VM 서비스 중단.'
+  mid:
+  - libvirt/QEMU 버전 업그레이드
+  - VM 설정(메모리·디바이스·머신 유형) 검토
+  - 호스트 시스템 리소스 확인
+  long:
+  - VM 상태 감시(libvirt 이벤트)와 libvirt/QEMU 판 관리
+  source_note: 'legacy-analyzer-v2.2 virtual_hw_rules.json KVM-VM-CRASH (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-KVM-STORAGE-ERROR
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:KVM.*storage.*error)|(?:qemu.*disk.*error)|(?:libvirt.*storage.*fail)|(?:image.*corrupt.*kvm)
+  severity: error
+  category: disk
+  verdict: KVM 스토리지 오류 — KVM VM 디스크 이미지 접근 오류
+  immediate:
+  - '블록 오류(읽기): `virsh domblkerror <vm>` — 오류 장치·사유(no space 등)'
+  - '디스크 이미지 경로·크기: `virsh domblklist <vm>` 와 `qemu-img info -U <image_path>` (QEMU 2.10+)'
+  - '이미지 저장소 여유: `df -h <image_dir>` 와 `dmesg -T | grep -i ''I/O error'' | tail`'
+  short:
+  - '(2차·승인 후, 롤백: 검사 전 이미지 사본) VM 정지 후 `qemu-img check <image_path>`(-r 없이 검사만), 손상 시 백업에서 복구'
+  - '영향: VM 디스크 I/O 실패, 데이터 손상 위험.'
+  mid:
+  - qemu-img check 로 이미지 검사
+  - 손상 이미지는 백업에서 VM 복구
+  - 이미지 저장소(스토리지 HW·경로) 점검
+  long:
+  - 이미지 저장소 사용률 감시와 VM 디스크 정기 백업 검증
+  source_note: 'legacy-analyzer-v2.2 virtual_hw_rules.json KVM-STORAGE-ERROR (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-VMW-LICENSE-WARN
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:license.*warning.*vmware)|(?:license.*expired.*vsphere)|(?:vCenter.*license.*critical)|(?:feature.*disabled.*license)
+  severity: warn
+  category: hardware
+  verdict: VMware 라이선스 경고 — VMware 라이선스 만료 또는 용량 초과
+  immediate:
+  - "vCenter › 관리 › 라이선싱에서 만료일·사용량(CPU·코어) 대 보유량 확인"
+  - "평가판 호스트(읽기): PowerCLI `Get-VMHost | Select-Object Name,LicenseKey` 또는 ESXi 셸 `vim-cmd vimsvc/license --show` — 키가 00000-00000-00000-00000-00000 이면 평가판(Evaluation) 모드"
+  short:
+  - (2차) 구매·갱신 일정 확정, 초과 사용이면 라이선스 재할당
+  - '영향: 고급 기능 비활성화 또는 제품 사용 불가.'
+  mid:
+  - 라이선스 갱신·추가 구매 절차 착수(만료 60일 전)
+  - 호스트별 라이선스 재할당 점검
+  - 공급사 계약 담당 연락
+  long:
+  - 라이선스 만료 60/30일 전 알림 등록
+  source_note: 'legacy-analyzer-v2.2 virtual_hw_rules.json VMW-LICENSE-WARN (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-VMW-CERT-EXPIRE
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:certificate.*expired.*vmware)|(?:vCenter.*certificate.*warning)|(?:SSL.*expired.*esxi)|(?:VMCA.*certificate)
+  severity: error
+  category: security
+  verdict: VMware 인증서 만료 — VMware vCenter 또는 ESXi SSL 인증서 만료
+  immediate:
+  - vCenter › 관리 › 인증서 관리 화면에서 만료 인증서(머신 SSL·STS·솔루션 사용자) 확인
+  - '실제 제공 인증서 만료일(읽기): `openssl s_client -connect <vcenter>:443 </dev/null 2>/dev/null | openssl x509 -noout -enddate`'
+  - 'ESXi 호스트 인증서: vCenter › 호스트 › 구성 › 인증서 화면의 만료일'
+  short:
+  - '(2차·승인 후, 롤백: VCSA 파일 기반 백업·스냅샷 선행) vSphere Certificate Manager 또는 UI 로 인증서 갱신'
+  - '영향: 관리 UI 접근 불가, VM 마이그레이션 실패.'
+  mid:
+  - vSphere Certificate Manager로 인증서 갱신
+  - VMCA 루트·머신 인증서 교체 절차 문서화
+  long:
+  - vCenter·ESXi 인증서 만료 60/30일 알람 등록
+  source_note: 'legacy-analyzer-v2.2 virtual_hw_rules.json VMW-CERT-EXPIRE (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-VMW-NW-ERROR
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:dvSwitch.*error)|(?:distributed switch.*fail)|(?:portgroup.*error)|(?:vmnic.*down)|(?:vDS.*health.*warning)|(?:vmkernel.*network.*error)
+  severity: error
+  category: hardware
+  verdict: VMware 가상 네트워크 오류 — VMware 분산 가상 스위치(dvSwitch) 또는 포트 그룹 오류
+  immediate:
+  - 'ESXi 물리 NIC 상태(읽기): `esxcli network nic list` — Link Status Down 인 vmnic 기록'
+  - 'NIC 통계: `esxcli network nic stats get -n <vmnic>` — 수신 오류·드롭 증가 여부'
+  - vCenter › 네트워킹 › dvSwitch › 모니터 › 상태(Health Check) 확인
+  short:
+  - '(2차·승인 후, 롤백: dvSwitch 설정 내보내기 선행) 업링크 케이블·스위치 포트 복구 또는 포트 그룹 VLAN·팀 구성 수정'
+  - '영향: VM 네트워크 통신 불가.'
+  mid:
+  - dvSwitch 설정 수정
+  - vmnic 연결 상태 점검
+  - 포트 그룹 VLAN·팀 구성 설정 표준화
+  long:
+  - vmnic 링크 다운 알람과 업링크 이중화 점검
+  source_note: 'legacy-analyzer-v2.2 virtual_hw_rules.json VMW-NW-ERROR (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-VMW-VUM-WARN
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:VUM.*warning)|(?:vSphere Update Manager.*error)|(?:patch.*compliance.*fail)|(?:remediation.*failed.*vmware)
+  severity: info
+  category: hardware
+  verdict: VMware Update Manager 경고 — VMware Update Manager 패치 적용 실패 또는 컴플라이언스 미달
+  immediate:
+  - vCenter › 업데이트(Lifecycle Manager/Update Manager) 작업 이력에서 실패 호스트·오류 메시지 확인
+  - '실패 호스트 판(읽기): `esxcli system version get` 와 `esxcli software vib list | head -30`'
+  short:
+  - '(2차·승인 후, 롤백: 패치 전 호스트 구성 백업) 유지보수 모드 전환 후 패치 재적용'
+  - '영향: 보안 패치 미적용 위험.'
+  mid:
+  - 실패 원인 해소 후 패치 수동 재적용
+  - 업데이트 기준선(Baseline) 재설정·호환성 확인
+  - ESXi 유지보수 모드 후 패치 적용
+  long:
+  - 패치 컴플라이언스 월간 점검과 HCL 기준 판 관리
+  source_note: 'legacy-analyzer-v2.2 virtual_hw_rules.json VMW-VUM-WARN (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-VMW-RESOURCE-CONTENTION
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:resource.*contention.*vmware)|(?:CPU.*ready.*high)|(?:memory.*balloon.*vmware)|(?:swap.*vmware)|(?:co-stop.*high)|(?:memory.*compressed)
+  severity: error
+  category: memory
+  verdict: VMware 리소스 경합 — VMware 클러스터 CPU/메모리 자원 경합
+  immediate:
+  - VM 성능 차트에서 CPU 준비(%RDY)·Co-stop·Balloon·Swap 확인(읽기) — 단일 VM 인지 호스트 전체인지 구분
+  - '호스트 실시간: 대화형 `esxtop` 의 c(CPU)·m(메모리) 화면 — %RDY 10% 이상·SWCUR 0 초과면 경합'
+  - 리소스 사용 상위 VM 식별
+  short:
+  - '(2차·승인 후, 롤백: 변경 전 예약·제한 값 기록) 경합 VM 을 여유 호스트로 이동하고 과도한 제한(Limit) 설정 해제'
+  - '영향: VM 성능 저하, 응답 지연.'
+  mid:
+  - VM 리소스 예약/제한 설정
+  - 클러스터에 ESXi 호스트 추가
+  - VM 마이그레이션으로 부하 분산
+  long:
+  - 호스트 오버커밋 비율 상한 정책과 분기별 용량 계획
+  source_note: 'legacy-analyzer-v2.2 virtual_hw_rules.json VMW-RESOURCE-CONTENTION (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관
+- id: LEG-KVM-OVERCOMMIT
+  layer: os
+  product:
+  - '*'
+  match:
+    regex: (?:KVM.*overcommit)|(?:memory.*overcommit.*kvm)|(?:balloon.*driver)|(?:ksm.*active.*high)
+  severity: error
+  category: memory
+  verdict: KVM 메모리 오버커밋 — KVM 호스트 메모리 오버커밋 과다
+  immediate:
+  - '호스트 메모리(읽기): `free -m` 과 `virsh nodememstats`'
+  - 'VM 별 할당 합계: `virsh list --name | xargs -I{} virsh dominfo {} | grep ''Max memory''`'
+  - 'KSM·스왑: `cat /sys/kernel/mm/ksm/run` · `cat /sys/kernel/mm/ksm/pages_sharing` 와 `vmstat 1 5` 의 si/so'
+  short:
+  - '(2차·승인 후, 롤백: 변경 전 `virsh dumpxml <vm>` 보관) VM 메모리 할당 축소 또는 다른 호스트로 VM 이전'
+  - '영향: VM 성능 저하 또는 OOM 발생.'
+  mid:
+  - VM 수 또는 메모리 할당 조정
+  - 메모리 오버커밋 비율 낮추기
+  - KVM 호스트 물리 메모리 증설
+  long:
+  - '호스트 메모리 할당률(예: 물리 메모리 1.2배 이내) 정책과 감시'
+  source_note: 'legacy-analyzer-v2.2 virtual_hw_rules.json KVM-OVERCOMMIT (원 출처: builtin)'
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: 키워드 기반 공통 룰(HW·네트워크·스토리지·가상화·일반) — 제품·버전 무관

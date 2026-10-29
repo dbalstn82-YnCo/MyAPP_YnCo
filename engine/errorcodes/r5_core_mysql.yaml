@@ -1,0 +1,116 @@
+# 5차 보강(2026-10-16) — GPT 핵심 코드 대조(MySQL 8.0)에서 빠진 서버 오류. dev.mysql.com Server Error Message Reference(5.7·8.0·8.4)와 Reference Manual 로 의미 확인한 것만 넣었다.
+product: mysql
+layer: db
+codes:
+- code: MY-1203
+  severity: error
+  category: connection
+  title: 계정별 동시 접속 한도(max_user_connections) 초과
+  vendor_cause: "한 계정의 동시 접속 수가 max_user_connections 한도를 넘어 새 접속이 거부된 상태(ER_TOO_MANY_USER_CONNECTIONS, SQLSTATE 42000). 계정별 MAX_USER_CONNECTIONS 가 0 이 아니면 그 값이, 0 이면 전역 max_user_connections 가 적용된다. WAS 커넥션 풀 최대값이 한도보다 크거나 커넥션 누수가 흔한 원인."
+  vendor_action: "계정별 한도는 ALTER USER … WITH MAX_USER_CONNECTIONS <n> 으로 지정하며 0 이면 전역 max_user_connections 값을 따르고, 둘 다 0 이면 한도가 없다. 연결을 끊은 직후 다시 붙을 때 서버가 끊김 처리를 마치기 전이면 이 오류가 날 수 있다."
+  vendor_url: https://dev.mysql.com/doc/refman/8.0/en/user-resources.html
+  immediate:
+  - "적용 한도 확인: `SELECT @@global.max_user_connections;` 와 `SELECT User, Host, max_user_connections FROM mysql.user WHERE User = '<user>';` — 계정 값이 0 이면 전역 값이 한도 (읽기 전용)"
+  - "계정·접속지별 현재 세션 수: `SELECT USER, HOST, COMMAND, COUNT(*) FROM information_schema.PROCESSLIST WHERE USER = '<user>' GROUP BY USER, HOST, COMMAND ORDER BY 4 DESC;` — Sleep 세션이 대부분이면 풀 과다·누수 의심 (PROCESS 권한 필요)"
+  - "같은 계정을 쓰는 WAS 들의 커넥션 풀 최대값 합계(인스턴스 수 × maxPoolSize)를 한도와 비교해 기록"
+  short:
+  - "(2차·승인 후, 롤백: 변경 전 값 기록 후 같은 문으로 원복) 풀 합계가 한도를 넘으면 `ALTER USER '<user>'@'<host>' WITH MAX_USER_CONNECTIONS <n>;` 로 계정 한도 조정 — max_connections 여유를 먼저 확인"
+  - "(2차·승인 후) 누수로 쌓인 Sleep 세션은 애플리케이션 담당 확인 후 `KILL <id>;` 로 정리(진행 중 트랜잭션은 롤백됨, 롤백 불가이므로 세션 정보 먼저 기록)"
+  mid:
+  - "WAS 풀 maxPoolSize·idle timeout 을 계정 한도 이하로 재산정하고, 풀의 유휴 연결 정리(minIdle·maxLifetime)와 wait_timeout 을 맞춘다"
+  long:
+  - "계정별 세션 수(PROCESSLIST 집계)가 한도의 80% 를 넘으면 경보, 서비스별 전용 계정·풀 크기 표준을 문서화"
+  versions:
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  version_note: "5.7·8.0·8.4 오류 참조에서 같은 번호·문구('User %s already has more than 'max_user_connections' active connections') 확인. 클라이언트에 돌아가는 오류라 에러 로그보다 애플리케이션 로그에 주로 남는다. 계정 한도 지정은 ALTER USER … WITH MAX_USER_CONNECTIONS (CREATE USER 의 WITH 절도 같음)"
+  source: "공식 문서 대조(2026-10-16 5차 보강)"
+- code: MY-1396
+  severity: error
+  category: security
+  title: 계정 관리 문 실패(Operation CREATE/DROP/ALTER USER failed)
+  vendor_cause: "CREATE USER·DROP USER·ALTER USER 같은 계정 관리 문이 대상 계정 때문에 실패했다(ER_CANNOT_USER, 'Operation %s failed for %s'). 흔한 원인은 이미 있는 계정을 CREATE USER 하거나 없는 계정을 DROP/ALTER 하는 경우로, 계정은 'user'@'host' 쌍이라 호스트 부분('%' 와 'localhost')이 다르면 다른 계정이다."
+  vendor_action: "이미 있는 계정을 만들면 기본적으로 오류이며 IF NOT EXISTS 를 쓰면 경고로 바뀐다. 없는 계정을 DROP USER 하면 오류이며 IF EXISTS 를 쓰면 경고가 된다. 여러 계정을 한 문장에 쓰면 하나라도 실패 시 전체가 롤백된다."
+  vendor_url: https://dev.mysql.com/doc/refman/8.0/en/create-user.html
+  immediate:
+  - "오류 원문 'Operation <문> failed for <계정>' 의 문 종류와 대상 'user'@'host' 를 기록하고 실제 계정 존재 확인: `SELECT User, Host, account_locked FROM mysql.user WHERE User = '<user>';` — 비밀번호 열(authentication_string)은 조회하지 않는다"
+  - "기존 계정의 권한 확인: `SHOW GRANTS FOR '<user>'@'<host>';` — 같은 이름이 다른 Host 로 있는지(예: '%' 와 'localhost') 비교 (읽기 전용)"
+  short:
+  - "(2차·승인 후, 롤백: 실행 전 SHOW CREATE USER·SHOW GRANTS 결과 보관) 배포 스크립트를 `CREATE USER IF NOT EXISTS` / `DROP USER IF EXISTS` 로 고치거나 정확한 Host 로 다시 실행 — 여러 계정을 한 문장에 묶었다면 하나씩 나눠 실패 계정 특정"
+  mid:
+  - "계정 생성·삭제를 IF [NOT] EXISTS 를 쓰는 멱등 스크립트로 표준화하고, 계정 Host 규칙('%'·대역·localhost) 을 문서화"
+  long:
+  - "계정 변경 이력(감사 로그 또는 변경 관리 기록)과 mysql.user 정기 대조로 유령·중복 계정 점검"
+  versions:
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  version_note: "5.7·8.0·8.4 오류 참조에 'Operation %s failed for %s'(SQLSTATE HY000) 확인. CREATE USER IF NOT EXISTS·DROP USER IF EXISTS 는 5.7.8+ 에서 지원, 8.0 부터 계정 관리 문은 원자적(전체 성공 또는 전체 롤백). 8.0.22+ 는 저장 객체의 DEFINER 로 쓰이는 계정의 DROP USER 가 실패할 수 있다(SET_USER_ID 권한이면 경고)"
+  source: "공식 문서 대조(2026-10-16 5차 보강)"
+- code: MY-1451
+  severity: warn
+  category: internal
+  title: 외래키 제약 — 자식 행이 있어 부모 행 삭제·변경 불가
+  vendor_cause: "자식 테이블이 참조하는 부모 행을 삭제·변경하려 해 외래키 제약이 실패했다(ER_ROW_IS_REFERENCED_2, SQLSTATE 23000). InnoDB 에서 ON DELETE/UPDATE 를 지정하지 않으면(RESTRICT/NO ACTION) 자식 행이 있는 부모 변경을 거부한다. 처리 순서가 뒤바뀐 배치·삭제 로직이 흔한 원인."
+  vendor_action: "InnoDB 는 자식 행이 있는 부모 행을 지울 때 외래키 제약이 실패하면 이 오류를 낸다. 자식 행을 먼저 삭제한다."
+  vendor_url: https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_row_is_referenced_2
+  immediate:
+  - "오류 원문 괄호 안의 제약 이름·자식 테이블·참조 열을 기록하고 최근 외래키 오류 상세 확인: `SHOW ENGINE INNODB STATUS\\G` 의 'LATEST FOREIGN KEY ERROR' 구간 (PROCESS 권한, 읽기 전용)"
+  - "참조 관계 확인: `SELECT TABLE_NAME, COLUMN_NAME, CONSTRAINT_NAME, REFERENCED_TABLE_NAME FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE WHERE REFERENCED_TABLE_SCHEMA = '<db>' AND REFERENCED_TABLE_NAME = '<부모 테이블>';` 와 `SHOW CREATE TABLE <db>.<자식 테이블>\\G` 의 ON DELETE/ON UPDATE 절"
+  short:
+  - "(2차·승인 후, 롤백: 삭제 대상 자식 행을 먼저 백업 테이블·덤프로 보관) 업무 담당이 확인한 경우에만 자식 행 → 부모 행 순서로 삭제하도록 처리 순서 수정 — foreign_key_checks=0 으로 우회하지 않는다(정합성 깨짐, 다시 켜도 검사하지 않음)"
+  mid:
+  - "삭제·변경 로직의 부모/자식 처리 순서를 명시하고, 업무상 연쇄 삭제가 맞는 관계만 ON DELETE CASCADE·SET NULL 적용을 설계 검토"
+  long:
+  - "외래키 오류(1451·1452) 건수 감시와 테이블 관계도(INFORMATION_SCHEMA.KEY_COLUMN_USAGE 기준) 최신화"
+  versions:
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  version_note: "5.7·8.0·8.4 오류 참조에 같은 번호·SQLSTATE 23000 확인. 클라이언트 오류라 애플리케이션 로그에 주로 남는다"
+  source: "공식 문서 대조(2026-10-16 5차 보강)"
+- code: MY-1452
+  severity: warn
+  category: internal
+  title: 외래키 제약 — 부모 행이 없어 자식 행 입력·변경 불가
+  vendor_cause: "참조할 부모 행이 없는 값을 자식 테이블에 넣거나 바꾸려 해 외래키 제약이 실패했다(ER_NO_REFERENCED_ROW_2, SQLSTATE 23000). 부모·자식 입력 순서가 뒤바뀐 배치, 다른 트랜잭션의 부모 삭제, 코드값 누락이 흔한 원인."
+  vendor_action: "InnoDB 는 부모 행이 없는 행을 추가할 때 외래키 제약이 실패하면 이 오류를 낸다. 부모 행을 먼저 추가한다."
+  vendor_url: https://dev.mysql.com/doc/mysql-errors/8.0/en/server-error-reference.html#error_er_no_referenced_row_2
+  immediate:
+  - "오류 원문 괄호 안의 제약 이름·참조 테이블·열을 기록하고 `SHOW ENGINE INNODB STATUS\\G` 의 'LATEST FOREIGN KEY ERROR' 구간에서 비교된 값 확인 (PROCESS 권한, 읽기 전용)"
+  - "부모 값 존재 확인: `SELECT COUNT(*) FROM <db>.<부모 테이블> WHERE <참조 열> = <값>;` — 0 이면 부모 누락 확정, 같은 시각 부모 행 DELETE·트랜잭션 ROLLBACK 이 있었는지 애플리케이션 로그 대조"
+  short:
+  - "(2차·승인 후, 롤백: 입력한 부모 행의 키를 기록해 두고 필요 시 삭제) 업무 담당 확인 후 누락된 부모(코드) 행을 먼저 입력하고 실패 건 재처리 — foreign_key_checks=0 으로 우회하지 않는다"
+  mid:
+  - "배치·연계 적재 순서를 부모 → 자식으로 고정하고, 코드 테이블 선적재와 재처리 시 부모 존재 확인 로직을 넣는다"
+  long:
+  - "외래키 오류(1451·1452) 건수 감시와 연계 적재 순서 표준 문서화"
+  versions:
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  version_note: "5.7·8.0·8.4 오류 참조에 같은 번호·SQLSTATE 23000 확인. 대량 적재(mysqldump 복원) 는 덤프가 foreign_key_checks 를 자동으로 끄므로 이 오류가 나지 않는 것이 정상"
+  source: "공식 문서 대조(2026-10-16 5차 보강)"
+- code: MY-1819
+  severity: warn
+  category: security
+  title: 비밀번호가 현재 정책(validate_password) 미충족
+  vendor_cause: "계정 생성·비밀번호 변경 시 지정한 비밀번호가 validate_password 의 정책(길이·숫자·대소문자·특수문자·사전 단어·사용자명 포함 여부)을 만족하지 못해 거부됐다(ER_NOT_VALID_PASSWORD). 정책 강화 후 기존 배포 스크립트·초기 비밀번호를 그대로 쓰는 경우가 흔하다."
+  vendor_action: "정책 수준 MEDIUM(기본) 은 길이·숫자·대소문자·특수문자를, STRONG 은 여기에 사전 파일 검사를 더한다. 현재 설정은 SHOW VARIABLES LIKE 'validate_password.%' 로 확인한다."
+  vendor_url: https://dev.mysql.com/doc/refman/8.0/en/validate-password-options-variables.html
+  immediate:
+  - "현재 정책 확인: `SHOW VARIABLES LIKE 'validate_password%';` — 8.0+ 컴포넌트는 validate_password.policy/.length/.mixed_case_count/.number_count/.special_char_count/.check_user_name, 5.7 플러그인은 validate_password_policy 등 밑줄 이름 (읽기 전용)"
+  - "실패한 문이 어느 계정·어떤 작업(CREATE USER/ALTER USER/SET PASSWORD)인지 애플리케이션·스크립트 로그로 기록 — 비밀번호 값 자체는 로그·보고서에 옮기지 않는다"
+  short:
+  - "(2차·승인 후) 정책을 만족하는 새 비밀번호를 계정 담당이 정해 다시 실행 — 정책 완화(`SET GLOBAL validate_password.policy=…`) 는 보안 담당 승인 사항이며 롤백: 변경 전 SHOW VARIABLES 결과로 원복"
+  mid:
+  - "계정 발급 절차의 초기 비밀번호 규칙을 validate_password 설정(length·policy·check_user_name)과 맞추고 배포 스크립트에 하드코딩된 비밀번호 제거"
+  long:
+  - "비밀번호 정책 값을 보안 기준서에 명시하고 my.cnf 영구 설정과 SHOW VARIABLES 결과를 정기 대조"
+  versions:
+  - MySQL 5.7
+  - MySQL 8.0
+  - MySQL 8.4
+  version_note: "5.7·8.0·8.4 오류 참조에 'Your password does not satisfy the current policy requirements'(HY000) 확인. 5.7 은 validate_password 플러그인(변수 validate_password_*), 8.0+ 는 컴포넌트(validate_password.*) — 플러그인은 사용 중단 예정. validate_password 미설치 서버에서는 발생하지 않는다"
+  source: "공식 문서 대조(2026-10-16 5차 보강)"

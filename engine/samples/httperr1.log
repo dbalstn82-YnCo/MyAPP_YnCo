@@ -1,0 +1,10 @@
+#Software: Microsoft HTTP API 2.0
+#Version: 1.0
+#Date: 2026-09-09 05:00:00
+#Fields: date time c-ip c-port s-ip s-port cs-version cs-method cs-uri sc-status s-siteid s-reason s-queuename
+2026-09-09 05:00:12 10.0.0.5 51234 10.0.0.20 80 HTTP/1.1 GET /api/v1/items - 1 Timer_ConnectionIdle -
+2026-09-09 05:02:11 10.0.0.5 51240 10.0.0.20 80 HTTP/1.1 POST /api/v1/orders 503 1 QueueFull DefaultAppPool
+2026-09-09 05:02:12 10.0.0.6 51241 10.0.0.20 80 HTTP/1.1 POST /api/v1/orders 503 1 QueueFull DefaultAppPool
+2026-09-09 05:02:15 10.0.0.5 51250 10.0.0.20 80 HTTP/1.1 GET /api/v1/items - 1 Connection_Abandoned_By_AppPool DefaultAppPool
+2026-09-09 05:02:40 10.0.0.9 40001 10.0.0.20 80 HTTP/1.1 GET /admin 400 1 BadRequest -
+2026-09-09 05:03:01 10.0.0.5 51260 10.0.0.20 80 HTTP/1.1 GET /api/v1/items 503 1 AppOffline DefaultAppPool

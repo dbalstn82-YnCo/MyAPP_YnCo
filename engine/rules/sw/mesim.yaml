@@ -1,0 +1,158 @@
+# 상용SW — 메타빌드 MESIM ESB · APIG (log4j 기반)
+# ※ 공개 문서에 로그 상세가 없어 도메인 시그니처로 시작 — 실로그·매뉴얼 확보 시 보강
+rules:
+- id: SW-ESB-001
+  layer: sw
+  product:
+  - mesim-esb
+  - mesim-apig
+  - mesim-eai
+  match:
+    regex: Connection refused|ConnectException|No route to host|연결.*(실패|거부)|접속.*(실패|불가)
+  severity: critical
+  category: upstream
+  verdict: 연계 대상 시스템 연결 실패
+  immediate:
+  - "`grep -n -E \"Connection refused|ConnectException|No route to host\" <mesim_log> | tail -30` 으로 대상 host:port·인터페이스(어댑터)·시각 확인"
+  - "`nc -zvw3 <host> <port>` 와 `getent hosts <host>` 로 대상 포트 도달·이름 해석 확인, 영향 인터페이스 목록 기록"
+  short:
+  - "연결 실패 시간대와 대상 시스템 작업·배포 이력을 대조해 원인 구간(대상 정지·방화벽·DNS) 확정"
+  - "(2차·승인 후) 장시간 지속 시 영향 인터페이스 우회 경로 전환(롤백: 원래 경로 복원)"
+  mid:
+  - "어댑터별 재시도 횟수·간격(백오프)과 연결 timeout 을 대상 SLA 기준으로 재설정"
+  long:
+  - "연계 대상별 연결 실패율 감시와 연계 구간 이중화·헬스체크 체계 운영"
+  versions:
+  - MESIM ESB/APIG/EAI (메타빌드, 납품 버전 기준)
+  version_note: MESIM 문구 룰 — 납품 버전 기준(Camel/Jetty/Hystrix 레거시 문구 포함)
+- id: SW-ESB-002
+  layer: sw
+  product:
+  - mesim-esb
+  - mesim-eai
+  match:
+    regex: TransformException|SAXParseException|JsonParseException|UnmarshalException|(변환|매핑).*(오류|실패)
+  severity: error
+  category: internal
+  verdict: 메시지 변환/매핑 오류
+  immediate:
+  - "`grep -n -A5 -E \"TransformException|SAXParseException|JsonParseException|UnmarshalException\" <mesim_log> | tail -40` 으로 인터페이스 ID·실패 위치 확인"
+  - "오류 원본 전문을 개인정보 가린 최소 범위로 보존(재처리 대비), 같은 인터페이스 반복 여부 집계"
+  short:
+  - "전문 규격 변경 여부를 송신 시스템 배포 이력과 대조하고 연계처에 규격 확인 요청"
+  mid:
+  - "매핑 룰 수정과 수신 전문 스키마 검증 단계 추가(변경은 승인 후, 롤백: 이전 매핑 정의 사본)"
+  long:
+  - "전문 규격 변경 사전 통보·연계 시험 절차를 연계처와 합의해 운영"
+  versions:
+  - MESIM ESB/APIG/EAI (메타빌드, 납품 버전 기준)
+  version_note: MESIM 문구 룰 — 납품 버전 기준(Camel/Jetty/Hystrix 레거시 문구 포함)
+- id: SW-ESB-003
+  layer: sw
+  product:
+  - mesim-esb
+  - mesim-apig
+  - mesim-eai
+  match:
+    regex: RejectedExecutionException|queue.*(full|overflow)|(큐|대기열).*(적체|초과|가득)
+  severity: critical
+  category: capacity
+  verdict: 처리 큐/스레드 풀 포화
+  immediate:
+  - "`grep -n -E \"RejectedExecutionException|queue.*(full|overflow)\" <mesim_log> | tail -30` 으로 포화 인터페이스·시각 확인"
+  - "`jcmd <PID> Thread.print > /var/tmp/td_$(date +%H%M%S).txt` 로 스레드 덤프 보존(프로세스 유지) 후 같은 대기 스택 스레드 수 확인, 유입량 급증 여부를 접근 로그로 집계"
+  short:
+  - "(2차·승인 후) 필요 시 유입 측 유량 제한 적용(롤백: 제한 해제), 스레드 풀·큐 크기와 실제 처리량을 비교"
+  mid:
+  - "스레드 풀·큐 크기를 처리량 기준으로 재산정하고 병목 인터페이스(느린 대상 시스템) 성능 개선 요청"
+  long:
+  - "스레드 풀 사용률·큐 적체를 감시하고 부하 분산·수평 확장 계획 운영"
+  versions:
+  - MESIM ESB/APIG/EAI (메타빌드, 납품 버전 기준)
+  version_note: MESIM 문구 룰 — 납품 버전 기준(Camel/Jetty/Hystrix 레거시 문구 포함)
+- id: SW-ESB-004
+  layer: sw
+  product:
+  - mesim-esb
+  - mesim-apig
+  - mesim-eai
+  match:
+    regex: TransactionTimedOut|transaction.*timed?.?out|(거래|트랜잭션).*(타임아웃|시간.?초과)
+  severity: error
+  category: upstream
+  verdict: 거래(트랜잭션) 타임아웃
+  immediate:
+  - "`grep -n -i -E \"transaction.*timed? ?out|TransactionTimedOut|거래.*(타임아웃|시간)\" <mesim_log> | tail -30` 으로 지연 인터페이스·대상 시스템·시각 확인"
+  - "같은 시각 대상 시스템 응답시간을 `curl -s -o /dev/null -w '%{time_total}\\n' --max-time 30 <url>`(조회성 경로만) 또는 대상 담당 확인으로 측정해 지연 구간 판별"
+  short:
+  - "타임아웃 설정값과 실제 응답시간 분포를 비교해 대상 지연인지 설정 과소인지 판단, 설정 조정은 승인 후(롤백: 이전 값 기록)"
+  mid:
+  - "대상 시스템 성능 개선 협의와 인터페이스별 타임아웃 값을 SLA 기준으로 문서화"
+  long:
+  - "인터페이스별 타임아웃 건수 감시와 타임아웃·재처리 표준 운영"
+  versions:
+  - MESIM ESB/APIG/EAI (메타빌드, 납품 버전 기준)
+  version_note: MESIM 문구 룰 — 납품 버전 기준(Camel/Jetty/Hystrix 레거시 문구 포함)
+- id: SW-APIG-001
+  layer: sw
+  product:
+  - mesim-apig
+  match:
+    regex: Bad Gateway|backend.*(unavailable|down|error)|(라우팅|백엔드).*(실패|불가)|\b502\b
+  severity: critical
+  category: upstream
+  verdict: API 백엔드 라우팅 실패
+  immediate:
+  - "`grep -n -E \"Bad Gateway| 502 |[Bb]ackend.*(unavailable|down|error)\" <apig_log> | tail -30` 으로 대상 백엔드·시작 시각 확인"
+  - "`nc -zvw3 <host> <port>` 로 백엔드 도달 확인 — 라우팅 제외(격리)는 2차"
+  short:
+  - "(2차·승인 후) 장애 백엔드를 라우팅 대상에서 제외(롤백: 복구 확인 후 재포함), 백엔드 장애 원인 분석 결과와 대조"
+  mid:
+  - "백엔드 헬스체크·자동 격리 구성과 장애 시 대체 응답 정책 정비"
+  long:
+  - "백엔드 이중화 구성과 백엔드별 가용률 감시 운영"
+  versions:
+  - MESIM ESB/APIG/EAI (메타빌드, 납품 버전 기준)
+  version_note: MESIM APIG 문구 룰 — 납품 버전 기준(HTTP CALL ERROR·CIRCUIT BREAK 등 Hystrix 1.5 문구)
+- id: SW-APIG-002
+  layer: sw
+  product:
+  - mesim-apig
+  match:
+    regex: authentication fail|authorization fail|invalid.*(token|api.?key)|(인증|인가).*(실패|오류)|\b401\b|\b403\b
+  severity: error
+  category: security
+  verdict: API 인증/인가 실패
+  immediate:
+  - "`grep -n -E \"authentication fail|authorization fail|invalid.*(token|api.?key)| 401 | 403 \" <apig_log> | tail -30` 으로 실패 API·호출처 확인(키·토큰 값은 가림)"
+  - "호출처별 실패 건수를 집계해 오설정(한 호출처 지속)·키 만료·공격(다수 출처 급증)을 구분"
+  short:
+  - "키 만료·권한 변경 이력을 확인하고 호출처 담당에 갱신 안내, 키 재발급은 승인 후"
+  mid:
+  - "키 발급·갱신·폐기 수명 주기 관리 절차 정비"
+  long:
+  - "인증 실패 건수를 호출처별로 감시하고 급증 시 보안 담당 경보"
+  versions:
+  - MESIM ESB/APIG/EAI (메타빌드, 납품 버전 기준)
+  version_note: MESIM APIG 문구 룰 — 납품 버전 기준(HTTP CALL ERROR·CIRCUIT BREAK 등 Hystrix 1.5 문구)
+- id: SW-APIG-003
+  layer: sw
+  product:
+  - mesim-apig
+  match:
+    regex: rate ?limit|throttl|too many requests|\b429\b|(유량|호출량).*(제한|초과)
+  severity: warn
+  category: capacity
+  verdict: 유량 제한(스로틀링) 발동
+  immediate:
+  - "`grep -n -E \"rate ?limit|throttl|Too Many Requests| 429 \" <apig_log> | tail -30` 으로 대상 API·초과 호출처 확인"
+  - "호출처별·분 단위 호출 건수를 집계해 정상 업무 급증인지 이상 호출인지 구분"
+  short:
+  - "해당 API 유량 정책값과 실사용량을 비교하고 정책 변경은 승인 후(롤백: 이전 값 기록)"
+  mid:
+  - "API 별 유량 정책 재산정 또는 호출처 재시도·배치 호출 개선 요청"
+  long:
+  - "API 별 TPS 용량 계획과 SLA 재정립, 제한 발생 건수 감시"
+  versions:
+  - MESIM ESB/APIG/EAI (메타빌드, 납품 버전 기준)
+  version_note: MESIM APIG 문구 룰 — 납품 버전 기준(HTTP CALL ERROR·CIRCUIT BREAK 등 Hystrix 1.5 문구)

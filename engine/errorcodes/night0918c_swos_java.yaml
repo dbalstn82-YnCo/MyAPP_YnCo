@@ -1,0 +1,655 @@
+product: java
+layer: sw
+note: Claude 야간 수집 2026-09-18 — 벤더 공식 문서와 대조 후 확정
+codes:
+- code: JAVA.LANG.ARRAYINDEXOUTOFBOUNDSEXCEPTION
+  severity: error
+  category: internal
+  title: 배열 인덱스 범위 초과(소스 결함)
+  immediate:
+  - "`grep -n -A15 \"ArrayIndexOutOfBoundsException\" <app_log> | head -60` 으로 'Index N out of bounds for length M' 값과 최초 애플리케이션 프레임(클래스:줄) 확인"
+  - "`grep -c \"ArrayIndexOutOfBoundsException\" <app_log>` 로 발생 빈도와 특정 요청·입력에만 나는지 확인 — 입력 전문은 개인정보 가린 뒤 보존"
+  short:
+  - "(2차) 해당 프레임에 경계 검사·입력 길이 검증을 추가하는 수정안을 개발 담당에 이관, 배포는 승인 후"
+  mid:
+  - "입력 전문·배열 처리 공통 유틸에 길이 검증을 넣고 경계값 단위 시험 보강"
+  long:
+  - "정적 분석 규칙(배열 경계)과 예외 건수 감시를 배포 품질 지표로 운영"
+  vendor_cause: "배열에 음수이거나 배열 크기 이상인 인덱스로 접근했다는 뜻(Java SE API). 입력 전문 길이·구분자 개수가 예상과 다르거나 경계 검사가 없는 소스 결함이 흔한 원인."
+  vendor_url: "https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/ArrayIndexOutOfBoundsException.html"
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/ArrayIndexOutOfBoundsException.html)
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: JAVA.LANG.CLASSCASTEXCEPTION
+  severity: error
+  category: internal
+  title: 형 변환 실패(소스 결함)
+  immediate:
+  - "`grep -n -A15 \"ClassCastException\" <app_log> | head -60` 으로 'class A cannot be cast to class B' 의 두 클래스명·클래스로더 정보와 최초 애플리케이션 프레임 확인"
+  - "두 클래스명이 같고 로더만 다르면 jar 중복 의심 — `find <배포경로> -xdev -name \"*.jar\" | xargs -I{} sh -c 'unzip -l {} | grep -q <클래스경로> && echo {}'` 로 중복 jar 확인"
+  short:
+  - "(2차) 중복 jar 정리(배포본 기준) 또는 형변환 코드 수정안을 개발/WAS 담당에 이관, 반영은 승인 후 배포"
+  mid:
+  - "제네릭 타입 적용과 instanceof 검사로 형변환 지점을 정리하고 공유 라이브러리와 애플리케이션 jar 의 중복을 제거"
+  long:
+  - "빌드 시 jar 중복 검사와 ClassCastException 건수 감시를 운영"
+  vendor_cause: "객체를 실제 인스턴스가 아닌 하위 클래스로 형변환하려 했다는 뜻(Java SE API). 서로 다른 클래스로더가 같은 이름의 클래스를 로드한 경우(배포 jar 중복)나 제네릭 미사용 컬렉션의 잘못된 원소가 흔한 원인."
+  vendor_url: "https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/ClassCastException.html"
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/ClassCastException.html)
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: JAVA.LANG.ILLEGALARGUMENTEXCEPTION
+  severity: error
+  category: internal
+  title: 부적절한 메서드 인자
+  immediate:
+  - "`grep -n -A15 \"IllegalArgumentException\" <app_log> | head -60` 으로 예외 메시지(어떤 인자가 왜 거부됐는지)와 최초 애플리케이션 프레임 확인"
+  - "같은 시각 설정 변경·배포 이력과 대조해 설정값 원인인지 입력값 원인인지 구분"
+  short:
+  - "(2차) 입력값 원인이면 검증 로직 보강, 설정값 원인이면 설정 정정안을 작성해 승인 후 반영(롤백: 변경 전 설정 사본 보관)"
+  mid:
+  - "API 인자 규격(허용 범위·형식)을 명세에 명시하고 호출부 입력 검증을 공통화"
+  long:
+  - "예외 메시지별 건수 감시와 설정 변경 사전 검증(형식 검사)을 운영"
+  vendor_cause: "메서드에 허용되지 않거나 부적절한 인자가 전달됐다는 뜻(Java SE API). 입력 검증 누락, 설정값 형식 오류, 라이브러리 사용 방법 오류가 흔한 원인."
+  vendor_url: "https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/IllegalArgumentException.html"
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/IllegalArgumentException.html)
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 입력 검증 부족으로 원인을 한정할 수 없음
+- code: JAVA.LANG.UNSUPPORTEDOPERATIONEXCEPTION
+  severity: error
+  category: internal
+  title: 지원하지 않는 연산 호출
+  immediate:
+  - "`grep -n -A15 \"UnsupportedOperationException\" <app_log> | head -60` 으로 호출된 메서드(add/remove/put 등)와 최초 애플리케이션 프레임 확인"
+  - "발생 빈도·특정 기능 한정 여부를 `grep -c` 로 집계해 영향 범위 기록"
+  short:
+  - "(2차) 수정 가능한 컬렉션으로 복사(new ArrayList<>(...)) 후 변경하도록 소스 수정안을 개발 담당에 이관, 배포는 승인 후"
+  mid:
+  - "불변/가변 컬렉션 사용 규칙을 개발 표준에 명시하고 해당 패턴을 정적 분석으로 점검"
+  long:
+  - "UnsupportedOperationException 건수를 기능별로 감시하고 코드 리뷰 점검 항목에 포함"
+  vendor_cause: "요청한 연산을 지원하지 않는 객체에 호출했다는 뜻(Java SE API). List.of()/Collections.unmodifiableList 같은 불변 컬렉션 수정, Arrays.asList 결과에 add/remove 호출이 흔한 원인."
+  vendor_url: "https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/UnsupportedOperationException.html"
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/UnsupportedOperationException.html)
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: JAVA.IO.FILENOTFOUNDEXCEPTION
+  severity: error
+  category: disk
+  title: 파일 없음 또는 권한 없음
+  immediate:
+  - "예외 메시지의 경로와 사유('No such file or directory'·'Permission denied')를 확인 후 `ls -l <path>` 와 `ls -ld $(dirname <path>)` 로 존재·권한 확인"
+  - "`df -h $(dirname <path>)` 와 `mount | grep <마운트지점>` 으로 파일시스템 마운트 상태, `ps -o user= -p <PID>` 로 실행 계정 확인"
+  short:
+  - "(2차·승인 후) 경로 설정 정정 또는 권한 부여·마운트 복구(롤백: 변경 전 권한·설정 사본 보관)"
+  mid:
+  - "파일 경로를 외부 설정으로 분리하고 배포·기동 전 필수 경로 존재 점검을 추가"
+  long:
+  - "필수 디렉터리·마운트 상태 감시와 배포 검증 점검표 운영"
+  vendor_cause: "지정한 경로의 파일을 열지 못했다는 뜻 — 파일이 없거나, 디렉터리이거나, 접근 권한이 없을 때 발생(Java SE API). 경로 설정 오류·마운트 누락·권한 변경이 흔한 원인."
+  vendor_url: "https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/io/FileNotFoundException.html"
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/io/FileNotFoundException.html)
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: JAVA.IO.EOFEXCEPTION
+  severity: error
+  category: internal
+  title: 입력 중 예기치 않은 EOF
+  immediate:
+  - "`grep -n -B3 -A15 \"EOFException\" <app_log> | head -60` 으로 읽던 대상(소켓·파일·세션 직렬화)과 최초 애플리케이션 프레임 확인"
+  - "소켓이면 같은 시각 상대 시스템 종료·타임아웃 로그와 대조, 파일이면 `ls -l <file>` 로 크기 이상(0바이트·잘림) 확인"
+  short:
+  - "(2차) 상대 측 조기 종료면 연계 담당과 타임아웃·keep-alive 정합, 파일 손상이면 원본 재수신 요청(승인 후)"
+  mid:
+  - "응답 길이 검증과 불완전 응답 재시도 로직을 연계 처리에 추가"
+  long:
+  - "연계 대상별 EOFException 건수를 감시하고 연계 안정성 지표로 관리"
+  vendor_cause: "입력 도중 예상치 않게 파일·스트림의 끝에 도달했다는 뜻(Java SE API). 상대가 응답을 끝까지 보내기 전에 연결을 닫았거나, 잘린 파일·직렬화 데이터를 읽은 경우가 흔한 원인."
+  vendor_url: "https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/io/EOFException.html"
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/io/EOFException.html)
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 네트워크 연결에 한정되지 않음
+- code: JAVA.NET.BINDEXCEPTION
+  severity: error
+  category: connection
+  title: 로컬 주소 바인드 실패
+  immediate:
+  - "예외 메시지의 포트를 확인 후 `ss -ltnp | grep :<port>` 로 해당 포트를 점유한 프로세스 확인"
+  - "`ps -ef | grep java` 로 같은 애플리케이션의 중복 기동·이전 프로세스 잔존 여부 확인(정리는 2차)"
+  short:
+  - "(2차·승인 후) 잔존·중복 프로세스 정리 또는 포트 설정 정정 후 기동(롤백: 정리 전 프로세스 명령행·PID 기록)"
+  mid:
+  - "서버별 포트 할당표를 관리하고 기동 스크립트에 포트 점유 사전 점검을 추가"
+  long:
+  - "기동 검증 자동화(포트 LISTEN 확인)와 포트 변경 이력 관리"
+  vendor_cause: "소켓을 로컬 주소·포트에 바인드하지 못했다는 뜻 — 포트가 이미 사용 중이거나 요청한 로컬 주소를 할당할 수 없을 때 발생(Java SE API). 중복 기동·이전 프로세스 잔존이 흔한 원인."
+  vendor_url: "https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/net/BindException.html"
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/net/BindException.html)
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 포트 사용 중은 가능한 원인 중 하나
+- code: JAVA.NET.NOROUTETOHOSTEXCEPTION
+  severity: error
+  category: connection
+  title: 원격 호스트 경로 없음
+  immediate:
+  - "`ip route get <host>` 와 `ping -c 3 <host>` 로 경로·도달 확인, `nc -zvw3 <host> <port>` 로 포트 응답 확인"
+  - "같은 시각 방화벽·네트워크 변경 이력과 대상 서버 상태를 확인(설정 변경 없이 조회만)"
+  short:
+  - "(2차) 네트워크 담당에 경로·방화벽 정책 점검 요청, 정책 변경은 승인 후 반영(롤백: 변경 전 정책 사본)"
+  mid:
+  - "연계 구간 방화벽 정책·라우팅을 문서화하고 이중 경로 구성을 검토"
+  long:
+  - "연계 대상 도달성 감시와 네트워크 변경관리 절차에 연계 영향 확인 단계 포함"
+  vendor_cause: "원격 주소로 연결하는 중 경로가 없어 실패했다는 뜻 — 대개 방화벽 차단이나 중간 라우터 다운이 원인(Java SE API)."
+  vendor_url: "https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/net/NoRouteToHostException.html"
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/net/NoRouteToHostException.html)
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 예외 자체가 항상 치명적이지 않음
+- code: JAVA.NIO.CHANNELS.CLOSEDCHANNELEXCEPTION
+  severity: error
+  category: internal
+  title: 닫힌 채널 작업 시도
+  immediate:
+  - "`grep -n -B5 -A15 \"ClosedChannelException\" <app_log> | head -60` 으로 직전 연결 종료·인터럽트(ClosedByInterruptException) 기록과 최초 애플리케이션 프레임 확인"
+  - "같은 시각 상대 시스템 연결 종료·타임아웃 로그와 대조해 발생 빈도 기록"
+  short:
+  - "(2차) 채널 종료 후 재사용 경로를 찾아 연결 수명 관리(재연결·isOpen 검사) 수정안을 개발 담당에 이관"
+  mid:
+  - "NIO 채널·스레드 인터럽트 사용 규칙을 개발 표준에 명시"
+  long:
+  - "ClosedChannelException 건수 감시와 코드 리뷰 점검 항목 운영"
+  vendor_cause: "이미 닫혔거나 해당 작업 방향이 닫힌 채널에 입출력을 시도했다는 뜻(Java SE API). 연결 종료 후 재사용, 인터럽트로 채널이 닫힌 뒤 접근이 흔한 원인."
+  vendor_url: "https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/nio/channels/ClosedChannelException.html"
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/nio/channels/ClosedChannelException.html)
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 네트워크 채널에 한정되지 않음
+- code: JAVA.SQL.SQLSYNTAXERROREXCEPTION
+  severity: error
+  category: internal
+  title: SQL 구문 오류
+  immediate:
+  - "`grep -n -A10 \"SQLSyntaxErrorException\" <app_log> | head -40` 으로 SQLState·vendorCode·DB 오류 메시지와 실패 SQL(매퍼 ID) 확인"
+  - "대상 DB 에서 테이블·컬럼 존재와 접속 계정 권한을 조회로 확인, 직전 배포·DB 변경 이력과 대조"
+  short:
+  - "(2차) SQL·스키마 불일치 원인을 정해 SQL 수정 또는 스키마 반영 순서 정정안을 개발·DB 담당에 이관(배포는 승인 후)"
+  mid:
+  - "배포 전 대상 DB 스키마 기준 SQL 검증 단계를 추가하고 DB 변경과 애플리케이션 배포를 연계"
+  long:
+  - "SQLState 42 계열 건수 감시와 SQL 품질 점검 운영"
+  vendor_cause: "SQLState 클래스 42 — 실행한 SQL 에 구문 오류가 있거나 접근 규칙 위반(없는 테이블·컬럼, 권한 없음)일 때 드라이버가 던지는 예외(Java SE API)."
+  vendor_url: "https://docs.oracle.com/en/java/javase/21/docs/api/java.sql/java/sql/SQLSyntaxErrorException.html"
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://docs.oracle.com/en/java/javase/21/docs/api/java.sql/java/sql/SQLSyntaxErrorException.html)
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: JAVA.SQL.SQLNONTRANSIENTCONNECTIONEXCEPTION
+  severity: error
+  category: connection
+  title: 비일시적 SQL 연결 오류
+  immediate:
+  - "`grep -n -A10 \"SQLNonTransientConnectionException\" <app_log> | head -40` 으로 SQLState·DB 오류 메시지 확인"
+  - "`nc -zvw3 <db_host> <port>` 로 DB 리스너 도달 확인, 데이터소스 URL·계정 설정과 DB 측 접속 로그를 대조(비밀번호 값은 기록하지 않음)"
+  short:
+  - "(2차·승인 후) 접속 정보·드라이버 정정 후 커넥션 풀만 재초기화(롤백: 변경 전 데이터소스 설정 사본 보관)"
+  mid:
+  - "DB 이중화 접속 URL·연결 검증 설정과 드라이버 버전 표준을 정비"
+  long:
+  - "DB 연결 실패율 감시와 DB 가용성 관리 지표 운영"
+  vendor_cause: "SQLState 클래스 08 — 연결 작업이 실패했고 원인을 고치지 않으면 재시도해도 성공하지 않는 연결 오류(Java SE API). 잘못된 URL·계정, DB 정지, 프로토콜·드라이버 불일치가 흔한 원인."
+  vendor_url: "https://docs.oracle.com/en/java/javase/21/docs/api/java.sql/java/sql/SQLNonTransientConnectionException.html"
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://docs.oracle.com/en/java/javase/21/docs/api/java.sql/java/sql/SQLNonTransientConnectionException.html)
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 예외 자체가 항상 치명적이지 않음
+- code: JAVA.UTIL.NOSUCHELEMENTEXCEPTION
+  severity: error
+  category: internal
+  title: 요소 없음(빈 컬렉션·Optional)
+  immediate:
+  - "`grep -n -A15 \"NoSuchElementException\" <app_log> | head -60` 으로 'No value present' 등 메시지와 최초 애플리케이션 프레임 확인"
+  - "해당 요청의 조회 조건으로 데이터 존재 여부를 조회만으로 확인(데이터 변경 없음)"
+  short:
+  - "(2차) 존재 여부 검사(hasNext·isPresent·orElse) 수정안을 개발 담당에 이관, 데이터 누락이면 업무 담당과 원인 확인"
+  mid:
+  - "빈 결과 처리 규칙(기본값·업무 오류 응답)을 개발 표준에 명시"
+  long:
+  - "NoSuchElementException 건수 감시와 경계 시험 보강"
+  vendor_cause: "요청한 요소가 없다는 뜻 — 빈 Iterator 의 next(), 값 없는 Optional 의 get()/orElseThrow() 등에서 발생(Java SE API). 조회 결과가 없는 데이터 상태를 고려하지 않은 소스 결함이 흔한 원인."
+  vendor_url: "https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/NoSuchElementException.html"
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/NoSuchElementException.html)
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: JAVAX.NET.SSL.SSLEXCEPTION
+  severity: error
+  category: security
+  title: SSL 통신 오류
+  immediate:
+  - "`grep -n -A10 \"SSLException\" <app_log> | head -40` 으로 메시지(protocol_version·handshake_failure·Unrecognized SSL message 등)와 대상 host:port 확인"
+  - "`openssl s_client -connect <host>:<port> -servername <host> < /dev/null 2>/dev/null | grep -E \"Protocol|Cipher|Verify\"` 로 상대 TLS 버전·cipher·검증 결과 확인"
+  short:
+  - "(2차·승인 후) 양측 합의된 TLS 버전·cipher 로 설정 정비(jdk.tls.client.protocols 등, 롤백: 변경 전 java.security·기동 옵션 사본 보관)"
+  mid:
+  - "TLS 정책 표준(허용 버전·cipher)을 연계 명세에 정하고 JDK 업데이트 시 영향 시험"
+  long:
+  - "TLS 오류 건수 감시와 인증서·프로토콜 변경 일정 관리"
+  vendor_cause: "SSL/TLS 하위 시스템이 감지한 오류의 상위 예외(Java SE API). 프로토콜·cipher 불일치, 손상된 레코드, 상대의 비정상 종료가 흔한 원인 — 하위 예외·메시지로 구분해야 한다."
+  vendor_url: "https://docs.oracle.com/en/java/javase/21/docs/api/java.base/javax/net/ssl/SSLException.html"
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://docs.oracle.com/en/java/javase/21/docs/api/java.base/javax/net/ssl/SSLException.html)
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: JAVAX.NET.SSL.SSLPEERUNVERIFIEDEXCEPTION
+  severity: error
+  category: security
+  title: 상대 인증서 검증 실패
+  immediate:
+  - "`openssl s_client -connect <host>:<port> -servername <host> -showcerts < /dev/null 2>/dev/null | grep -E \"s:|i:|Verify\"` 로 상대 인증서 체인·발급자 확인"
+  - "`keytool -list -keystore <truststore> | grep -i <CA별칭>` 으로 신뢰 저장소에 발급 CA 존재 확인(비밀번호 입력 화면 내용은 기록하지 않음)"
+  short:
+  - "(2차·승인 후) 발급 CA 를 truststore 에 추가(keytool -importcert, 롤백: 추가 전 truststore 파일 사본 보관)"
+  mid:
+  - "연계 대상 인증서 체인·호스트명 규칙을 PKI 구성 표준으로 정리"
+  long:
+  - "인증서 만료 30일 전 경보와 truststore 변경 이력 관리"
+  vendor_cause: "상대(peer)의 신원을 검증하지 못했다는 뜻 — 상대가 인증서를 제시하지 않았거나 검증할 수 없을 때 발생(Java SE API). 신뢰 저장소에 CA 누락, 호스트명 불일치가 흔한 원인."
+  vendor_url: "https://docs.oracle.com/en/java/javase/21/docs/api/java.base/javax/net/ssl/SSLPeerUnverifiedException.html"
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://docs.oracle.com/en/java/javase/21/docs/api/java.base/javax/net/ssl/SSLPeerUnverifiedException.html)
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: ORG.SPRINGFRAMEWORK.BEANS.FACTORY.BEANCREATIONEXCEPTION
+  severity: error
+  category: internal
+  title: 빈 생성 중 오류
+  immediate:
+  - "① 장애 시각의 기동 실패 묶음 찾기: `awk '/^[[:space:]]*[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9][ T][0-9][0-9]:[0-9][0-9]/ {h=NR; hl=$0} /Error creating bean with name/ && h {print h, substr(hl,1,200)}' <app_log> | uniq | grep '<HH:MM>' | tail -20` — 첫 칸 = 머리 줄 번호, '[ … ]' 안 = 스레드, 기동을 여러 번 했으면 장애 시각·스레드가 맞는 줄 하나를 고른다 · 지원 로그 형식: 각 항목이 `YYYY-MM-DD HH:MM`(또는 ISO `YYYY-MM-DDTHH:MM`) 머리로 시작한다고 가정한 추출 — 다른 패턴이면 추출을 믿지 말고 `grep -n 'Error creating bean' <app_log>` 로 찾은 줄 앞뒤를 `sed -n '<시작줄>,<끝줄>p' <app_log>` 로 원문 그대로 읽는다"
+  - "② 그 묶음 안에서 실패 빈과 맨 안쪽 원인: `awk -v s=<머리줄번호> 'NR<s {next} NR>s && /^[[:space:]]*[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9][ T][0-9][0-9]:[0-9][0-9]/ {exit} {print NR, $0}' <app_log> | grep -E 'Error creating bean with name|Caused by:'` — 다음 '날짜 시각' 줄 직전까지만 읽어 빈 줄·들여쓰기 없는 중간 예외 줄에서 끊기지 않는다, 빈 이름과 마지막 Caused by 가 한 짝(따로 grep 한 줄끼리 짝짓지 않는다) — 마지막 Caused by 는 보통의 사슬에서 맨 안쪽 원인이지만 Suppressed:·함께 찍힌 다른 원인이 있을 수 있어 유일한 근본 원인이라 보장되지는 않는다"
+  - "맨 안쪽 원인이 연결 실패(Connection refused·timed out·UnknownHost)일 때만 선택적 능동 확인으로 `nc -zvw3 <host> <port>`, 설정값 누락·의존 빈 없음·클래스 없음이면 직전 설정·배포 변경 이력 확인 (Too many open files 면 절차의 FD 확인 단계)"
+  short:
+  - "(2차·승인 후) 근본 원인(설정·의존성·연결) 정정 후 애플리케이션 기동(롤백: 직전 배포본·설정으로 원복)"
+  mid:
+  - "기동 시험(컨텍스트 로딩 시험)을 배포 파이프라인에 넣고 환경별 설정값 누락 검사 추가"
+  long:
+  - "환경 설정 구성관리와 기동 실패 감시(기동 후 헬스체크) 운영"
+  vendor_cause: "Spring 컨테이너가 빈을 생성·초기화하다 실패했다는 뜻. 대개 기동 시 발생하며 실제 원인은 중첩된 cause(설정값 누락, 의존 빈 없음, DB 연결 실패 등)에 있다."
+  verify_note: "미검증 — Spring Framework 공식 문서(docs.spring.io)는 허용 도메인 목록 밖이라 우리가 직접 대조하지 못함 — BeanCreationException 클래스 정의(빈 생성 실패 예외, 중첩 cause 보유)는 2차 교차 검토자가 Spring Framework 5.3 API 문서로 대조했다고 전함, 메시지 문구('Error creating bean with name')와 다른 판(6.x) 문서는 직접 대조 못 함"
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/beans/factory/BeanCreationException.html)
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 기동 실패로 한정되지 않음
+- code: ORG.SPRINGFRAMEWORK.WEB.HTTPREQUESTMETHODNOTSUPPORTEDEXCEPTION
+  severity: warn
+  category: internal
+  title: 지원하지 않는 HTTP 메서드
+  immediate:
+  - "`grep -n \"Request method '\" <app_log> | tail -20` 으로 거부된 메서드·URL 과 지원 메서드 목록 확인"
+  - "접근 로그에서 같은 URL 의 호출 출처(IP·User-Agent)와 건수 확인 — 스캐너성 요청인지 정상 연계인지 구분"
+  short:
+  - "(2차) 정상 연계면 호출 측 메서드 수정 또는 API 명세 정합을 개발 담당에 요청(배포는 승인 후)"
+  mid:
+  - "API 명세(허용 메서드)를 연계 문서로 관리하고 변경 시 연계처 사전 공지"
+  long:
+  - "405 응답 건수를 API 별로 감시하고 연계 시험에 메서드 검증 포함"
+  vendor_cause: "요청 HTTP 메서드(GET/POST 등)를 해당 핸들러가 지원하지 않을 때 Spring MVC 가 던지는 예외 — 보통 405 응답. 호출 측 메서드 오류나 API 변경이 흔한 원인."
+  verify_note: "미검증 — Spring Framework 공식 문서는 공식 도메인 목록에 없어 URL·문구를 대조하지 못함"
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/web/HttpRequestMethodNotSupportedException.html)
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: ORG.SPRINGFRAMEWORK.DAO.DATAINTEGRITYVIOLATIONEXCEPTION
+  severity: error
+  category: internal
+  title: 데이터 무결성 위반
+  immediate:
+  - "`grep -n -A10 \"DataIntegrityViolationException\" <app_log> | head -40` 으로 제약조건명·SQLState·vendorCode 와 대상 테이블 확인"
+  - "위반 유형(NULL·FK·중복)에 맞춰 관련 데이터 존재 여부를 조회로만 확인(데이터 변경 없음)"
+  short:
+  - "(2차) 입력 검증 보강 또는 선후행 처리 순서 수정안을 개발 담당에 이관, 데이터 보정은 업무 담당 승인 후"
+  mid:
+  - "제약조건과 애플리케이션 검증 규칙을 대조표로 관리하고 스키마 변경 시 함께 갱신"
+  long:
+  - "제약 위반 건수를 제약조건별로 감시하고 데이터 품질 점검을 정기화"
+  vendor_cause: "INSERT/UPDATE 가 무결성 제약(NOT NULL·FK·CHECK·UNIQUE 등)을 위반했을 때 Spring 이 변환해 던지는 데이터 접근 예외. 입력 검증 누락·선후행 데이터 부재가 흔한 원인."
+  verify_note: "미검증 — Spring Framework 공식 문서는 공식 도메인 목록에 없어 URL·문구를 대조하지 못함"
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/dao/DataIntegrityViolationException.html)
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: ORG.SPRINGFRAMEWORK.DAO.CANNOTACQUIRELOCKEXCEPTION
+  severity: error
+  category: lock
+  title: 데이터 접근 락 획득 실패
+  immediate:
+  - "`grep -n -A10 \"CannotAcquireLockException\" <app_log> | head -40` 으로 DB 오류 코드·대상 SQL 확인"
+  - "대상 DB 의 잠금 대기 조회(Oracle `V$SESSION` blocking_session, CUBRID `cubrid lockdb`, Goldilocks `V$LOCK_WAIT` 등)로 점유 세션 확인(읽기 전용)"
+  short:
+  - "(2차·승인 후) 점유 세션 정리는 업무 담당 확인 뒤 DB 담당이 수행(롤백: 정리된 거래는 재처리), 반복 시 트랜잭션 범위 축소·자원 접근 순서 통일"
+  mid:
+  - "잠금 경합 거래의 설계 검토와 잠금 대기 timeout 값을 업무별로 정리"
+  long:
+  - "DB 잠금 대기 시간·건수 감시와 장시간 트랜잭션 경보 운영"
+  vendor_cause: "갱신을 위한 잠금(예: SELECT FOR UPDATE NOWAIT)을 얻지 못했을 때 Spring 이 던지는 예외. 다른 트랜잭션의 장시간 잠금 보유나 잠금 대기 timeout 이 흔한 원인."
+  verify_note: "미검증 — Spring Framework 공식 문서는 공식 도메인 목록에 없어 URL·문구를 대조하지 못함"
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/dao/CannotAcquireLockException.html)
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 타임아웃이나 데드락으로 한정되지 않음
+- code: ORG.SPRINGFRAMEWORK.TRANSACTION.CANNOTCREATETRANSACTIONEXCEPTION
+  severity: error
+  category: internal
+  title: 트랜잭션 생성 실패
+  immediate:
+  - "`grep -n -A10 \"CannotCreateTransactionException\" <app_log> | head -40` 으로 cause(풀 timeout·연결 거부 등) 확인"
+  - "`nc -zvw3 <db_host> <port>` 로 DB 도달 확인, 풀 지표(active/idle/pending)를 JMX·로그로 확인 — `jcmd <PID> Thread.print | grep -c getConnection` 으로 연결 대기 스레드 수 확인"
+  short:
+  - "(2차·승인 후) DB 상태 복구 또는 풀 크기·timeout 조정(롤백: 변경 전 데이터소스 설정 사본 보관)"
+  mid:
+  - "풀 크기 재산정·커넥션 누수 검출(leak detection) 설정과 DB 이중화 접속 구성"
+  long:
+  - "풀 사용률·DB 가용성 감시와 장애 시 연결 재시도 정책 운영"
+  vendor_cause: "트랜잭션 API(JDBC·JTA)로 트랜잭션을 시작하지 못했을 때 Spring 이 던지는 예외. 커넥션 획득 실패(풀 고갈·DB 다운)가 가장 흔한 원인이며 cause 로 구분한다."
+  verify_note: "미검증 — Spring Framework 공식 문서는 공식 도메인 목록에 없어 URL·문구를 대조하지 못함"
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/transaction/CannotCreateTransactionException.html)
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 연결 불가로 한정되지 않음
+- code: ORG.HIBERNATE.EXCEPTION.GENERICJDBCEXCEPTION
+  severity: error
+  category: internal
+  title: 미분류 JDBC 예외
+  immediate:
+  - "`grep -n -A12 \"GenericJDBCException\" <app_log> | head -50` 으로 내부 SQLException 메시지·SQLState·vendorCode 와 실행 SQL 확인"
+  - "vendorCode 를 해당 DB 제품 오류 코드표와 대조하고 같은 시각 DB 측 로그 확인"
+  short:
+  - "(2차) 내부 DB 오류 코드별 원인(공간·권한·SQL)을 DB 담당과 확정해 조치, SQL 수정이면 개발 담당 배포(승인 후)"
+  mid:
+  - "SQLExceptionConverter·방언(dialect) 설정을 DB 제품·버전에 맞추고 예외 로깅에 SQLState 포함"
+  long:
+  - "DB 오류 코드별 집계 감시와 DB 연동 표준 관리"
+  vendor_cause: "Hibernate 가 더 구체적인 예외로 분류하지 못한 JDBC SQLException 을 감싼 예외. 실제 원인은 내부 SQLException 의 SQLState·vendorCode 로 판단해야 한다."
+  verify_note: "미검증 — Hibernate 공식 문서는 공식 도메인 목록에 없어 URL·문구를 대조하지 못함"
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://docs.hibernate.org/orm/7.1/javadocs/org/hibernate/exception/GenericJDBCException.html)
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 연결 오류로 한정되지 않음
+- code: ORG.HIBERNATE.STALEOBJECTSTATEEXCEPTION
+  severity: warn
+  category: lock
+  title: 낙관적 락 충돌(오래된 객체)
+  immediate:
+  - "`grep -n -A10 \"StaleObjectStateException\" <app_log> | head -40` 으로 엔티티명·식별자 확인"
+  - "같은 엔티티 식별자에 대한 동시 요청 여부를 접근 로그·애플리케이션 로그로 확인(데이터 변경 없음)"
+  short:
+  - "(2차) 재조회 후 재시도·병합 처리 수정안을 개발 담당에 이관(배포는 승인 후)"
+  mid:
+  - "동시 수정이 잦은 엔티티의 갱신 범위를 줄이고 충돌 시 사용자 안내 흐름을 설계"
+  long:
+  - "엔티티별 충돌 건수 감시와 동시성 설계 리뷰 운영"
+  vendor_cause: "낙관적 잠금 충돌 — 읽은 뒤 다른 트랜잭션이 같은 행을 갱신·삭제해 version 이 달라졌을 때 Hibernate 가 던지는 예외."
+  verify_note: "미검증 — Hibernate 공식 문서는 공식 도메인 목록에 없어 URL·문구를 대조하지 못함"
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://docs.hibernate.org/orm/7.1/javadocs/org/hibernate/StaleObjectStateException.html)
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: ORG.HIBERNATE.LAZYINITIALIZATIONEXCEPTION
+  severity: error
+  category: internal
+  title: 세션 종료 후 지연 로딩
+  immediate:
+  - "`grep -n -A12 \"LazyInitializationException\" <app_log> | head -50` 으로 'could not initialize proxy' 대상 엔티티·속성과 최초 애플리케이션 프레임 확인"
+  - "발생 API·화면과 건수를 집계해 영향 범위 기록"
+  short:
+  - "(2차) fetch join·DTO 변환을 트랜잭션 안으로 옮기는 수정안을 개발 담당에 이관(배포는 승인 후)"
+  mid:
+  - "엔티티 직접 직렬화 금지·DTO 변환 규칙을 ORM 사용 가이드로 정리"
+  long:
+  - "LazyInitializationException 건수 감시와 코드 리뷰 점검 항목 운영"
+  vendor_cause: "세션(영속성 컨텍스트)이 닫힌 뒤 지연 로딩 프록시·컬렉션에 접근했을 때 Hibernate 가 던지는 예외. 트랜잭션 밖(뷰·직렬화)에서 연관 엔티티를 읽는 소스 결함이 흔한 원인."
+  verify_note: "미검증 — Hibernate 공식 문서는 공식 도메인 목록에 없어 URL·문구를 대조하지 못함"
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://docs.hibernate.org/orm/7.1/javadocs/org/hibernate/LazyInitializationException.html)
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: COM.FASTERXML.JACKSON.DATABIND.JSONMAPPINGEXCEPTION
+  severity: error
+  category: internal
+  title: JSON 매핑 실패
+  immediate:
+  - "`grep -n -A10 \"JsonMappingException\\|MismatchedInputException\\|UnrecognizedPropertyException\" <app_log> | head -40` 으로 대상 클래스·필드 경로(through reference chain) 확인"
+  - "실패 요청의 송신 시스템·시각을 기록하고 본문 샘플은 개인정보를 가린 최소 범위만 보존"
+  short:
+  - "(2차) 송신 규격 변경이면 연계처와 규격 정합, 수신 DTO 수정이면 개발 담당 배포(승인 후)"
+  mid:
+  - "연계 API 계약(필드·타입)을 명세로 관리하고 FAIL_ON_UNKNOWN_PROPERTIES 등 매핑 정책을 표준화"
+  long:
+  - "매핑 실패 건수를 연계처별로 감시하고 연계 시험에 규격 검증 포함"
+  vendor_cause: "JSON 구문은 맞지만 대상 Java 타입으로 매핑하지 못했다는 Jackson 예외(알 수 없는 필드, 타입 불일치, 생성자 없음 등). 연계 전문 규격 변경이 흔한 원인."
+  verify_note: "미검증 — Jackson 공식 문서는 공식 도메인 목록에 없어 URL·문구를 대조하지 못함"
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://fasterxml.github.io/jackson-databind/javadoc/2.14/com/fasterxml/jackson/databind/JsonMappingException.html)
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: IO.NETTY.CHANNEL.CONNECTTIMEOUTEXCEPTION
+  severity: error
+  category: connection
+  title: 연결 타임아웃(Netty)
+  immediate:
+  - "`grep -n \"ConnectTimeoutException\" <app_log> | tail -20` 으로 대상 host:port 와 발생 빈도 확인"
+  - "`nc -zvw3 <host> <port>` 와 `ping -c 5 <host>` 로 대상 도달·지연 확인"
+  short:
+  - "(2차) 대상 서비스·네트워크 원인 확인을 연계 담당에 요청하고, connect timeout·재시도 값 조정은 승인 후(롤백: 이전 값 기록)"
+  mid:
+  - "연계 대상 이중화와 연결 재시도(백오프) 정책을 정비"
+  long:
+  - "연계 대상별 연결 시간·실패율 감시"
+  vendor_cause: "Netty 채널이 connectTimeoutMillis 안에 원격지 연결을 맺지 못했다는 뜻. 대상 서비스 응답 없음·방화벽 drop·네트워크 지연이 흔한 원인."
+  verify_note: "미검증 — Netty 공식 문서는 공식 도메인 목록에 없어 URL·문구를 대조하지 못함"
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://netty.io/4.1/api/io/netty/channel/ConnectTimeoutException.html)
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: ORG.APACHE.KAFKA.COMMON.ERRORS.TIMEOUTEXCEPTION
+  severity: error
+  category: upstream
+  title: Kafka 요청 타임아웃
+  immediate:
+  - "`grep -n -A5 \"org.apache.kafka.common.errors.TimeoutException\" <app_log> | head -40` 으로 대상 토픽·파티션과 메시지(메타데이터 대기·배치 만료 등) 확인"
+  - "`nc -zvw3 <broker_host> <port>` 로 브로커 도달 확인, Kafka 담당에 토픽 리더·ISR 상태 조회 요청"
+  short:
+  - "(2차) 브로커·리더 상태 복구는 Kafka 담당이 수행, 클라이언트 timeout(request.timeout.ms·delivery.timeout.ms) 조정은 승인 후(롤백: 이전 값 기록)"
+  mid:
+  - "프로듀서·컨슈머 timeout·재시도 설정을 메시징 운영 표준으로 정리"
+  long:
+  - "브로커 가용성·소비 지연(lag)과 전송 실패 건수 감시"
+  vendor_cause: "Kafka 클라이언트 요청(메타데이터 조회·전송·커밋)이 설정 시간 안에 끝나지 않았다는 뜻. 브로커 다운·리더 부재·네트워크 지연·전송 버퍼 포화가 흔한 원인."
+  verify_note: "미검증 — Apache Kafka 공식 문서는 공식 도메인 목록에 없어 URL·설정 이름 문구를 대조하지 못함"
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://kafka.apache.org/40/javadoc/org/apache/kafka/common/errors/TimeoutException.html)
+  versions:
+  - JDK 6
+  - JDK 7
+  - JDK 8
+  - JDK 11
+  - JDK 17
+  - JDK 21
+  - JDK 25
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'

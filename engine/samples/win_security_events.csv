@@ -1,0 +1,8 @@
+"TimeCreated","LevelDisplayName","ProviderName","Id","KeywordsDisplayNames","Message"
+"2026-09-09 13:59:01","정보","Microsoft-Windows-Security-Auditing","4624","감사 성공","계정이 성공적으로 로그온되었습니다. 계정 이름: svc_app 로그온 유형: 3 원본 네트워크 주소: 10.0.0.5"
+"2026-09-09 14:02:11","정보","Microsoft-Windows-Security-Auditing","4625","감사 실패","계정이 로그온하지 못했습니다. 계정 이름: administrator 실패 이유: 알 수 없는 사용자 이름이거나 잘못된 암호입니다. 원본 네트워크 주소: 203.0.113.44 로그온 유형: 3"
+"2026-09-09 14:02:12","정보","Microsoft-Windows-Security-Auditing","4625","감사 실패","계정이 로그온하지 못했습니다. 계정 이름: administrator 실패 이유: 알 수 없는 사용자 이름이거나 잘못된 암호입니다. 원본 네트워크 주소: 203.0.113.44 로그온 유형: 3"
+"2026-09-09 14:02:13","정보","Microsoft-Windows-Security-Auditing","4625","감사 실패","계정이 로그온하지 못했습니다. 계정 이름: administrator 실패 이유: 알 수 없는 사용자 이름이거나 잘못된 암호입니다. 원본 네트워크 주소: 203.0.113.44 로그온 유형: 3"
+"2026-09-09 14:02:30","정보","Microsoft-Windows-Security-Auditing","4740","감사 성공","사용자 계정이 잠겼습니다. 계정 이름: administrator 호출자 컴퓨터 이름: WEB01"
+"2026-09-09 14:03:05","정보","Microsoft-Windows-Security-Auditing","1102","감사 성공","감사 로그가 지워졌습니다. 주체 계정 이름: contractor01"
+"2026-09-09 14:05:00","정보","Microsoft-Windows-Security-Auditing","4672","감사 성공","새 로그온에 할당된 특수 권한. 계정 이름: SYSTEM"

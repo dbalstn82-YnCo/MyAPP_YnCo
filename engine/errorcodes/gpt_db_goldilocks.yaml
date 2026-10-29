@@ -1,0 +1,53 @@
+product: goldilocks
+layer: db
+note: GPT 협업 수집분 — 벤더 공식 문서와 대조 후 확정
+codes:
+- code: ERR-11141   # 룰 학습 5차: 파서는 늘 'ERR-<내부번호>' — 숫자만 쓰면 사전에 닿지 못했다
+  severity: error
+  category: connection
+  title: 통신 링크 실패
+  immediate:
+  - "`ping -c 5 <server>` 와 `nc -zvw3 <server> <port>` 로 대상 서버·리스너 포트 도달 확인"
+  - "`ps -ef | grep -i goldilocks | grep -v grep` 와 `tail -100 $GOLDILOCKS_DATA/trc/system.trc` 로 서버 프로세스 생존·같은 시각 오류 확인"
+  short:
+  - 방화벽과 네트워크 장비, 통신 로그를 분석
+  mid:
+  - 네트워크 경로와 재접속 정책을 개선
+  long:
+  - 연결 품질 SLO와 이중화 경로를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4)
+  note: 공식 오류는 존재하지만 개별 통신 링크 실패이므로 서비스 전체 중단 수준의 critical보다 error가 타당함
+  vendor_cause: "Communication link failure(SQLSTATE 08S01) — 클라이언트·서버 또는 노드 사이 통신 링크가 끊겼다는 뜻(오류 메시지 매뉴얼: 네트워크 연결과 통신 인프라 확인). 서버 프로세스 종료·네트워크 순단·방화벽 세션 만료가 흔한 원인."
+  vendor_action: 네트워크 연결 상태와 통신 인프라를 확인
+  vendor_url: https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4
+  versions:
+  - GOLDILOCKS 3.1
+  - GOLDILOCKS 20c.1
+  - GOLDILOCKS 22c.1
+  - GOLDILOCKS 26c.1
+  version_note: 실로그 표기는 ERR-<SQLSTATE>(내부번호) 예 ERR-HY000(13011) — 사전은 내부번호 기준이며 파서가 괄호 안 번호로 대응. 3.1(과거)·20c.1·22c.1·26c.1 공통(버전별 재편 근거 없음 — GPT B)
+- code: ERR-14168   # 룰 학습 5차: 파서는 늘 'ERR-<내부번호>' — 숫자만 쓰면 사전에 닿지 못했다
+  severity: error
+  category: disk
+  title: 비동기 I/O 실패로 거래 롤백
+  immediate:
+  - "오류 메시지에 함께 찍힌 I/O 원인을 `grep -n \"14168\" $GOLDILOCKS_DATA/trc/system.trc | tail -10` 으로 확인하고 `dmesg -T | grep -i \"I/O error\" | tail` 로 OS 디스크 오류 동반 여부 확인"
+  - "`df -h $GOLDILOCKS_DATA` 로 공간 확인 — 롤백된 거래(STATEMENT_NOFORCE append insert) 재실행은 원인 해소 전까지 보류하고 2차에 보고"
+  short:
+  - "(2차·승인 후) I/O 원인 해소 뒤 실패 트랜잭션 재실행(매뉴얼 권고, 롤백: 재실행 전 대상 테이블 건수 기록)"
+  - "OS 로그와 스토리지 경로, 디스크 상태를 진단"
+  mid:
+  - 결함 I/O 경로를 복구하고 실패 트랜잭션을 재실행해 정합성을 검증
+  long:
+  - 스토리지 이중화와 I/O 오류 예측 모니터링을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4)
+  note: 비동기 디스크 I/O 실패로 해당 트랜잭션을 강제 롤백하는 오류이므로 단독 코드의 심각도는 error가 타당함
+  vendor_cause: STATEMENT_NOFORCE append insert 중 비동기 디스크 I/O 요청이 실패해 트랜잭션이 강제 롤백됨
+  vendor_action: 오류 메시지에 표시된 원인을 해결한 뒤 작업을 재시도
+  vendor_url: https://manual.sunjesoft.co.kr/goldilocks/26c_1/manual/en/4f0d98b11f1e6ab4
+  versions:
+  - GOLDILOCKS 3.1
+  - GOLDILOCKS 20c.1
+  - GOLDILOCKS 22c.1
+  - GOLDILOCKS 26c.1
+  version_note: 실로그 표기는 ERR-<SQLSTATE>(내부번호) 예 ERR-HY000(13011) — 사전은 내부번호 기준이며 파서가 괄호 안 번호로 대응. 3.1(과거)·20c.1·22c.1·26c.1 공통(버전별 재편 근거 없음 — GPT B)

@@ -1,0 +1,76 @@
+product: mesim-apig
+layer: sw
+title: mesim-apig 로그 종류 카탈로그 (GPT 수집 — 벤더 문서 대조 필요)
+source: GPT 수집(벤더 문서 대조 필요)
+sources:
+- https://www.metabuild.co.kr/mesim/esb
+- https://www.metabuild.co.kr/mesim/apig
+- https://www.gov-nhncloud.com/kr/marketplace/application-service/mesim-esb
+- https://www.gov-nhncloud.com/kr/marketplace/application-service/mesim-apig-api-gateway
+- https://aws.amazon.com/marketplace/pp/prodview-opwxmqmhaes6c
+- https://aws.amazon.com/marketplace/pp/prodview-ropqm3h2qumre
+- https://data.kosw.or.kr/egovdata/cop/bbs/selectBoardArticle.do?bbsId=BBSMSTR_000000000121&nttId=3303
+- https://m.digitalmarket.kr/m/service/detail.do?s=SAS-3-04-11246
+- https://www.etnews.com/20210512000110
+- https://www.etnews.com/20221214000290
+logtypes:
+- name: API 호출 이력
+  path: 공개자료에서 기본 경로·파일명 미확인
+  format: 공개자료에서 파일형식 미확인
+  check: API별 호출 시각과 사용자 및 처리상태를 기준으로 장애 요청과 반복 실패를 확인
+  sample: ''
+- name: API 트래픽 모니터링
+  path: 공개자료에서 기본 경로·파일명 미확인
+  format: 공개자료에서 파일형식 미확인
+  check: API별 실시간 트래픽과 사용량 및 급증 구간과 Gateway 부하를 확인
+  sample: ''
+- name: API 이벤트 알림 이력
+  path: 공개자료에서 기본 경로·파일명 미확인
+  format: 공개자료에서 파일형식 미확인
+  check: 실시간 API 이벤트와 발생 시각 및 대상 API와 Gateway와 Backend 상태를 확인
+  sample: ''
+- name: 게이트웨이 상태정보
+  path: 공개자료에서 기본 경로·파일명 미확인
+  format: 공개자료에서 파일형식 미확인
+  check: Gateway 상태와 부하분산 및 트래픽 처리상태와 비정상 인스턴스를 확인
+  sample: ''
+- name: 라우팅 현황정보
+  path: 공개자료에서 기본 경로·파일명 미확인
+  format: 공개자료에서 파일형식 미확인
+  check: API 라우팅과 URL 매핑 및 Backend Endpoint 상태와 실패 경로를 확인
+  sample: ''
+- name: API 사용량 통계
+  path: 공개자료에서 기본 경로·파일명 미확인
+  format: 공개자료에서 파일형식 미확인
+  check: API별 사용량과 이용현황 및 시간대별 처리량으로 과부하와 비정상 사용 패턴을 확인
+  sample: ''
+- name: API 접근·호출 이력
+  path: 공개자료에서 기본 경로·파일명 미확인
+  format: 공개자료에서 파일형식 미확인
+  check: 사용자 인증과 API 호출 이력을 연계해 인증 실패와 권한 거부 및 비정상 접근을 확인
+  sample: ''
+- name: 장애·예측 모니터링 정보
+  path: 공개자료에서 기본 경로·파일명 미확인
+  format: 공개자료에서 파일형식 미확인
+  check: 자원과 트랜잭션 및 트래픽을 기반으로 이상징후와 장애예측 및 잠재적 실패를 확인
+  sample: ''
+sections:
+- heading: 로그 종류 카탈로그 (전수)
+  body: 'API 호출 이력: 공개자료에서 기본 경로·파일명 미확인 · API 트래픽 모니터링: 공개자료에서 기본 경로·파일명 미확인 · API 이벤트 알림 이력: 공개자료에서 기본 경로·파일명 미확인 · 게이트웨이 상태정보: 공개자료에서 기본 경로·파일명 미확인 · 라우팅 현황정보: 공개자료에서 기본 경로·파일명 미확인 · API 사용량 통계: 공개자료에서
+    기본 경로·파일명 미확인 · API 접근·호출 이력: 공개자료에서 기본 경로·파일명 미확인 · 장애·예측 모니터링 정보: 공개자료에서 기본 경로·파일명 미확인'
+- heading: '로그: API 호출 이력'
+  body: 경로 공개자료에서 기본 경로·파일명 미확인 / 형식 공개자료에서 파일형식 미확인 / 확인 API별 호출 시각과 사용자 및 처리상태를 기준으로 장애 요청과 반복 실패를 확인
+- heading: '로그: API 트래픽 모니터링'
+  body: 경로 공개자료에서 기본 경로·파일명 미확인 / 형식 공개자료에서 파일형식 미확인 / 확인 API별 실시간 트래픽과 사용량 및 급증 구간과 Gateway 부하를 확인
+- heading: '로그: API 이벤트 알림 이력'
+  body: 경로 공개자료에서 기본 경로·파일명 미확인 / 형식 공개자료에서 파일형식 미확인 / 확인 실시간 API 이벤트와 발생 시각 및 대상 API와 Gateway와 Backend 상태를 확인
+- heading: '로그: 게이트웨이 상태정보'
+  body: 경로 공개자료에서 기본 경로·파일명 미확인 / 형식 공개자료에서 파일형식 미확인 / 확인 Gateway 상태와 부하분산 및 트래픽 처리상태와 비정상 인스턴스를 확인
+- heading: '로그: 라우팅 현황정보'
+  body: 경로 공개자료에서 기본 경로·파일명 미확인 / 형식 공개자료에서 파일형식 미확인 / 확인 API 라우팅과 URL 매핑 및 Backend Endpoint 상태와 실패 경로를 확인
+- heading: '로그: API 사용량 통계'
+  body: 경로 공개자료에서 기본 경로·파일명 미확인 / 형식 공개자료에서 파일형식 미확인 / 확인 API별 사용량과 이용현황 및 시간대별 처리량으로 과부하와 비정상 사용 패턴을 확인
+- heading: '로그: API 접근·호출 이력'
+  body: 경로 공개자료에서 기본 경로·파일명 미확인 / 형식 공개자료에서 파일형식 미확인 / 확인 사용자 인증과 API 호출 이력을 연계해 인증 실패와 권한 거부 및 비정상 접근을 확인
+- heading: '로그: 장애·예측 모니터링 정보'
+  body: 경로 공개자료에서 기본 경로·파일명 미확인 / 형식 공개자료에서 파일형식 미확인 / 확인 자원과 트랜잭션 및 트래픽을 기반으로 이상징후와 장애예측 및 잠재적 실패를 확인

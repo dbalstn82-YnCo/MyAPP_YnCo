@@ -1,0 +1,4 @@
+"TimeCreated","LevelDisplayName","ProviderName","Id","Message"
+"2026-09-02 13:55:10","정보","Service Control Manager","7036","Windows Update 서비스가 실행 중 상태로 들어갔습니다."
+"2026-09-02 14:01:42","오류","Service Control Manager","7031","OrderSync 서비스가 예기치 않게 종료되었습니다. 이 동작이 1번 발생했습니다."
+"2026-09-02 14:02:05","경고","Microsoft-Windows-Resource-Exhaustion-Detector","2004","가상 메모리가 부족합니다. 다음 프로그램이 가장 많은 가상 메모리를 사용했습니다: java.exe"

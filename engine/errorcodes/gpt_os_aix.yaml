@@ -1,0 +1,319 @@
+product: aix
+layer: os
+note: GPT 협업 수집분 — 벤더 공식 문서와 대조 후 확정
+codes:
+- code: DCB47997
+  severity: error
+  category: hardware
+  title: SC_DISK_ERR4 디스크 동작 오류
+  immediate:
+  - errpt 상세와 대상 hdisk 및 PATH ID를 확인하고 정상 경로로 I/O를 유지
+  short:
+  - sense data와 SAN 및 스토리지 로그를 분석해 SC_DISK_ERR4 원인을 확인
+  mid:
+  - sense data·PATH ID·SAN 스위치·스토리지 포트/LUN 상태로 장애 지점을 특정한 뒤 필요한 구성요소만 교체 또는 복구
+  long:
+  - MPIO 경로 상태와 디스크 오류 추세를 상시 모니터링
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/support/pages/error-label-scdiskerr4-identifier-dcb47997-logged-aix-or-virtual-io-server-0)
+  note: IBM 예시 Type=TEMP/Class=H, critical 고정은 과다
+  vendor_cause: 스토리지 장치가 I/O 요청을 중단한 내부 target failure이며 일반적으로 SAN fabric 전송 문제가 원인임
+  vendor_action: 영향 LUN ID와 실패 경로의 storage WWPN을 확인해 SAN Storage Support에 전달
+  vendor_url: https://www.ibm.com/support/pages/error-label-scdiskerr4-identifier-dcb47997-logged-aix-or-virtual-io-server-0
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: SC_DISK_ERR4 — IBM 문서 기준 5.3~7.3 동일 IDENTIFIER
+- code: B6267342
+  severity: critical
+  category: hardware
+  title: SC_DISK_ERR2 디스크 동작 오류 (DISK OPERATION ERROR)
+  immediate:
+  - "`errpt -a -j B6267342 | head -80` 으로 대상 hdisk(Resource Name)·PATH ID·SENSE DATA 기록 — 같은 hdisk 반복이면 장치 결함 의심(sense data 는 스토리지 지원팀 전달 자료)"
+  - "`lspath -l hdisk<N>` 로 경로 상태(Enabled/Failed/Missing), `lsdev -Cc disk | grep hdisk<N>` 로 Available 여부 확인 — Failed 경로가 있거나 Defined 면 I/O 영향 있음"
+  short:
+  - 디스크와 SAN 및 HBA 오류를 상관분석하고 장치 진단을 수행
+  mid:
+  - sense data·diag·path·스토리지 로그로 결함 FRU 가 확인된 경우에만 해당 디스크/스토리지 부품을 교체하고 경로를 검증
+  long:
+  - 디스크 예측진단과 SAN 경로 이중화 및 오류 임계치를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/support/pages/error-label-scdiskerr2-and-identifier-b6267342-reported-aix-or-vio-server)
+  note: Type=PERM/Class=H, 디스크·R/W 장치 하드웨어 오류
+  vendor_cause: 디스크 또는 읽기/쓰기 광학장치 하드웨어 오류이며 장치가 사용 가능한 ready 상태가 아닐 수 있음
+  vendor_action: 전체 SCSI sense code와 오류 상황을 스토리지 지원팀에 전달해 장치 문제를 해결
+  vendor_url: https://www.ibm.com/support/pages/error-label-scdiskerr2-and-identifier-b6267342-reported-aix-or-vio-server
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: IBM 문서 LABEL 은 SC_DISK_ERR2(이전 표기 DISK_ERR4 는 오기) — All Versions
+- code: E86653C3
+  severity: critical
+  category: storage
+  title: LVM I/O 오류
+  immediate:
+  - "`errpt -a -j E86653C3 | head -80` 으로 대상 PV·LV·시각 확인, `errpt | head -40` 으로 같은 시각 SC_DISK_ERR*·FCP_ERR* 동반 여부 — 동반이면 하위 디스크·경로 원인"
+  - "`lsvg -p <vg>` 로 PV STATE(active/missing/removed), `lsvg -l <vg>` 로 LV STATE(stale 포함) 확인 — missing PV 또는 stale LV 가 있으면 확정"
+  short:
+  - errpt와 lspath 및 SAN 로그로 I/O 실패 경로를 분석
+  mid:
+  - 결함 PV 또는 경로를 복구하고 VG와 LV 정합성을 검증
+  long:
+  - LVM I/O 오류와 MPIO 경로 상태를 통합 모니터링
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/support/pages/resolving-missing-or-removed-disks-aix-lvm)
+  note: LVM_IO_FAIL / I/O ERROR DETECTED BY LVM
+  vendor_cause: 디스크 접근 문제로 LVM I/O 오류가 발생하며 디스크가 missing 상태일 때 함께 기록될 수 있음
+  vendor_action: errpt·lsdev·lspv·lsvg와 PVID를 확인하고 PVID가 맞으면 varyonvg를 수행; 디스크 문제면
+    스토리지 지원팀 문의
+  vendor_url: https://www.ibm.com/support/pages/resolving-missing-or-removed-disks-aix-lvm
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: LVM_IO_FAIL 전 버전
+- code: EAA3D429
+  severity: error
+  category: storage
+  title: 물리 파티션 stale
+  immediate:
+  - "`lsvg -l <vg> | grep -i stale` 로 stale LV, `lspv hdisk<N>` 의 STALE PARTITIONS 수 확인 — 0 보다 크면 미러 불일치 확정"
+  - "`lsvg -p <vg>` 의 PV STATE 와 `errpt | head -40` 의 선행 디스크 I/O 오류(SC_DISK_ERR*·LVM_IO_FAIL) 확인 — 미러 동기화(syncvg)는 경로 복구 뒤 2차"
+  short:
+  - lspv와 lsvg 및 errpt로 stale 발생 원인과 디스크 경로를 분석
+  mid:
+  - 결함 경로를 복구한 뒤 syncvg로 미러 동기화를 수행
+  long:
+  - stale PP와 mirror 동기화 상태를 상시 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/support/pages/resolving-missing-or-removed-disks-aix-lvm)
+  note: LVM_SA_STALEPP
+  vendor_cause: 디스크 접근 문제와 함께 LVM이 물리 파티션을 stale 상태로 표시할 수 있음
+  vendor_action: errpt·lsdev·lspv·lsvg와 PVID를 확인하고 일시 접근 문제면 varyonvg 또는 필요 시 chpv
+    -va 수행
+  vendor_url: https://www.ibm.com/support/pages/resolving-missing-or-removed-disks-aix-lvm
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: LVM_SA_STALEPP 전 버전
+- code: F7DDA124
+  severity: critical
+  category: storage
+  title: 물리 볼륨 누락
+  immediate:
+  - "`lsvg -p <vg>` 로 missing PV, `lspv` 로 PVID·VG 대응 확인 — PV STATE 가 missing 이면 확정"
+  - "`lsdev -Cc disk` 로 hdisk Available/Defined, `lspath -l hdisk<N>` 으로 경로 상태 확인 — Defined 이거나 모든 경로가 Failed 면 장치·SAN 측 문제(varyonvg·chpv 는 2차·승인 후)"
+  short:
+  - lspath와 lsdev 및 SAN zoning과 디스크 상태를 분석
+  mid:
+  - 누락 PV를 복구하거나 교체하고 VG 상태와 quorum을 검증
+  long:
+  - PV 상태와 MPIO path loss를 실시간 모니터링
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/support/pages/resolving-missing-or-removed-disks-aix-lvm)
+  note: LVM_SA_PVMISS
+  vendor_cause: LVM이 해당 디스크가 현재 Volume Group에 속하는지 정상적으로 확인하지 못해 missing으로 선언함
+  vendor_action: PVID와 VGDA를 확인하고 일치하면 varyonvg/chpv를 수행; PVID를 읽지 못하면 디스크 지원팀에 문의
+  vendor_url: https://www.ibm.com/support/pages/resolving-missing-or-removed-disks-aix-lvm
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: LVM_SA_PVMISS 전 버전
+- code: 78ABDDEB
+  severity: critical
+  category: storage
+  title: JFS2 메타데이터 I/O 오류
+  immediate:
+  - "`errpt -a -j 78ABDDEB | head -60` 으로 대상 장치(LV)·시각, `errpt | head -40` 으로 같은 시각 SC_DISK_ERR·LVM_IO_FAIL 동반 여부 확인 — 동반이면 하위 디스크 원인"
+  - "`mount | grep <mount>` 로 마운트 상태(ro 여부), `lsvg -l <vg>` 로 해당 LV STATE 확인 — fsck·umount 는 1차에서 하지 않음(2차·승인 후)"
+  short:
+  - errpt와 fsck 검사 계획 및 스토리지 I/O 상태를 분석
+  mid:
+  - 정비창에 파일시스템 복구와 결함 스토리지 조치를 수행
+  long:
+  - JFS2 무결성 점검과 스토리지 오류 사전경보를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/support/pages/resolving-missing-or-removed-disks-aix-lvm)
+  note: J2_METADATA_EIO
+  vendor_cause: 디스크 missing 또는 접근 장애 상황에서 JFS2 메타데이터 I/O 오류가 함께 발생할 수 있음
+  vendor_action: errpt와 물리 디스크 상태를 확인하고 PVID·VG 상태를 점검해 하위 디스크 접근 문제를 먼저 해결
+  vendor_url: https://www.ibm.com/support/pages/resolving-missing-or-removed-disks-aix-lvm
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: JFS2 메타데이터 I/O 오류 — JFS2 전 버전
+- code: B6DB68E0
+  severity: critical
+  category: storage
+  title: JFS2 복구 필요
+  immediate:
+  - "`errpt -a -j B6DB68E0 | head -60` 으로 대상 파일시스템(장치)·시각, `errpt | head -40` 으로 선행 디스크 I/O·J2_METADATA 오류 확인"
+  - "`mount | grep <mount>` 와 `df -g <mount>` 로 마운트·접근 상태 확인 — 접근 가능하면 중요 데이터 최근 백업 여부를 담당자와 확인(fsck·umount 는 2차·승인 후)"
+  short:
+  - 선행 I/O 오류와 파일시스템 손상 범위를 분석
+  mid:
+  - 언마운트 후 fsck를 수행하고 정상 마운트와 데이터 정합성을 검증
+  long:
+  - 파일시스템 무결성 검사와 복구훈련을 정례화
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/support/pages/resolving-missing-or-removed-disks-aix-lvm)
+  note: J2_FSCK_REQUIRED
+  vendor_cause: JFS2 가 파일시스템 불일치를 감지해 fsck 실행이 필요하다고 표시한 상태(J2_FSCK_REQUIRED). 대개
+    선행 디스크 I/O 오류나 비정상 종료 후 메타데이터 정합성이 깨졌을 때 기록된다.
+  vendor_action: ''
+  vendor_note: 제조사 문서에 원인·조치 항목 없음
+  vendor_url: https://www.ibm.com/support/pages/resolving-missing-or-removed-disks-aix-lvm
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: JFS2 복구 필요 — JFS2 전 버전
+- code: C1348779
+  severity: critical
+  category: storage
+  title: JFS2 로그 I/O 오류 (J2_LOG_EIO — LOG I/O ERROR)
+  immediate:
+  - errpt -a 로 해당 항목의 Resource Name(파일시스템/논리볼륨)과 시각을 기록, 같은 시각의 SC_DISK_ERR·LVM_IO_FAIL
+    동반 여부 확인
+  - 해당 파일시스템 쓰기 영향(응답 지연·오류) 신고와 대조 — umount/fsck 는 2차 승인 후
+  short:
+  - 하위 디스크·경로(MPIO) 상태(lspath, lsmpio) 확인 후 스토리지 담당 이관
+  mid:
+  - 용량 계획 재산정
+  long:
+  - 파일시스템 사용률 감시
+  source: IBM 문서 대조 완료 — J2_LOG_EIO(LOG I/O ERROR), Version Independent (https://www.ibm.com/support/pages/resolving-missing-or-removed-disks-aix-lvm)
+  note: GPT 라운드 간 의미 상충(JFS2 확장 정보 vs J2_LOG_EIO) — 실로그·IBM 문서 재확인 전 보류
+  versions: &id001
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: 이전 등재('JFS2 EXPANSION OF FILESYSTEM' 정보성)는 오기 — GPT 교차·IBM 문서로 정정
+    2026-09-11
+  vendor_url: https://www.ibm.com/support/pages/resolving-missing-or-removed-disks-aix-lvm
+  vendor_cause: JFS2 저널 로그 장치 I/O 오류 — 하위 디스크·경로 장애가 원인인 경우가 대부분
+  vendor_action: errpt 의 동반 디스크/LVM 오류 확인, 경로·디스크 복구 후 fsck 필요 여부 판단
+- code: 52715FA5
+  severity: critical
+  category: storage
+  title: VG 상태영역 쓰기 실패 (FAILED TO WRITE VOLUME GROUP STATUS AREA)
+  immediate:
+  - errpt -a 에서 LVM_SA_WRTERR 항목의 Resource Name(hdisk/VG)·시각·Detail Data(sense) 를
+    기록
+  - 같은 시각의 SC_DISK_ERR·LVM_IO_FAIL·PATH 오류 동반 여부와 서비스 영향(I/O 지연) 확인 — varyon/importvg
+    등 LVM 변경은 2차 승인 후
+  short:
+  - lspv·lsvg -p·lspath 로 디스크·경로 상태 확인 후 스토리지/SAN 담당 이관
+  mid:
+  - 같은 PV 에서 반복되면 replacepv 로 디스크 교체, VGDA 복구는 IBM 'Resolving missing or removed disks
+    in AIX LVM' 절차에 따라 변경 관리로 진행
+  long:
+  - LVM_SA_WRTERR·LVM_IO_FAIL 발생 감시와 lsvg -p missing PV 일일 점검
+  source: IBM 문서 대조 완료 — LVM_SA_WRTERR, Version Independent (https://www.ibm.com/support/pages/resolving-missing-or-removed-disks-aix-lvm)
+  vendor_url: https://www.ibm.com/support/pages/resolving-missing-or-removed-disks-aix-lvm
+  vendor_cause: 'LVM_SA_WRTERR: IBM LVM 문서 등재 오류 — 디스크 누락/경로 장애/상태영역 쓰기 실패'
+  vendor_action: IBM 'Resolving missing or removed disks in AIX LVM' 절차(디스크 상태 확인
+    → 복구 → 재동기화)
+  versions: *id001
+  version_note: IBM 문서 Version Independent (GPT 교차 2026-09-11)
+- code: 5BEAD71B
+  severity: error
+  category: storage
+  title: 쿼럼 없는 VG 활성화 (100% 디스크 없이 no-quorum VG 활성화)
+  immediate:
+  - errpt -a 에서 LVM_QUORUMNOQUORUM 항목의 Resource Name(hdisk/VG)·시각·Detail Data(sense)
+    를 기록
+  - 같은 시각의 SC_DISK_ERR·LVM_IO_FAIL·PATH 오류 동반 여부와 서비스 영향(I/O 지연) 확인 — varyon/importvg
+    등 LVM 변경은 2차 승인 후
+  short:
+  - lspv·lsvg -p·lspath 로 디스크·경로 상태 확인 후 스토리지/SAN 담당 이관
+  mid:
+  - 쿼럼 없이 강제 활성화된 VG 는 누락 디스크 복구 후 syncvg 로 미러 재동기화, 쿼럼 정책(chvg -Q)을 설계 기준대로 재검토
+  long:
+  - 강제 varyon 이력과 VG 쿼럼 상태를 변경 기록으로 관리
+  source: IBM 문서 대조 완료 — LVM_QUORUMNOQUORUM, Version Independent (https://www.ibm.com/support/pages/resolving-missing-or-removed-disks-aix-lvm)
+  vendor_url: https://www.ibm.com/support/pages/resolving-missing-or-removed-disks-aix-lvm
+  vendor_cause: 'LVM_QUORUMNOQUORUM: IBM LVM 문서 등재 오류 — 디스크 누락/경로 장애/상태영역 쓰기 실패'
+  vendor_action: IBM 'Resolving missing or removed disks in AIX LVM' 절차(디스크 상태 확인
+    → 복구 → 재동기화)
+  versions: *id001
+  version_note: IBM 문서 Version Independent (GPT 교차 2026-09-11)
+- code: '26120107'
+  severity: error
+  category: storage
+  title: 누락 PV 정의됨 (PHYSICAL VOLUME DEFINED AS MISSING)
+  immediate:
+  - errpt -a 에서 LVM_MISSPVADDED 항목의 Resource Name(hdisk/VG)·시각·Detail Data(sense)
+    를 기록
+  - 같은 시각의 SC_DISK_ERR·LVM_IO_FAIL·PATH 오류 동반 여부와 서비스 영향(I/O 지연) 확인 — varyon/importvg
+    등 LVM 변경은 2차 승인 후
+  short:
+  - lspv·lsvg -p·lspath 로 디스크·경로 상태 확인 후 스토리지/SAN 담당 이관
+  mid:
+  - 누락 PV 를 복구한 뒤 `varyonvg <vg>` 로 PV 를 active 로 되돌리고 stale PP 를 syncvg 로 동기화(2차·변경
+    관리)
+  long:
+  - PV missing 상태와 경로 손실(lspath Failed) 감시 등록
+  source: IBM 문서 대조 완료 — LVM_MISSPVADDED, Version Independent (https://www.ibm.com/support/pages/resolving-missing-or-removed-disks-aix-lvm)
+  vendor_url: https://www.ibm.com/support/pages/resolving-missing-or-removed-disks-aix-lvm
+  vendor_cause: 'LVM_MISSPVADDED: IBM LVM 문서 등재 오류 — 디스크 누락/경로 장애/상태영역 쓰기 실패'
+  vendor_action: IBM 'Resolving missing or removed disks in AIX LVM' 절차(디스크 상태 확인
+    → 복구 → 재동기화)
+  versions: *id001
+  version_note: IBM 문서 Version Independent (GPT 교차 2026-09-11)
+- code: 747725D9
+  severity: critical
+  category: disk
+  title: SC_DISK_ERR1 디스크 동작 오류 (하드웨어 오류 계열)
+  immediate:
+  - errpt -a 에서 SC_DISK_ERR1 항목의 Resource Name(hdisk/VG)·시각·Detail Data(sense) 를 기록
+  - 같은 시각의 SC_DISK_ERR·LVM_IO_FAIL·PATH 오류 동반 여부와 서비스 영향(I/O 지연) 확인 — varyon/importvg
+    등 LVM 변경은 2차 승인 후
+  short:
+  - lspv·lsvg -p·lspath 로 디스크·경로 상태 확인 후 스토리지/SAN 담당 이관
+  mid:
+  - sense data 로 결함 FRU(디스크·컨트롤러)를 확정한 경우 해당 부품만 교체, 미러 VG 는 replacepv 로 데이터 이동
+  long:
+  - SC_DISK_ERR1 등 하드웨어 클래스 errpt 감시와 디스크 예방 교체 기준 운영
+  source: IBM 문서 대조 완료 — SC_DISK_ERR1, Version Independent (https://www.ibm.com/support/pages/resolving-missing-or-removed-disks-aix-lvm)
+  vendor_url: https://www.ibm.com/support/pages/resolving-missing-or-removed-disks-aix-lvm
+  vendor_cause: 'SC_DISK_ERR1: IBM LVM 문서 등재 오류 — 디스크 누락/경로 장애/상태영역 쓰기 실패'
+  vendor_action: IBM 'Resolving missing or removed disks in AIX LVM' 절차(디스크 상태 확인
+    → 복구 → 재동기화)
+  versions: *id001
+  version_note: IBM 문서 Version Independent (GPT 교차 2026-09-11)
+- code: DE3B8540
+  severity: error
+  category: disk
+  title: SC_DISK_ERR7 디스크 동작 오류 (경로/매체 계열)
+  immediate:
+  - errpt -a 에서 SC_DISK_ERR7 항목의 Resource Name(hdisk/VG)·시각·Detail Data(sense) 를 기록
+  - 같은 시각의 SC_DISK_ERR·LVM_IO_FAIL·PATH 오류 동반 여부와 서비스 영향(I/O 지연) 확인 — varyon/importvg
+    등 LVM 변경은 2차 승인 후
+  short:
+  - lspv·lsvg -p·lspath 로 디스크·경로 상태 확인 후 스토리지/SAN 담당 이관
+  mid:
+  - PATH ID 로 문제 경로를 특정해 HBA·케이블·스위치 포트·스토리지 포트 중 결함 부품을 교체
+  long:
+  - SC_DISK_ERR7 발생 건수와 경로 Failed 이력 감시
+  source: IBM 문서 대조 완료 — SC_DISK_ERR7, Version Independent (https://www.ibm.com/support/pages/resolving-missing-or-removed-disks-aix-lvm)
+  vendor_url: https://www.ibm.com/support/pages/resolving-missing-or-removed-disks-aix-lvm
+  vendor_cause: 'SC_DISK_ERR7: IBM LVM 문서 등재 오류 — 디스크 누락/경로 장애/상태영역 쓰기 실패'
+  vendor_action: IBM 'Resolving missing or removed disks in AIX LVM' 절차(디스크 상태 확인
+    → 복구 → 재동기화)
+  versions: *id001
+  version_note: IBM 문서 Version Independent (GPT 교차 2026-09-11)

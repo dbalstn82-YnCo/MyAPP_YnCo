@@ -1,0 +1,111 @@
+product: windows
+layer: os
+codes:
+- code: '41'
+  severity: critical
+  category: internal
+  title: Kernel-Power 비정상 종료 후 재부팅
+  immediate:
+  - '`Get-WinEvent -FilterHashtable @{LogName="System"; Id=41; ProviderName="Microsoft-Windows-Kernel-Power"} -MaxEvents 5 | ForEach-Object { $_.ToXml() }` 로 BugcheckCode·PowerButtonTimestamp 확인 — BugcheckCode 가 0 이 아니면 Stop 오류'
+  - '덤프 확인: `Get-ChildItem C:\Windows\MEMORY.DMP,C:\Windows\Minidump -ErrorAction SilentlyContinue | ft FullName,LastWriteTime,Length` 와 1001(BugCheck) 이벤트 확인'
+  - BMC(iLO/iDRAC)·UPS 로그로 같은 시각 전원 이벤트 확인, `Get-WinEvent -FilterHashtable @{LogName="System"; Id=6008,1074} -MaxEvents 5 | fl TimeCreated,Message` 로 직전 종료 성격 확인
+  short:
+  - 미니덤프 분석, 최근 드라이버 변경 확인
+  mid:
+  - 펌웨어·드라이버 업데이트
+  long:
+  - 전원 이중화·UPS 점검
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/windows-client/performance/event-id-41-restart)
+  note: 원인은 전원·Stop 오류·응답정지 등 다양, hardware 고정 불가
+  vendor_cause: 'System 로그 원본 Microsoft-Windows-Kernel-Power 이벤트 41 "The system has rebooted without cleanly shutting down first." — 다음 부팅 때 직전 종료가 정상 절차를 거치지 않았음을 남긴 기록(원인 자체는 아님). 이벤트 데이터의 BugcheckCode 가 0 이 아니면 Stop 오류(10진수로 기록), PowerButtonTimestamp 가 0 이 아니면 전원 버튼 강제 종료, 둘 다 0 이면 전원 차단·전원공급장치·과열·응답 정지(hard hang) 또는 ASR·하이퍼바이저 heartbeat 에 의한 재시작이 흔한 원인.'
+  vendor_action: BugcheckCode·PowerButtonTimestamp를 확인하고 값이 0이면 오버클럭·메모리·전원공급장치·과열 등을 점검
+  vendor_url: https://learn.microsoft.com/en-us/troubleshoot/windows-client/performance/event-id-41-restart
+  versions:
+  - Windows Server 2008/R2
+  - 2012/R2
+  - '2016'
+  - '2019'
+  - '2022'
+  - '2025'
+  version_note: Kernel-Power 41 은 2008 R2/Vista SP1 이후
+- code: '55'
+  severity: error
+  category: storage
+  title: NTFS 파일시스템 손상 감지
+  immediate:
+  - '`Get-WinEvent -FilterHashtable @{LogName="System"; Id=55} -MaxEvents 10 | fl TimeCreated,ProviderName,Message` 로 손상 볼륨·파일 참조 확인'
+  - '`fsutil dirty query <드라이브>:` 와 `Get-Volume -DriveLetter <드라이브> | fl HealthStatus,OperationalStatus` (2012+) 로 dirty·상태 확인'
+  - 해당 볼륨 백업 성공 여부와 같은 시각 Disk 7/11/51/153 동반 확인 — 수리(chkdsk /f)는 2차
+  short:
+  - '(2차·승인 후, 롤백: 백업 복원) `chkdsk <드라이브>: /scan` (2012+, 수정 없이 검사)로 범위 확인 후 업무 중단 시간에 `chkdsk <드라이브>: /f` 또는 `/spotfix`, 시스템 볼륨은 재부팅 시 실행'
+  mid:
+  - 디스크 상태 진단·교체
+  long:
+  - 스토리지 상태 점검 정례화
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/windows-server/backup-and-storage/troubleshoot-data-corruption-and-disk-errors)
+  note: NTFS 손상 이벤트, hardware로 한정 불가
+  vendor_cause: 디스크 불량 섹터 또는 파일시스템이 보낸 I/O 요청이 정상 완료되지 않아 NTFS 파일시스템이 손상됨
+  vendor_action: chkdsk /f /r 실행 후 하드웨어를 확인하고 SCSI/RAID·필터 드라이버와 스토리지 드라이버·펌웨어를 갱신
+  vendor_url: https://learn.microsoft.com/en-us/troubleshoot/windows-server/backup-and-storage/troubleshoot-data-corruption-and-disk-errors
+  versions:
+  - Windows Server 2003
+  - 2008/R2
+  - 2012/R2
+  - '2016'
+  - '2019'
+  - '2022'
+  - '2025'
+  version_note: 이벤트 ID 전 버전 공통(2003 포함). CSV 내보내기는 2008 R2+ Get-WinEvent, 2003/2008 은 wevtutil/Get-EventLog
+- code: '153'
+  severity: warn
+  category: storage
+  title: Disk I/O 작업 재시도
+  immediate:
+  - '`Get-WinEvent -FilterHashtable @{LogName="System"; Id=153} -MaxEvents 20 | fl TimeCreated,Message` 로 디스크 번호·재시도 빈도 확인'
+  - '`Get-WinEvent -FilterHashtable @{LogName="System"; Id=129; StartTime=(Get-Date).AddHours(-6)} -ErrorAction SilentlyContinue | fl TimeCreated,ProviderName,Message` 로 Storport 리셋 동반 여부 확인'
+  - '`mpclaim -s -d` (MPIO 사용 시)와 `Get-Counter "\PhysicalDisk(*)\Avg. Disk sec/Transfer" -MaxSamples 3` 로 경로·지연 확인'
+  short:
+  - HBA·펌웨어 로그 점검
+  mid:
+  - 경로·케이블·컨트롤러 정비
+  long:
+  - 스토리지 경로 이중화 점검
+  source: GPT 수집·벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/windows-server/backup-and-storage/windows-server-mpio-troubleshooting)
+  note: logical block I/O operation was retried
+  vendor_cause: 스토리지 서브시스템 과부하로 요청이 timeout되어 Storport miniport 드라이버가 I/O를 재시도함
+  vendor_action: 트래픽 분산·컨트롤러 용량·throttling·iSCSI·MPIO 설정을 점검하고 지속되면 하드웨어 공급업체에 문의
+  vendor_url: https://learn.microsoft.com/en-us/troubleshoot/windows-server/backup-and-storage/windows-server-mpio-troubleshooting
+  versions:
+  - Windows Server 2012/R2
+  - '2016'
+  - '2019'
+  - '2022'
+  - '2025'
+  version_note: Disk 153 은 2012 R2/8.1 이후 도입(2012 는 KB 핫픽스 후)
+- code: '2013'
+  severity: error
+  category: disk
+  title: 디스크 공간 부족 경고 (2013)
+  vendor_cause: Server(srv) 서비스가 디스크(볼륨) 사용량이 용량 한도에 근접했음을 경고 — 로그·덤프·임시 파일·섀도 복사본 누적이 흔한 원인이며 가득 차면 서비스·데이터베이스 쓰기 실패로 이어진다.
+  immediate:
+  - '`Get-Volume | Sort-Object SizeRemaining | ft DriveLetter,FileSystemLabel,Size,SizeRemaining` (2012+) 또는 `Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" | ft DeviceID,Size,FreeSpace` 로 여유 확인'
+  - '대용량 파일 확인: `Get-ChildItem <폴더> -Recurse -File -ErrorAction SilentlyContinue | Sort-Object Length -Descending | Select-Object -First 20 FullName,Length,LastWriteTime` (부하 있음 — 의심 폴더 한정)'
+  - '`vssadmin list shadowstorage` 로 섀도 복사본 사용량 확인 — 정리는 2차'
+  short:
+  - '(2차·승인 후, 롤백: 정리 전 보관본) 소유 담당 확인 후 오래된 로그·덤프 이동·압축, 섀도 저장 공간 조정(`vssadmin resize shadowstorage`), `Dism /Online /Cleanup-Image /StartComponentCleanup` (2012+)'
+  mid:
+  - 로그·덤프 보존 정책과 데이터 폴더 별도 볼륨 분리
+  long:
+  - 볼륨 사용률 80% 경고·90% 위험 감시와 증설 계획
+  source: GPT 수집·공식 문서 미확인(보류)
+  note: Microsoft Learn 공식 본문 미확인, 공개 검색은 Microsoft Q&A만 확인
+  versions:
+  - Windows Server 2003
+  - 2008/R2
+  - 2012/R2
+  - '2016'
+  - '2019'
+  - '2022'
+  - '2025'
+  version_note: 이벤트 ID 전 버전 공통(2003 포함). CSV 내보내기는 2008 R2+ Get-WinEvent, 2003/2008 은 wevtutil/Get-EventLog
+  verify_note: 미검증 — Microsoft Learn 공식 문서에서 srv 2013 정의 본문 미확인, 메시지 문구 기준 작성

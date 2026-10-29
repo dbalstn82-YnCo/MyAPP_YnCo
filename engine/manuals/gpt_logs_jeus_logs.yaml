@@ -1,0 +1,99 @@
+product: jeus
+layer: was
+title: jeus 로그 종류 카탈로그 (GPT 수집 — 벤더 문서 대조 필요)
+source: GPT 수집(벤더 문서 대조 필요)
+sources: []
+logtypes:
+- name: 서버 로그
+  path: ${SERVER_HOME}/logs/JeusServer.log
+  format: 텍스트·[yyyy.MM.dd HH:mm:ss][level] [J-T] [M-N]
+  check: JEUS-모듈 코드·SERVER·Deploy·JDBC·EJB·클러스터·기동 오류
+  sample: '[2016.08.24 12:38:52][0] [launcher-1] [SERVER-0522] An exception occurred...'
+- name: Launcher 로그
+  path: ${SERVER_HOME}/logs/JeusLauncher.log
+  format: 텍스트·JEUS 기본 timestamp
+  check: 서버 부팅 전 설정 파싱·Master 연결·JVM 생성·Launcher 오류
+  sample: '[2026.04.23 10:49:41][1] [launcher-1] [Config-0153] ...'
+- name: 로거 상태 로그
+  path: ${SERVER_HOME}/logs/JeusLoggerStatus.log
+  format: 텍스트·JEUS timestamp
+  check: Asynchronous logger 자체 예외·queue/handler 기록 실패
+  sample: <timestamp> <async logger exception>
+- name: JVM 로그
+  path: ${SERVER_HOME}/logs/jvm.log
+  format: JVM 텍스트·JVM timestamp
+  check: GC·Thread Dump·JVM diagnostic output·hang 분석
+  sample: Full thread dump Java HotSpot(TM) ...
+- name: 사용자 GC 로그
+  path: JVM -Xloggc:<file> 또는 -Xverbosegclog:<file> 지정·기본 timestamp suffix 추가
+  format: JVM GC 텍스트/XML·JVM timestamp
+  check: Full GC·긴 pause·heap 포화·allocation failure
+  sample: <configured-gc-file>.<timestamp>
+- name: 웹 Access 로그
+  path: ${SERVER_HOME}/logs/servlet/access.log
+  format: CLF·dd/MMM/yyyy:HH:mm:ss Z
+  check: HTTP 상태·URI·client IP·bytes·응답 처리 결과
+  sample: 192.168.15.57 [29/Aug/2016:17:37:02 +0900] "GET /example/test1.jsp HTTP/1.1" 200 5 38
+- name: 가상호스트 Access
+  path: ${SERVER_HOME}/logs/servlet/<VHOST>/access.log
+  format: CLF·dd/MMM/yyyy:HH:mm:ss Z
+  check: 가상호스트별 4xx·5xx·URI·응답량 분리 분석
+  sample: 192.168.15.57 [29/Aug/2016:17:37:02 +0900] "GET / HTTP/1.1" 200 ...
+- name: 웹앱 User 로그
+  path: ${SERVER_HOME}/logs/servlet/user.log 또는 user_<appname>.log
+  format: Java/JEUS 텍스트·설정 formatter timestamp
+  check: ServletContext.log·애플리케이션 예외·업무 로그
+  sample: '[yyyy.MM.dd HH:mm:ss][INFO] ... <application message>'
+- name: 웹엔진 서버 로그
+  path: ${SERVER_HOME}/logs/JeusServer.log
+  format: JEUS 텍스트·기본 formatter
+  check: 웹 엔진 start/stop·Servlet/JSP·session·connector 오류
+  sample: '[yyyy.MM.dd HH:mm:ss][level] [J-T] [M-N] <message>'
+- name: 보안 Audit 로그
+  path: 버전별 상이(security-domains.xml default-audit-service config-file)
+  format: BasicAuditLogFileService 텍스트·설정형
+  check: 인증 실패·인가 실패·Security Framework 이벤트
+  sample: <timestamp> <audit-level> <security event>
+- name: 모듈별 Logger 로그
+  path: 버전별 상이(FileHandler 설정, 기본은 JeusServer.log)
+  format: JEUS/Java Logging·설정 formatter
+  check: jeus.ejb.* 등 모듈별 오류와 코드 집중 추적
+  sample: '[yyyy.MM.dd HH:mm:ss][level] [J-T] [M-N] <message>'
+- name: 콘솔 로그
+  path: Launcher -verbose 실행 콘솔·필요 시 리다이렉션 파일
+  format: 텍스트·JEUS 기본 timestamp
+  check: 부팅 중 파일 logger 이전 오류·실시간 서버 메시지
+  sample: '[yyyy.MM.dd HH:mm:ss][level] [launcher-1] [SERVER-xxxx] ...'
+sections:
+- heading: 로그 종류 카탈로그 (전수)
+  body: '서버 로그: ${SERVER_HOME}/logs/JeusServer.log · Launcher 로그: ${SERVER_HOME}/logs/JeusLauncher.log · 로거 상태 로그: ${SERVER_HOME}/logs/JeusLoggerStatus.log · JVM 로그: ${SERVER_HOME}/logs/jvm.log · 사용자 GC
+    로그: JVM -Xloggc:<file> 또는 -Xverbosegclog:<file> 지정·기본 timestamp suffix 추가 · 웹 Access 로그: ${SERVER_HOME}/logs/servlet/access.log · 가상호스트 Access: ${SERVER_HOME}/logs/servlet/<VHOST>/access.log · 웹앱 User
+    로그: ${SERVER_HOME}/logs/servlet/user.log 또는 user_<appname>.log · 웹엔진 서버 로그: ${SERVER_HOME}/logs/JeusServer.log · 보안 Audit 로그: 버전별 상이(security-domains.xml default-audit-service config-file) · 모듈별 Logger
+    로그: 버전별 상이(FileHandler 설정, 기본은 JeusServer.log) · 콘솔 로그: Launcher -verbose 실행 콘솔·필요 시 리다이렉션 파일'
+- heading: '로그: 서버 로그'
+  body: 경로 ${SERVER_HOME}/logs/JeusServer.log / 형식 텍스트·[yyyy.MM.dd HH:mm:ss][level] [J-T] [M-N] / 확인 JEUS-모듈 코드·SERVER·Deploy·JDBC·EJB·클러스터·기동 오류 / 샘플 [2016.08.24 12:38:52][0] [launcher-1] [SERVER-0522]
+    An exception occurred...
+- heading: '로그: Launcher 로그'
+  body: 경로 ${SERVER_HOME}/logs/JeusLauncher.log / 형식 텍스트·JEUS 기본 timestamp / 확인 서버 부팅 전 설정 파싱·Master 연결·JVM 생성·Launcher 오류 / 샘플 [2026.04.23 10:49:41][1] [launcher-1] [Config-0153] ...
+- heading: '로그: 로거 상태 로그'
+  body: 경로 ${SERVER_HOME}/logs/JeusLoggerStatus.log / 형식 텍스트·JEUS timestamp / 확인 Asynchronous logger 자체 예외·queue/handler 기록 실패 / 샘플 <timestamp> <async logger exception>
+- heading: '로그: JVM 로그'
+  body: 경로 ${SERVER_HOME}/logs/jvm.log / 형식 JVM 텍스트·JVM timestamp / 확인 GC·Thread Dump·JVM diagnostic output·hang 분석 / 샘플 Full thread dump Java HotSpot(TM) ...
+- heading: '로그: 사용자 GC 로그'
+  body: 경로 JVM -Xloggc:<file> 또는 -Xverbosegclog:<file> 지정·기본 timestamp suffix 추가 / 형식 JVM GC 텍스트/XML·JVM timestamp / 확인 Full GC·긴 pause·heap 포화·allocation failure / 샘플 <configured-gc-file>.<timestamp>
+- heading: '로그: 웹 Access 로그'
+  body: 경로 ${SERVER_HOME}/logs/servlet/access.log / 형식 CLF·dd/MMM/yyyy:HH:mm:ss Z / 확인 HTTP 상태·URI·client IP·bytes·응답 처리 결과 / 샘플 192.168.15.57 [29/Aug/2016:17:37:02 +0900] "GET /example/test1.jsp HTTP/1.1"
+    200 5 38
+- heading: '로그: 가상호스트 Access'
+  body: 경로 ${SERVER_HOME}/logs/servlet/<VHOST>/access.log / 형식 CLF·dd/MMM/yyyy:HH:mm:ss Z / 확인 가상호스트별 4xx·5xx·URI·응답량 분리 분석 / 샘플 192.168.15.57 [29/Aug/2016:17:37:02 +0900] "GET / HTTP/1.1" 200 ...
+- heading: '로그: 웹앱 User 로그'
+  body: 경로 ${SERVER_HOME}/logs/servlet/user.log 또는 user_<appname>.log / 형식 Java/JEUS 텍스트·설정 formatter timestamp / 확인 ServletContext.log·애플리케이션 예외·업무 로그 / 샘플 [yyyy.MM.dd HH:mm:ss][INFO] ... <application
+    message>
+- heading: '로그: 웹엔진 서버 로그'
+  body: 경로 ${SERVER_HOME}/logs/JeusServer.log / 형식 JEUS 텍스트·기본 formatter / 확인 웹 엔진 start/stop·Servlet/JSP·session·connector 오류 / 샘플 [yyyy.MM.dd HH:mm:ss][level] [J-T] [M-N] <message>
+- heading: '로그: 보안 Audit 로그'
+  body: 경로 버전별 상이(security-domains.xml default-audit-service config-file) / 형식 BasicAuditLogFileService 텍스트·설정형 / 확인 인증 실패·인가 실패·Security Framework 이벤트 / 샘플 <timestamp> <audit-level> <security event>
+- heading: '로그: 모듈별 Logger 로그'
+  body: 경로 버전별 상이(FileHandler 설정, 기본은 JeusServer.log) / 형식 JEUS/Java Logging·설정 formatter / 확인 jeus.ejb.* 등 모듈별 오류와 코드 집중 추적 / 샘플 [yyyy.MM.dd HH:mm:ss][level] [J-T] [M-N] <message>
+- heading: '로그: 콘솔 로그'
+  body: 경로 Launcher -verbose 실행 콘솔·필요 시 리다이렉션 파일 / 형식 텍스트·JEUS 기본 timestamp / 확인 부팅 중 파일 logger 이전 오류·실시간 서버 메시지 / 샘플 [yyyy.MM.dd HH:mm:ss][level] [launcher-1] [SERVER-xxxx] ...

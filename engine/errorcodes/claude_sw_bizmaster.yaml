@@ -1,0 +1,44 @@
+product: bizmaster-app
+layer: sw
+note: Tmax BizMaster EAI 업무 앱(GISS) 오류 코드 — 2026-04 실로그 관찰 기반(공개 문서 미확인, 납품 매뉴얼 확보 시 대조)
+codes:
+- code: BM-407
+  severity: error
+  category: upstream
+  title: 연계 기관 서버 응답 시간 초과 (Remote host timed out)
+  immediate:
+  - "`grep -c \"BM-407\" <app_log>` 와 `grep \"BM-407\" <app_log> | tail -30` 으로 발생 건수·대상 기관·시각 확인 — 특정 기관에 몰리면 상대 기관 지연, 전 기관이면 우리 쪽 구간 의심"
+  - "대상 기관 host:port 로 `nc -zvw3 <host> <port>` 와 `ping -c 5 <host>` 를 실행해 도달·지연 확인(재전송·설정 변경 없이 조회만)"
+  short:
+  - 기관별 실패율·응답 시간 집계 후 상대 기관에 상태 문의
+  mid:
+  - 타임아웃·재시도 정책 검토
+  long:
+  - 기관별 연계 품질 지표 관리
+  vendor_cause: "BizMaster 업무 앱이 연계 기관 서버에 요청한 뒤 응답 대기 시간을 넘겼다는 기록(Remote host timed out). 상대 기관 시스템 지연·장애나 구간 네트워크 지연이 흔한 원인이며, 우리 쪽 장애가 아닐 수 있다."
+  verify_note: "미검증 — BizMaster(Tmax) 납품 매뉴얼을 확보하지 못해 BM-407 의 공식 정의·타임아웃 설정 항목 이름을 확인하지 못함(실로그 문구 기준 서술)"
+  source: 실로그 관찰(err.out·eai.log 메시지 '-407 기관 서버의 응답 시간이 초과했습니다' — 공식 문서 미확인)
+  vendor_note: 제조사 문서 미확인 — 로그 메시지와 스택트레이스에서 해석(원인·조치는 룰 즉시/단기 조치 참조)
+  versions:
+  - BizMaster 4.x (Tmax EAI, JEUS 6 기반)
+  version_note: BizMaster 업무 앱(GISS) 실로그 코드(-407/-402) — 공개 문서 없음, BizMaster 4.x 실로그 기준(후속 AnyLink 7/8 은 코드 체계 상이·미수집)
+- code: BM-402
+  severity: error
+  category: connection
+  title: 연계 기관 서버 연결 오류 (IO 예외 — Connection reset)
+  immediate:
+  - "`grep -n \"BM-402\" <app_log> | tail -30` 으로 대상 기관·시각을 확인하고 특정 기관·시간대 집중 여부 집계"
+  - "`nc -zvw3 <host> <port>` 로 기관 서버 포트 도달 확인, 같은 시각 `ss -tan | grep <port> | awk '{print $1}' | sort | uniq -c` 로 소켓 상태 분포 확인"
+  short:
+  - "(2차) 기관별 실패 건수·지속 시간을 집계해 상대 기관과 네트워크 담당에 세션 timeout·장비 정책 확인 요청"
+  mid:
+  - "연결 실패 시 자동 재시도(횟수·간격)와 우회 경로 정책을 연계 설정에 반영(승인 후, 롤백: 이전 설정 사본)"
+  long:
+  - "기관별 연계 성공률·연결 오류 건수를 헬스체크 지표로 감시"
+  vendor_cause: "연계 기관 서버와의 통신 중 IO 예외(Connection reset 등)가 났다는 기록 — 상대가 연결을 끊었거나 중간 장비(방화벽·L4)가 세션을 정리한 경우가 흔한 원인."
+  verify_note: "미검증 — BizMaster(Tmax) 납품 매뉴얼을 확보하지 못해 BM-402 의 공식 정의를 확인하지 못함(실로그 문구 기준 서술)"
+  source: '실로그 관찰(eai.log ''BizException [-402] ... IO 예외 상황: Connection reset'' — 공식 문서 미확인)'
+  vendor_note: 제조사 문서 미확인 — 로그 메시지와 스택트레이스에서 해석(원인·조치는 룰 즉시/단기 조치 참조)
+  versions:
+  - BizMaster 4.x (Tmax EAI, JEUS 6 기반)
+  version_note: BizMaster 업무 앱(GISS) 실로그 코드(-407/-402) — 공개 문서 없음, BizMaster 4.x 실로그 기준(후속 AnyLink 7/8 은 코드 체계 상이·미수집)

@@ -1,0 +1,439 @@
+product: mssql
+layer: db
+note: Claude 야간 수집 2026-09-18 — 벤더 공식 문서와 대조 후 확정
+codes:
+- code: MSSQL-229
+  severity: warn
+  category: security
+  title: 객체 권한 거부
+  immediate:
+  - "오류 원문(Msg 229)의 권한 종류·객체·DB·스키마와 실행 계정 기록(애플리케이션 로그)"
+  - "해당 계정의 부여 권한 조회: `SELECT permission_name, state_desc, OBJECT_NAME(major_id) AS obj FROM sys.database_permissions WHERE grantee_principal_id = USER_ID(N'<user>');` (해당 DB, 읽기 전용)"
+  short:
+  - "(2차·승인 후) 필요한 최소 권한만 `GRANT <권한> ON <schema>.<object> TO <user>` — 롤백: 대응 REVOKE 문 미리 작성, 보안 담당 승인"
+  mid:
+  - "역할(DB Role) 기반 권한 부여로 표준화하고 배포 스크립트에 권한 부여문 포함"
+  long:
+  - "권한 변경 감사(SQL Server Audit)와 분기별 계정 권한 검토"
+  vendor_cause: 로그인/DB 사용자에게 대상 객체(테이블·뷰·프로시저)의 SELECT·EXECUTE 등 권한이 없어 문장이 거부된 경우(심각도 14). 권한 회수·스키마 변경·실행 계정 변경이 흔한 원인이다.
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://learn.microsoft.com/en-us/sql/relational-databases/errors-events/database-engine-events-and-errors-0-to-999?view=sql-server-ver17)
+  versions:
+  - SQL Server 2005
+  - SQL Server 2008/2008 R2
+  - SQL Server 2012
+  - SQL Server 2014
+  - SQL Server 2016
+  - SQL Server 2017
+  - SQL Server 2019
+  - SQL Server 2022
+  - SQL Server 2025
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: MSSQL-547
+  severity: warn
+  category: internal
+  title: 제약조건 충돌
+  immediate:
+  - "오류 원문에서 제약 이름·테이블·컬럼 기록 후 정의 확인: `SELECT name, OBJECT_NAME(parent_object_id) AS tbl, OBJECT_NAME(referenced_object_id) AS ref_tbl FROM sys.foreign_keys WHERE name=N'<제약명>';` (CHECK 제약이면 sys.check_constraints)"
+  - "호출 화면·배치와 입력값을 애플리케이션 로그에서 확인 — 데이터 수정은 하지 않음"
+  short:
+  - "(2차·승인 후) 개발팀과 입력 순서(부모→자식)·삭제 순서 수정, 데이터 보정 SQL 은 대상 행을 백업 테이블로 복사한 뒤 실행(롤백: 백업 테이블에서 원복)"
+  mid:
+  - "애플리케이션 입력 검증에 FK·CHECK 제약 규칙을 반영해 DB 도달 전 차단"
+  long:
+  - "제약 위반(547) 발생 건수 감시와 월간 데이터 정합성 점검"
+  vendor_cause: INSERT·UPDATE·DELETE 문이 FOREIGN KEY 또는 CHECK 제약 조건과 충돌해 거부된 경우(Msg 547). 부모 행 없음·참조 중인 자식 행 존재·허용 범위 밖 값이 흔한 원인이다.
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://learn.microsoft.com/en-us/sql/relational-databases/errors-events/database-engine-events-and-errors-0-to-999?view=sql-server-ver17)
+  versions:
+  - SQL Server 2005
+  - SQL Server 2008/2008 R2
+  - SQL Server 2012
+  - SQL Server 2014
+  - SQL Server 2016
+  - SQL Server 2017
+  - SQL Server 2019
+  - SQL Server 2022
+  - SQL Server 2025
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: FK 외 CHECK 제약 등도 포함
+- code: MSSQL-2627
+  severity: warn
+  category: internal
+  title: 고유 제약 조건 위반
+  immediate:
+  - 오류 원문의 제약 이름·중복 키 값·객체 기록, 같은 키를 넣은 배치·재처리 여부를 애플리케이션 로그로 확인
+  - '제약 구성 열 확인(읽기 전용): `SELECT kc.name, kc.type_desc, c.name AS column_name FROM sys.key_constraints kc JOIN sys.index_columns ic ON ic.object_id=kc.parent_object_id AND ic.index_id=kc.unique_index_id JOIN sys.columns c ON c.object_id=ic.object_id AND c.column_id=ic.column_id WHERE kc.parent_object_id=OBJECT_ID(N''<schema>.<table>'') ORDER BY kc.name, ic.key_ordinal;`'
+  - 제약 열이 IDENTITY 일 때만 `SELECT IDENT_CURRENT(N'<schema>.<table>');` 와 실제 최대 키 값을 비교(시드 어긋남 확인) — IDENTITY 가 아닌 UNIQUE 위반에는 쓰지 않는다
+  short:
+  - "(2차·승인 후) 중복 재처리 방지(존재 확인 후 입력) 로직 보강, IDENTITY 재설정(DBCC CHECKIDENT RESEED)은 현재 최대값 확인·백업 후 — 롤백: 이전 시드 값 기록"
+  mid:
+  - "키 생성 방식(SEQUENCE·IDENTITY) 표준화와 재처리 멱등성 설계"
+  long:
+  - "중복 키(2627·2601) 오류 건수 감시와 데이터 정합성 점검 주기 운영"
+  vendor_cause: PRIMARY KEY 또는 UNIQUE 제약에 이미 있는 키 값을 넣으려 해 거부된 경우(Msg 2627, 중복 키 값이 메시지에 표시됨). 재처리로 인한 중복 입력·키 채번 충돌이 흔한 원인이다.
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://learn.microsoft.com/en-us/sql/relational-databases/errors-events/database-engine-events-and-errors-2000-to-2999?view=sql-server-ver17)
+  versions:
+  - SQL Server 2005
+  - SQL Server 2008/2008 R2
+  - SQL Server 2012
+  - SQL Server 2014
+  - SQL Server 2016
+  - SQL Server 2017
+  - SQL Server 2019
+  - SQL Server 2022
+  - SQL Server 2025
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: MSSQL-3201
+  severity: error
+  category: disk
+  title: 백업 장치 열기 실패
+  immediate:
+  - "오류 원문의 백업 경로와 Operating system error 번호 기록 → `net helpmsg <번호>` 로 의미 확인(5=접근 거부, 3=경로 없음, 53=네트워크 경로 없음)"
+  - "SQL 서비스 계정 확인 `SELECT servicename, service_account FROM sys.dm_server_services;` (2008 R2 SP1+) 후 그 계정의 대상 경로 권한 조회 `icacls <path>` (조회만)"
+  - "대상 경로 존재·여유 공간 확인: `Test-Path <path>` · `Get-PSDrive`"
+  short:
+  - "(2차·승인 후) 서비스 계정에 백업 경로 쓰기 권한 부여 또는 백업 경로 수정 후 재수행 — 롤백: 변경 전 ACL 저장(`icacls <path> /save <aclfile>`)"
+  mid:
+  - "백업 전용 볼륨·공유 경로의 권한·용량(85% 경보) 표준 수립"
+  long:
+  - "SQL Agent 백업 작업 실패 시 운영자 알림과 일일 백업 성공 여부 점검"
+  vendor_cause: BACKUP·RESTORE 가 지정한 백업 장치(파일·공유 경로)를 열지 못한 경우(심각도 16). 메시지의 Operating system error 번호가 원인(접근 거부·경로 없음·네트워크 경로 없음 등)을 알려준다.
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://learn.microsoft.com/en-us/sql/relational-databases/errors-events/database-engine-events-and-errors-3000-to-3999?view=sql-server-ver17)
+  versions:
+  - SQL Server 2005
+  - SQL Server 2008/2008 R2
+  - SQL Server 2012
+  - SQL Server 2014
+  - SQL Server 2016
+  - SQL Server 2017
+  - SQL Server 2019
+  - SQL Server 2022
+  - SQL Server 2025
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 오류 자체는 심각도 16
+- code: MSSQL-4060
+  severity: error
+  category: connection
+  title: 요청 데이터베이스 열기 실패
+  immediate:
+  - "`SELECT name, state_desc, user_access_desc FROM sys.databases WHERE name=N'<db>';` 로 존재·상태(OFFLINE·SUSPECT·RESTORING) 확인 — 행이 없으면 DB 이름 오류 (읽기 전용)"
+  - "ERRORLOG 의 18456 동반 줄(State 38 = 지정 DB 열기 실패)로 대상 DB·클라이언트 확인: `EXEC xp_readerrorlog 0, 1, N'18456'`"
+  short:
+  - "(2차·승인 후) DB 온라인 전환(`ALTER DATABASE <db> SET ONLINE`)·복구 또는 로그인을 DB 사용자로 매핑(`CREATE USER <user> FOR LOGIN <login>`) — 롤백: 변경 전 상태·매핑 기록"
+  mid:
+  - "접속 문자열의 DB 이름과 DB 이전·이름 변경 절차를 변경 관리에 연계"
+  long:
+  - "로그인 실패(4060·18456) 출처 감시와 DB 복구 절차 문서화"
+  vendor_cause: 로그인 시 요청한 데이터베이스를 열 수 없어 로그인이 실패한 경우(심각도 11). DB 이름 오류, DB 가 OFFLINE·RESTORING·SUSPECT 상태, 해당 DB 에 사용자 매핑이 없는 경우가 흔한 원인이다.
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://learn.microsoft.com/en-us/sql/relational-databases/errors-events/database-engine-events-and-errors-4000-to-4999?view=sql-server-ver17)
+  versions:
+  - SQL Server 2005
+  - SQL Server 2008/2008 R2
+  - SQL Server 2012
+  - SQL Server 2014
+  - SQL Server 2016
+  - SQL Server 2017
+  - SQL Server 2019
+  - SQL Server 2022
+  - SQL Server 2025
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 로그인 시 대상 DB 열기 실패
+- code: MSSQL-4064
+  severity: error
+  category: connection
+  title: 사용자 기본 DB 열기 실패
+  immediate:
+  - "로그인의 기본 DB 확인: `SELECT name, default_database_name FROM sys.server_principals WHERE name=N'<login>';` 후 그 DB 상태를 `sys.databases` 에서 확인 (읽기 전용)"
+  - "클라이언트에서 DB 를 명시해 접속 시험(`sqlcmd -S <server> -d master -E`) — 성공하면 로그인 자체가 아닌 기본 DB 문제"
+  short:
+  - "(2차·승인 후) `ALTER LOGIN <login> WITH DEFAULT_DATABASE = <db>` 로 기본 DB 변경 — 롤백: 이전 default_database_name 기록 후 원복"
+  mid:
+  - "로그인 생성 시 기본 DB 를 존재가 보장된 DB 로 지정하는 계정 생성 표준"
+  long:
+  - "DB 삭제·이름 변경 전 기본 DB 의존 로그인 점검을 변경 절차에 포함"
+  vendor_cause: 로그인의 기본 데이터베이스가 삭제·이름 변경·OFFLINE 이거나 그 DB 에 사용자 매핑이 없어 로그인 자체가 실패한 경우. ERRORLOG 에 18456(State 40)이 함께 남는다.
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://learn.microsoft.com/en-us/sql/relational-databases/errors-events/database-engine-events-and-errors-4000-to-4999?view=sql-server-ver17)
+  versions:
+  - SQL Server 2005
+  - SQL Server 2008/2008 R2
+  - SQL Server 2012
+  - SQL Server 2014
+  - SQL Server 2016
+  - SQL Server 2017
+  - SQL Server 2019
+  - SQL Server 2022
+  - SQL Server 2025
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: MSSQL-7303
+  severity: error
+  category: upstream
+  title: 연결된 서버 초기화 실패
+  immediate:
+  - "연결된 서버 설정 확인: `SELECT name, provider, data_source FROM sys.servers WHERE is_linked=1;` 와 로그인 매핑 `SELECT * FROM sys.linked_logins;` (비밀번호는 표시되지 않음, 읽기 전용)"
+  - "`Test-NetConnection <원격서버> -Port <port>` 로 도달성 확인, 오류 원문의 공급자 메시지(로그인 실패·네트워크·공급자 미등록) 기록"
+  short:
+  - "(2차·승인 후) 원격 로그인 매핑 갱신(`sp_addlinkedsrvlogin`) 또는 공급자 옵션 수정 — 롤백: 변경 전 sys.servers·sys.linked_logins 조회 결과 저장"
+  mid:
+  - "연결된 서버 의존 쿼리 축소와 연계 계정 최소 권한 지정"
+  long:
+  - "연결된 서버 헬스체크(`EXEC sp_testlinkedserver N'<linked>'`) 정기 실행"
+  vendor_cause: 연결된 서버의 OLE DB 공급자 데이터 원본 개체를 초기화하지 못한 경우(심각도 16). 원격 서버 도달 불가·원격 로그인 실패·공급자 미설치 또는 옵션 오류·이중 홉 Kerberos 위임 문제가 흔한 원인이다.
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://learn.microsoft.com/en-us/sql/relational-databases/errors-events/database-engine-events-and-errors-7000-to-7999?view=sql-server-ver17)
+  versions:
+  - SQL Server 2005
+  - SQL Server 2008/2008 R2
+  - SQL Server 2012
+  - SQL Server 2014
+  - SQL Server 2016
+  - SQL Server 2017
+  - SQL Server 2019
+  - SQL Server 2022
+  - SQL Server 2025
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: MSSQL-926
+  severity: critical
+  category: storage
+  title: 데이터베이스 SUSPECT 로 표시
+  immediate:
+  - "`SELECT name, state_desc FROM sys.databases WHERE state_desc='SUSPECT';` 로 대상 확인, 애플리케이션 측 재시도 중단 요청(DB 자체는 건드리지 않음)"
+  - "ERRORLOG 의 926 이전 오류(823/824·9001·3414) 확인: `EXEC xp_readerrorlog 0, 1, N'<db>'` 와 `SELECT * FROM msdb.dbo.suspect_pages;` (읽기 전용)"
+  short:
+  - "(2차·승인 후) 정상 백업 복원이 우선, 불가할 때만 EMERGENCY 모드 진단 — 롤백: 작업 전 mdf/ldf 사본 보관, REPAIR_ALLOW_DATA_LOSS 는 데이터 손실 감수 승인 필요"
+  mid:
+  - "스토리지 무결성 검증(장비 진단·SQLIOSim)과 손상 원인 제거"
+  long:
+  - "복구 리허설과 정기 CHECKDB·백업 검증 체계 운영"
+  vendor_cause: 복구 과정에서 데이터베이스가 SUSPECT 로 표시되어 열 수 없는 상태(심각도 14). 데이터·로그 파일 손상, 스토리지 I/O 오류, 복구 중 공간 부족이 흔한 원인이며 상세는 ERRORLOG 의 선행 오류에 있다.
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://learn.microsoft.com/en-us/sql/relational-databases/errors-events/database-engine-events-and-errors-0-to-999?view=sql-server-ver17)
+  versions:
+  - SQL Server 2005
+  - SQL Server 2008/2008 R2
+  - SQL Server 2012
+  - SQL Server 2014
+  - SQL Server 2016
+  - SQL Server 2017
+  - SQL Server 2019
+  - SQL Server 2022
+  - SQL Server 2025
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: MSSQL-945
+  severity: critical
+  category: storage
+  title: DB 파일 또는 자원 부족
+  immediate:
+  - "DB 파일 경로 확인: `SELECT physical_name, state_desc FROM sys.master_files WHERE database_id=DB_ID(N'<db>');` 후 `Test-Path <physical_name>` 으로 파일 존재 확인 (읽기 전용)"
+  - "ERRORLOG 의 945 직전 OS 오류(2·3·5·32) 확인: `EXEC xp_readerrorlog 0, 1, N'<db>'`, 볼륨 여유 `Get-Volume`"
+  short:
+  - "(2차·승인 후) 드라이브 재연결·서비스 계정 권한 복구·공간 확보 후 `ALTER DATABASE <db> SET ONLINE` — 롤백: 권한 변경 전 ACL 저장, 실패 시 백업 복원 절차로 전환"
+  mid:
+  - "DB 파일 볼륨의 드라이브 문자·마운트 지점 고정과 파일 경로 권한 표준"
+  long:
+  - "DB 상태(ONLINE 외)·볼륨 사용률 감시 알림과 복구 절차 문서화"
+  vendor_cause: 파일에 접근할 수 없거나 메모리·디스크 공간이 부족해 데이터베이스를 열 수 없는 경우(심각도 14). 파일 경로 변경·드라이브 미연결·서비스 계정 권한 부족이 흔한 원인이며 ERRORLOG 에 세부 사유가 남는다.
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://learn.microsoft.com/en-us/sql/relational-databases/errors-events/database-engine-events-and-errors-0-to-999?view=sql-server-ver17)
+  versions:
+  - SQL Server 2005
+  - SQL Server 2008/2008 R2
+  - SQL Server 2012
+  - SQL Server 2014
+  - SQL Server 2016
+  - SQL Server 2017
+  - SQL Server 2019
+  - SQL Server 2022
+  - SQL Server 2025
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 파일 접근 외 메모리나 디스크 부족 포함
+- code: MSSQL-9003
+  severity: critical
+  category: storage
+  title: 로그 스캔 번호 무효
+  immediate:
+  - "대상 DB 와 상태 확인: `SELECT name, state_desc FROM sys.databases WHERE name=N'<db>';` 와 ERRORLOG 9003 줄의 LSN 기록 (읽기 전용)"
+  - "최근 mdf/ldf 파일 교체·복사 작업 이력과 마지막 정상 백업(msdb.dbo.backupset) 확인 — 파일은 건드리지 않음"
+  short:
+  - "(2차·승인 후) 기동 중 발생이면 정상 백업에서 복원이 원칙(복제 중 발생이면 게시 재생성) — 롤백: 복원 전 현재 파일 사본 보관, 로그 재구축은 데이터 손실 감수 승인 필요"
+  mid:
+  - "로그 스토리지 점검과 DB 파일 수동 교체·복사 작업 통제"
+  long:
+  - "백업 보존 정책 강화와 복원 리허설 정례화"
+  vendor_cause: 로그 스캔에 전달된 LSN 이 유효하지 않다는 오류(심각도 20)로, 트랜잭션 로그(.ldf)와 데이터 파일(.mdf)이 서로 맞지 않거나 손상된 경우 발생한다. 다른 시점의 파일을 붙인 경우·스토리지 손상이 흔한 원인이다.
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://learn.microsoft.com/en-us/sql/relational-databases/errors-events/database-engine-events-and-errors-9000-to-9999?view=sql-server-ver17)
+  versions:
+  - SQL Server 2005
+  - SQL Server 2008/2008 R2
+  - SQL Server 2012
+  - SQL Server 2014
+  - SQL Server 2016
+  - SQL Server 2017
+  - SQL Server 2019
+  - SQL Server 2022
+  - SQL Server 2025
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: MSSQL-17832
+  severity: error
+  category: connection
+  title: 로그인 패킷 구조 오류
+  immediate:
+  - "ERRORLOG 17832 줄의 클라이언트 IP 기록: `EXEC xp_readerrorlog 0, 1, N'17832'` — 업무 서버인지 보안 스캐너인지 자산 목록과 대조 (읽기 전용)"
+  - "업무 클라이언트면 사용 드라이버 종류·버전(JDBC/ODBC/OLE DB) 확인"
+  short:
+  - "(2차·승인 후) 업무 클라이언트는 드라이버를 지원 버전으로 갱신(롤백: 이전 드라이버 보관), 미승인 출처는 보안 담당과 차단 협의"
+  mid:
+  - "접속 클라이언트 드라이버 버전 표준화"
+  long:
+  - "보안 스캔 일정과 17832 발생 시각 대조 감시"
+  vendor_cause: 연결을 열 때 받은 로그인 패킷의 구조가 올바르지 않아 서버가 연결을 닫은 경우(심각도 20). 오래된·비표준 클라이언트 드라이버, 패킷을 변형하는 네트워크 장비, 취약점 스캐너 접속이 흔한 원인이다.
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://learn.microsoft.com/en-us/sql/relational-databases/errors-events/database-engine-events-and-errors-16000-to-17999?view=sql-server-ver17)
+  versions:
+  - SQL Server 2005
+  - SQL Server 2008/2008 R2
+  - SQL Server 2012
+  - SQL Server 2014
+  - SQL Server 2016
+  - SQL Server 2017
+  - SQL Server 2019
+  - SQL Server 2022
+  - SQL Server 2025
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 보안 인증 오류가 아니라 malformed packet
+- code: MSSQL-17836
+  severity: error
+  category: connection
+  title: 네트워크 패킷 길이 불일치
+  immediate:
+  - "ERRORLOG 17836 줄의 CLIENT IP 기록·빈도 집계: `EXEC xp_readerrorlog 0, 1, N'17836';` (읽기 전용)"
+  - "출처 IP 가 보안 스캐너·모니터링 장비인지 자산 목록과 대조 — 방화벽 조치는 이 단계에서 하지 않음(2차)"
+  short:
+  - "(2차·승인 후) 미승인 출처는 방화벽 허용 목록에서 제외 — 롤백: 변경 전 규칙 내보내기, 보안 담당 승인"
+  mid:
+  - "SQL Server 포트 접근 허용 IP 목록 관리와 정기 검토"
+  long:
+  - "17836·17832 발생 출처 감시와 보안 스캔 일정 공유"
+  vendor_cause: 네트워크 패킷에 적힌 길이와 실제 읽은 바이트 수가 달라 서버가 연결을 닫은 경우(심각도 20). 포트 스캔·SQL 이 아닌 트래픽 유입, 네트워크 장비의 패킷 변형, 비표준 클라이언트가 흔한 원인이다.
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://learn.microsoft.com/en-us/sql/relational-databases/errors-events/database-engine-events-and-errors-16000-to-17999?view=sql-server-ver17)
+  versions:
+  - SQL Server 2005
+  - SQL Server 2008/2008 R2
+  - SQL Server 2012
+  - SQL Server 2014
+  - SQL Server 2016
+  - SQL Server 2017
+  - SQL Server 2019
+  - SQL Server 2022
+  - SQL Server 2025
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: SQL Server 심각도 20
+- code: MSSQL-10054
+  severity: error
+  category: connection
+  title: 전송 수준 오류(연결 강제 종료)
+  immediate:
+  - "같은 시각 서버 기동 여부: `SELECT sqlserver_start_time FROM sys.dm_os_sys_info;` (2008+) 와 ERRORLOG 의 세션 단절 기록 `EXEC xp_readerrorlog 0, 1, N'4014';` 확인 (읽기 전용)"
+  - "단절된 연결의 유휴 시간과 방화벽/L4 세션 타임아웃 값을 네트워크 담당에 조회 요청해 대조 — 유휴 시간이 장비 타임아웃 이상이면 장비 세션 정리가 원인"
+  short:
+  - "(2차·승인 후) 커넥션 풀 유효성 검사(대여 시 검증 쿼리)와 유휴 연결 수명을 장비 타임아웃보다 짧게 설정 — 롤백: 이전 풀 설정 보관"
+  mid:
+  - "네트워크 장비 세션 타임아웃·TCP keepalive 정책 정비"
+  long:
+  - "애플리케이션 재시도 로직 표준과 연결 오류율 감시"
+  vendor_cause: 클라이언트가 결과를 받거나 요청을 보내는 중 원격 호스트가 연결을 강제로 끊은 전송 수준 오류(Windows 소켓 오류 10054). 서버 재시작·세션 KILL, 방화벽/L4 의 유휴 세션 정리, 커넥션 풀이 끊긴 연결을 재사용한 경우가 흔한 원인이다.
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://learn.microsoft.com/en-us/troubleshoot/sql/database-engine/connect/tls-exist-connection-closed)
+  versions:
+  - SQL Server 2005
+  - SQL Server 2008/2008 R2
+  - SQL Server 2012
+  - SQL Server 2014
+  - SQL Server 2016
+  - SQL Server 2017
+  - SQL Server 2019
+  - SQL Server 2022
+  - SQL Server 2025
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: Windows 소켓 오류 10054가 SQL 연결에 표출
+- code: MSSQL-14420
+  severity: error
+  category: upstream
+  title: 로그 전달 기본DB 백업 지연
+  immediate:
+  - "로그 전달 상태: 기본 서버에서 `EXEC sp_help_log_shipping_monitor;` — last_backup_date 와 임계(분) 확인 (읽기 전용)"
+  - "LSBackup 작업 이력: `SELECT TOP 10 j.name, h.run_date, h.run_time, h.run_status, h.message FROM msdb.dbo.sysjobhistory h JOIN msdb.dbo.sysjobs j ON h.job_id=j.job_id WHERE j.name LIKE 'LSBackup%' ORDER BY h.instance_id DESC;`"
+  - "`Get-Service SQLSERVERAGENT, SQLAgent$*` 로 SQL Agent 실행 확인"
+  short:
+  - "(2차·승인 후) 원인(백업 경로·권한·Agent 중지) 해소 후 LSBackup 작업 수동 실행 — 성공: last_backup_date 갱신, 롤백 불필요(로그 백업 추가만), 실패 시 작업 기록 보존"
+  mid:
+  - "로그 전달 모니터 서버 구성과 백업 임계값(backup_threshold) 업무 기준 재설정"
+  long:
+  - "DR 로그 전달 지연 알림과 분기 DR 전환 리허설"
+  vendor_cause: 로그 전달 기본 DB 가 설정된 백업 임계 시간(분) 동안 로그 백업을 수행하지 못한 경우. LSBackup 작업 실패·SQL Agent 중지·백업 경로 문제나 모니터 정보 갱신 실패가 흔한 원인이다.
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://learn.microsoft.com/en-us/sql/relational-databases/errors-events/database-engine-events-and-errors-14000-to-14999?view=sql-server-ver17)
+  versions:
+  - SQL Server 2005
+  - SQL Server 2008/2008 R2
+  - SQL Server 2012
+  - SQL Server 2014
+  - SQL Server 2016
+  - SQL Server 2017
+  - SQL Server 2019
+  - SQL Server 2022
+  - SQL Server 2025
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 기본 DB 로그 백업 임계시간 초과
+- code: MSSQL-14421
+  severity: error
+  category: upstream
+  title: 로그 전달 보조 DB 복원 지연
+  immediate:
+  - "보조 서버에서 `EXEC sp_help_log_shipping_monitor;` 로 last_copied_date·last_restored_date 와 임계 확인 (읽기 전용)"
+  - "LSCopy%·LSRestore% 작업 이력(msdb.dbo.sysjobhistory)과 복사 대상 폴더의 로그 백업 파일 존재(`Get-ChildItem <복사폴더> | Sort-Object LastWriteTime | Select-Object -Last 5`) 확인"
+  short:
+  - "(2차·승인 후) 복사 공유 권한·경로 복구 후 LSCopy → LSRestore 순으로 수동 실행, 로그 체인이 끊겼으면 재초기화 계획 — 롤백: 보조 DB 는 NORECOVERY/STANDBY 상태 유지"
+  mid:
+  - "복사 경로 네트워크 대역·보조 서버 스토리지 용량 점검"
+  long:
+  - "DR 절차서에 로그 전달 재초기화·전환 절차 포함과 정기 리허설"
+  vendor_cause: 로그 전달 보조 DB 가 복원 임계 시간 동안 로그를 복원하지 못해 동기화가 늦어진 경우. LSCopy·LSRestore 작업 실패, 공유 경로 접근 불가, 복원 지연 설정, 보조 서버 SQL Agent 중지가 흔한 원인이다.
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://learn.microsoft.com/en-us/sql/relational-databases/errors-events/database-engine-events-and-errors-14000-to-14999?view=sql-server-ver17)
+  versions:
+  - SQL Server 2005
+  - SQL Server 2008/2008 R2
+  - SQL Server 2012
+  - SQL Server 2014
+  - SQL Server 2016
+  - SQL Server 2017
+  - SQL Server 2019
+  - SQL Server 2022
+  - SQL Server 2025
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: MSSQL-8115
+  severity: warn
+  category: internal
+  title: 산술 오버플로
+  immediate:
+  - "오류 원문의 변환 대상 형식과 SQL 기록, IDENTITY 컬럼이면 `SELECT IDENT_CURRENT(N'<schema>.<table>');` 로 형식 최대값(int 2147483647) 근접 여부 확인 (읽기 전용)"
+  - "컬럼 정의 확인: `SELECT name, TYPE_NAME(user_type_id) AS type, precision, scale FROM sys.columns WHERE object_id=OBJECT_ID(N'<schema>.<table>');`"
+  short:
+  - "(2차·승인 후) 컬럼 형식 확장(int→bigint 등) 또는 계산식 CAST 수정 — 영향: 대형 테이블 ALTER 는 잠금·로그 증가, 롤백: 변경 전 백업"
+  mid:
+  - "애플리케이션 입력값 범위 검증과 집계 계산의 decimal 정밀도 기준"
+  long:
+  - "IDENTITY 사용률 감시(최대값 대비 80% 경보)와 데이터 형식 설계 기준"
+  vendor_cause: 값을 대상 데이터 형식으로 변환·계산할 때 표현 범위를 넘어 산술 오버플로가 발생한 경우(심각도 16). int 범위 초과, IDENTITY 최대값 도달, decimal 정밀도 부족이 흔한 원인이다.
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://learn.microsoft.com/en-us/sql/relational-databases/errors-events/database-engine-events-and-errors-8000-to-8999?view=sql-server-ver17)
+  versions:
+  - SQL Server 2005
+  - SQL Server 2008/2008 R2
+  - SQL Server 2012
+  - SQL Server 2014
+  - SQL Server 2016
+  - SQL Server 2017
+  - SQL Server 2019
+  - SQL Server 2022
+  - SQL Server 2025
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'

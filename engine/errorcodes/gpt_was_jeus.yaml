@@ -1,0 +1,358 @@
+product: jeus
+layer: was
+note: GPT 협업 수집분 — 벤더 공식 문서와 대조 후 확정
+codes:
+- code: LAUNCHER-0052
+  severity: error
+  category: connection
+  title: MASTER 설정 수신 실패 후 독립기동 시도
+  immediate:
+  - "`grep -n -E 'LAUNCHER-0052|SERVER-0249|INDEPENDENT' <JEUS_HOME>/domains/<domain>/servers/<server>/logs/JeusLauncher.log <JEUS_HOME>/domains/<domain>/servers/<server>/logs/JeusServer.log | tail -20` 로 MASTER 설정 수신 실패 시각과 INDEPENDENT 기동 여부 확인 (JEUS 7+)"
+  - "MS 서버에서 `nc -zvw3 <master_host> <master_port>` 로 masterurl 도달성 확인, `jeusadmin -host <host>:<base_port> -u <user> 'server-info'`(MASTER 접속) 로 MASTER 응답과 서버별 상태 확인 — 접속 실패면 MASTER 측 장애"
+  short:
+  - FileTransfer 연결과 네트워크 및 Master 장애 원인을 분석
+  mid:
+  - Master 이중화와 네트워크 경로 및 재연결 절차를 검증
+  long:
+  - Master 통신 헬스체크와 독립기동 감지를 상시 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tmaxsoft.com/ko/jeus/9.1/server-guide/chapter-server-structure.html)
+  note: 설정 수신 실패 후 캐시 설정으로 INDEPENDENT 기동 가능, critical 과다
+  vendor_cause: MASTER와의 연결 실패로 설정을 수신하지 못해 INDEPENDENT 기동을 시도함
+  vendor_action: MASTER가 복구되면 MS가 설정을 재동기화하고 실패한 애플리케이션을 다시 deploy함
+  vendor_url: https://docs.tmaxsoft.com/ko/jeus/9.1/server-guide/chapter-server-structure.html
+  versions:
+  - JEUS 7
+  - JEUS 8/8.5
+  - JEUS 9/9.1
+  version_note: Launcher·도메인·배포 저장소(repository) 개념은 JEUS 7 도메인 구조에서 도입 — 메시지 문구의 MASTER 는 8.5 이후(7/8 은 DAS)
+- code: LAUNCHER-0054
+  severity: warn
+  category: internal
+  title: 로컬 설정 대체 기동
+  immediate:
+  - "`grep -n -E 'LAUNCHER-0054|LAUNCHER-0052|MASTER' <JEUS_HOME>/domains/<domain>/servers/<server>/logs/JeusLauncher.log | tail -20` 로 로컬 설정으로 기동한 시각과 MASTER 연결 실패 사유 확인 (JEUS 7+)"
+  - "MS 와 MASTER 양쪽에서 `cksum <JEUS_HOME>/domains/<domain>/config/domain.xml` 으로 값 비교 — 다르면 로컬 설정이 최신 MASTER 설정과 어긋난 상태"
+  short:
+  - domain 설정 파일의 동기화 시점과 변경 이력을 비교
+  mid:
+  - Master 복구 후 설정을 재동기화하고 배포 상태를 검증
+  long:
+  - 로컬 설정 사용 경보와 설정 버전 추적을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tmaxsoft.com/ko/jeus/9.1/server-guide/chapter-server-structure.html)
+  note: Starting the server using the local configuration
+  vendor_cause: MASTER 설정을 사용할 수 없어 로컬에 보관된 설정으로 서버 기동을 시작함
+  vendor_action: ''
+  vendor_url: https://docs.tmaxsoft.com/ko/jeus/9.1/server-guide/chapter-server-structure.html
+  versions:
+  - JEUS 7
+  - JEUS 8/8.5
+  - JEUS 9/9.1
+  version_note: Launcher·도메인·배포 저장소(repository) 개념은 JEUS 7 도메인 구조에서 도입 — 메시지 문구의 MASTER 는 8.5 이후(7/8 은 DAS)
+- code: SERVER-0249
+  severity: warn
+  category: connection
+  title: 독립 모드 기동
+  immediate:
+  - "`jeusadmin -host <host>:<base_port> -u <user> 'server-info'`(MASTER 접속) 로 MASTER 응답 여부와 서버별 상태 확인 — 접속 실패면 MASTER 장애 지속 (JEUS 7+)"
+  - "MS 에 `jeusadmin -host <host>:<base_port> -u <user> 'application-info'` 로 독립 모드에서 서비스 중인 애플리케이션 범위 확인 — MASTER 복구 전까지 배포·설정 같은 관리 작업은 보류"
+  short:
+  - Master 연결 실패 원인과 독립기동 중 설정 차이를 점검
+  mid:
+  - Master 복구 후 설정 재동기화와 실패 배포 재처리를 검증
+  long:
+  - INDEPENDENT 상태 감지와 Master 장애조치 절차를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tmaxsoft.com/ko/jeus/9.1/server-guide/chapter-server-structure.html)
+  note: Successfully started the server INDEPENDENTLY
+  vendor_cause: MASTER 없이 로컬 설정을 사용한 INDEPENDENT 모드 서버 기동이 성공함
+  vendor_action: MASTER 복구 후 설정 재동기화와 실패 애플리케이션 재배포가 수행됨
+  vendor_url: https://docs.tmaxsoft.com/ko/jeus/9.1/server-guide/chapter-server-structure.html
+  versions:
+  - JEUS 7
+  - JEUS 8/8.5
+  - JEUS 9/9.1
+  version_note: SERVER-xxxx 는 JEUS 7 이후 관리 서버(MS) 코드 — JEUS 6 은 JEUSMain/컨테이너 문구로 기록(STANDBY·INDEPENDENT 상태는 7+)
+- code: SERVER-0248
+  severity: info
+  category: internal
+  title: JEUS 서버 현재 상태 통지
+  immediate:
+  - "`grep -n 'SERVER-0248' <JEUS_HOME>/domains/<domain>/servers/<server>/logs/JeusServer.log | tail -5` 로 통지된 상태값 확인 — STANDBY 일 때만 장애, STARTING·RUNNING·SHUTDOWN 은 정상 생명주기 (JEUS 7+)"
+  - "`jeusadmin -host <host>:<base_port> -u <user> 'server-info -server <server> -state'` 로 현재 상태 재확인, STANDBY 면 `grep -n -E 'SERVER-0522|DEPLOY-|Exception' <JEUS_HOME>/domains/<domain>/servers/<server>/logs/JeusServer.log | tail -20` 로 직전 배포·기동 오류 확인"
+  short:
+  - 실패 애플리케이션과 SERVER-0522 등 선행 예외를 분석
+  mid:
+  - 문제 모듈을 수정하거나 제거한 뒤 서버를 정상 기동
+  long:
+  - 상태값 조건 매칭과 부팅 애플리케이션 검증을 자동화
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tmaxsoft.com/ko/jeus/8.6/server-guide/chapter-server-control.html)
+  note: STARTING·RUNNING·STANDBY·SHUTDOWN 모두 동일 코드 사용
+  vendor_cause: 서버가 STARTING·STANDBY·RUNNING·SHUTDOWN 등의 라이프사이클 상태로 전환됨
+  vendor_action: ''
+  vendor_url: https://docs.tmaxsoft.com/ko/jeus/8.6/server-guide/chapter-server-control.html
+  versions:
+  - JEUS 7
+  - JEUS 8/8.5
+  - JEUS 9/9.1
+  version_note: SERVER-xxxx 는 JEUS 7 이후 관리 서버(MS) 코드 — JEUS 6 은 JEUSMain/컨테이너 문구로 기록(STANDBY·INDEPENDENT 상태는 7+)
+- code: SERVER-0250
+  severity: critical
+  category: internal
+  title: 서버 기동 실패
+  immediate:
+  - "`grep -n -B30 'SERVER-0250' <JEUS_HOME>/domains/<domain>/servers/<server>/logs/JeusServer.log | grep -E 'Exception|Caused by|SERVER-0522|DEPLOY-' | tail -20` 로 기동 실패 직전 예외 확보 (JEUS 7+)"
+  - "`jeusadmin -host <host>:<base_port> -u <user> 'server-info -server <server> -state'` 로 STANDBY 확인 — STANDBY 인데 앞단 웹서버·LB 가 이 서버로 요청을 보내는지 담당에게 확인(분산 대상 제외는 2차)"
+  short:
+  - "(2차·승인 후, 롤백: 앞단 분산 설정 원복) STANDBY 서버를 앞단 웹서버·LB 분산 대상에서 빼 트래픽 유입 차단 후 원인 조치"
+  - 배포 실패와 설정 XML 및 리소스 초기화 오류를 분석
+  mid:
+  - 원인 모듈 또는 설정을 수정하고 정상 RUNNING 전환을 검증
+  long:
+  - 기동 실패 자동탐지와 배포 롤백 및 헬스체크를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tmaxsoft.com/ko/jeus/8.6/server-guide/chapter-server-control.html)
+  note: Starting server failed. Staying in STANDBY
+  vendor_cause: 서버 기동 과정에서 애플리케이션 설정·배포 처리 등이 실패해 STANDBY 상태에 머묾
+  vendor_action: 선행 예외와 설정 오류를 확인·수정한 뒤 서버 기동을 다시 수행
+  vendor_url: https://docs.tmaxsoft.com/ko/jeus/8.6/server-guide/chapter-server-control.html
+  versions:
+  - JEUS 7
+  - JEUS 8/8.5
+  - JEUS 9/9.1
+  version_note: SERVER-xxxx 는 JEUS 7 이후 관리 서버(MS) 코드 — JEUS 6 은 JEUSMain/컨테이너 문구로 기록(STANDBY·INDEPENDENT 상태는 7+)
+- code: LAUNCHER-0042
+  severity: error
+  category: internal
+  title: STANDBY 기동 완료
+  immediate:
+  - "`jeusadmin -host <host>:<base_port> -u <user> 'server-info -server <server> -state'` 로 STANDBY 확인 — RUNNING 이 아니면 확정 (JEUS 7+)"
+  - "`grep -n -E 'SERVER-0250|SERVER-0522|DEPLOY-|Exception' <JEUS_HOME>/domains/<domain>/servers/<server>/logs/JeusServer.log | tail -30` 로 STANDBY 에 머문 원인 확인, `jeusadmin -host <host>:<base_port> -u <user> 'application-info'` 로 RUNNING 이 아닌 애플리케이션 확인"
+  short:
+  - "(2차·승인 후, 롤백: 앞단 분산 설정 원복) 원인 해소 전까지 앞단 웹서버·LB 라우팅에서 이 서버 제외"
+  - 기동 중 실패한 애플리케이션과 선행 예외를 분석
+  mid:
+  - 문제 모듈을 조치한 뒤 재기동 또는 검증된 force 절차를 적용
+  long:
+  - 부팅 상태검증과 STANDBY 자동격리 정책을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tmaxsoft.com/ko/jeus/8.6/server-guide/chapter-server-control.html)
+  note: Completed starting but server state is still STANDBY
+  vendor_cause: 서버 프로세스 기동 절차는 완료됐지만 서버가 RUNNING으로 전환되지 않고 STANDBY에 남음
+  vendor_action: server-info로 STANDBY 상태를 확인하고 선행 기동 오류를 확인
+  vendor_url: https://docs.tmaxsoft.com/ko/jeus/8.6/server-guide/chapter-server-control.html
+  versions:
+  - JEUS 7
+  - JEUS 8/8.5
+  - JEUS 9/9.1
+  version_note: Launcher·도메인·배포 저장소(repository) 개념은 JEUS 7 도메인 구조에서 도입 — 메시지 문구의 MASTER 는 8.5 이후(7/8 은 DAS)
+- code: SERVER-0522
+  severity: error
+  category: internal
+  title: 설정·배포 파일 처리 예외
+  immediate:
+  - "`grep -n -A15 'SERVER-0522' <JEUS_HOME>/domains/<domain>/servers/<server>/logs/JeusServer.log | grep -E 'xml|line|SAXParse|Exception' | head -20` 로 오류 대상 XML 파일과 파싱 예외 위치(줄·열) 확인 (JEUS 7+)"
+  - "`xmllint --noout <대상 XML>` 로 구문 오류 위치 재확인(읽기 전용, xmllint 설치 시), `ls -lt <JEUS_HOME>/domains/<domain>/config/` 로 최근 변경 시각 확인 — 장애 직전 변경이 있으면 그 변경이 원인 후보"
+  short:
+  - "(2차·승인 후, 롤백: 변경 전 XML 사본 보관) 직전 배포 또는 설정 변경을 이전 정상본으로 되돌림"
+  - domain.xml 또는 web.xml 스키마와 태그 및 버전 호환성을 검증
+  mid:
+  - 설정 파일을 수정하고 JEUS 지원 스키마로 표준화
+  long:
+  - XML 스키마 검증을 배포와 설정 변경 절차에 자동화
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tmaxsoft.com/ko/jeus/8.6/server-guide/chapter-server-control.html)
+  note: domain.xml·web.xml 등 처리 예외, 설정 XML로만 한정 불가
+  vendor_cause: domain.xml·web.xml 등 XML 설정 또는 배포 디스크립터를 처리하는 중 파싱·검증 예외가 발생함
+  vendor_action: 로그의 XML 검증 오류를 확인해 잘못된 요소·태그 등 디스크립터 내용을 수정
+  vendor_url: https://docs.tmaxsoft.com/ko/jeus/8.6/server-guide/chapter-server-control.html
+  versions:
+  - JEUS 7
+  - JEUS 8/8.5
+  - JEUS 9/9.1
+  version_note: SERVER-xxxx 는 JEUS 7 이후 관리 서버(MS) 코드 — JEUS 6 은 JEUSMain/컨테이너 문구로 기록(STANDBY·INDEPENDENT 상태는 7+)
+- code: CPOOL-0034
+  severity: warn
+  category: capacity
+  title: DB풀 사용률 과다
+  immediate:
+  - "`jeusadmin -host <host>:<base_port> -u <user> 'connection-pool-info -server <server> -id <DS>'` 로 대상 데이터소스의 active·idle 연결 수와 최대값·대기 요청 확인 — active 가 최대에 근접하고 대기가 있으면 확정 (JEUS 7+, JEUS 6 은 로그만)"
+  - "`jcmd <PID> Thread.print > td_$(date +%H%M%S).txt` 로 DB 호출에서 대기 중인 스레드 확인(스레드 덤프, 프로세스는 유지), DB 담당에 같은 시각 장기 실행 SQL 확인 요청"
+  short:
+  - 장기 점유 커넥션과 SQL 지연 및 풀 크기를 분석
+  mid:
+  - 풀 크기와 SQL 성능 및 애플리케이션 반납 로직을 함께 개선
+  long:
+  - 풀 사용률 임계치와 누수 및 대기시간 모니터링을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tmaxsoft.com/ko/jeus/8.6/reference-guide/sect-properties-jdbc.html)
+  note: 현재 active 연결 비율이 설정 임계치를 넘을 때 기록
+  vendor_cause: 현재 활성 Connection 비율이 Connection Pool 최대값에 대한 설정 임계치를 초과함
+  verify_note: "미검증 — jeusadmin connection-pool-info 의 -id·-active 옵션 철자를 원문 페이지로 확인 못 함(명령 이름과 풀 ID·active 전용 옵션의 존재는 JEUS 9 Reference Guide 검색 요약으로 확인)"
+  vendor_action: ''
+  vendor_url: https://docs.tmaxsoft.com/ko/jeus/8.6/reference-guide/sect-properties-jdbc.html
+  versions:
+  - JEUS 6
+  - JEUS 7
+  - JEUS 8/8.5
+  - JEUS 9/9.1
+  version_note: JDBC 연결 풀 모듈 코드 — 접두 도입 버전 미확인(6~9 공통으로 수집, 문구 별칭 JEUS-DS-POOL-EXHAUSTED 병행)
+- code: JDBC-0395
+  severity: warn
+  category: capacity
+  title: DB풀 연결이 모두 활성 상태
+  immediate:
+  - "`jeusadmin -host <host>:<base_port> -u <user> 'connection-pool-info -server <server> -id <DS> -active'` 로 active 연결 목록과 점유 시간 확인 — 모든 연결이 오래 active 면 미반납·장기 SQL 의심 (JEUS 7+, JEUS 6 은 로그만)"
+  - "`jcmd <PID> Thread.print > td_$(date +%H%M%S).txt` 로 연결을 쥔 스레드의 대기 지점(SQL 실행·외부 호출) 확인(스레드 덤프, 프로세스는 유지)"
+  short:
+  - "(2차·승인 후, 롤백: 원래 값 복원) 신규 부하 완화(앞단 유입 제한) 또는 풀 최대값 상향 — DB 세션 한도(processes·max_connections) 확인 후"
+  - 장기 SQL과 미반납 연결 및 DB 세션 한도를 분석
+  mid:
+  - 풀 크기와 DB 수용량 및 커넥션 반환 로직을 재설계
+  long:
+  - 풀 포화 예측과 백프레셔 및 누수 탐지를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tmaxsoft.com/ko/jeus/8.6/reference-guide/sect-properties-jdbc.html)
+  note: Current pool's connections are all active, critical 과다
+  vendor_cause: Connection Pool에 존재하는 모든 Connection이 active 상태임
+  verify_note: "미검증 — jeusadmin connection-pool-info 의 -id·-active 옵션 철자를 원문 페이지로 확인 못 함(명령 이름과 풀 ID·active 전용 옵션의 존재는 JEUS 9 Reference Guide 검색 요약으로 확인)"
+  vendor_action: ''
+  vendor_url: https://docs.tmaxsoft.com/ko/jeus/8.6/reference-guide/sect-properties-jdbc.html
+  versions:
+  - JEUS 6
+  - JEUS 7
+  - JEUS 8/8.5
+  - JEUS 9/9.1
+  version_note: JDBC 연결 풀 모듈 코드 — 접두 도입 버전 미확인(6~9 공통으로 수집, 문구 별칭 JEUS-DS-POOL-EXHAUSTED 병행)
+- code: JNDI.CONTEXT-0073
+  severity: error
+  category: upstream
+  title: JNDI 호출 예외
+  immediate:
+  - "`grep -n -B5 -A15 'JNDI.CONTEXT-0073' <JEUS_HOME>/domains/<domain>/servers/<server>/logs/JeusServer.log | grep -E 'lookup|Name|Exception' | head -20` 로 조회 대상 JNDI 이름과 직전 예외 확인 (JEUS 7+)"
+  - "`jeusadmin -host <host>:<base_port> -u <user> 'application-info'` 로 대상 EJB 애플리케이션 상태 확인 — DISTRIBUTED(미시작)면 Start 전 요청으로 확정"
+  short:
+  - DISTRIBUTED 상태와 EJB 준비 여부 및 JNDI 바인딩을 분석
+  mid:
+  - 애플리케이션 배포와 JNDI 의존성을 정상화
+  long:
+  - 배포 완료 전 트래픽 차단과 JNDI 헬스체크를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tmaxsoft.com/ko/jeus/8.6/deployment-guide/chapter-application-management.html)
+  note: JNDI operation exception
+  vendor_cause: DISTRIBUTED 상태의 EJB 애플리케이션에 요청하여 아직 서비스할 수 없는 Bean을 조회함
+  vendor_action: 애플리케이션의 Start 단계를 수행해 서비스 가능한 상태로 전환
+  vendor_url: https://docs.tmaxsoft.com/ko/jeus/8.6/deployment-guide/chapter-application-management.html
+  versions:
+  - JEUS 7
+  - JEUS 8/8.5
+  - JEUS 9/9.1
+  version_note: 점(.)으로 구분된 하위 모듈 코드(JNDI.CONTEXT)는 JEUS 7+ 문서에서 확인 — 6 은 JNSS-xxxx 접두(미확인)
+- code: DEPLOY-0005
+  severity: warn
+  category: internal
+  title: 애플리케이션 ID 중복
+  immediate:
+  - "`grep -n 'DEPLOY-0005' <JEUS_HOME>/domains/<domain>/servers/<server>/logs/JeusServer.log | tail -5` 로 중복된 애플리케이션 ID 와 저장소 파일명 확인 (JEUS 7+)"
+  - "`jeusadmin -host <host>:<base_port> -u <user> 'application-info'` 의 등록 ID 목록과 `ls -l <repository 경로>` 의 파일명 대조 — 같은 ID 가 이미 있으면 확정, 추가 배포 시도는 2차 판단까지 보류"
+  short:
+  - 도메인 등록 앱과 repository 파일을 대조
+  mid:
+  - 고유 ID와 배포 파일명 규칙을 적용해 중복을 제거
+  long:
+  - 배포 전 ID 중복 검사를 자동화하고 저장소 명명규칙을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tmaxsoft.com/ko/jeus/8.6/deployment-guide/chapter-application-management.html)
+  note: 저장소 파일명이 기존 애플리케이션 ID와 중복
+  vendor_cause: 저장소의 애플리케이션 파일명이 도메인에서 이미 사용 중인 애플리케이션 ID와 중복됨
+  vendor_action: 중복된 저장소 애플리케이션 파일 이름을 변경
+  vendor_url: https://docs.tmaxsoft.com/ko/jeus/8.6/deployment-guide/chapter-application-management.html
+  versions:
+  - JEUS 7
+  - JEUS 8/8.5
+  - JEUS 9/9.1
+  version_note: Launcher·도메인·배포 저장소(repository) 개념은 JEUS 7 도메인 구조에서 도입 — 메시지 문구의 MASTER 는 8.5 이후(7/8 은 DAS)
+- code: DEPLOY-0062
+  severity: warn
+  category: storage
+  title: 유효 앱 없는 저장소
+  immediate:
+  - "`grep -n 'DEPLOY-0062' <JEUS_HOME>/domains/<domain>/servers/<server>/logs/JeusServer.log | tail -5` 로 지정된 repository 경로 확인 (JEUS 7+)"
+  - "`ls -l <repository 경로>` 로 .war·.ear·.jar 등 애플리케이션 파일 존재와 JEUS 실행 계정의 읽기 권한 확인 — 비었거나 권한이 없으면 확정"
+  short:
+  - 패키지 확장자와 파일 손상 및 저장소 설정을 점검
+  mid:
+  - 유효 애플리케이션만 포함하도록 저장소 구조를 정비
+  long:
+  - 저장소 무결성과 배포 패키지 검증을 자동화
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tmaxsoft.com/ko/jeus/8.6/deployment-guide/chapter-application-management.html)
+  note: repository does not contain any valid applications
+  vendor_cause: 추가한 애플리케이션 저장소 안에 JEUS가 인식할 수 있는 유효한 애플리케이션이 없음
+  vendor_action: 유효한 애플리케이션을 해당 저장소에 추가
+  vendor_url: https://docs.tmaxsoft.com/ko/jeus/8.6/deployment-guide/chapter-application-management.html
+  versions:
+  - JEUS 7
+  - JEUS 8/8.5
+  - JEUS 9/9.1
+  version_note: Launcher·도메인·배포 저장소(repository) 개념은 JEUS 7 도메인 구조에서 도입 — 메시지 문구의 MASTER 는 8.5 이후(7/8 은 DAS)
+- code: DEPLOY-0124
+  severity: warn
+  category: internal
+  title: 실행 앱 저장소 제거
+  immediate:
+  - '`jeusadmin` 접속 후 `application-info` 로 RUNNING 애플리케이션과 배포 경로 확인(읽기 전용, JEUS 7+)'
+  - 제거하려던 repository 경로에 RUNNING 앱 파일이 있는지 확인 — 그 파일은 손대지 말고 그대로 둔다
+  short:
+  - '(2차·승인 후, 롤백: 재배포) 해당 애플리케이션 undeploy 후 repository 제거'
+  - 도메인 관리 대상과 실제 파일 위치 및 배포 상태를 대조
+  mid:
+  - 필요 시 정상 undeploy 후 저장소 정리를 수행
+  long:
+  - 저장소 삭제 전 실행 앱 참조검사를 운영 절차에 강제
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tmaxsoft.com/ko/jeus/8.6/deployment-guide/chapter-application-management.html)
+  note: 저장소 삭제 후 실행 앱은 도메인 관리 대상으로 유지
+  vendor_cause: 삭제하려는 저장소에 도메인에서 RUNNING 중인 애플리케이션 파일이 존재함
+  vendor_action: 해당 애플리케이션도 도메인에서 제거하려면 먼저 undeploy 명령을 수행
+  vendor_url: https://docs.tmaxsoft.com/ko/jeus/8.6/deployment-guide/chapter-application-management.html
+  versions:
+  - JEUS 7
+  - JEUS 8/8.5
+  - JEUS 9/9.1
+  version_note: Launcher·도메인·배포 저장소(repository) 개념은 JEUS 7 도메인 구조에서 도입 — 메시지 문구의 MASTER 는 8.5 이후(7/8 은 DAS)
+- code: DOMAIN-0101
+  severity: info
+  category: connection
+  title: MASTER 복구·통신 재개
+  immediate:
+  - "`grep -n -E 'DOMAIN-0101|LAUNCHER-0052|SERVER-0249|INDEPENDENT' <JEUS_HOME>/domains/<domain>/servers/<server>/logs/JeusServer.log | tail -20` 로 MASTER 단절 시작·복구 시각과 영향 MS 확인 (JEUS 7+)"
+  - "`jeusadmin -host <host>:<base_port> -u <user> 'server-info'`(MASTER 접속) 로 MS 전체가 RUNNING 인지 확인 — 모두 RUNNING 이면 정상 복구, 단절 구간의 실패 요청은 업무 담당에 전달"
+  short:
+  - 네트워크와 Master 프로세스 및 장애 전후 로그를 상관분석
+  mid:
+  - 단절 원인을 제거하고 복구 후 설정과 배포 상태를 검증
+  long:
+  - Master 가용성 감시와 장애 전환 및 복구 검증을 자동화
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tmaxsoft.com/ko/jeus/9.1/server-guide/chapter-server-structure.html)
+  note: MASTER recovered 및 통신 재개 성공 메시지
+  vendor_cause: 장애 상태였던 MASTER가 복구되어 Managed Server와 다시 통신하게 됨
+  vendor_action: ''
+  vendor_url: https://docs.tmaxsoft.com/ko/jeus/9.1/server-guide/chapter-server-structure.html
+  versions:
+  - JEUS 7
+  - JEUS 8/8.5
+  - JEUS 9/9.1
+  version_note: Launcher·도메인·배포 저장소(repository) 개념은 JEUS 7 도메인 구조에서 도입 — 메시지 문구의 MASTER 는 8.5 이후(7/8 은 DAS)
+- code: SERVER-0308
+  severity: info
+  category: internal
+  title: MASTER와 설정 재동기화 완료
+  immediate:
+  - "`grep -n -E 'SERVER-0308|SERVER-0249|INDEPENDENT' <JEUS_HOME>/domains/<domain>/servers/<server>/logs/JeusServer.log | tail -20` 로 재동기화 직전 INDEPENDENT 였는지와 그 기간 확인 (JEUS 7+)"
+  - "`ls -lt <JEUS_HOME>/domains/<domain>/config/` 로 재동기화로 갱신된 설정 파일 시각 확인, `jeusadmin -host <host>:<base_port> -u <user> 'application-info'` 로 재동기화 후 애플리케이션이 RUNNING 인지 확인"
+  short:
+  - Master와 로컬 설정 차이 및 재배포 결과를 점검
+  mid:
+  - 설정 충돌을 해소하고 전체 MS의 구성 일관성을 검증
+  long:
+  - 설정 버전 관리와 재동기화 후 자동 정합성 검사를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tmaxsoft.com/ko/jeus/9.1/server-guide/chapter-server-structure.html)
+  note: Resynchronized the configuration 완료 메시지
+  vendor_cause: MASTER 복구 후 Managed Server가 MASTER의 구성정보와 재동기화를 완료함
+  vendor_action: ''
+  vendor_url: https://docs.tmaxsoft.com/ko/jeus/9.1/server-guide/chapter-server-structure.html
+  versions:
+  - JEUS 7
+  - JEUS 8/8.5
+  - JEUS 9/9.1
+  version_note: SERVER-xxxx 는 JEUS 7 이후 관리 서버(MS) 코드 — JEUS 6 은 JEUSMain/컨테이너 문구로 기록(STANDBY·INDEPENDENT 상태는 7+)

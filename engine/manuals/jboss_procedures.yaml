@@ -1,0 +1,208 @@
+# JBoss EAP 조치 절차 카탈로그 — Red Hat JBoss EAP 7.4/8.0 Configuration Guide·Performance Tuning Guide·jboss-cli 기준 (2026-09-11)
+# 강화(2026-10-16, GPT 45차 관문): 1차 = 읽기 전용(재기동·:reload·:shutdown·설정 변경·비밀 노출 없음), 2차 = 사전조건·영향·승인·백업/롤백 + 성공/실패 기준, 3차 = 민감정보 마스킹·전달 승인
+# 적용 범위 표기: EAP 7.x/8.0·WildFly 10+ 기준. EAP 6.x 는 메시지 접두어가 JBAS 이고 Undertow/IO 서브시스템이 없다(web 서브시스템). 도메인 모드는 경로 앞에 /host=<host>/server=<server>(런타임) 또는 /profile=<profile>(설정)을 붙인다.
+products: [jboss]
+procedures:
+- id: EAP-PROC-CONNECTION
+  category: connection
+  match: [IJ000453, IJ000655, IJ000100, IJ000604, IJ031040, WFLYJCA0027, WFLYJCA0030, WFLYJCA0099, WFLYJCA0003, WFLYJCA0031, WFLYJCA0041, LEG-WFLY-DS, WAS-POOL-002]
+  title: 데이터소스 풀 고갈·연결 실패 (IJ000453 · WFLYJCA)
+  source: "Red Hat EAP 7.4 Configuration Guide '12. Datasource Management (pool: min/max-pool-size, blocking-timeout-wait-millis, validation, flush-strategy)'·'Performance Tuning Guide 6. Datasource and Resource Adapter Tuning' — docs.redhat.com/en/documentation/red_hat_jboss_enterprise_application_platform/7.4/html/configuration_guide/datasource_management"
+  stages:
+  - stage: 1
+    steps:
+    - do: 풀 통계 확인 (jboss-cli 읽기 전용)
+      cmd: |
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/subsystem=datasources/data-source=<DS>/statistics=pool:read-resource(include-runtime=true)"
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/subsystem=datasources/data-source=<DS>:test-connection-in-pool"
+        grep -n "IJ000453\|IJ000655\|WFLYJCA" $JBOSS_HOME/standalone/log/server.log | tail -20
+      check: "이상: ActiveCount 가 max-pool-size 와 같고 WaitCount/BlockingFailureCount 가 증가하면 풀 고갈. test-connection 실패면 DB/네트워크 쪽. 정상: ActiveCount < max-pool-size 이고 WaitCount 0"
+      note: "적용: EAP 7.x/8.0·WildFly 10+ (EAP 6 도 같은 CLI 경로, 메시지는 JBAS/IJ) · 권한: jboss-cli 관리 사용자(Monitor 역할 이상)·server.log 읽기 권한 · 통계 값이 비어 있으면 statistics-enabled=false — 켜는 것은 설정 변경이므로 2차 · test-connection-in-pool 은 풀에서 연결 하나를 빌려 보는 조회라 고갈 중에는 blocking-timeout 만큼 기다릴 수 있음(1회만)"
+    - do: 스레드 덤프 채취 (프로세스 유지)
+      cmd: |
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/core-service=platform-mbean/type=threading:dump-all-threads(locked-monitors=true,locked-synchronizers=true)" > $JBOSS_HOME/standalone/log/td_$(date +%H%M%S).txt
+        # 대안: kill -3 <PID> (스레드 덤프, 프로세스는 유지 — console.log/stdout 에 기록) 또는 jcmd <PID> Thread.print
+      check: "getConnection 대기 스택이 다수면 풀 고갈/누수, SQL 실행 중 스택이 다수면 느린 쿼리. 파일이 0 바이트면 CLI 연결 실패 — kill -3 으로 대체"
+      note: "적용: EAP 7.x/8.0·WildFly 10+ (dump-all-threads), EAP 6 은 kill -3/jstack · 권한: 관리 사용자 또는 JVM 실행 OS 계정(kill -3·jcmd) · 10초 간격 3회 권장"
+  - stage: 2
+    steps:
+    - do: 풀 크기·대기·검증·누수 회수 설정
+      config:
+        file: $JBOSS_HOME/standalone/configuration/standalone.xml (subsystem datasources › datasource <DS>)
+        snippet: |
+          <pool><min-pool-size>10</min-pool-size><max-pool-size>60</max-pool-size><prefill>true</prefill><flush-strategy>FailingConnectionOnly</flush-strategy></pool>
+          <timeout><blocking-timeout-millis>10000</blocking-timeout-millis><idle-timeout-minutes>5</idle-timeout-minutes><query-timeout>30</query-timeout></timeout>
+          <validation><valid-connection-checker class-name="org.jboss.jca.adapters.jdbc.extensions.oracle.OracleValidConnectionChecker"/><background-validation>true</background-validation><background-validation-millis>60000</background-validation-millis></validation>
+          <!-- 누수 추적: --> <statement><track-statements>true</track-statements></statement>
+          <!-- 미반환 연결 추적(7.x): /subsystem=jca/cached-connection-manager=cached-connection-manager:write-attribute(name=debug,value=true) -->
+        note: "standalone.xml 은 서버 실행 중 직접 편집하지 않는다(실행 중 관리 변경이 덮어씀) — CLI 로 바꾸거나 중지 상태에서 편집"
+      cmd: |
+        $JBOSS_HOME/bin/jboss-cli.sh -c ":take-snapshot"
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/subsystem=datasources/data-source=<DS>:write-attribute(name=max-pool-size,value=60)"
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/subsystem=datasources/data-source=<DS>:write-attribute(name=blocking-timeout-wait-millis,value=10000)"
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/subsystem=datasources/data-source=<DS>:flush-gracefully-connection-in-pool"   # flush-all 은 모든 연결 제거로 지연 유발 — graceful 우선
+        $JBOSS_HOME/bin/jboss-cli.sh -c ":reload"
+      check: "성공: :reload 후 server-state running, statistics=pool 의 WaitCount 0 유지·IJ000453 미발생. 실패: write-attribute 가 failed 응답이거나 reload 후 WFLYCTL0013/WFLYJCA 오류 → 스냅샷으로 원복"
+      note: "사전조건: DB 측 processes/sessions 한도에 여유(max-pool-size 합계 ≤ DB 한도)·DBA 협의, 2단계 1차 통계·스레드 덤프 확보 · 영향: :reload 는 모든 배포 재시작(수 초~수십 초 서비스 중단), flush 는 유휴 연결 재생성 · 승인: WAS 운영 담당·서비스 담당(작업 시간대) · 백업/롤백: 변경 전 :take-snapshot(standalone_xml_history/snapshot 에 저장) — 롤백은 같은 write-attribute 로 원래 값 복원 후 :reload, 또는 중지 상태에서 스냅샷 파일 복원 · 적용: EAP 7.x/8.0·WildFly 10+ (EAP 6 은 flush-gracefully 대신 flush-idle-connection-in-pool)"
+  - stage: 3
+    steps:
+    - do: Red Hat 케이스 자료 (JDR)
+      cmd: |
+        $JBOSS_HOME/bin/jdr.sh
+        $JBOSS_HOME/bin/jboss-cli.sh -c ":read-attribute(name=product-version)" ; $JBOSS_HOME/bin/jboss-cli.sh -c "/subsystem=datasources/data-source=<DS>:read-resource(recursive=true)" > ds_$(date +%Y%m%d).txt
+      check: JDR zip(로그·설정·버전) + 풀 설정 덤프 + 스레드 덤프 + JDBC 드라이버 버전(modules/… module.xml)
+      note: "민감정보 마스킹: ds_*.txt 의 password·user-name·connection-url(호스트·포트·서비스명)·security-domain 값을 가린다(credential-reference/vault 미사용 시 평문 비밀번호가 그대로 나옴). JDR 은 설정 비밀번호를 기본 마스킹하지만 로그 안의 호스트명·IP·계정·세션 ID 는 직접 확인 후 가림 · 전달 승인: 보안 담당 승인 후 Red Hat 포털 케이스에만 첨부"
+
+- id: EAP-PROC-UNDO
+  category: undo
+  match: [ARJUNA012117, ARJUNA012121, ARJUNA016037, ARJUNA016087, WFLYTX0001, WFLYTX0017]
+  title: 트랜잭션 타임아웃·복구 실패 (ARJUNA012117 · WFLYTX)
+  source: "Red Hat EAP 7.4 'Managing Transactions on JBoss EAP › Configuring the Transaction Manager (default-timeout, object store, recovery)' — docs.redhat.com/…/7.4/html/managing_transactions_on_jboss_eap"
+  stages:
+  - stage: 1
+    steps:
+    - do: 타임아웃·복구 현황 확인
+      cmd: |
+        grep -n "ARJUNA012117\|ARJUNA016037\|WFLYTX00" $JBOSS_HOME/standalone/log/server.log | tail -20
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/subsystem=transactions:read-resource(include-runtime=true)"
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/subsystem=transactions/log-store=log-store:probe" ; $JBOSS_HOME/bin/jboss-cli.sh -c "/subsystem=transactions/log-store=log-store:read-children-names(child-type=transactions)"
+      check: "이상: number-of-timed-out-transactions 증가 또는 log-store 에 미완료(heuristic) 트랜잭션 존재. 정상: 타임아웃 카운터 정지·transactions 목록 비어 있음 — 결과를 그대로 기록"
+      note: "적용: EAP 7.x/8.0·WildFly 10+ (EAP 6 도 같은 경로, 메시지 접두어 JBAS) · 권한: jboss-cli 관리 사용자(Monitor 이상)·server.log 읽기 · probe 는 object store 를 다시 읽어 관리 모델에 보여 줄 뿐 트랜잭션을 바꾸지 않음"
+  - stage: 2
+    steps:
+    - do: 기본 타임아웃 조정 및 미완료 트랜잭션 처리 (DBA 와 협의)
+      config:
+        file: standalone.xml (subsystem transactions)
+        snippet: |
+          <subsystem xmlns="urn:jboss:domain:transactions:5.0"><core-environment node-identifier="node1"/><recovery-environment socket-binding="txn-recovery-environment" status-socket-binding="txn-status-manager"/>
+            <coordinator-environment default-timeout="300" statistics-enabled="true"/></subsystem>
+        note: "node-identifier 는 인스턴스마다 고유해야 복구가 정상(WFLYTX0013 경고 방지). 네임스페이스 판(5.0)은 EAP 판마다 다름 — 실제 파일의 xmlns 를 유지"
+      cmd: |
+        $JBOSS_HOME/bin/jboss-cli.sh -c ":take-snapshot"
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/subsystem=transactions:write-attribute(name=default-timeout,value=300)"
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/subsystem=transactions/log-store=log-store/transactions=<id>:delete"   # heuristic·고아 트랜잭션은 DB 측 확인 후에만 (ID 의 ':' 는 '\:' 로 이스케이프)
+      check: "성공: write-attribute outcome success, 이후 number-of-timed-out-transactions 증가 정지·log-store transactions 목록 비어 있음. 실패: delete 가 failed 응답이거나 같은 ID 가 probe 후 다시 나타남 → 중단하고 3차 의뢰"
+      note: "사전조건: DBA 가 DB 측 in-doubt(2PC) 트랜잭션 상태를 확인·정리 방향 합의, 1차 결과 기록 · 영향: 타임아웃 증가는 잠금 보유 시간 증가, log-store delete 는 해당 트랜잭션 복구 포기(데이터 불일치 위험 — 되돌릴 수 없음) · 승인: WAS 운영 담당 + DBA + 업무 담당 · 백업/롤백: 변경 전 :take-snapshot 과 tx-object-store 디렉터리 tar 보관, 타임아웃은 같은 명령으로 원래 값 복원(reload-required 이면 :reload), 삭제한 트랜잭션은 복원 불가 · 적용: EAP 7.x/8.0·WildFly 10+"
+  - stage: 3
+    steps:
+    - do: Red Hat 케이스 자료
+      cmd: |
+        $JBOSS_HOME/bin/jdr.sh ; tar czf tx_$(date +%Y%m%d).tgz $JBOSS_HOME/standalone/data/tx-object-store/
+      check: JDR + tx-object-store + DB 2PC 상태
+      note: "민감정보 마스킹: 로그·DB 2PC 조회 결과의 호스트명·IP·DB 계정·JDBC URL·업무 데이터 값은 가림, tx-object-store 는 Xid·자원 이름이 들어 있으므로 Red Hat 요청 시에만 첨부 · 전달 승인: 보안 담당·DBA 승인 후 Red Hat 케이스에만"
+
+- id: EAP-PROC-INTERNAL
+  category: internal
+  match: [WFLYSRV0049, WFLYSRV0073, WFLYSRV0148, WFLYSRV0176, WFLYSRV0210, WFLYSRV0232, WFLYSRV0257, WFLYCTL0013, WFLYCTL0180, WFLYCTL0186, WFLYCTL0348, WFLYSRV0055, WFLYSRV0071, WFLYSRV0082, WFLYSRV0083, WFLYSRV0153, WFLYDS0009, LEG-WFLY-DEPLOY, LEG-JBOSS-WFLY-001-86B6]
+  title: 서버 기동·배포 실패 (WFLYSRV/WFLYCTL/WFLYDS)
+  source: "Red Hat EAP 7.4 Configuration Guide '7. Deploying Applications (deployment scanner, jboss-cli deploy/undeploy)'·'2. Server Management (standalone.sh, :reload, :shutdown)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 실패 원인 줄·배포 상태 확인
+      cmd: |
+        grep -n "ERROR\|WFLYSRV0049\|WFLYCTL0013\|WFLYCTL0180\|WFLYDS0009\|Failed to start" $JBOSS_HOME/standalone/log/server.log | tail -30
+        $JBOSS_HOME/bin/jboss-cli.sh -c "deployment-info"
+        $JBOSS_HOME/bin/jboss-cli.sh -c ":read-attribute(name=server-state)" ; $JBOSS_HOME/bin/jboss-cli.sh -c "/core-service=management:read-boot-errors" ; ss -ltnp | grep -E ":(8080|9990|8443)\b"
+      check: "이상: server-state 가 running 이 아니거나(reload-required·restart-required) 배포 STATUS 가 FAILED, read-boot-errors 에 항목 존재 → 2차. 포트 점유 PID 기록. 정상: running·모든 배포 OK"
+      note: "적용: EAP 7.x/8.0·WildFly 10+ (deployment-info·read-boot-errors 는 EAP 6 일부 판에 없음 — EAP 6 은 server.log 와 deployments/*.failed 로 판단) · 권한: jboss-cli 관리 사용자(Monitor 이상), ss -p 의 PID 표시는 root 필요"
+  - stage: 2
+    steps:
+    - do: 배포 롤백·재배포 (CLI)
+      cmd: |
+        $JBOSS_HOME/bin/jboss-cli.sh -c "undeploy <app>.war"
+        $JBOSS_HOME/bin/jboss-cli.sh -c "deploy /path/<app>.war --force"
+        $JBOSS_HOME/bin/jboss-cli.sh -c "deployment-info --name=<app>.war"
+      check: "성공: deployment-info STATUS OK, server.log 에 WFLYSRV0010 'Deployed'. 실패: deploy 가 WFLYCTL0080/WFLYSRV 오류로 실패하거나 STATUS FAILED → 직전 정상 war 로 같은 명령 재실행(롤백)"
+      note: "사전조건: 직전 정상 war 파일 확보·배포 대상 버전 확인, 업무 담당과 작업 시간 합의 · 영향: undeploy~deploy 사이 해당 앱 서비스 중단·세션 소실 · 승인: 서비스 담당·WAS 운영 담당 · 백업/롤백: 현재 war 를 <app>.war.bak.<날짜> 로 보관(관리 콘텐츠는 undeploy 시 삭제됨), 실패 시 보관본으로 deploy --force · 적용: EAP 7.x/8.0·WildFly 10+ (EAP 6 은 deployment-info 대신 :read-children-resources(child-type=deployment))"
+    - do: 서버 재기동 (reload 로 해결되지 않는 경우)
+      cmd: |
+        $JBOSS_HOME/bin/jboss-cli.sh -c ":shutdown(restart=true)"
+        # 또는 systemctl restart <service>   (systemd 등록 시 — RPM 설치 EAP 7 은 eap7-standalone, ZIP 설치는 등록한 서비스 이름)
+      check: "성공: server.log 에 WFLYSRV0025 'JBoss EAP … started' 와 server-state running. 실패: WFLYSRV0026 'started (with errors)' 또는 기동 중단 → 설정 이력 복원 단계로"
+      note: "사전조건: 1차 스레드 덤프·로그 확보, 클러스터면 다른 노드가 부하를 받을 수 있는지 확인 · 영향: 전체 배포 중단(기동 시간 동안 서비스 불가)·세션 소실 · 승인: 서비스 담당·WAS 운영 담당 · 백업/롤백: 재기동 전 :take-snapshot, 기동 실패 시 다음 단계(이력 복원)로 직전 설정 복구 · 적용: EAP 7.x/8.0·WildFly 10+ (EAP 6 도 :shutdown(restart=true) 지원)"
+    - do: 설정 손상 시 스냅샷·이력 복원
+      cmd: |
+        ls -lt $JBOSS_HOME/standalone/configuration/standalone_xml_history/ | head -5
+        cp $JBOSS_HOME/standalone/configuration/standalone.xml $JBOSS_HOME/standalone/configuration/standalone.xml.bad.$(date +%Y%m%d%H%M)
+        cp $JBOSS_HOME/standalone/configuration/standalone_xml_history/standalone.last.xml $JBOSS_HOME/standalone/configuration/standalone.xml
+      check: "성공: 기동 후 WFLYSRV0025 기록·read-boot-errors 비어 있음. 실패: 같은 파싱 오류(WFLYCTL0085 등) 반복 → standalone.boot.xml 또는 snapshot/ 의 이전 파일로 재시도, 그래도 실패면 3차"
+      note: "사전조건: 서버 중지 상태(실행 중 복사하면 다음 관리 변경이 덮어씀), 복원할 파일의 날짜 확인 · 영향: 마지막 정상 이후의 설정 변경이 사라짐 · 승인: WAS 운영 담당 · 백업/롤백: 덮어쓰기 전 standalone.xml.bad.<시각> 으로 보관(위 cmd 2번째 줄), 되돌릴 때는 그 파일을 다시 복사 · 적용: EAP 6/7/8·WildFly 공통(standalone_xml_history 의 standalone.last.xml·standalone.boot.xml·standalone.initial.xml)"
+  - stage: 3
+    steps:
+    - do: Red Hat 케이스 자료
+      cmd: |
+        $JBOSS_HOME/bin/jdr.sh ; ls $JBOSS_HOME/standalone/deployments/*.failed 2>/dev/null && cat $JBOSS_HOME/standalone/deployments/*.failed
+      check: JDR + .failed 마커 내용 + 앱 버전
+      note: "민감정보 마스킹: server.log·.failed 내용의 호스트명·IP·계정·JDBC URL·세션 ID·업무 데이터 가림, JDR zip 안 설정 파일의 비밀번호 마스킹 여부 확인 · 전달 승인: 보안 담당 승인 후 Red Hat 케이스에만"
+
+- id: EAP-PROC-CAPACITY
+  category: capacity
+  match: [WFLYUT0006, WFLYUT0080, WFLYUT0001, WFLYUT0005, LEG-WFLY-THREAD, LEG-WFLY-UNDERTOW-ERR, LEG-WFLY-UT-ALL, LEG-JBOSS-UT001-E29E]
+  title: Undertow 요청 처리 한계·워커(io) 스레드 고갈
+  source: "Red Hat EAP 7.4 'Performance Tuning Guide 4. Undertow / 5. IO Subsystem (worker: task-max-threads, io-threads)'·'Configuration Guide 17. Configuring the Web Server (Undertow) — listeners: max-connections, request-parse-timeout'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 워커·리스너 상태 확인
+      cmd: |
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/subsystem=io/worker=default:read-resource(include-runtime=true)"
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/subsystem=undertow/server=default-server/http-listener=default:read-resource(include-runtime=true)"
+        grep -n "UT005\|WFLYUT" $JBOSS_HOME/standalone/log/server.log | tail -20
+      check: "이상: busy-task-thread-count 가 task-max-threads 에 근접하고 queue-size 증가면 워커 고갈. 정상: busy 가 task-max-threads 의 70% 미만·queue-size 0 근처"
+      note: "적용: EAP 7.x/8.0·WildFly 10+ (worker 런타임 지표 busy-task-thread-count·queue-size 는 EAP 7.2+/WildFly 13+ 기준, 이전 판은 스레드 덤프로 default task 스레드 수 확인). EAP 6 은 Undertow/IO 없음 — /subsystem=web/connector=http 로 대체 · 권한: jboss-cli 관리 사용자(Monitor 이상)"
+  - stage: 2
+    steps:
+    - do: IO 워커·리스너 한도 조정
+      config:
+        file: standalone.xml (subsystem io › worker default / undertow http-listener)
+        snippet: |
+          <worker name="default" io-threads="8" task-max-threads="128" task-keepalive="60000"/>
+          <http-listener name="default" socket-binding="http" max-connections="4000" max-header-size="32768" no-request-timeout="60000" redirect-socket="https" enable-http2="true"/>
+        note: "io-threads ≈ CPU 코어×2, task-max-threads ≈ 코어×16 을 상한으로. 백엔드(DB 풀) 한도와 균형"
+      cmd: |
+        $JBOSS_HOME/bin/jboss-cli.sh -c ":take-snapshot"
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/subsystem=io/worker=default:write-attribute(name=task-max-threads,value=128)"
+        $JBOSS_HOME/bin/jboss-cli.sh -c "/subsystem=undertow/server=default-server/http-listener=default:write-attribute(name=max-connections,value=4000)"
+        $JBOSS_HOME/bin/jboss-cli.sh -c ":reload"
+      check: "성공: reload 후 server-state running, busy-task-thread-count 가 한도의 70% 미만으로 안정·UT005023 (Exception handling request) 감소. 실패: write-attribute failed 이거나 CPU 포화·DB 풀 고갈로 번짐 → 원래 값으로 되돌림"
+      note: "사전조건: CPU 코어 수·DB 풀 max-pool-size 확인(스레드만 늘리면 DB 풀 고갈로 옮겨감), 1차 지표 기록 · 영향: :reload 동안 전체 서비스 중단(수 초~수십 초), 스레드 증가로 메모리·CPU 사용 증가 · 승인: WAS 운영 담당·서비스 담당 · 백업/롤백: 변경 전 :take-snapshot, 롤백은 같은 write-attribute 로 원래 값 + :reload · 적용: EAP 7.x/8.0·WildFly 10+ (EAP 6 해당 없음)"
+  - stage: 3
+    steps:
+    - do: Red Hat 케이스 자료
+      cmd: |
+        $JBOSS_HOME/bin/jdr.sh ; $JBOSS_HOME/bin/jboss-cli.sh -c "/core-service=platform-mbean/type=threading:dump-all-threads(locked-monitors=true,locked-synchronizers=true)" > td_$(date +%H%M%S).txt
+      check: JDR + 스레드 덤프 3회 + 접근 로그(access-log 활성 시)
+      note: "민감정보 마스킹: 접근 로그의 클라이언트 IP·URL 쿼리 문자열(토큰·세션 ID)·사용자 ID, 스레드 덤프 안 SQL 문자열·호스트명 가림 · 전달 승인: 보안 담당 승인 후 Red Hat 케이스에만"
+
+- id: EAP-PROC-SECURITY
+  category: security
+  match: [WFLYSEC0011, WFLYDM0022]
+  title: 보안 도메인·관리 사용자 인증 실패
+  source: "Red Hat EAP 7.4 'How to Configure Server Security (add-user.sh, Elytron security domains, management interface HTTPS)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 실패 원인 확인
+      cmd: |
+        grep -n "WFLYSEC0011\|WFLYDM0022\|ELY0" $JBOSS_HOME/standalone/log/server.log | tail -20
+        ls -l $JBOSS_HOME/standalone/configuration/mgmt-users.properties $JBOSS_HOME/standalone/configuration/application-users.properties
+      check: "이상: 사용자 미존재/비활성(#로 주석)·파일 권한 변경·같은 출처 IP 반복 실패. 정상: 파일 존재·권한 600 수준·실패가 일회성"
+      note: "적용: EAP 7.x/8.0·WildFly 10+ (ELY 메시지는 Elytron 사용 시, EAP 6 은 JBAS011xxx/PBOX) · 권한: server.log·configuration 디렉터리 읽기(JBoss 실행 계정) · 파일 내용(해시)은 열람하지 않고 ls 로 존재·권한만 확인"
+  - stage: 2
+    steps:
+    - do: 관리·애플리케이션 사용자 재등록
+      cmd: |
+        cp -p $JBOSS_HOME/standalone/configuration/mgmt-users.properties $JBOSS_HOME/standalone/configuration/mgmt-users.properties.bak.$(date +%Y%m%d%H%M)
+        cp -p $JBOSS_HOME/standalone/configuration/application-users.properties $JBOSS_HOME/standalone/configuration/application-users.properties.bak.$(date +%Y%m%d%H%M)
+        $JBOSS_HOME/bin/add-user.sh   # 대화형: a) Management User 선택 → 영역(ManagementRealm)·<user>·비밀번호(화면에 안 보임, 확인 입력) 순으로 묻는다
+        $JBOSS_HOME/bin/add-user.sh   # 대화형: b) Application User 선택 → 영역(ApplicationRealm)·<appuser>·비밀번호·그룹(<group>) 순으로 묻는다
+      check: "성공: add-user.sh 가 'Added user' 출력, jboss-cli 접속 성공 / 앱 로그인 정상. 실패: 비밀번호 정책 거부·realm 불일치 오류 또는 여전히 WFLYSEC0011 → .bak 복원 후 보안 도메인 설정 점검"
+      note: "사전조건: 계정 소유자·용도 확인(외부 반복 실패면 재등록보다 차단이 먼저), 보안 담당 통보 · 영향: 같은 이름 사용자는 비밀번호가 바뀌어 기존 스크립트·연동 인증 실패 가능 · 승인: 보안 담당·WAS 운영 담당 · 백업/롤백: properties 파일 .bak 보관(위 cmd 1~2줄), 롤백은 .bak 복사 · 주의: -p 로 비밀번호를 넘기지 않는다(셸 history·ps 에 남음) — 인자 없이 실행하면 사용자 유형·사용자 이름·비밀번호를 대화형으로 묻는다 · 적용: EAP 6/7/8·WildFly 공통(properties realm 사용 시)"
+  - stage: 3
+    steps:
+    - do: Red Hat 케이스 자료
+      cmd: |
+        $JBOSS_HOME/bin/jdr.sh
+      check: JDR(보안 설정 포함, 비밀번호 마스킹)
+      note: "민감정보 마스킹: JDR 안 *-users.properties 해시·keystore 비밀번호·로그의 사용자 ID·출처 IP·호스트명 가림(비밀번호 해시는 첨부 전 제거) · 전달 승인: 보안 담당 승인 후 Red Hat 케이스에만"

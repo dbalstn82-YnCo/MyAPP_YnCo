@@ -1,0 +1,327 @@
+product: linux
+layer: os
+note: GPT 협업 수집분 — 벤더 공식 문서와 대조 후 확정
+codes:
+- code: LNX-OOM-KILLER
+  severity: critical
+  category: memory
+  title: OOM 프로세스 강제종료
+  vendor_cause: 시스템 전체 메모리(커밋 포함)가 고갈되어 커널이 oom_score 가 가장 높은 프로세스를 골라 SIGKILL 로 종료한 상태 — 메모리 누수, 과도한 JVM 힙·캐시 설정, 스왑 부족, 동시 부하 급증이 흔한 원인.
+  immediate:
+  - '`journalctl -k --since ''-2 hours'' | grep -iE ''out of memory|oom'' | tail -30` (RHEL 7+) / `grep -i ''out of memory'' /var/log/messages | tail -30` (RHEL 6) 로 종료된 프로세스명·PID·RSS 확인'
+  - '`free -m ; vmstat 1 5` 와 `ps -eo pid,rss,comm --sort=-rss | head -10` 으로 현재 가용 메모리·상위 사용 프로세스 확인'
+  - 종료된 프로세스가 업무 서비스면 `systemctl status <service>` 로 기동 여부 확인 후 담당 통보 (재기동은 2차)
+  short:
+  - (2차) /proc/meminfo 의 Committed_AS·CommitLimit 과 `sysctl vm.overcommit_memory vm.swappiness`, 상위 프로세스 RSS 추세(`sar -r`) 로 누수·과할당 여부 판정
+  mid:
+  - 서비스별 메모리 제한과 JVM 및 애플리케이션 메모리 설정을 재산정
+  long:
+  - 메모리 용량예측과 OOM 사전경보 및 누수 회귀시험을 운영
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - RHEL 5~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: '커널별 3형식 모두 매칭: 2.6.18(RHEL5) ''Out of Memory: Killed process'' / 2.6.32~4.18 ''Out of memory: kill|Kill process … or (sacrifice) child'' + ''Killed process … total-vm'' / 5.x+·RHEL8 backport
+    ''Out of memory: Killed process … UID:''. 커널 소스 대조'
+- code: LNX-MEMCG-OOM
+  severity: critical
+  category: memory
+  title: cgroup 메모리 고갈
+  vendor_cause: 특정 cgroup(systemd 서비스·컨테이너)의 메모리 한도(v1 memory.limit_in_bytes, v2 memory.max)에 도달해 커널이 그 cgroup 안의 프로세스만 골라 종료한 상태('Memory cgroup out of memory') — 시스템 전체 메모리가 남아 있어도 발생하며 한도 과소·누수가 원인.
+  immediate:
+  - '`journalctl -k --since ''-2 hours'' | grep -iE -A 3 ''memory cgroup out of memory'' | tail -30` (RHEL 7+) / `grep -i ''memory cgroup'' /var/log/messages | tail -20` (RHEL 6) 로 cgroup 경로·종료 프로세스 확인'
+  - '`systemctl show <service> -p MemoryLimit -p MemoryMax -p MemoryCurrent` 로 한도·현재 사용량 확인 (RHEL 7 은 MemoryLimit, RHEL 8+ cgroup v2 는 MemoryMax)'
+  - '`systemd-cgtop -m -n 1 | head -15` 로 cgroup 별 메모리 사용 상위 확인 (RHEL 7+)'
+  short:
+  - memory.max와 컨테이너 메모리 제한 및 실제 사용량을 비교 분석
+  mid:
+  - 워크로드 기준으로 cgroup 메모리 한도와 요청량을 재설계
+  long:
+  - cgroup 메모리 사용률과 OOM 이벤트를 상시 모니터링
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - RHEL 6~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: memcg 는 2.6.32+ — RHEL 5 없음. 'Memory cgroup out of memory' 문구 2.6.32~6.x 동일(커널 소스 대조)
+- code: LNX-SOFT-LOCKUP
+  severity: critical
+  category: thread
+  title: CPU 소프트락업
+  vendor_cause: 한 CPU 가 커널 모드에서 스케줄링 없이 watchdog_thresh 의 2배(기본 20초) 이상 묶여 워치독 스레드가 실행되지 못한 상태 — 긴 커널 루프의 드라이버 결함, 스핀락 경합, 가상화 호스트 과할당(steal)·스토리지 지연이 흔한 원인.
+  immediate:
+  - '`journalctl -k --since ''-2 hours'' | grep -iE -A 25 ''soft lockup'' | tail -60` (RHEL 7+) / `grep -A 25 ''soft lockup'' /var/log/messages | tail -60` (RHEL 6) 로 CPU 번호·프로세스·스택(모듈명) 확보'
+  - '`mpstat -P ALL 1 3` (sysstat) 로 CPU 별 %sys·%steal 확인 — VM 에서 %steal 지속 상승이면 호스트 과할당 의심'
+  - '`sysctl kernel.watchdog_thresh kernel.softlockup_panic` 로 설정 기록, 서비스 응답 확인 — 트래픽 우회는 2차·담당 합의'
+  short:
+  - CPU 과점유와 드라이버 및 가상화 스케줄링 지연을 분석
+  mid:
+  - 문제 커널이나 드라이버를 업데이트하고 CPU 자원 구성을 조정
+  long:
+  - soft lockup 자동 vmcore 수집과 커널 회귀시험을 운영
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - RHEL 5~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: '2.6.18 ''BUG: soft lockup detected on CPU#'' / 2.6.32~ ''BUG: soft lockup - CPU#N stuck for Ns!'' / 4.x+ ''watchdog: BUG: soft lockup'' — ''soft lockup'' 공통'
+- code: LNX-HUNG-TASK
+  severity: error
+  category: thread
+  title: 태스크 장시간 정지
+  vendor_cause: khungtaskd 가 TASK_UNINTERRUPTIBLE(D 상태)로 kernel.hung_task_timeout_secs(기본 120초) 이상 멈춘 태스크를 발견한 상태 — 대부분 스토리지·NFS 응답 지연, 파일시스템 저널/락 대기, 메모리 회수 지연이 원인.
+  immediate:
+  - '`journalctl -k --since ''-2 hours'' | grep -iE -A 20 ''blocked for more than'' | tail -60` (RHEL 7+) / `grep -A 20 ''blocked for more than'' /var/log/messages | tail -60` (RHEL 6) 로 태스크·스택(xfs/ext4/nfs 함수) 확인'
+  - '`ps -eo pid,stat,wchan:32,comm | awk ''$2 ~ /^D/'' | head -20` 으로 현재 D 상태 프로세스·대기 함수 확인'
+  - '`iostat -xz 1 3` 으로 장치별 await·%util 확인, NFS 면 `nfsstat -rc` 와 `grep nfs /proc/mounts` 확인'
+  short:
+  - 스토리지와 NFS 및 잠금 대기와 커널 스택을 분석
+  mid:
+  - 병목 I/O 경로와 드라이버 또는 애플리케이션을 개선
+  long:
+  - hung task 추세와 D 상태 프로세스 수를 상시 모니터링
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - RHEL 6~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: 'khungtaskd ''INFO: task X:PID blocked for more than N seconds'' — 2.6.30+(RHEL 6+). RHEL 5 는 5.4+ 백포트 여부 미확인'
+- code: LNX-KERNEL-PANIC
+  severity: critical
+  category: internal
+  title: 커널 패닉
+  vendor_cause: 커널이 복구할 수 없는 오류(Oops 후 panic_on_oops, 정정 불가 MCE, 루트 FS 마운트 실패, 워치독 패닉 등)를 만나 'Kernel panic - not syncing' 으로 시스템을 정지한 상태 — 원인은 패닉 문자열과 직전 Oops·스택에 기록된다.
+  immediate:
+  - '`ls -lt /var/crash/ | head` 로 vmcore 와 vmcore-dmesg.txt 생성 여부 확인 (kdump 설정 시)'
+  - '`journalctl -k -b -1 | tail -80` (RHEL 7+, persistent journal 필요) 또는 /var/crash/<dir>/vmcore-dmesg.txt 에서 ''Kernel panic - not syncing:'' 뒤 문구·직전 스택 확인'
+  - '`last -x | head -10` 과 BMC(iLO/iDRAC) 콘솔 로그로 정지·재부팅 시각 확인, 클러스터면 서비스 전환 상태 확인 (노드 격리는 2차)'
+  short:
+  - (2차) `crash /usr/lib/debug/lib/modules/<패닉 당시 커널>/vmlinux /var/crash/<dir>/vmcore` (kernel-debuginfo 필요) 로 `bt`·`log`·`mod` 분석
+  mid:
+  - 원인 커널과 드라이버를 패치하고 동일 조건 재현시험을 수행
+  long:
+  - kdump 검증과 커널 패치 수명주기 및 장애복구훈련을 운영
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - RHEL 5~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: '''Kernel panic - not syncing:'' 전 버전 동일'
+- code: LNX-BUFFER-IO
+  severity: critical
+  category: disk
+  title: 블록 I/O 오류
+  vendor_cause: 블록 계층이 장치에 대한 읽기/쓰기 요청 실패를 보고한 상태('I/O error, dev sdX, sector N', 'Buffer I/O error on dev') — 디스크 매체 불량, 컨트롤러·케이블·SAN 경로 단절, 멀티패스 전 경로 실패가 흔한 원인이며 파일시스템 오류·읽기 전용 전환으로 이어질 수 있다.
+  immediate:
+  - '`journalctl -k --since ''-2 hours'' | grep -iE ''I/O error|Buffer I/O'' | tail -30` (RHEL 7+) / `grep -i ''I/O error'' /var/log/messages | tail -30` (RHEL 6) 로 장치명·sector·반복 여부 확인'
+  - '`lsblk -o NAME,HCTL,SIZE,TYPE,MOUNTPOINT` (RHEL 7+) 와 `multipath -ll` (SAN) 로 영향 볼륨·경로 상태 확인'
+  - '`grep -E '' ro[ ,]'' /proc/mounts` 로 읽기 전용(ro) 마운트 여부, `smartctl -H /dev/sdX` 로 디스크 상태 확인 — PASSED 가 아니면 매체 불량'
+  short:
+  - SMART와 multipath 및 SAN 로그와 커널 선행 오류를 분석
+  mid:
+  - 결함 디스크와 케이블 및 HBA 또는 스토리지 경로를 교체
+  long:
+  - I/O 오류 임계치와 디스크 예측진단 및 경로 이중화를 운영
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - RHEL 5~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: '''I/O error, dev'' 가 2.6.x ''end_request:'' / 4.13~5.5 ''print_req_error:'' / 3.17~4.12·5.6+ ''blk_update_request:'' 접두 모두 포함. ''Buffer I/O error on device'' 전 버전'
+- code: LNX-EXT4-ERROR
+  severity: critical
+  category: storage
+  title: EXT4 파일시스템 오류
+  vendor_cause: 'ext4 드라이버가 메타데이터 불일치(디렉터리 항목·inode·익스텐트 트리·비트맵)를 발견한 상태(''EXT4-fs error (device X): <함수>'') — 마운트 옵션 errors= 에 따라 계속·읽기 전용 전환·패닉하며 하위 I/O 오류·비정상 종료·커널 버그가 원인.'
+  immediate:
+  - '`journalctl -k --since ''-1 day'' | grep -i ''EXT4-fs'' | tail -30` (RHEL 7+) / `grep ''EXT4-fs'' /var/log/messages | tail -30` (RHEL 6) 로 장치·함수·inode 번호 확인'
+  - '`grep <dev> /proc/mounts` 로 ro 마운트 여부(옵션에 ro 면 쓰기 불가), `dumpe2fs -h /dev/<dev> 2>/dev/null | grep -iE ''state|errors|error count''` 로 오류 기록 확인'
+  - 같은 시각 I/O error 동반 여부 확인 — 동반 시 하드웨어 우선(LNX-BUFFER-IO), fsck 는 2차
+  short:
+  - '(2차·승인 후, 롤백: 백업 복원) 백업 확인·언마운트 후 `e2fsck -fn /dev/<dev>` 로 점검, 오류 확인 시 `e2fsck -fy` 로 수리 (루트 FS 는 rescue 모드)'
+  mid:
+  - 점검창에 fsck를 수행하고 하부 스토리지 결함을 제거
+  long:
+  - 파일시스템 무결성 검사와 백업 복구훈련을 정례화
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - RHEL 6~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: ext4 는 2.6.28+ — RHEL 5 기본 ext3 는 LNX-EXT3-ERROR 참조
+- code: LNX-XFS-CORRUPTION
+  severity: critical
+  category: storage
+  title: XFS 메타데이터 손상
+  vendor_cause: XFS 가 디스크에서 읽은 메타데이터의 검증(CRC·magic) 실패 또는 메모리 내 구조 불일치를 발견한 상태 — 'Corruption of in-memory data detected. Shutting down filesystem' 이면 파일시스템이 강제 셧다운되어 모든 I/O 가 실패한다. 하위 I/O 오류·스토리지 캐시 손실·커널 버그가 원인.
+  immediate:
+  - '`journalctl -k --since ''-1 day'' | grep -i xfs | tail -40` (RHEL 7+) / `grep -i xfs /var/log/messages | tail -40` (RHEL 6) 로 장치·Shutting down filesystem 여부 확인'
+  - '`grep xfs /proc/mounts` 와 `ls <마운트>` 로 접근 가능 여부(Input/output error) 확인'
+  - 같은 시각 I/O error·multipath 실패 동반 여부 확인 — xfs_repair 는 2차(언마운트 필요, `-n` 점검 먼저)
+  short:
+  - '(2차·승인 후, 롤백: 백업 복원) 언마운트 후 `xfs_repair -n /dev/<dev>` 로 점검, 로그 재생 요구 시 먼저 마운트/언마운트로 로그 재생 — `xfs_repair -L` 은 로그 손실 위험으로 벤더 확인 후만'
+  mid:
+  - 검증된 절차로 xfs_repair 또는 백업 복구를 수행
+  long:
+  - XFS 무결성 점검과 스토리지 오류 조기경보를 운영
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - RHEL 5~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: XFS 'Corruption detected' / 'Corruption of in-memory data detected' — RHEL 7+ 기본 FS, 그 이전은 선택 설치
+- code: LNX-NO-SPACE
+  severity: critical
+  category: storage
+  title: 파일시스템 공간 고갈
+  vendor_cause: 파일시스템 블록(예약 공간 제외 가용 공간)이 소진되어 쓰기가 ENOSPC('No space left on device') 로 실패한 상태 — 로그 폭증, 덤프·임시 파일 누적, 삭제됐지만 프로세스가 열고 있는 파일이 흔한 원인.
+  immediate:
+  - '`df -hT` 와 `df -i` 로 가득 찬 마운트(Use% 95% 이상)와 inode 고갈 여부 구분'
+  - '`du -xh --max-depth=1 <마운트> 2>/dev/null | sort -rh | head` 로 큰 디렉터리 확인'
+  - '`lsof +L1 2>/dev/null | head` 로 삭제됐으나 열려 있는 파일 확인 (정리는 2차)'
+  short:
+  - '(2차·승인 후, 롤백: 보관본 복원) 소유 담당 확인 뒤 오래된 로그 압축·이동, 열린 삭제 파일은 해당 프로세스 재기동 일정으로 반환, `journalctl --vacuum-size=<크기>` (RHEL 7+)'
+  mid:
+  - 볼륨을 증설하고 보존기간과 로그 정책을 재설계
+  long:
+  - 파일시스템 증가율 예측과 용량 임계치 경보를 운영
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - RHEL 5~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: ENOSPC 메시지 전 버전 동일
+- code: LNX-CONNTRACK-FULL
+  severity: critical
+  category: capacity
+  title: Conntrack 테이블 포화
+  vendor_cause: 'netfilter 연결 추적 테이블이 net.netfilter.nf_conntrack_max 에 도달해 새 연결의 패킷을 버리는 상태(''nf_conntrack: table full, dropping packet'') — 연결 폭주·DDoS·NAT 게이트웨이 부하·긴 타임아웃이 원인이며 신규 접속 실패로 나타난다.'
+  immediate:
+  - '`sysctl net.netfilter.nf_conntrack_count net.netfilter.nf_conntrack_max` 로 사용률 확인 — 90% 이상이면 경고, 같은 값이면 가득 참'
+  - '`journalctl -k --since ''-1 hour'' | grep -i ''nf_conntrack.*table full'' | tail -20` (RHEL 7+) / `grep -i ''nf_conntrack.*table full'' /var/log/messages | tail -20` (RHEL 6) 로 패킷 폐기 메시지가 실제로 있는지 확인 — 있으면 확정'
+  - '`ss -s` 로 TCP 연결 상태 요약 확인(출발지별 집계는 부하가 커서 2차에서 `conntrack -L` 표본으로)'
+  short:
+  - '(2차·승인 후, 롤백: 이전 값 복원) `sysctl -w net.netfilter.nf_conntrack_max=<값>` 과 /etc/sysctl.d/ 반영, 필요 시 `nf_conntrack_tcp_timeout_established` 단축 — 비정상 출발지는 방화벽 차단'
+  mid:
+  - 필요 용량에 맞게 nf_conntrack_max와 네트워크 구조를 조정
+  long:
+  - conntrack 사용률과 신규 연결률 임계치 경보를 운영
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - RHEL 6~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: '''nf_conntrack: table full, dropping packet'' 2.6.32+ (4.x+ 는 ''nf_conntrack: nf_conntrack: table full''). RHEL 5 ''ip_conntrack: table full'' 은 LNX-IPCONNTRACK-FULL'
+- code: LNX-NETDEV-WATCHDOG
+  severity: error
+  category: connection
+  title: NIC 송신 큐 시간초과
+  vendor_cause: 네트워크 스택 워치독이 NIC 송신 큐가 드라이버 지정 시간(watchdog_timeo) 동안 진행되지 않음을 감지해 'transmit queue N timed out' 을 남기고 드라이버 리셋을 유도한 상태 — NIC 펌웨어/드라이버 결함, PCIe 오류, 링크 불안정이 흔한 원인.
+  immediate:
+  - '`journalctl -k --since ''-2 hours'' | grep -iE ''NETDEV WATCHDOG|tx timeout|reset'' | tail -30` (RHEL 7+) / `grep -i ''NETDEV WATCHDOG'' /var/log/messages | tail -20` (RHEL 6) 로 인터페이스·드라이버·반복 여부 확인'
+  - '`ethtool -i <iface>` 로 드라이버·펌웨어 버전, `ethtool -S <iface> | grep -iE ''timeout|err|reset'' | head` 로 오류 카운터 확인'
+  - '`ip -s link show <iface>` 로 TX errors·dropped 와 링크 상태 확인, 본딩이면 `cat /proc/net/bonding/<bond>` 로 다른 슬레이브 활성 여부 확인 — TX errors 가 계속 늘면 해당 NIC 이상'
+  short:
+  - ethtool과 드라이버 로그 및 스위치 포트 오류를 분석
+  mid:
+  - NIC 펌웨어와 드라이버를 갱신하고 결함 장비를 교체
+  long:
+  - NIC 오류와 TX timeout 및 링크 상태를 상시 감시
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - RHEL 5~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: '''NETDEV WATCHDOG: eth0 (driver): transmit queue N timed out'' 전 버전'
+- code: LNX-MCE-HARDWARE
+  severity: critical
+  category: hardware
+  title: CPU 메모리 하드웨어 오류
+  vendor_cause: CPU 의 Machine Check Architecture 가 CPU 캐시·메모리 컨트롤러·버스 등의 하드웨어 오류를 보고한 상태 — 정정 가능(CE) 오류는 경고지만 증가 추세면 DIMM/CPU 고장 예고이고, 정정 불가(UE)는 프로세스 종료·패닉으로 이어진다.
+  immediate:
+  - '`journalctl -k | grep -iE ''mce|Hardware Error|EDAC'' | tail -30` (RHEL 7+) / `grep -iE ''mce|Machine check|EDAC'' /var/log/messages | tail -30` (RHEL 6) 로 CPU/뱅크·CE/UE 구분'
+  - '`ras-mc-ctl --summary` 와 `ras-mc-ctl --errors | tail -20` (rasdaemon, RHEL 7+) 또는 `cat /var/log/mcelog` (RHEL 6 mcelog) 로 DIMM 위치별 오류 수 확인'
+  - '`grep -H . /sys/devices/system/edac/mc/mc*/ce_count 2>/dev/null` 와 BMC(iLO/iDRAC) 이벤트 로그로 오류 DIMM 슬롯 확인'
+  short:
+  - rasdaemon과 하드웨어 진단 및 BMC 로그를 분석
+  mid:
+  - 결함 CPU 또는 DIMM을 교체하고 BIOS와 펌웨어를 갱신
+  long:
+  - ECC 오류 추세와 하드웨어 예측진단을 운영
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - RHEL 5~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: '2.6 ''Machine check events logged'' / 3.x+ ''mce: [Hardware Error]:'' / EDAC ''CE'' 모두 포함'
+- code: LNX-READONLY-FS
+  severity: critical
+  category: storage
+  title: 파일시스템 읽기전용
+  vendor_cause: 파일시스템이 오류(ext4 errors=remount-ro, XFS 셧다운) 또는 하위 I/O 실패를 만나 데이터 보호를 위해 읽기 전용으로 다시 마운트된 상태 — 이후 모든 쓰기가 'Read-only file system' 으로 실패한다.
+  immediate:
+  - '`grep -E '' ro[ ,]'' /proc/mounts` 로 읽기 전용 마운트 목록 확인 — 원래 rw 였던 마운트면 확정'
+  - '`journalctl -k --since ''-1 day'' | grep -iE ''remount|read-only|I/O error|EXT4-fs error|XFS'' | tail -30` (RHEL 7+) / `grep -iE ''read-only|I/O error'' /var/log/messages | tail -30` (RHEL 6) 로 선행 원인 확인'
+  - 쓰기 실패 중인 서비스 목록을 담당에 통보 — 서비스 정리·rw 재마운트는 2차(원인 미해결 상태 재마운트 금지)
+  short:
+  - 읽기전용 전환 원인과 디스크 및 파일시스템 무결성을 분석
+  mid:
+  - 정비창에서 파일시스템 복구 후 정상 마운트와 데이터 정합성을 검증
+  long:
+  - 파일시스템 오류 자동감지와 스토리지 예방점검을 운영
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - RHEL 5~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: '''Remounting filesystem read-only'' 전 버전'
+- code: LNX-NFS-NOT-RESPONDING
+  severity: error
+  category: upstream
+  title: NFS 서버 응답 없음
+  vendor_cause: 'NFS 클라이언트가 timeo·retrans 만큼 재전송해도 서버 응답을 받지 못한 상태(''nfs: server X not responding, still trying'') — hard 마운트면 접근 프로세스가 D 상태로 대기하며 서버 부하·장애, 네트워크 손실, 방화벽(2049/111) 이 원인.'
+  immediate:
+  - '`grep nfs /proc/mounts` 로 대상 마운트·옵션(hard/soft·timeo·retrans·vers) 확인'
+  - '`rpcinfo -t <server> nfs` 와 `ping -c 3 <server>` 로 서버 NFS 응답·네트워크 확인 (마운트 경로 ls·df 는 멈출 수 있어 금지)'
+  - '`nfsstat -rc` 로 retrans 증가 여부, `ps -eo pid,stat,comm | awk ''$2 ~ /^D/'' | head` 로 대기 프로세스 확인'
+  short:
+  - mount 옵션과 서버 부하 및 네트워크 손실과 지연을 분석
+  mid:
+  - NFS 이중화와 타임아웃 및 네트워크 경로를 개선
+  long:
+  - NFS 응답시간과 재전송률 및 서버 가용성을 통합 감시
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - RHEL 5~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: '''nfs: server X not responding, still trying'' 전 버전'

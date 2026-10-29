@@ -1,0 +1,797 @@
+product: linux
+layer: os
+note: GPT 협업 수집분 — 벤더 공식 문서와 대조 후 확정
+codes:
+- code: LNX-SEGFAULT
+  severity: error
+  category: internal
+  title: 프로세스 세그폴트
+  vendor_cause: 사용자 프로세스가 매핑되지 않았거나 권한이 없는 메모리 주소에 접근해 커널이 SIGSEGV 로 종료시킨 상태 — 메시지의 ip·sp 와 'in <라이브러리>[+오프셋]' 이 오류 위치이며 애플리케이션 버그·라이브러리 버전 불일치·메모리 손상이 흔한 원인.
+  immediate:
+  - '`journalctl -k --since ''-2 hours'' | grep -i segfault | tail -20` (RHEL 7+) / `grep -i segfault /var/log/messages | tail -20` (RHEL 6) 로 프로세스명·PID·라이브러리 확인'
+  - '`coredumpctl list | tail -5` (RHEL 8+) 또는 `cat /proc/sys/kernel/core_pattern ; ls -lt /var/spool/abrt 2>/dev/null | head` (RHEL 6/7 ABRT) 로 코어 파일 확보 여부 확인'
+  - '`systemctl status <service>` (RHEL 7+) / `ps -ef | grep <프로세스명>` 로 해당 서비스 현재 기동 상태 확인 — 기동 복구는 2차'
+  short:
+  - (2차) `coredumpctl debug <PID>` 또는 `gdb <실행파일> <core>` 의 `bt` 로 스택 확인, 같은 라이브러리 반복이면 최근 패치(`rpm -qa --last | head`) 와 대조
+  mid:
+  - 결함 모듈(애플리케이션·라이브러리) 수정판 배포, systemd-coredump/ABRT 와 서비스 LimitCORE 로 코어 자동 수집 설정
+  long:
+  - 동일 프로세스 세그폴트 일 1회 이상 경보, 패치 전 스테이징 회귀 시험 정례화
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - RHEL 5~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: '''name[pid]: segfault at ADDR ip … sp … error N'' x86 전 버전'
+- code: LNX-GENERAL-PROTECTION
+  severity: error
+  category: internal
+  title: 일반 보호 오류
+  vendor_cause: 'CPU 일반 보호 예외(#GP) — 사용자 프로세스면 ''traps: <name>[PID] general protection ip:… sp:… in <라이브러리>'' 로 SIGSEGV 종료되고, 커널 모드면 ''general protection fault'' 로 Oops·패닉까지 이어질 수 있다. 잘못된(non-canonical) 주소 접근 소프트웨어 버그·메모리 손상·DIMM 결함이 원인.'
+  immediate:
+  - '`journalctl -k --since ''-2 hours'' | grep -iE ''general protection|traps:'' | tail -20` (RHEL 7+) / `grep -i ''general protection'' /var/log/messages | tail -20` (RHEL 6) 로 사용자 프로세스인지 커널(RIP·모듈명)인지 구분'
+  - 커널 쪽이면 `cat /proc/sys/kernel/tainted` 와 `lsmod | head -30` 으로 비표준 모듈 적재 여부 기록 — 0 이 아니면 서드파티 모듈 의심
+  - '`journalctl -k | grep -iE ''mce|EDAC|Hardware Error'' | tail` 로 메모리 하드웨어 오류 동반 여부 확인'
+  short:
+  - (2차) 사용자 프로세스는 코어 스택 분석(LNX-SEGFAULT 와 동일), 커널은 kdump vmcore 를 `crash` 로 열어 `bt`·`mod` 로 원인 모듈 식별
+  mid:
+  - 원인 라이브러리·커널 모듈(드라이버) 수정판 적용, 메모리 하드웨어 오류 동반 시 벤더 진단으로 DIMM 교체
+  long:
+  - 커널 tainted 값·GP 이벤트 감시와 서드파티 커널 모듈 버전 관리 대장 운영
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - RHEL 5~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: '''general protection ip:'' / ''general protection fault'' 전 버전'
+- code: LNX-TCP-SYN-FLOOD
+  severity: error
+  category: security
+  title: SYN 플러딩 감지
+  vendor_cause: 리슨 소켓의 SYN 대기 큐(tcp_max_syn_backlog·somaxconn·애플리케이션 listen backlog)가 넘쳐 커널이 SYN cookies 로 응답하기 시작했다는 표시 — 실제 SYN 플러드 공격 외에도 정상 접속 폭주나 애플리케이션의 accept() 지연(백로그 과소)으로 흔히 발생.
+  immediate:
+  - '`journalctl -k | grep -i ''SYN flooding'' | tail -20` (RHEL 7+) / `grep -i ''SYN flooding'' /var/log/messages | tail -20` (RHEL 6) 로 대상 포트·빈도 확인'
+  - '`ss -ltn ''sport = :<port>''` 로 Recv-Q(현재 대기)·Send-Q(backlog 한도) 확인 — Recv-Q 가 Send-Q 에 근접하면 백로그 포화'
+  - '`ss -tn state syn-recv ''sport = :<port>'' | awk ''NR>1{print $4}'' | cut -d: -f1 | sort | uniq -c | sort -rn | head` 로 발신 IP 분포 확인 (RHEL 6 은 `netstat -ant | grep SYN_RECV`) — 소수 IP 집중이면 보안 담당 통보'
+  short:
+  - '(2차·보안 담당 승인 후, 롤백: 규칙 제거) 소수 IP 집중 공격이면 방화벽 차단, 정상 폭주면 애플리케이션 listen backlog·처리 스레드 증설'
+  mid:
+  - '(2차·승인 후, 롤백: 이전 값) /etc/sysctl.d/ 에 `net.ipv4.tcp_syncookies = 1`·`net.ipv4.tcp_max_syn_backlog`·`net.core.somaxconn` 상향과 애플리케이션 backlog 동시 조정'
+  long:
+  - 포트별 SYN_RECV 수·ListenOverflows(`nstat -az TcpExtListenOverflows`) 감시, 전단 방화벽/IPS 의 SYN 보호 정책 운영
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - RHEL 5~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: '2.6.32 ''possible SYN flooding on port N. Sending cookies.''(소문자) / 3.x+ ''TCP: Possible SYN flooding on port'' / 4.x+ ''TCP: request_sock_TCP: Possible SYN flooding'' — 대소문자 무시 매칭'
+- code: LNX-SOCKET-BUFFER
+  severity: warn
+  category: capacity
+  title: 소켓 버퍼 부족
+  vendor_cause: TCP 소켓 전체 메모리가 net.ipv4.tcp_mem 상한을 넘었거나 orphan 소켓 수가 net.ipv4.tcp_max_orphans 를 넘었을 때 커널이 'Out of socket memory'·'too many orphaned sockets' 를 남긴다 — 대량 연결·종료되지 않은 연결 누적·느린 수신 측이 흔한 원인.
+  immediate:
+  - '`cat /proc/net/sockstat` 의 TCP inuse·orphan·mem(페이지) 과 `sysctl net.ipv4.tcp_mem net.ipv4.tcp_max_orphans` 비교 — mem 이 tcp_mem 세 번째 값, orphan 이 max 에 근접하면 확정'
+  - '`ss -s` 와 `ss -tan state close-wait | wc -l` 로 상태별 연결 수 확인 — CLOSE-WAIT 다수면 애플리케이션 소켓 미종료'
+  - '`ss -tnp state close-wait | awk ''{print $NF}'' | sort | uniq -c | sort -rn | head` 로 원인 프로세스 확인'
+  short:
+  - '(2차·승인 후, 롤백: 이전 값 복원) 원인 프로세스의 연결 누수 수정 전 임시로 `net.ipv4.tcp_mem`·`net.ipv4.tcp_max_orphans` 를 메모리 여유 범위에서 상향(/etc/sysctl.d/)'
+  mid:
+  - 애플리케이션 커넥션 풀·타임아웃·close 처리 수정, `net.ipv4.tcp_rmem`·`tcp_wmem`·`net.core.rmem_max` 를 트래픽 특성에 맞게 재산정
+  long:
+  - /proc/net/sockstat 의 mem·orphan 추세와 CLOSE-WAIT 수 감시(한도 80% 경고)
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - RHEL 5~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: '''Out of socket memory'' / ''too many orphaned sockets'' 전 버전'
+- code: LNX-TOO-MANY-OPEN-FILES
+  severity: critical
+  category: capacity
+  title: 파일디스크립터 고갈
+  vendor_cause: '시스템 전체 열린 파일 수가 fs.file-max 에 도달(''VFS: file-max limit N reached'')했거나 프로세스가 RLIMIT_NOFILE(ulimit -n) 한도에 도달해 open·socket·accept 가 ENFILE/EMFILE(''Too many open files'') 로 실패하는 상태 — 파일·소켓 핸들 누수와 한도 과소 설정이 흔한 원인.'
+  immediate:
+  - '`cat /proc/sys/fs/file-nr` (할당·미사용·최대) 로 전체 한도 근접 여부 확인 — 첫 값이 셋째 값의 90% 이상이면 시스템 한도 문제'
+  - '`ls /proc/<PID>/fd | wc -l` 과 `grep ''open files'' /proc/<PID>/limits` 비교 — 근접하면 프로세스 한도 문제'
+  - '`for p in /proc/[0-9]*; do echo $(ls $p/fd 2>/dev/null | wc -l) $p; done | sort -rn | head` 로 FD 상위 프로세스 확인'
+  short:
+  - '(2차·승인 후, 롤백: drop-in·limits 파일 원복) systemd 서비스는 `systemctl edit <service>` 의 `LimitNOFILE=` (RHEL 7+), 일반 계정은 /etc/security/limits.d/ 의 nofile 상향 후 서비스 재기동 — `ls -l /proc/<PID>/fd | awk ''{print $NF}'' | sort | uniq -c | sort -rn | head` 로 누수 대상 확인 병행'
+  mid:
+  - fs.file-max 를 /etc/sysctl.d/ 로 영구 반영하고 애플리케이션의 파일·소켓·커넥션 close 누락 수정
+  long:
+  - 프로세스별 FD 사용률(한도 대비 80% 경고)과 /proc/sys/fs/file-nr 감시 등록
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - RHEL 5~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: '''VFS: file-max limit N reached'' 전 버전 + 앱 EMFILE 문구'
+- code: LNX-FORK-FAILED
+  severity: critical
+  category: capacity
+  title: 프로세스 생성 실패
+  vendor_cause: fork()/clone() 이 EAGAIN·ENOMEM 으로 실패한 상태 — 사용자별 프로세스 한도(ulimit -u, /etc/security/limits.d/*-nproc.conf), kernel.pid_max·kernel.threads-max, cgroup pids 한도(systemd TasksMax) 도달이나 메모리(커밋 한도) 부족이 원인.
+  immediate:
+  - '`ps -eLf | wc -l` (전체 스레드 수) 와 `sysctl kernel.pid_max kernel.threads-max` 비교로 시스템 한도 근접 여부 확인'
+  - '`ps -eLo user | sort | uniq -c | sort -rn | head` 와 `cat /etc/security/limits.d/*nproc*.conf` 로 사용자별 스레드 수·한도 도달 여부 확인'
+  - '`systemctl show <service> -p TasksMax -p TasksCurrent` (RHEL 8+) 와 `journalctl -k | grep -i ''fork rejected''` 로 cgroup pids 제한 여부 확인'
+  short:
+  - '(2차·승인 후, 롤백: 설정 파일 원복) 폭주 원인(스레드 누수·좀비 부모) 조치 후 limits.d nproc·TasksMax·kernel.pid_max 상향'
+  mid:
+  - 애플리케이션 스레드 풀 상한 설정, `grep -E 'Commit' /proc/meminfo` 로 커밋 여유 확보 계획 수립
+  long:
+  - 사용자별·서비스별 프로세스/스레드 수 감시(한도 80% 경고)
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - RHEL 5~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: '''cgroup: fork rejected by pids controller'' 는 4.3+(RHEL 7.x 백포트·8+)'
+- code: LNX-CPU-STALL
+  severity: critical
+  category: thread
+  title: RCU CPU 스톨
+  vendor_cause: RCU 가 grace period 를 커널 설정 시간(rcu_cpu_stall_timeout) 안에 끝내지 못해 특정 CPU·태스크가 스케줄되지 않고 있음을 알린 상태 — 인터럽트를 오래 막는 드라이버, 커널 루프, 가상화 호스트 CPU 과할당(steal) 이 흔한 원인.
+  immediate:
+  - '`journalctl -k --since ''-2 hours'' | grep -iE -A 20 ''rcu.*stall|detected stall'' | tail -60` (RHEL 7+) / `grep -i -A 20 ''stall'' /var/log/messages | tail -60` (RHEL 6) 로 스톨 CPU·태스크·스택 확보'
+  - '`mpstat -P ALL 1 3` (sysstat) 로 CPU 별 %steal·%irq·%sys 확인 — 가상 머신에서 %steal 지속 10% 이상이면 호스트 과할당 의심'
+  - '`cat /sys/module/rcupdate/parameters/rcu_cpu_stall_timeout 2>/dev/null` 로 타임아웃 값 기록 (RHEL 7+)'
+  short:
+  - (2차) 스택에 반복되는 모듈·드라이버로 벤더(Red Hat) 지식베이스 대조, 가상화면 호스트 담당에 vCPU 과할당 해소 요청, 반복 시 kdump vmcore 확보 방안 마련
+  mid:
+  - 원인 드라이버·펌웨어·커널 업데이트, VM vCPU 수를 호스트 물리 코어 대비 적정화
+  long:
+  - RCU stall·soft lockup 커널 메시지 실시간 경보와 커널/펌웨어 업데이트 주기 관리
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - RHEL 6~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: '2.6.32 ''INFO: RCU detected CPU N stall'' / 3.x+ ''INFO: rcu_sched detected stalls on CPUs/tasks'' — RHEL 5 없음'
+- code: LNX-NMI-WATCHDOG
+  severity: critical
+  category: thread
+  title: 하드 락업
+  vendor_cause: NMI 워치독이 특정 CPU 가 인터럽트를 받지 못한 채 kernel.watchdog_thresh(기본 10초) 이상 멈춘 하드 락업을 감지한 상태 — 인터럽트를 끈 채 도는 커널 코드(드라이버 결함)나 하드웨어·펌웨어 결함이 원인이며 hardlockup panic 설정 시 패닉한다.
+  immediate:
+  - '`journalctl -k -b -1 | grep -iE -A 30 ''hard LOCKUP'' | head -60` (RHEL 7+, persistent journal 필요) / `grep -i -A 30 ''LOCKUP'' /var/log/messages | head -60` (RHEL 6) 로 CPU·스택 확보'
+  - '`ls -lt /var/crash | head` 와 `systemctl status kdump` (RHEL 7+) / `service kdump status` (RHEL 6) 로 vmcore 생성 여부 확인'
+  - '`sysctl -a 2>/dev/null | grep -E ''nmi_watchdog|watchdog_thresh|lockup_panic''` 로 설정 기록, BMC(iLO/iDRAC) 이벤트 로그 같은 시각 확인'
+  short:
+  - (2차) vmcore 를 `crash` 로 분석해 락업 CPU 스택·모듈 식별, BMC 하드웨어 이벤트와 대조해 하드웨어 결함 여부 판정 후 벤더 의뢰
+  mid:
+  - 원인 드라이버·BIOS/펌웨어·커널 업데이트, 하드웨어 결함이면 메인보드·CPU 교체(벤더)
+  long:
+  - kdump 동작 정기 검증(분기 1회)과 하드 락업 메시지 경보, 펌웨어 버전 표준화
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - RHEL 6~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: 2.6.38+ 'Watchdog detected hard LOCKUP on cpu N'(RHEL 6.x 백포트·7+). RHEL 5 'NMI Watchdog detected LOCKUP' 별칭 추가
+- code: LNX-LINK-DOWN
+  severity: error
+  category: connection
+  title: 네트워크 링크 다운
+  vendor_cause: NIC 드라이버가 물리 링크(carrier) 상실을 보고한 상태 — 케이블·SFP/트랜시버 불량, 스위치 포트 shutdown·err-disable, 속도/듀플렉스 협상 실패, NIC 하드웨어·드라이버 오류가 흔한 원인.
+  immediate:
+  - '`ip -s link show <iface>` (RHEL 7+) / `ifconfig <iface>` (RHEL 6) 로 state·carrier 와 RX/TX errors·dropped 확인'
+  - '`ethtool <iface>` 로 Link detected·Speed·Duplex, `ethtool -S <iface> | grep -iE ''err|drop|crc'' | head -20` 로 오류 카운터 확인'
+  - '`journalctl -k | grep -i ''<iface>'' | tail -20` (RHEL 7+) / `grep ''<iface>'' /var/log/messages | tail -20` (RHEL 6) 로 다운·업 반복(플래핑) 시각 확인 후 네트워크 담당에 스위치 포트 상태 확인 요청'
+  short:
+  - '(2차·승인 후, 롤백: 원래 포트·케이블 복귀) 케이블·SFP 교체 또는 다른 스위치 포트로 이동, 복구 후 `ip link show` UP 확인 — 인터페이스 강제 up/down 은 네트워크 담당 합의 후'
+  mid:
+  - NIC 펌웨어·드라이버 갱신, 단일 링크 서버는 bonding/teaming 이중화 구성
+  long:
+  - 링크 상태·플래핑 횟수·CRC 오류 카운터 감시와 케이블·SFP 교체 이력 관리
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - RHEL 5~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: 드라이버별 'Link is Down' / 'NIC Link is Down' 전 버전
+- code: LNX-BOND-FAILOVER
+  severity: warn
+  category: connection
+  title: 본딩 슬레이브 전환
+  vendor_cause: bonding 드라이버가 MII/ARP 감시로 슬레이브 링크 다운을 감지해 다른 슬레이브로 활성 경로를 바꾼 상태 — 서비스는 유지되지만 이중화가 깨진 상태이며 원인은 개별 링크 장애(케이블·스위치 포트·NIC).
+  immediate:
+  - '`cat /proc/net/bonding/<bond>` 로 Bonding Mode·Currently Active Slave·각 Slave 의 MII Status·Link Failure Count 확인 — down 슬레이브가 있으면 이중화 상실'
+  - '`ip -s link show <slave>` 와 `ethtool <slave>` 로 다운 슬레이브의 carrier·속도·오류 확인'
+  - '`journalctl -k | grep -i bond | tail -20` (RHEL 7+·Ubuntu 16.04+) / `grep -i bond /var/log/messages | tail -20` (RHEL 6) 로 failover 시각·반복 여부 확인 — 하루 여러 번이면 링크 불안정'
+  short:
+  - '(2차·승인 후, 롤백: 원 구성 파일 복원) 다운 슬레이브의 케이블·스위치 포트 복구, 전환이 반복되면 miimon·updelay 값과 스위치 LACP/포트 설정을 네트워크 담당과 대조'
+  mid:
+  - 슬레이브를 서로 다른 스위치·NIC 칩에 분산, 필요 시 ARP 감시(arp_ip_target) 를 nmcli/ifcfg 설정에 반영
+  long:
+  - Link Failure Count 증가와 슬레이브 down 상태를 감시해 이중화 상실 즉시 경보
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - RHEL 5~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: bonding 'link status definitely down for interface' / 'making interface X the new active one' 전 버전
+- code: LNX-MULTIPATH-FAIL
+  severity: critical
+  category: storage
+  title: 멀티패스 경로 실패
+  vendor_cause: 'device-mapper-multipath 가 SAN 경로(HBA·스위치·스토리지 포트) 중 하나 이상을 failed 로 표시한 상태 — ''remaining active paths: 0'' 이면 해당 LUN 의 모든 경로가 끊겨 I/O 가 대기(queue_if_no_path)하거나 실패한다.'
+  immediate:
+  - '`multipath -ll` 로 LUN 별 경로 상태(active/failed, ready/faulty) 와 남은 active 경로 수 확인 — 0 이면 즉시 2차·스토리지 담당 통보'
+  - '`journalctl -k --since ''-2 hours'' | grep -iE ''multipath|device-mapper|rport|qla|lpfc'' | tail -30` (RHEL 7+) / `grep -iE ''multipath|qla|lpfc'' /var/log/messages | tail -30` (RHEL 6) 로 HBA·링크 오류 확인'
+  - '`cat /sys/class/fc_host/host*/port_state` 로 FC 포트 Online 여부 확인 (FC 환경)'
+  short:
+  - '(2차·승인 후, 롤백: 원 경로 구성 유지) 스토리지·SAN 담당과 실패 경로(HBA 포트·스위치 존·스토리지 포트) 복구 후 `multipathd show paths` 로 active 복귀 확인'
+  mid:
+  - multipath.conf 의 no_path_retry·fast_io_fail_tmo·dev_loss_tmo 를 스토리지 벤더 권고값으로 정비, HBA 펌웨어·드라이버 갱신
+  long:
+  - LUN 별 active 경로 수 감시(설계 경로 수 미만이면 경보)와 SAN 변경 시 경로 점검 체크리스트 운영
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - RHEL 5~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: multipathd 'remaining active paths' / 'Failing path' 전 버전
+- code: LNX-SCSI-ERROR
+  severity: critical
+  category: disk
+  title: SCSI 장치 오류
+  vendor_cause: 'SCSI 계층이 명령 실패를 보고한 상태 — ''FAILED Result: hostbyte=… driverbyte=…'' 와 Sense Key(Medium Error·Hardware Error·Not Ready 등)로 원인을 구분하며 매체 불량·컨트롤러·케이블·SAN 경로 단절이 흔한 원인.'
+  immediate:
+  - '`journalctl -k --since ''-2 hours'' | grep -iE ''Sense Key|hostbyte|I/O error'' | tail -30` (RHEL 7+) / `grep -iE ''Sense Key|SCSI error'' /var/log/messages | tail -30` (RHEL 6) 로 장치(sdX·H:C:T:L)·Sense Key 확인'
+  - '`lsblk -o NAME,HCTL,SIZE,MOUNTPOINT` (RHEL 7+) / `cat /proc/scsi/scsi` (RHEL 6) 로 오류 장치가 쓰이는 볼륨·마운트 확인'
+  - '`smartctl -H -l error /dev/sdX` (smartmontools, 하드웨어 RAID 뒤는 벤더 도구) 로 디스크 자체 오류 이력 확인'
+  short:
+  - '(2차) Medium/Hardware Error 반복이면 서버·스토리지 벤더 진단(iLO/iDRAC·스토리지 관리 콘솔) 의뢰, (승인 후, 롤백: 교체 전 디스크 보관) 이중화 상태 확인 뒤 디스크·케이블 교체'
+  mid:
+  - 결함 디스크·HBA·케이블 교체, 컨트롤러 펌웨어·드라이버를 벤더 호환표 기준으로 갱신
+  long:
+  - SCSI 오류·SMART 재할당 섹터 추세 감시와 디스크 예방 교체 기준 운영
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - RHEL 5~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: '2.6.18 ''SCSI error : <h c t l> return code = 0x…''(별칭 추가) / 2.6.32 ''Unhandled error code''·''Sense Key'' / 3.x+ ''FAILED Result: hostbyte='''
+- code: LNX-SMART-FAIL
+  severity: critical
+  category: disk
+  title: SMART 장애 예고
+  vendor_cause: smartd 가 디스크 자체 진단(SMART) 결과 건강 상태 FAILED 또는 재할당·보류 섹터 증가 등 임계 속성 변화를 보고한 상태 — 가까운 시일 내 디스크 고장 가능성이 높다는 예고.
+  immediate:
+  - '`smartctl -H /dev/sdX` 로 overall-health 결과(PASSED/FAILED) 확인 — FAILED 면 확정'
+  - '`smartctl -A /dev/sdX | grep -iE ''Reallocated|Pending|Uncorrectable|CRC''` 로 핵심 속성 원값 기록 (NVMe 는 `smartctl -a /dev/nvme0` 의 Media and Data Integrity Errors)'
+  - '`journalctl -u smartd | tail -20` (RHEL 7+) / `grep smartd /var/log/messages | tail -20` (RHEL 6) 로 경고 시작 시각 확인, RAID 멤버면 `cat /proc/mdstat` 확인'
+  short:
+  - '(2차·승인 후, 롤백: 교체 전 디스크 보관) 데이터 백업 확인 후 해당 디스크 교체 일정 수립 — RAID 멤버면 LNX-MD-RAID-DEGRADED 교체·재동기화 절차 적용'
+  mid:
+  - 동일 모델·로트 디스크 SMART 일괄 점검, /etc/smartmontools/smartd.conf 에 주기 자가 진단(-s) 일정 등록
+  long:
+  - Reallocated/Pending 섹터 증가 추세 경보와 디스크 사용 기간 기반 예방 교체 운영
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - RHEL 5~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: smartd 메시지 전 버전
+- code: LNX-MD-RAID-DEGRADED
+  severity: critical
+  category: storage
+  title: 소프트웨어 RAID 저하
+  vendor_cause: Linux 소프트웨어 RAID(md) 에서 멤버 디스크가 오류로 faulty 처리되어 배열이 degraded 상태로 동작 중 — 추가 디스크 장애 시 데이터 손실(RAID1/5)·배열 정지 위험.
+  immediate:
+  - '`cat /proc/mdstat` 로 [UU]/[U_] 표기와 recovery 진행 확인 — ''_'' 가 있으면 degraded 확정'
+  - '`mdadm --detail /dev/mdX` 로 State·Failed Devices·faulty/removed 멤버 확인'
+  - '`journalctl -k | grep -iE ''md/raid|md:|I/O error'' | tail -20` (RHEL 7+) / `grep -iE ''raid|md:'' /var/log/messages | tail -20` (RHEL 6) 와 `smartctl -H /dev/sdX` 로 실패 디스크 원인 확인'
+  short:
+  - '(2차·승인 후, 롤백: 교체 전 디스크 보관·백업 확인) `mdadm /dev/mdX --fail /dev/sdY1 --remove /dev/sdY1` 후 디스크 교체·파티션 복제(`sfdisk -d` 또는 `sgdisk -R`), `mdadm /dev/mdX --add /dev/sdZ1` 로 재동기화 — 부트 디스크면 부트로더 재설치'
+  mid:
+  - 재동기화 완료(/proc/mdstat [UU]) 확인, 핫스페어 구성과 /etc/mdadm.conf 의 MAILADDR 알림 설정
+  long:
+  - mdadm --monitor 알림·/proc/mdstat 상시 감시와 정기 배열 점검(sync_action=check) 일정 운영
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - RHEL 5~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: md 'Disk failure on sdX, disabling device' / 'degraded' 전 버전
+- code: LNX-LVM-FAIL
+  severity: critical
+  category: storage
+  title: LVM 장치 실패
+  vendor_cause: LVM 이 볼륨 그룹을 구성하는 PV 를 찾지 못하거나('Couldn't find device with uuid', 'Device for PV … not found') device-mapper 장치 활성화에 실패한 상태 — 디스크·SAN 경로 소실, 멀티패스 미구성으로 인한 중복 PV, lvm.conf filter 오류가 원인.
+  immediate:
+  - '`pvs ; vgs ; lvs -a -o +devices` 로 missing 표시 PV 와 영향 LV 확인'
+  - '`lsblk` 와 `multipath -ll` (멀티패스 환경) 로 해당 디스크가 OS 에 보이는지 확인'
+  - '`journalctl -k --since ''-2 hours'' | grep -iE ''device-mapper|I/O error'' | tail -20` (RHEL 7+) / `grep -iE ''device-mapper|lvm'' /var/log/messages | tail -20` (RHEL 6) 로 소실 시각 확인'
+  short:
+  - '(2차·승인 후, 롤백: `vgcfgrestore` 로 /etc/lvm/archive 메타데이터 복원) 경로·디스크 복구 후 `pvscan --cache` 와 `vgchange -ay <vg>` 로 재활성화 — `vgreduce --removemissing` 은 데이터 손실 위험으로 벤더 확인 후만'
+  mid:
+  - lvm.conf `filter`/`global_filter` 를 멀티패스 장치 기준으로 정비, /etc/lvm/backup 정기 보관
+  long:
+  - PV missing·VG partial 상태 감시와 스토리지 변경 시 `vgcfgbackup` 의무화
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - RHEL 5~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: device-mapper / lvm 메시지 전 버전
+- code: LNX-SWAP-FULL
+  severity: critical
+  category: memory
+  title: 스왑 고갈
+  vendor_cause: 스왑 사용률이 한도에 근접해 더 이상 페이지를 내보낼 수 없는 상태 — 물리 메모리 부족·메모리 누수가 근본 원인이며 지속되면 커널 OOM 처리와 심한 성능 저하로 이어진다.
+  immediate:
+  - '`free -m` 와 `swapon -s` 로 스왑 사용률 확인 — 90% 이상이면 확정'
+  - '`vmstat 1 5` 의 si/so 값 확인 — 지속적으로 0 보다 크면 실시간 스와핑'
+  - '`grep VmSwap /proc/[0-9]*/status 2>/dev/null | sort -k2 -rn | head` 로 스왑 상위 프로세스 PID 확인 후 `ps -p <PID> -o pid,comm,rss`'
+  short:
+  - '(2차·승인 후, 롤백: swapoff 후 파일 제거) 누수 프로세스 담당과 재기동 일정 협의, 임시 스왑 파일 추가(`dd if=/dev/zero of=/swapfile bs=1M count=<MB>` → `chmod 600` → `mkswap` → `swapon`)'
+  mid:
+  - 물리 메모리 증설 또는 워크로드 분산, vm.swappiness 를 업무 특성에 맞게 조정(/etc/sysctl.d/)
+  long:
+  - 메모리·스왑 사용률(70% 경고)과 si/so 추세 감시, 분기별 용량 계획
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - RHEL 5~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: 일반 문구(모니터링·앱 로그 기준) — 커널 고정 문구 아님
+- code: LNX-PAGE-ALLOC-FAIL
+  severity: critical
+  category: memory
+  title: 페이지 할당 실패
+  vendor_cause: '커널이 요청한 order(연속 2^order 페이지) 메모리를 할당하지 못한 상태(''page allocation failure: order:N, mode:…'') — 전체 메모리가 남아도 단편화로 고차 연속 메모리가 없거나 GFP_ATOMIC 요청(네트워크 드라이버 등)이 예약 여유(min_free_kbytes)를 다 쓴 경우 흔하다.'
+  immediate:
+  - '`journalctl -k --since ''-2 hours'' | grep -iE -A 5 ''page allocation failure'' | tail -40` (RHEL 7+) / `grep -A 5 ''page allocation failure'' /var/log/messages | tail -40` (RHEL 6) 로 order·mode·호출 프로세스/드라이버 확인'
+  - '`cat /proc/buddyinfo` 로 존별 order 별 가용 블록 확인 — 높은 order 열이 0 에 가까우면 단편화'
+  - '`free -m ; grep -E ''MemAvailable|Slab|SUnreclaim'' /proc/meminfo ; sysctl vm.min_free_kbytes` 로 가용·슬랩·예약량 기록'
+  short:
+  - '(2차·승인 후, 롤백: 이전 값 복원) `vm.min_free_kbytes` 상향 검토, 필요 시 업무 영향이 적은 시간에 `echo 1 > /proc/sys/vm/compact_memory` 로 단편화 완화'
+  mid:
+  - 원인 드라이버(NIC 등)의 링 버퍼·점보 프레임 설정과 드라이버 버전 갱신, HugePages 예약량 재산정
+  long:
+  - /proc/buddyinfo·슬랩 사용량 추세 감시와 커널 메모리 경고 메시지 경보
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - RHEL 5~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: '''page allocation failure: order:N'' 전 버전 / ''page allocation stalls'' 4.x+'
+- code: LNX-DISK-QUOTA
+  severity: warn
+  category: capacity
+  title: 디스크 쿼터 초과
+  vendor_cause: 사용자·그룹·프로젝트 쿼터의 블록 또는 inode 한도를 넘어 쓰기가 EDQUOT('Disk quota exceeded') 로 실패한 상태 — 파일시스템 여유와 무관하게 해당 계정만 실패하며 로그·임시 파일 누적이 흔한 원인.
+  immediate:
+  - '`quota -s -u <user>` 로 사용량·soft/hard 한도·grace 확인'
+  - '`repquota -as | head -40` (ext4) 또는 `xfs_quota -x -c ''report -h'' <mount>` (XFS, report 는 조회만) 로 한도 초과 계정 확인'
+  - '`du -xsh <사용자 경로>/* 2>/dev/null | sort -rh | head` 로 사용량 상위 디렉터리 확인'
+  short:
+  - '(2차·승인 후, 롤백: 원래 한도 복원) 불필요 파일 정리는 소유자 확인 후, 한도 조정은 `setquota` (ext4) 또는 `xfs_quota -x -c ''limit …''` (XFS)'
+  mid:
+  - 계정·서비스별 쿼터 한도를 실제 증가율 기준으로 재산정하고 로그 순환(logrotate) 적용
+  long:
+  - 쿼터 사용률 80% 경고 감시와 계정별 사용량 월간 보고
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - RHEL 5~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: EDQUOT 문구 전 버전
+- code: LNX-CLOCK-SKEW
+  severity: warn
+  category: internal
+  title: 시간 동기화 실패
+  vendor_cause: '시스템 시간이 기준 시간원과 크게 어긋났거나 동기화를 잃은 상태(chronyd ''System clock wrong by'', ''Can''t synchronise: no selectable sources'', ntpd ''time reset'' 등) — 시간원 도달 불가·서버 품질 불량·가상화 시계 드리프트가 원인이며 Kerberos·클러스터·로그 상관 분석에 영향.'
+  immediate:
+  - '`chronyc tracking ; chronyc sources -v` (RHEL 7+ chronyd) / `ntpq -p` (RHEL 6 ntpd) 로 동기 소스(*)·offset·stratum 확인 — offset 수백 ms 이상이거나 ''*'' 소스가 없으면 이상'
+  - '`timedatectl` (RHEL 7+) 로 System clock synchronized·NTP service 상태 확인'
+  - '`journalctl -u chronyd --since ''-1 day'' | tail -20` (RHEL 7+) / `grep -iE ''ntpd|chronyd'' /var/log/messages | tail -20` (RHEL 6) 로 시간 점프 시각 확인'
+  short:
+  - '(2차·승인 후, 롤백: 이전 chrony.conf 복원) 시간원 상태 복구 후 `chronyc makestep` 으로 즉시 보정 — 시간 점프가 DB·클러스터·인증에 주는 영향을 담당과 확인 후'
+  mid:
+  - chrony.conf 에 서로 다른 시간원 3개 이상 등록, `makestep` 정책과 가상화 도구 시간 동기 중복 정리
+  long:
+  - offset ±100ms 초과·동기 상실 경보와 시간원 이중화 표준화
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - RHEL 5~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: ntpd(RHEL≤7 기본) / chronyd(RHEL 7+·Ubuntu 18.04+ 선택) 문구 모두 포함
+- code: LNX-SSH-AUTH-FAIL
+  severity: error
+  category: security
+  title: SSH 인증 실패 반복
+  vendor_cause: sshd 가 비밀번호·공개키 인증 실패('Failed password for', 'Invalid user') 를 반복 기록한 상태 — 무차별 대입 공격, 변경·만료된 비밀번호를 쓰는 배치, 잘못된 키가 흔한 원인.
+  immediate:
+  - '`grep -E ''Failed password|Invalid user'' /var/log/secure | tail -50` (RHEL) / `/var/log/auth.log` (Ubuntu) / `journalctl -u sshd --since ''-1 hour''` (RHEL 7+) 로 계정·출처 IP·시각 확인'
+  - '`grep ''Failed password'' /var/log/secure | awk ''{print $(NF-3)}'' | sort | uniq -c | sort -rn | head` 로 출처 IP 별 실패 횟수 집계 — 단일 IP 다수면 공격 의심, 보안 담당 통보'
+  - '`faillock --user <user>` (RHEL 8+) / `pam_tally2 --user <user>` (RHEL 6/7) 로 계정 잠금 여부 확인 (해제는 2차)'
+  short:
+  - '(2차·보안 담당 승인 후, 롤백: 규칙 제거) 공격 출처는 firewalld/iptables 로 차단, 정당 사용자는 비밀번호·키 갱신 후 `faillock --user <user> --reset` 으로 잠금 해제'
+  mid:
+  - sshd_config 의 `PermitRootLogin no`·`PasswordAuthentication no`(키 인증)·`MaxAuthTries` 정비와 접속 허용 IP 제한
+  long:
+  - '인증 실패 임계(예: 5분 20회) 경보, 계정별 실패 추세 감시와 분기별 접근 권한 검토'
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - RHEL 5~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: 'OpenSSH ''Failed password for'' / ''Invalid user'' 전 버전 (RHEL: /var/log/secure, Ubuntu: auth.log, 24.04: journal)'
+- code: LNX-SUDO-FAIL
+  severity: warn
+  category: security
+  title: sudo 실패
+  vendor_cause: sudo 가 비밀번호 오류('incorrect password attempts') 또는 권한 없음('user NOT in sudoers', 'command not allowed') 을 기록한 상태 — 오입력·권한 누락 외에 계정 탈취 후 권한 상승 시도일 수 있다.
+  immediate:
+  - '`grep -E ''sudo.*(incorrect password|NOT in sudoers|command not allowed)'' /var/log/secure | tail -30` (RHEL) / `/var/log/auth.log` (Ubuntu) 로 계정·TTY·시도 명령 확인'
+  - root 로 `sudo -l -U <user>` 실행해 해당 계정의 허용 명령 확인 — 허용 범위 밖 명령 반복이면 보안 담당 통보
+  - '`last -n 20 <user>` 와 `who` 로 해당 계정의 접속 출처·시각 대조'
+  short:
+  - '(2차·보안 담당 승인 후, 롤백: sudoers.d 파일 원복) 정당 요청이면 `visudo -f /etc/sudoers.d/<파일>` 로 최소 권한 추가, 비인가 시도면 계정 잠금·비밀번호 변경'
+  mid:
+  - sudoers 를 역할별 /etc/sudoers.d/ 파일로 정리하고 `Defaults logfile`·`log_output` 으로 감사 강화
+  long:
+  - sudo 실패 이벤트 경보와 분기별 sudo 권한 재검토
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - RHEL 5~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: sudo 문구 전 버전
+- code: LNX-SELINUX-DENIAL
+  severity: error
+  category: security
+  title: SELinux 접근 차단
+  vendor_cause: SELinux 정책이 프로세스(scontext)의 파일·포트·기능(tcontext/tclass) 접근을 거부해 AVC denied 를 기록한 상태 — 잘못된 파일 레이블(복사·이동한 파일), 비표준 포트·경로 사용, boolean 미설정이 흔한 원인이며 드물게 침해 시도.
+  immediate:
+  - '`ausearch -m AVC,USER_AVC -ts recent -i | tail -40` 으로 scontext·tcontext·tclass·comm·name 확인'
+  - '`ausearch -m AVC -ts recent | audit2why` 로 거부 사유(레이블·boolean·정책 없음) 확인 (policycoreutils-python / python3-utils 필요)'
+  - '`getenforce ; ls -Z <대상 경로>` 로 모드와 대상 파일 레이블 확인 — Enforcing 이면 실제 거부, Permissive 면 기록만'
+  short:
+  - '(2차·승인 후, 롤백: restorecon 재실행·boolean 원복) 레이블 문제는 `semanage fcontext -a -t <type> ''<경로>(/.*)?''` + `restorecon -Rv <경로>`, boolean 이면 `setsebool -P <bool> on`'
+  mid:
+  - 필요 시 `audit2allow -M <모듈>` 로 만든 정책을 보안 담당 검토 후 `semodule -i <모듈>.pp` 적용, 비표준 포트는 `semanage port -a`
+  long:
+  - AVC 발생 건수 감시와 배포 절차에 레이블 점검(`restorecon -n -v`) 포함 — setenforce 0 운영 금지
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - RHEL 5~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  version_note: SELinux 는 RHEL 계열 기본. Ubuntu·SLES(AppArmor) 는 LNX-APPARMOR-DENIED 참조
+- code: LNX-SYSTEMD-UNIT-FAILED
+  severity: error
+  category: internal
+  title: systemd 유닛 실패
+  vendor_cause: 'systemd 가 유닛 시작 실패 또는 실행 중 비정상 종료(Result: exit-code·signal·timeout·core-dump)로 failed 상태가 되었음을 기록 — 설정 오류·의존 서비스 실패·권한/SELinux·포트 충돌·실행 파일 누락이 흔한 원인.'
+  immediate:
+  - '`systemctl --failed` 로 실패 유닛 목록 확인'
+  - '`systemctl status <unit> -l --no-pager` 로 Result 와 Main PID 종료 코드 확인'
+  - '`journalctl -u <unit> -b --no-pager | tail -50` 로 실패 직전 오류 메시지 확인 (RHEL 7+)'
+  short:
+  - '(2차·승인 후, 롤백: 설정 파일 원복) 원인(설정·권한·포트) 수정 후 `systemctl reset-failed <unit>` 과 `systemctl start <unit>`, 의존성은 `systemctl list-dependencies <unit>` 로 확인'
+  mid:
+  - 유닛 override(`systemctl edit`) 로 Restart=on-failure·RestartSec·TimeoutStartSec 정비와 변경 이력 관리
+  long:
+  - '`systemctl --failed` 결과 주기 감시로 failed 유닛 발생 즉시 경보'
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - RHEL 7~10
+  - CentOS 7~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: systemd 'Failed to start' / 'entered failed state'(219~) / 'Failed with result'(232+, RHEL 8+·Ubuntu 18.04+) 모두 포함. RHEL 6 upstart 는 LNX-UPSTART-FAIL
+- code: LNX-CRON-FAIL
+  severity: warn
+  category: internal
+  title: 크론 작업 실패
+  vendor_cause: crond 가 작업 실행 실패(명령 없음·권한·PAM 계정 만료)를 기록했거나 작업이 0 이 아닌 종료 코드로 끝난 상태 — cron 의 최소 환경(PATH) 차이, 스크립트 오류, 계정 만료가 흔한 원인.
+  immediate:
+  - '`grep CROND /var/log/cron | tail -30` (RHEL) / `grep CRON /var/log/syslog | tail -30` (Ubuntu) / `journalctl -u crond --since ''-1 day''` (RHEL 7+) 로 실패 작업·계정·시각 확인'
+  - '`crontab -l -u <user>` 와 `ls -l /etc/cron.d/` 로 등록 내용·스크립트 경로 확인'
+  - '`chage -l <user>` 로 계정 만료 여부, `ls -l /var/spool/mail/<user>` 로 cron 결과 메일 존재 여부 확인'
+  short:
+  - '(2차·승인 후, 롤백: 이전 crontab 백업 복원) crontab 변경 전 `crontab -l -u <user> > <백업파일>` 보관, 스크립트를 cron 과 같은 환경에서 시험해 원인 수정'
+  mid:
+  - 스크립트에 절대경로·PATH 지정과 종료 코드·로그 기록 추가, 중복 실행 방지(flock)
+  long:
+  - 배치 결과(종료 코드·소요 시간) 수집·실패 경보와 배치 목록 대장 관리
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - RHEL 5~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: cron/CROND 문구 전 버전
+- code: LNX-NTP-UNREACHABLE
+  severity: warn
+  category: connection
+  title: NTP 서버 도달 불가
+  vendor_cause: chronyd/ntpd 가 설정된 시간 서버에서 UDP 123 응답을 받지 못한 상태 — 방화벽 차단·DNS 해석 실패·시간 서버 장애가 흔한 원인이며 지속되면 시간 편차(LNX-CLOCK-SKEW)로 이어진다.
+  immediate:
+  - '`chronyc sources -v` (RHEL 7+) / `ntpq -pn` (RHEL 6) 로 서버별 Reach 값 확인 — Reach 0 이면 응답 없음'
+  - '`getent hosts <NTP서버>` 로 이름 해석 확인, `grep -E ''^(server|pool)'' /etc/chrony.conf /etc/ntp.conf 2>/dev/null` 로 설정 서버 확인'
+  - 네트워크 담당에 서버↔시간원 UDP 123 허용 여부 확인 요청, `chronyc ntpdata <서버>` (RHEL 8+) 로 마지막 응답 시각 확인
+  short:
+  - '(2차·승인 후, 롤백: conf 원복) 방화벽 정책 요청 또는 chrony.conf/ntp.conf 의 server 항목을 도달 가능한 내부 시간원으로 교체 후 서비스 재적용'
+  mid:
+  - 내부 시간원 2대 이상 이중화, 폐쇄망은 GPS/기준 시계 기반 내부 NTP 구성
+  long:
+  - Reach 값·사용 가능 소스 수 감시(2개 미만 경보)
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - RHEL 5~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: ntpd / chronyd 문구 모두 포함. Ubuntu 16.04+ 기본 timesyncd 는 'Timed out waiting for reply' 별도(미등록)
+- code: LNX-DNS-FAIL
+  severity: error
+  category: connection
+  title: DNS 해석 실패
+  vendor_cause: glibc resolver(또는 systemd-resolved)가 /etc/resolv.conf 의 네임서버에서 응답을 받지 못했거나(timeout) NXDOMAIN·SERVFAIL 을 받은 상태 — DNS 서버 장애, UDP/TCP 53 차단, resolv.conf 오설정이 흔한 원인.
+  immediate:
+  - '`cat /etc/resolv.conf` 와 `getent hosts <이름>` 으로 nameserver·search 설정과 실제 해석 결과 확인'
+  - '`dig @<DNS서버> <이름> +time=2 +tries=1` (bind-utils) 로 서버별 응답·응답 코드(NOERROR/NXDOMAIN/SERVFAIL) 확인'
+  - '`resolvectl status` (Ubuntu 20.04+) / `systemd-resolve --status` (Ubuntu 18.04) 로 실제 업스트림 DNS 확인'
+  short:
+  - '(2차·승인 후, 롤백: resolv.conf·연결 설정 백업 복원) 장애 DNS 를 순서에서 내리거나 `nmcli con mod <con> ipv4.dns ''<주> <보조>''` 로 정상 서버 지정 — resolv.conf 직접 편집은 NetworkManager 가 덮어씀'
+  mid:
+  - DNS 서버 2대 이상과 `options timeout:2 attempts:2` 설정, 중요 내부 이름의 /etc/hosts 보조 등록 정책 수립
+  long:
+  - DNS 응답 시간·실패율 감시와 DNS 변경 시 영향 점검 절차 운영
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - RHEL 5~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: glibc resolver 문구 전 버전 / 'systemd-resolved' 는 Ubuntu 18.04+
+- code: LNX-FS-INODE-FULL
+  severity: error
+  category: capacity
+  title: inode 고갈
+  vendor_cause: 파일시스템 inode 가 모두 사용되어 공간이 남아도 새 파일을 만들 수 없는 상태(ENOSPC) — 세션·캐시·메일 큐 등 작은 파일 대량 생성이 흔한 원인이며 ext4 는 mkfs 시 inode 수가 고정된다(XFS 는 동적 할당이지만 imaxpct 한도).
+  immediate:
+  - '`df -i` 로 IUse% 확인 — 95% 이상이면 확정'
+  - '`du --inodes -x <마운트> 2>/dev/null | sort -rn | head` (RHEL 7+) / `find <마운트> -xdev -type d -size +1M` (RHEL 6, 항목이 많은 디렉터리) 로 파일 수 상위 디렉터리 확인'
+  - '`lsof +D <디렉터리> 2>/dev/null | head` 로 해당 디렉터리를 쓰는 프로세스를 확인해 담당 통보 (정리는 2차)'
+  short:
+  - '(2차·승인 후, 롤백: 보관본 복원) 소유 서비스 확인 뒤 오래된 소파일을 보관 후 정리 — `find <디렉터리> -xdev -type f -mtime +<일수> | head` 결과 검토 후 수행'
+  mid:
+  - ext4 는 재생성 시 `mkfs.ext4 -i <bytes-per-inode>` 로 inode 비율 확대 또는 XFS 이전, 임시 파일 정리 주기(systemd-tmpfiles) 설정
+  long:
+  - inode 사용률 80% 경고 감시와 소파일 생성 디렉터리 정리 정책 운영
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - RHEL 5~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: 앱·툴 문구 기준
+- code: LNX-KDUMP-FAIL
+  severity: warn
+  category: internal
+  title: kdump 실패
+  vendor_cause: kdump 서비스가 캡처 커널 적재에 실패했거나 패닉 시 vmcore 저장에 실패한 상태 — crashkernel= 예약 메모리 없음/부족, kdump initramfs 생성 실패, 저장 경로 공간 부족·대상 접근 불가가 흔한 원인이며 이 상태에서 패닉하면 분석 자료가 남지 않는다.
+  immediate:
+  - '`systemctl status kdump` (RHEL 7+) / `service kdump status` (RHEL 6) 와 `cat /sys/kernel/kexec_crash_loaded` 로 캡처 커널 적재 확인 — 1 이면 정상'
+  - '`grep -o ''crashkernel=[^ ]*'' /proc/cmdline` 와 `grep -i crash /proc/iomem` 으로 예약 메모리 확인 — 예약 없음이면 원인'
+  - '`grep -vE ''^#|^$'' /etc/kdump.conf` 와 `df -h /var/crash` 로 저장 경로·공간 확인'
+  short:
+  - '(2차·승인 후, 롤백: grubby 로 이전 crashkernel 값 복원) `grubby --update-kernel=ALL --args=''crashkernel=<크기>''` (RHEL 7+) 또는 `kdumpctl reset-crashkernel` (RHEL 9) 후 재부팅 일정 반영, `kdumpctl restart` 로 재적재'
+  mid:
+  - kdump 저장 경로를 충분한 별도 파일시스템 또는 원격(NFS·SSH)으로 지정, core_collector `makedumpfile -l --message-level 7 -d 31` 압축 적용
+  long:
+  - 시험 서버에서 분기 1회 kdump 동작 검증(운영 서버 강제 패닉 금지)과 커널 업데이트 후 kdump 상태 자동 점검
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - RHEL 5~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: kdump 서비스 문구(RHEL 5+)
+- code: LNX-THERMAL
+  severity: critical
+  category: hardware
+  title: 온도 임계 초과
+  vendor_cause: CPU 패키지/코어 온도가 임계를 넘어 하드웨어가 클럭을 낮추는(thermal throttling) 상태 — 팬 고장·통풍 불량·전산실 온도 상승·방열판 문제가 원인이며 지속 시 성능 저하·보호 차단 위험.
+  immediate:
+  - '`journalctl -k | grep -iE ''temperature|throttl'' | tail -20` (RHEL 7+) / `grep -iE ''temperature|throttl'' /var/log/messages | tail -20` (RHEL 6) 로 CPU·발생 빈도 확인'
+  - '`ipmitool sdr type Temperature` 와 `ipmitool sdr type Fan` (ipmitool·BMC 연동 시) 또는 iLO/iDRAC 콘솔로 센서 온도·팬 상태 확인'
+  - '`grep -H . /sys/class/thermal/thermal_zone*/temp 2>/dev/null` (밀리도) 와 `grep MHz /proc/cpuinfo | sort | uniq -c` 로 온도·클럭 저하 확인'
+  short:
+  - '(2차·승인 후, 롤백: 이동한 부하 원복) 시설 담당에 랙·전산실 온도 확인 요청, 팬 고장이면 벤더 교체 요청, 필요 시 부하 분산'
+  mid:
+  - 서버 팬·방열판·필터 점검과 BMC/BIOS 팬 제어 펌웨어 갱신, 랙 배치·통풍 개선
+  long:
+  - BMC 온도 센서 SNMP/Redfish 수집·임계 경보와 전산실 온도 감시 연동
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - RHEL 5~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: '''CPUn: Core temperature above threshold'' / thermal throttling 전 버전'
+- code: LNX-PSU-FAIL
+  severity: critical
+  category: hardware
+  title: 전원 공급 장애
+  vendor_cause: BMC/IPMI 가 전원 공급 장치(PSU) 고장·입력 전원 상실·이중화 상실(Redundancy Lost) 을 보고한 상태 — 남은 PSU 로 동작 중일 수 있으나 추가 장애 시 서버 정지 위험.
+  immediate:
+  - '`ipmitool sdr type ''Power Supply''` 와 `ipmitool sel elist | tail -20` (BMC 연동 시) 또는 iLO/iDRAC 의 System Event Log 로 PSU 상태·이벤트 시각 확인'
+  - 현장(시설 담당)에 PSU LED·전원 케이블·PDU/UPS 입력 상태 확인 요청 — 두 PSU 가 서로 다른 전원 계통인지 확인
+  - '`journalctl --since ''-1 day'' | grep -iE ''power supply|psu'' | tail -20` 으로 OS 쪽 기록 확인'
+  short:
+  - '(2차·승인 후, 롤백: 교체 전 부품 보관) 벤더에 PSU 핫스왑 교체 요청 — 교체 전 나머지 PSU 정상 확인, 입력 전원 문제면 시설 담당 조치'
+  mid:
+  - PSU 이중 전원 계통(A/B 피드) 분리 점검과 BMC 펌웨어 갱신
+  long:
+  - BMC 이벤트(SEL) SNMP 트랩·Redfish 수집으로 PSU 상태 상시 감시
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - RHEL 5~10
+  - CentOS 6~Stream 9
+  - Rocky/Alma 8~9
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: IPMI/BMC 전달 문구 — 커널 버전 무관
+- code: LNX-EXT3-ERROR
+  severity: critical
+  category: storage
+  title: EXT3 파일시스템 오류 (RHEL 5/6 기본 FS)
+  vendor_cause: 'ext3 드라이버가 디렉터리·inode·블록 비트맵 등 메타데이터 불일치를 발견한 상태(''EXT3-fs error (device X): <함수>'') — 마운트 옵션 errors=(continue|remount-ro|panic) 에 따라 동작하며 하위 디스크 I/O 오류·비정상 종료가 흔한 원인.'
+  immediate:
+  - '`grep -iE ''EXT3-fs|I/O error'' /var/log/messages | tail -30` 과 `dmesg | grep -i ''EXT3-fs'' | tail -20` 으로 장치·함수·반복 여부와 하위 블록 I/O 오류 동반 확인'
+  - '`grep ext3 /proc/mounts` 로 ro 마운트 여부(옵션에 ro 면 쓰기 불가), `tune2fs -l /dev/<dev> | grep -iE ''state|errors behavior|Last checked''` 로 오류 상태·동작 확인'
+  - 쓰기 중단·fsck 는 2차(유지보수) 승인 후 수행
+  short:
+  - 디스크·컨트롤러 오류 로그(LNX-BUFFER-IO·LNX-SCSI-ERROR) 동반 시 하드웨어 점검 우선
+  - '(2차·승인 후, 롤백: 백업 복원) 백업 확인·업무 중단 일정 확보 후 언마운트하고 `e2fsck -fn /dev/<dev>` 로 점검, 수리는 `e2fsck -fy` (루트 FS 는 rescue 모드)'
+  mid:
+  - 디스크·컨트롤러 진단으로 하드웨어 원인 제거, RHEL 7+ 이전 시 ext4/XFS 로 전환 계획
+  long:
+  - EXT3/4 오류 메시지 경보, 정기 백업·복구 훈련과 tune2fs 의 Filesystem state 점검 정례화
+  source: '커널 fs/ext3 메시지 형식 ''EXT3-fs error (device X): func: …'' — RHEL 5·6 기본 ext3 (Claude 버전 검증 2026-09-11)'
+  versions:
+  - RHEL 5~6
+  - CentOS 6
+  version_note: ext3 는 RHEL 7 부터 기본 아님(ext4/xfs). RHEL 7+ 에서도 ext3 마운트 시 동일 문구
+- code: LNX-IPCONNTRACK-FULL
+  severity: critical
+  category: capacity
+  title: ip_conntrack 테이블 포화 (RHEL 5 커널 2.6.18)
+  vendor_cause: RHEL 5(커널 2.6.18) 의 ip_conntrack 연결 추적 테이블이 ip_conntrack_max 에 도달해 새 연결 패킷을 버리는 상태 — 대량·짧은 연결 폭주와 긴 established 타임아웃(기본 5일)이 원인.
+  immediate:
+  - '`grep -c ''ip_conntrack: table full'' /var/log/messages` 와 마지막 발생 시각 확인, 신규 접속 실패 신고와 대조'
+  - '`cat /proc/sys/net/ipv4/ip_conntrack_max` 와 `wc -l /proc/net/ip_conntrack` 로 사용량 기록 — max 에 근접하면 확정'
+  - '`grep -o ''src=[0-9.]*'' /proc/net/ip_conntrack | sort | uniq -c | sort -rn | head` 로 상위 출발지 확인'
+  short:
+  - '(2차·승인 후, 롤백: 이전 값 복원) `sysctl -w net.ipv4.ip_conntrack_max=<값>` 및 /etc/sysctl.conf 반영 — 커널 메모리 증가 확인, 필요 시 `net.ipv4.netfilter.ip_conntrack_tcp_timeout_established` 단축'
+  mid:
+  - 연결 추적이 불필요한 트래픽은 raw 테이블 NOTRACK 적용 검토, conntrack 해시 크기(hashsize) 조정
+  long:
+  - RHEL 5 는 지원 종료 — RHEL 7+ 이전(LNX-CONNTRACK-FULL 대상) 계획과 conntrack 사용률 감시
+  source: '커널 2.6.18 net/ipv4/netfilter/ip_conntrack_core.c ''ip_conntrack: table full, dropping packet'' (Claude 버전 검증 2026-09-11)'
+  versions:
+  - RHEL 5
+  version_note: RHEL 6+ 는 nf_conntrack (LNX-CONNTRACK-FULL)
+- code: LNX-APPARMOR-DENIED
+  severity: error
+  category: security
+  title: AppArmor 접근 차단 (Ubuntu·SLES 기본 MAC)
+  vendor_cause: AppArmor 프로파일이 enforce 모드에서 허용하지 않은 파일·네트워크·capability 접근을 거부한 상태 — 프로그램 업데이트·비표준 경로 사용 후 프로파일 미갱신 등이 원인 후보이며, 의도하지 않은 접근(침해 시도)일 수도 있어 대상 경로로 가른다.
+  immediate:
+  - '`journalctl -k --since ''-2 hours'' | grep -i ''apparmor="DENIED"'' | tail -30` (Ubuntu 16.04+) / `grep -i ''apparmor="DENIED"'' /var/log/kern.log | tail -30`, auditd 가 돌면(`systemctl is-active auditd`) `grep -i ''apparmor="DENIED"'' /var/log/audit/audit.log | tail -30` 로 profile=·operation=·name=·comm=·requested_mask=·denied_mask= 확인 — capability·network 등 일부 이벤트에는 requested_mask/denied_mask 가 없다(파싱 오류 아님)'
+  - 'DENIED 0줄이 "막힌 것 없음"은 아니다 — 프로파일의 명시적 deny 규칙에 걸린 접근은 기본적으로 기록되지 않으므로 `grep -n deny /etc/apparmor.d/<profile> /etc/apparmor.d/local/<profile>` 와 include 된 abstraction 파일까지 펼친 `apparmor_parser -p /etc/apparmor.d/<profile> | grep -n deny`(전처리 출력만, 적재 안 함 — AppArmor 2.13+/3 기준, 지원 판 미검증)로 대상 경로를 막는 규칙을 본다(deny 규칙이 안 보여도 차단이 없었다고 단정하지 않는다), `aa-status`(root)로 그 profile 이 enforce/complain 중 어느 모드인지 확인'
+  - 'PID 는 재사용되므로 기록의 pid= 만으로 지금 프로세스와 짝짓지 않는다 — `ps -o pid,lstart,comm,args -p <PID>` 와 `cat /proc/<PID>/attr/current` 가 기록의 comm=·profile= 과 같고 시작 시각(lstart)이 기록 시각보다 앞일 때만 같은 프로세스로 보고 장애 시각과 대조 (설정 변경은 2차)'
+  short:
+  - '(2차·승인 후, 롤백: `aa-enforce` 로 원복) 원인 확인 기간 동안 `aa-complain /etc/apparmor.d/<profile>` 로 기록만 하도록 전환 후 `aa-logprof` 로 필요한 규칙 검토'
+  mid:
+  - 검토된 규칙을 /etc/apparmor.d/local/<profile> 에 추가하고 `apparmor_parser -r /etc/apparmor.d/<profile>` 로 재적재 후 enforce 유지
+  long:
+  - AppArmor DENIED 건수 감시와 패키지 업데이트 후 프로파일 검증 절차 운영
+  source: 'AppArmor 커널 감사 문구 ''audit: type=1400 audit(…): apparmor="DENIED" operation=… profile=… name=…'' (Ubuntu·SLES 문서, Claude 버전 검증 2026-09-11)'
+  versions:
+  - Ubuntu 16.04~24.04
+  - SLES 12~15
+  version_note: RHEL 계열은 SELinux(LNX-SELINUX-DENIAL)
+  verify_note: "미검증 — apparmor_parser -p(include 를 펼친 전처리 출력)를 지원하는 판(AppArmor 2.13+/3 로 봄)을 공식 문서로 확인하지 못함 — 옵션 오류가 나면 프로파일·local 의 include 줄이 가리키는 /etc/apparmor.d/abstractions/ 파일을 직접 grep"
+- code: LNX-UPSTART-FAIL
+  severity: error
+  category: internal
+  title: upstart 서비스 비정상 종료·재기동 반복 (RHEL 6)
+  vendor_cause: RHEL 6 의 upstart init 이 관리하는 작업(job)의 주 프로세스가 비정상 종료('terminated with status N')했거나, respawn 작업이 짧은 시간에 반복 종료되어 'respawning too fast, stopped' 로 재기동을 포기한 상태 — 설정 오류·의존 자원 부재·애플리케이션 크래시가 원인.
+  immediate:
+  - '`grep ''init:'' /var/log/messages | tail -30` 으로 작업명·종료 상태·respawn 중단 여부 확인'
+  - '`initctl list | grep -v ''start/running''` 와 `initctl status <job>` 로 현재 상태 확인 (RHEL 6)'
+  - '`cat /etc/init/<job>.conf` 와 해당 서비스 로그(/var/log/<svc>) 로 종료 직전 오류 확인'
+  short:
+  - 재기동 반복 서비스는 2차(유지보수) 에 원인 분석 이관
+  - '(2차·승인 후, 롤백: conf 원복) 원인 수정 후 `initctl start <job>` 으로 기동, respawn 한도는 /etc/init/<job>.conf 의 `respawn limit <횟수> <초>` 로 조정'
+  mid:
+  - SysV init 스크립트와 upstart 작업 중복 여부 정리, 애플리케이션 크래시 원인 수정
+  long:
+  - RHEL 6 지원 종료 대비 RHEL 7+ systemd 전환 계획, 그 전까지 init 메시지 감시
+  source: upstart 0.6 (RHEL 6) init 메시지 형식 (Claude 버전 검증 2026-09-11)
+  versions:
+  - RHEL 6
+  - CentOS 6
+  version_note: RHEL 7+ 는 systemd(LNX-SYSTEMD-UNIT-FAILED), RHEL 5 는 sysvinit(inittab 'respawning too fast')
+- code: LNX-SYSTEMD-OOMD
+  severity: critical
+  category: memory
+  title: systemd-oomd 가 cgroup 단위 프로세스 강제 종료 (RHEL 9+·Ubuntu 22.04+)
+  vendor_cause: systemd-oomd 가 cgroup 의 메모리 압력(PSI) 또는 스왑 사용률이 설정 한도(ManagedOOMMemoryPressureLimit·SwapUsedLimit)를 넘자 커널 OOM 보다 먼저 해당 cgroup 의 프로세스를 종료한 상태 — 메모리 부족·누수 또는 과도하게 낮은 한도가 원인.
+  immediate:
+  - '`journalctl -u systemd-oomd --since ''-1 day'' | tail -30` 으로 종료된 cgroup·시각 확인'
+  - '`oomctl` 로 감시 대상 cgroup·현재 압력·한도 확인, `systemctl is-enabled systemd-oomd` 로 활성 여부 확인'
+  - '`cat /proc/pressure/memory` 와 `free -m` 로 현재 메모리 압력(PSI avg10/avg60)·가용량 기록'
+  short:
+  - oomd 임계(ManagedOOMMemoryPressureLimit) 조정은 2차 승인 후
+  - '(2차·승인 후, 롤백: drop-in 제거) 서비스/slice 의 `ManagedOOMMemoryPressure=`·`ManagedOOMMemoryPressureLimit=` 를 `systemctl edit` 로 조정하거나 메모리 사용 프로세스 정리 일정 협의'
+  mid:
+  - 업무 서비스 slice 의 MemoryHigh/MemoryMax 재산정, /etc/systemd/oomd.conf 정책 문서화
+  long:
+  - PSI(memory some/full) 추세와 oomd 종료 이벤트 감시
+  source: systemd-oomd(8) — systemd 247+ (RHEL 9·Ubuntu 22.04 기본 활성) (Claude 버전 검증 2026-09-11)
+  versions:
+  - RHEL 9~10
+  - Rocky/Alma 9
+  - Ubuntu 22.04~24.04
+  version_note: RHEL 8·Ubuntu 20.04 이하 없음
+  verify_note: 미검증 — RHEL 9 서버 설치에서 systemd-oomd 기본 활성 여부를 Red Hat 공식 문서로 대조하지 못함(Ubuntu 22.04 데스크톱은 기본 활성). source 의 'RHEL 9 기본 활성' 문구는 확인 필요

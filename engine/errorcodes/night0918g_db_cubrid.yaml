@@ -1,0 +1,394 @@
+product: cubrid
+layer: db
+note: GPT 협업 수집분 — 벤더 공식 문서와 대조 후 확정
+codes:
+- code: '-10'
+  severity: error
+  category: storage
+  title: 로그 디스크 볼륨 마운트 실패
+  immediate:
+  - "`grep -n \"ha_copy_log_base\" $CUBRID/conf/cubrid_ha.conf` 로 복제 로그 경로 확인 후 `ls -l <copylog_path>/` 로 파일 존재·소유자 확인"
+  - "`tail -50 $CUBRID/log/<db>@<node>_copylogdb.err` 또는 `ls $CUBRID/log/*applylogdb*.err` 의 최근 파일로 오류 대상 파일명 확인"
+  short:
+  - "(2차·승인 후) 경로·권한을 바로잡은 뒤 `cubrid heartbeat copylogdb <stop|start> <db> <peer_node>`(applylogdb 도 같은 형식)로 해당 프로세스만 다시 올림(롤백: 변경 전 경로·권한 기록 후 원복)"
+  mid:
+  - 복제 로그 상태를 cubrid applyinfo로 점검한다.
+  long:
+  - HA 복제 로그 경로와 파일 존재 여부를 정기적으로 확인한다.
+  vendor_cause: "HA 복제 로그 처리 중 'Cannot mount the disk volume' — copylogdb/applylogdb 가 복제 로그 파일을 열지 못했다는 뜻(CUBRID HA 매뉴얼). 복제 로그 경로(ha_copy_log_base) 변경·파일 누락·권한 문제가 흔한 원인."
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://www.cubrid.org/manual/en/latest/ha.html)
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: HA 프로세스에서 Cannot mount the disk volume 계열로 사용됨
+- code: '-80'
+  severity: critical
+  category: capacity
+  title: 복제 로그 디스크 부족
+  immediate:
+  - "`df -h <copylog_path>` 와 `df -i <copylog_path>` 로 복제 로그 파티션 사용률·inode 확인 — 95% 이상이면 확정"
+  - "`du -sh <copylog_path>/* | sort -h | tail -10` 으로 큰 파일(아카이브 복제 로그 등) 식별(삭제는 2차·승인 후)"
+  short:
+  - "(2차·승인 후) applyinfo 로 이미 반영된 복제 아카이브인지 확인한 뒤 정리하거나 파티션 증설(롤백: 정리 대상은 다른 경로에 먼저 보관)"
+  mid:
+  - 공간 확보 후 복제 로그 쓰기가 정상 재개됐는지 확인한다.
+  long:
+  - 복제 로그 영역에 용량 임계치와 사전 경보를 설정한다.
+  vendor_cause: "HA 복제 로그 페이지 기록 중 OS 장치 공간 부족 — copylogdb 가 복제 로그를 쓰지 못한 상태(CUBRID HA 매뉴얼 fatal). 복제 로그 파티션 가득참, 아카이브 누적이 흔한 원인."
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://www.cubrid.org/manual/en/latest/ha.html)
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 로그 페이지 기록 중 파일시스템 공간 부족
+- code: '-98'
+  severity: critical
+  category: storage
+  title: 아카이브 로그 생성 실패
+  immediate:
+  - "`df -h <copylog_path>` 로 아카이브 대상 파티션 여유 확인, `ls -ld <copylog_path>` 로 CUBRID 실행 계정 쓰기 권한 확인"
+  - "`tail -50 $CUBRID/log/<db>@<node>_copylogdb.err` 로 실패한 아카이브 파일명·페이지 범위 기록"
+  short:
+  - "(2차·승인 후) 공간 확보 또는 권한 정정 뒤 copylogdb 재개 확인(롤백: 정리 파일은 사전 보관)"
+  mid:
+  - 복제 로그와 아카이브 로그 상태를 함께 점검한다.
+  long:
+  - 아카이브 영역의 증가 추세와 보존 용량을 관리한다.
+  vendor_cause: "Cannot create an archive log — 복제 로그 복사 프로세스(copylogdb)가 아카이브 로그 파일을 만들지 못함(CUBRID HA 매뉴얼 fatal). 디스크 공간 부족·디렉터리 권한 문제가 흔한 원인."
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://www.cubrid.org/manual/en/latest/ha.html)
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: Cannot create an archive log
+- code: '-186'
+  severity: error
+  category: upstream
+  title: 복제 데이터 수신 오류
+  immediate:
+  - "`tail -50 $CUBRID/log/<db>@<node>_copylogdb.err` 로 발생 빈도 확인, `cubrid heartbeat status` 로 노드 상태 확인"
+  - "`cubrid applyinfo -L <copylog_path> -r <peer_host> -a <db>` 로 복사·반영 지연(Delay in Copying Active Log)이 늘어나는지 확인"
+  short:
+  - "(2차) 반복되면 노드 간 네트워크 품질(ping 손실·지연)과 상대 서버 .err 를 함께 분석해 원인 구간 확정"
+  mid:
+  - 반복 발생하면 연결 서버와 복제 로그 상태를 함께 점검한다.
+  long:
+  - 복제 데이터 수신 오류 발생 현황을 지속적으로 감시한다.
+  vendor_cause: "Data receiver error from the server — copylogdb 가 연결된 DB 서버에서 잘못된 정보를 받았다는 뜻(CUBRID HA 매뉴얼: 내부적으로 복구됨). 네트워크 순단이나 서버 쪽 일시 오류가 흔한 원인."
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://www.cubrid.org/manual/en/latest/ha.html)
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 서버에서 잘못된 복제 데이터 수신
+- code: '-199'
+  severity: error
+  category: connection
+  title: DB 서버 무응답
+  immediate:
+  - "`cubrid heartbeat status` 와 `cubrid server status` 로 대상 노드·DB 서버 기동 상태 확인"
+  - "`ping -c 5 <peer_host>` 와 `tail -50 $CUBRID/log/<db>@<node>_copylogdb.err` 로 단절 시각·복구 여부 확인"
+  short:
+  - "(2차) 복구되지 않으면 상대 노드 서버 .err·OS 로그로 정지 원인 분석 후 서버 기동은 승인 받아 수행(롤백: 기동 실패 시 제조사 지원)"
+  mid:
+  - 서버 종료와 네트워크 단절 기록을 함께 점검한다.
+  long:
+  - HA 서버 가용성과 복제 연결 상태를 지속적으로 감시한다.
+  vendor_cause: "The server is not responding — HA 복제 프로세스와 DB 서버 간 연결이 끊김(CUBRID HA 매뉴얼: 내부적으로 복구됨). 상대 서버 정지·과부하·네트워크 단절이 흔한 원인."
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://www.cubrid.org/manual/en/latest/ha.html)
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 서버 무응답으로 연결 종료
+- code: '-353'
+  severity: error
+  category: connection
+  title: 마스터 서버 연결 실패
+  immediate:
+  - "`ps -ef | grep cub_master` 와 `cubrid service status` 로 대상 호스트 cub_master 기동 여부 확인"
+  - "`tail -50 $CUBRID/log/<hostname>_master.err` 로 종료 시각·원인 확인, `grep cubrid_port_id $CUBRID/conf/cubrid.conf` 로 포트 확인"
+  short:
+  - "(2차·승인 후) 원인 확인 뒤 `cubrid service start` 또는 `cubrid heartbeat start` 로 마스터 기동(롤백: 기동 실패 시 master.err 보존 후 제조사 지원)"
+  mid:
+  - 마스터 프로세스가 종료된 원인을 로그에서 확인한다.
+  long:
+  - cub_master 상태를 HA 운영 감시에 포함한다.
+  vendor_cause: "Cannot make connection to master server on host — 대상 호스트의 cub_master 프로세스에 접속하지 못함(CUBRID HA 매뉴얼: cub_master 다운). cub_master 정지·포트(cubrid_port_id) 차단이 흔한 원인."
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://www.cubrid.org/manual/en/latest/ha.html)
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: Cannot make connection to master server
+- code: '-897'
+  severity: error
+  category: storage
+  title: 복제 로그 압축해제 실패
+  immediate:
+  - "`cubrid applyinfo -L <copylog_path> -r <peer_host> -a <db>` 로 복제 로그 상태 확인(매뉴얼 권고)"
+  - "`ls $CUBRID/log/*applylogdb*.err` 의 최근 파일 `tail -50` 으로 실패 LSA 기록"
+  short:
+  - "(2차) 같은 LSA 에서 반복되면 복제 로그 손상으로 보고 HA 복제 재구성 계획(백업 기반 standby 재구축) 수립 — 승인 후 수행"
+  mid:
+  - 같은 압축해제 오류가 반복되는지 점검한다.
+  long:
+  - 복제 로그 무결성 확인 절차를 HA 운영 점검에 포함한다.
+  vendor_cause: "Decompression failure — HA 로그 반영 중 로그 레코드 압축 해제에 실패함(CUBRID HA 매뉴얼). 복제 로그 손상·전송 중 손상이 원인일 수 있다."
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://www.cubrid.org/manual/en/latest/ha.html)
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 로그 레코드 압축해제 실패
+- code: '-1028'
+  severity: error
+  category: storage
+  title: 아카이브 로그 EOF 오류
+  immediate:
+  - "`cubrid applyinfo -L <copylog_path> -r <peer_host> -a <db>` 로 반영 위치(LSA)와 아카이브 상태 확인"
+  - "applylogdb 오류 로그(`$CUBRID/log/*applylogdb*.err`)에서 LSA 를 기록하고 `ls -l <copylog_path>` 로 아카이브 파일 크기 이상 여부 확인"
+  short:
+  - "(2차) 같은 아카이브에서 반복되면 standby 복제 재구성(백업 복원 후 재동기화) 계획 수립 — 승인 후 수행"
+  mid:
+  - 잘못된 아카이브 로그가 반복 생성되는지 확인한다.
+  long:
+  - 아카이브 로그 무결성과 보존 상태를 정기적으로 검증한다.
+  vendor_cause: "log applier: Unexpected EOF log record exists in the Archive log — 복제 아카이브 로그에 예상하지 못한 EOF 레코드가 있음(CUBRID HA 매뉴얼). 아카이브 로그 손상·비정상 종료로 인한 잘린 파일이 원인일 수 있다."
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://www.cubrid.org/manual/en/latest/ha.html)
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: Archive log에 예상하지 못한 EOF 레코드
+- code: '-1029'
+  severity: error
+  category: storage
+  title: 복제 로그 위치 오류
+  immediate:
+  - "`cubrid applyinfo -L <copylog_path> -r <peer_host> -a <db>` 로 copied/applied LSA 비교"
+  - "오류 로그의 page HDR·append LSA·EOF LSA 값을 그대로 기록(`tail -50` applylogdb .err)"
+  short:
+  - "(2차) 반복되면 복제 로그 손상으로 보고 standby 재구성 계획 수립(승인 후, 롤백: 재구성 전 standby DB 백업)"
+  mid:
+  - 복제 로그에 잘못된 레코드가 반복되는지 확인한다.
+  long:
+  - 복제 로그 무결성 검사를 HA 운영 절차에 포함한다.
+  vendor_cause: "log applier: Incorrect log page/offset — 복제 로그 페이지 헤더와 반영 위치가 맞지 않음(CUBRID HA 매뉴얼). 복제 로그 손상이나 복사 중단 뒤 불일치가 원인일 수 있다."
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://www.cubrid.org/manual/en/latest/ha.html)
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 잘못된 로그 페이지 또는 오프셋
+- code: '-1030'
+  severity: error
+  category: storage
+  title: 복제 로그 레코드 오류
+  immediate:
+  - "`cubrid applyinfo -L <copylog_path> -r <peer_host> -a <db>` 로 복제 로그 상태 확인"
+  - "applylogdb .err 의 LSA·Trid·type 값을 기록하고 같은 LSA 반복 여부 확인"
+  short:
+  - "(2차) 같은 LSA 반복이면 standby 재구성 계획 수립(승인 후, 롤백: 재구성 전 standby 백업)"
+  mid:
+  - 같은 로그 레코드 헤더 오류가 반복되는지 확인한다.
+  long:
+  - 복제 로그 이상 시 재구성 절차를 사전에 마련한다.
+  vendor_cause: "log applier: Incorrect log record — 복제 로그 레코드 헤더 오류(CUBRID HA 매뉴얼). 복제 로그 손상이 원인일 수 있다."
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://www.cubrid.org/manual/en/latest/ha.html)
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 잘못된 로그 레코드 또는 헤더
+- code: '-1032'
+  severity: error
+  category: upstream
+  title: INSERT 복제 반영 실패
+  immediate:
+  - "applylogdb .err(`$CUBRID/log/*applylogdb*.err`)에서 실패 class·key·internal error 값 기록"
+  - "`cubrid applyinfo -L <copylog_path> -r <peer_host> -a <db>` 로 반영 지연 증가 여부 확인, 같은 class 반복 여부 집계"
+  short:
+  - "(2차) 해당 class 의 마스터·standby 데이터를 키 기준으로 비교해 불일치면 HA 복제 재구성(매뉴얼 권고) 계획 — 승인 후 수행"
+  mid:
+  - 재구성 후 INSERT 복제가 정상 반영되는지 확인한다.
+  long:
+  - 복제 일관성 검사를 정기 운영 절차에 포함한다.
+  vendor_cause: "log applier: Failed to reflect the Insert replication log — standby 에 INSERT 복제 반영 실패(CUBRID HA 매뉴얼). 마스터·standby 데이터 불일치(키 중복·누락)나 스키마 차이가 흔한 원인."
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://www.cubrid.org/manual/en/latest/ha.html)
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: INSERT 복제 로그 반영 실패
+- code: '-1035'
+  severity: error
+  category: memory
+  title: 로그 적용 메모리 초과
+  immediate:
+  - "`grep ha_apply_max_mem_size $CUBRID/conf/cubrid_ha.conf` 로 한도 확인, applylogdb .err 에서 -1035 반복 간격 확인"
+  - "`ps -eo pid,rss,comm | grep applylogdb` 로 현재 메모리 사용 확인"
+  short:
+  - "(2차·승인 후) 반복되면 ha_apply_max_mem_size 상향 검토— 값 반영은 `cubrid heartbeat applylogdb <stop|start> <db> <peer_node>` 로 해당 프로세스만 재시작(롤백: 원래 값 복원 후 같은 방식으로 재시작)"
+  mid:
+  - 반복되면 로그 적용 프로세스의 메모리 증가 원인을 점검한다.
+  long:
+  - HA 로그 적용 메모리 사용량과 재시작 발생을 지속 감시한다.
+  vendor_cause: "log applier 메모리가 최대 크기(ha_apply_max_mem_size) 이상이거나 시작 크기의 2배 이상이 되어 applylogdb 가 다시 시작됨(CUBRID HA 매뉴얼: 내부 복구). 대량 트랜잭션 반영이 흔한 원인."
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://www.cubrid.org/manual/en/latest/ha.html)
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 로그 적용 프로세스 메모리 한도 관련 오류
+- code: '-1139'
+  severity: error
+  category: connection
+  title: HA 모드 불일치
+  immediate:
+  - "`cubrid broker status -b -f` 로 브로커별 ACCESS_MODE 확인, `cubrid changemode <db>@<node>` (옵션 없이 = 현재 상태 조회)로 서버 상태 확인"
+  - "`cubrid heartbeat status` 로 노드 역할(master/slave) 변화와 현재 master 노드 확인"
+  short:
+  - "(2차·승인 후) 절체 뒤라면 `cubrid broker reset <broker>` 로 CAS 재연결(매뉴얼: HA 절체 후 재연결용, 롤백: 불필요 — 연결만 재수립)"
+  mid:
+  - HA 역할 변경 후 브로커 연결 상태를 다시 점검한다.
+  long:
+  - HA 역할별 브로커 ACCESS_MODE 설정을 구성관리한다.
+  vendor_cause: "Handshake error: incompatible read/write mode — 브로커 ACCESS_MODE 와 DB 서버 상태(active/standby)가 맞지 않음(CUBRID HA 매뉴얼). 절체 뒤 RW 브로커가 standby 에 붙거나 설정 오류가 흔한 원인."
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://www.cubrid.org/manual/en/latest/ha.html)
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 브로커 ACCESS_MODE와 서버 HA 상태 불일치
+- code: '-1140'
+  severity: error
+  category: upstream
+  title: HA 복제 지연
+  immediate:
+  - "`cubrid applyinfo -L <copylog_path> -r <peer_host> -a <db> -i 5` 로 'Delay in Applying Copied Log' 지연 추이 확인"
+  - "`grep -E \"ha_delay_limit\" $CUBRID/conf/cubrid_ha.conf $CUBRID/conf/cubrid.conf` 로 한도 값 확인"
+  short:
+  - "(2차) 지연 원인(대량 배치·standby I/O 부족) 분석 후 배치 분산 또는 standby 자원 증설 계획(승인 후)"
+  mid:
+  - ha_delay_limit과 실제 복제 지연 상태를 함께 점검한다.
+  long:
+  - HA 복제 지연을 임계치 기반으로 지속 감시한다.
+  vendor_cause: "Handshake error: HA replication delayed — ha_delay_limit 을 설정한 서버에서 복제 지연이 한도를 넘어 CAS 가 해당 standby 를 부적합으로 판단함(CUBRID HA 매뉴얼)."
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://www.cubrid.org/manual/en/latest/ha.html)
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: ha_delay_limit 설정 서버에서 복제 지연
+- code: '-1144'
+  severity: error
+  category: connection
+  title: HA 연결 시간 초과
+  immediate:
+  - "`ping -c 5 <peer_host>` 와 `cubrid heartbeat status` 로 대상 장비·노드 상태 확인"
+  - "`tail -50 $CUBRID/log/<db>@<node>_copylogdb.err` 로 시간 초과 시작 시각 확인"
+  short:
+  - "(2차) 대상 장비 정상화 후 copylogdb 연결 복구 확인, 장비 장애면 H/W 담당과 복구 일정 협의"
+  mid:
+  - 연결 timeout 발생 시점과 장비 장애 시간을 대조한다.
+  long:
+  - HA 노드 간 연결 가용성과 지연을 지속적으로 감시한다.
+  vendor_cause: "Timed out attempting to connect — HA 노드 접속 시간 초과(CUBRID HA 매뉴얼: 대상 장비 다운). 상대 장비 정지·네트워크 단절·방화벽이 흔한 원인."
+  source: GPT 수집 2026-09-18·벤더 문서 대조 완료(https://www.cubrid.org/manual/en/latest/ha.html)
+  versions:
+  - CUBRID 8.4
+  - CUBRID 9.x
+  - CUBRID 10.0/10.1
+  - CUBRID 10.2
+  - CUBRID 11.0
+  - CUBRID 11.2
+  - CUBRID 11.3
+  - CUBRID 11.4
+  version_note: 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 대상 장비 연결 시도 시간초과

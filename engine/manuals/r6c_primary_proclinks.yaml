@@ -1,0 +1,35 @@
+# 2026-10-16 GPT 58차 '매칭 모호' 정리 — 같은 ID 를 같은 순위의 전용 절차 둘 이상이 가진 판정에서 사람이 1순위를 고른다(primary).
+# 고르지 않은 쪽은 2순위로 함께 보인다. 고르지 못한 것은 화면에 '이 판정 전용 후보 N개 — 매칭 모호'로 남긴다.
+links:
+- procedure: JAVA-PROC-R5-APP
+  match: [JAVA.LANG.STACKOVERFLOWERROR]
+  primary: true
+  reviewed: "스택 넘침은 대개 재귀·순환 참조 같은 소스 결함 — 제목에 '스택 넘침'이 있는 R5-APP 이 1순위, -Xss 조정(MEMORY)은 2순위"
+- procedure: JAVA-PROC-R5-UPSTREAM
+  match: [JAVA.NET.SOCKETTIMEOUTEXCEPTION, JAVAX.NAMING.COMMUNICATIONEXCEPTION]
+  primary: true
+  reviewed: "읽기 시간 초과·JNDI/LDAP 통신 실패는 연계 대상 응답 문제 — 제목에 '소켓 시간 초과·LDAP 통신'이 있는 R5-UPSTREAM 이 1순위"
+- procedure: JAVA-PROC-R5-PERFORMANCE
+  match: [JAVA.UTIL.CONCURRENT.TIMEOUTEXCEPTION]
+  primary: true
+  reviewed: "Future.get 등 비동기 작업 시간 초과 — 제목이 '비동기 작업 시간 초과'인 R5-PERFORMANCE 가 1순위"
+- procedure: JAVA-PROC-THREAD
+  match: [JAVA.UTIL.CONCURRENT.REJECTEDEXECUTIONEXCEPTION]
+  primary: true
+  reviewed: "실행기(스레드 풀) 큐·스레드 포화로 작업 거부 — 스레드 풀 고갈 절차가 1순위"
+- procedure: WLS-PROC-R5-CAPACITY
+  match: [BEA-000415]
+  primary: true
+  reviewed: "파일 디스크립터 한도 정보 메시지 — FD 한도 절차가 1순위(기동·배포 실패 절차 아님)"
+- procedure: WLS-PROC-R5-LOCK
+  match: [BEA-141297]
+  primary: true
+  reviewed: "서버 파일 잠금 획득 대기 — 잠금 파일 절차가 1순위"
+- procedure: IIS-PROC-CAPACITY
+  match: ["503.2"]
+  primary: true
+  reviewed: "appConcurrentRequestLimit 초과(동시 요청 한도) — 요청 큐·연결 한도 절차가 1순위(앱 풀 중지 절차 아님)"
+- procedure: JAVA-PROC-MEMORY
+  match: [LEG-COM-JAVA-OOM]
+  primary: true
+  reviewed: "java.lang.OutOfMemoryError — JVM 힙·Metaspace 절차가 1순위, OS OOM killer(LNX-PROC-MEMORY)는 2순위"

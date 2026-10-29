@@ -1,0 +1,83 @@
+product: goldilocks
+layer: db
+title: goldilocks 로그 종류 카탈로그 (GPT 수집 — 벤더 문서 대조 필요)
+source: GPT 수집(벤더 문서 대조 필요)
+sources: []
+logtypes:
+- name: System Trace
+  path: $GOLDILOCKS_DATA/trc/system.trc
+  format: 텍스트·YYYY-MM-DD HH:mm:ss.ffffff
+  check: FATAL·ABORT·WARNING·INFO·CHECKPOINT·LOG FLUSHER·ARCHIVELOG
+  sample: '[2014-09-11 14:04:34.704465 THREAD(...)] [INFORMATION] [CHECKPOINT] begin'
+- name: DDL Trace
+  path: $GOLDILOCKS_DATA/trc/system.trc, TRACE_DDL=ON
+  format: 텍스트·YYYY-MM-DD HH:mm:ss.ffffff
+  check: CREATE·ALTER·DROP DDL·DDL 실패·시스템 변경
+  sample: system.trc 형식으로 SQL DDL 기록
+- name: ALTER SYSTEM Trace
+  path: $GOLDILOCKS_DATA/trc/system.trc, TRACE_ALTER_SYSTEM=ON
+  format: 텍스트·microsecond timestamp
+  check: ALTER SYSTEM 변경·장애 직전 property 변경
+  sample: system.trc 형식으로 ALTER SYSTEM SQL 기록
+- name: XA Trace
+  path: $GOLDILOCKS_DATA/trc/xa.trc
+  format: 텍스트·microsecond timestamp
+  check: XA interface·분산 TX·prepare/commit/rollback 오류
+  sample: XA trace message 형식
+- name: Listener Trace
+  path: $GOLDILOCKS_DATA/trc/listener.trc
+  format: 텍스트·YYYY-MM-DD HH:mm:ss.ffffff
+  check: listener start/stop·접속·socket·ERR 코드
+  sample: '[timestamp THREAD(pid,handle)] [prefix] message 형식'
+- name: SQL Trace
+  path: $GOLDILOCKS_DATA/trc/opt_p<PID>_s<SESSION>.trc
+  format: 텍스트·trace timestamp
+  check: SQL·실행계획·bind·실행시간·성공/실패 SQL
+  sample: TRACE_LOG_ID flag에 따른 SQL/PLAN/BIND record
+- name: Login Trace
+  path: $GOLDILOCKS_DATA/trc/login.trc, TRACE_LOGIN=ON
+  format: 텍스트·microsecond timestamp
+  check: 로그인·접속 사용자·인증·connection 장애
+  sample: login trace record 형식
+- name: Archive 상태 로그
+  path: $GOLDILOCKS_DATA/trc/system.trc; archive 파일 기본 계열 $GOLDILOCKS_DATA/archive_log/
+  format: 텍스트+redo archive 바이너리·microsecond timestamp
+  check: ARCHIVELOG BEGIN/END·SUCCESS·archive 지연·공간 문제
+  sample: '[ARCHIVELOG BEGIN] LOG(...) => ARCHIVE(...)'
+- name: Redo 로그
+  path: 기본 $GOLDILOCKS_DATA/wal/redo_* 계열
+  format: 바이너리·LSN/LFSN
+  check: LOG FLUSHER·log switch·재사용 불가·복구·I/O
+  sample: system.trc에 [LOG FLUSHER] disable logging - blocked lfsn(...) 상태 기록
+- name: Replication Trace
+  path: CYCLONE·LOGMIRROR 설정별 로그 경로, 버전별 상이
+  format: 텍스트·제품별 timestamp
+  check: 이중화 연결·전송·apply·lag·노드 단절
+  sample: CYCLONE/LOGMIRROR replication trace 형식
+sections:
+- heading: 로그 종류 카탈로그 (전수)
+  body: 'System Trace: $GOLDILOCKS_DATA/trc/system.trc · DDL Trace: $GOLDILOCKS_DATA/trc/system.trc, TRACE_DDL=ON · ALTER SYSTEM Trace: $GOLDILOCKS_DATA/trc/system.trc, TRACE_ALTER_SYSTEM=ON · XA Trace:
+    $GOLDILOCKS_DATA/trc/xa.trc · Listener Trace: $GOLDILOCKS_DATA/trc/listener.trc · SQL Trace: $GOLDILOCKS_DATA/trc/opt_p<PID>_s<SESSION>.trc · Login Trace: $GOLDILOCKS_DATA/trc/login.trc, TRACE_LOGIN=ON
+    · Archive 상태 로그: $GOLDILOCKS_DATA/trc/system.trc; archive 파일 기본 계열 $GOLDILOCKS_DATA/archive_log/ · Redo 로그: 기본 $GOLDILOCKS_DATA/wal/redo_* 계열 · Replication Trace: CYCLONE·LOGMIRROR 설정별 로그 경로, 버전별 상이'
+- heading: '로그: System Trace'
+  body: 경로 $GOLDILOCKS_DATA/trc/system.trc / 형식 텍스트·YYYY-MM-DD HH:mm:ss.ffffff / 확인 FATAL·ABORT·WARNING·INFO·CHECKPOINT·LOG FLUSHER·ARCHIVELOG / 샘플 [2014-09-11 14:04:34.704465 THREAD(...)] [INFORMATION]
+    [CHECKPOINT] begin
+- heading: '로그: DDL Trace'
+  body: 경로 $GOLDILOCKS_DATA/trc/system.trc, TRACE_DDL=ON / 형식 텍스트·YYYY-MM-DD HH:mm:ss.ffffff / 확인 CREATE·ALTER·DROP DDL·DDL 실패·시스템 변경 / 샘플 system.trc 형식으로 SQL DDL 기록
+- heading: '로그: ALTER SYSTEM Trace'
+  body: 경로 $GOLDILOCKS_DATA/trc/system.trc, TRACE_ALTER_SYSTEM=ON / 형식 텍스트·microsecond timestamp / 확인 ALTER SYSTEM 변경·장애 직전 property 변경 / 샘플 system.trc 형식으로 ALTER SYSTEM SQL 기록
+- heading: '로그: XA Trace'
+  body: 경로 $GOLDILOCKS_DATA/trc/xa.trc / 형식 텍스트·microsecond timestamp / 확인 XA interface·분산 TX·prepare/commit/rollback 오류 / 샘플 XA trace message 형식
+- heading: '로그: Listener Trace'
+  body: 경로 $GOLDILOCKS_DATA/trc/listener.trc / 형식 텍스트·YYYY-MM-DD HH:mm:ss.ffffff / 확인 listener start/stop·접속·socket·ERR 코드 / 샘플 [timestamp THREAD(pid,handle)] [prefix] message 형식
+- heading: '로그: SQL Trace'
+  body: 경로 $GOLDILOCKS_DATA/trc/opt_p<PID>_s<SESSION>.trc / 형식 텍스트·trace timestamp / 확인 SQL·실행계획·bind·실행시간·성공/실패 SQL / 샘플 TRACE_LOG_ID flag에 따른 SQL/PLAN/BIND record
+- heading: '로그: Login Trace'
+  body: 경로 $GOLDILOCKS_DATA/trc/login.trc, TRACE_LOGIN=ON / 형식 텍스트·microsecond timestamp / 확인 로그인·접속 사용자·인증·connection 장애 / 샘플 login trace record 형식
+- heading: '로그: Archive 상태 로그'
+  body: 경로 $GOLDILOCKS_DATA/trc/system.trc; archive 파일 기본 계열 $GOLDILOCKS_DATA/archive_log/ / 형식 텍스트+redo archive 바이너리·microsecond timestamp / 확인 ARCHIVELOG BEGIN/END·SUCCESS·archive 지연·공간 문제 / 샘플 [ARCHIVELOG
+    BEGIN] LOG(...) => ARCHIVE(...)
+- heading: '로그: Redo 로그'
+  body: 경로 기본 $GOLDILOCKS_DATA/wal/redo_* 계열 / 형식 바이너리·LSN/LFSN / 확인 LOG FLUSHER·log switch·재사용 불가·복구·I/O / 샘플 system.trc에 [LOG FLUSHER] disable logging - blocked lfsn(...) 상태 기록
+- heading: '로그: Replication Trace'
+  body: 경로 CYCLONE·LOGMIRROR 설정별 로그 경로, 버전별 상이 / 형식 텍스트·제품별 timestamp / 확인 이중화 연결·전송·apply·lag·노드 단절 / 샘플 CYCLONE/LOGMIRROR replication trace 형식

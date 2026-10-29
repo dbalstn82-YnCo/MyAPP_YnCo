@@ -1,0 +1,52 @@
+# 지표 고정 해석(2026-10-16 7차 아이디어 3 · GPT 58·59차) — 여기 적힌 (판정, 명령) 짝만 기계가 '기준 충족·미충족'을 정한다.
+# 나머지는 참고 수치만(사람 판단). 판정 규칙:
+#   · 명령 출력에서 header 중 하나와 같은 머리글 칸을 '한 번만' 찾는다(두 번 나오면 표가 둘 — 판정 불가).
+#   · 그 칸의 값은 unit(%)로 끝나는 숫자여야 한다(아니면 판정 불가). 줄이 접힌 df 출력은 다음 줄과 이어 읽는다.
+#   · 기준값은 판단 기준 문구의 'N% 이상'. 값 중 하나라도 기준 이상이면 충족(그 줄을 보여 줌), 모두 아래면 미충족.
+# 머리글 이름은 각 OS 의 df·bdf 출력 머리글(GNU coreutils df: Use%·IUse%, AIX df: %Used·%Iused, Solaris df -h: capacity,
+# HP-UX bdf: %used·%iuse, Solaris df -o i: %iused)이다. keys 에 없는 판정에는 적용하지 않는다.
+metrics:
+- id: fs-block-use
+  title: 파일시스템 블록 사용률
+  cmd: '^(df\s+-h|df\s+-k|df\s+-g|df\s+-Ph|bdf)(\s+(?!-i\b)[^;|]+)?\s*$'
+  header: ['Use%', 'Capacity', '%Used', '%used']
+  unit: '%'
+  op: '>='
+  agg: any        # 출력에 대상 줄이 여럿이면 어느 한 줄이라도 기준 이상이면 충족(명령이 경로 하나를 보면 줄도 하나)
+  keys: [JEUS:JEUS-JMS-STORE-FULL, JEUS:JEUS-LOG-WRITE-FAIL, TOMCAT:TOMCAT-TEMP-DIR-FAIL, TOMCAT:TOMCAT-LOG-WRITE-FAIL,
+         WEBTOB:WEBTOB-DISK-FULL, ALTIBASE:ERR-61016, TIBERO:TBR-1063, TOMCAT:TOMCAT-NO-SPACE, CUBRID:-80, HPUX:HPUX-TMP-FULL,
+         # 룰(판정 키 = 룰 ID) — 판단 기준이 '사용률 N% 이상' 하나뿐인 것만. '…이거나 권한 없음' 처럼 다른 조건이 섞인 룰은 결속하지 않는다
+         LEG-COM-BACKUP-FAIL, LEG-JEUS-JMS-001-E160, OS-UNX-002, WAS-TC-020]
+  # 8차 아이디어 9: 판단 기준에 다른 조건이 섞인 룰 — 수치 부분만 결속한다. 결과는 '수치 조건 충족/미충족'이고 나머지 조건(권한 등)은 사람 판단.
+  #   SW-BM-005 '사용률 95% 이상이거나 실행 계정 쓰기 권한이 없으면' · WAS-JB-015 '95% 이상·권한 불일치면'
+  #   (OS-LNX-011 은 'df -hT ; df -i' 두 명령이 한 줄이라 결속하지 않는다 · LEG-AIX-BACKUP 은 /tmp 만 — 아래 aix-tmp-use)
+  part_keys: [SW-BM-005, WAS-JB-015]
+- id: fs-inode-use
+  title: 파일시스템 inode 사용률
+  cmd: '^(df\s+-i|bdf\s+-i|df\s+-F\s+ufs\s+-o\s+i)(\s+[^;|]+)?\s*$'
+  header: ['IUse%', '%Iused', '%iuse', '%iused']
+  unit: '%'
+  op: '>='
+  agg: any        # 출력에 대상 줄이 여럿이면 어느 한 줄이라도 기준 이상이면 충족(명령이 경로 하나를 보면 줄도 하나)
+  keys: [LINUX:LNX-FS-INODE-FULL, JEUS:JEUS-JMS-STORE-FULL, JEUS:JEUS-LOG-WRITE-FAIL, TOMCAT:TOMCAT-TEMP-DIR-FAIL, TOMCAT:TOMCAT-LOG-WRITE-FAIL,
+         WEBTOB:WEBTOB-DISK-FULL, TOMCAT:TOMCAT-NO-SPACE, CUBRID:-80, HPUX:HPUX-TMP-FULL, HPUX:HPUX-FS-INODE-FULL, SOLARIS:SOL-INODE-FULL,
+         LEG-RHEL-INODE, WAS-TC-020]
+  part_keys: [SW-BM-005, WAS-JB-015]
+- id: aix-tmp-use
+  title: AIX /tmp 블록 사용률(df -g /tmp 의 %Used)
+  # 8차 아이디어 9: LEG-AIX-BACKUP 의 기준 중 '/tmp 사용률 95% 이상' 부분만. 'df -g <백업경로>' 의 '여유 < 백업 대상 사용량'은 수치 비교 대상이 달라 결속하지 않는다
+  cmd: '^df\s+-g\s+/tmp\s*$'
+  header: ['%Used']
+  unit: '%'
+  op: '>='
+  agg: any
+  keys: []
+  part_keys: [LEG-AIX-BACKUP]
+- id: aix-inode-use
+  title: AIX inode 사용률(df -g 의 %Iused)
+  cmd: '^df\s+-g(\s+[^;|]+)?\s*$'
+  header: ['%Iused']
+  unit: '%'
+  op: '>='
+  agg: any        # 출력에 대상 줄이 여럿이면 어느 한 줄이라도 기준 이상이면 충족(명령이 경로 하나를 보면 줄도 하나)
+  keys: [AIX:AIX-INODE-FULL]

@@ -1,0 +1,99 @@
+product: jboss
+layer: was
+title: jboss 로그 종류 카탈로그 (GPT 수집 — 벤더 문서 대조 필요)
+source: GPT 수집(벤더 문서 대조 필요)
+sources: []
+logtypes:
+- name: 서버 로그
+  path: EAP_HOME/standalone/log/server.log 또는 domain/servers/<SERVER>/log/server.log
+  format: 텍스트·yyyy-MM-dd HH:mm:ss,SSS 계열
+  check: WFLY/JBAS 코드·기동·배포·datasource·Undertow·transaction 오류
+  sample: 2026-09-09 12:00:00,123 ERROR [org.jboss.as...] (...) WFLYSRV...
+- name: Host Controller 로그
+  path: EAP_HOME/domain/log/host-controller.log
+  format: 텍스트·JBoss LogManager timestamp
+  check: Host Controller 기동·domain.xml·DC 연결·서버 관리 실패
+  sample: 2026-09-09 12:00:00,123 ERROR [org.jboss.as.host.controller] ... WFLYHC...
+- name: Process Controller 로그
+  path: EAP_HOME/domain/log/process-controller.log
+  format: 텍스트·JBoss LogManager timestamp
+  check: Host Controller와 서버 프로세스 생성·종료·재시작 오류
+  sample: 2026-09-09 12:00:00,123 ERROR [org.jboss.as.process] ...
+- name: GC 로그
+  path: EAP_HOME/standalone/log/gc.log.<DIGIT>.current 기본 EAP
+  format: 텍스트·JVM GC timestamp
+  check: Full GC·pause·old generation 포화·메모리 압박
+  sample: '[12.345s][info][gc] GC(4) Pause Young ...'
+- name: Undertow Access 로그
+  path: ${jboss.server.log.dir}/access_log.log 또는 설정 prefix/suffix
+  format: Common/Combined·dd/MMM/yyyy:HH:mm:ss Z
+  check: HTTP 4xx·5xx·URI·처리량·remote host
+  sample: 127.0.0.1 - - [09/Sep/2026:12:00:00 +0900] "GET / HTTP/1.1" 200 1234
+- name: 콘솔 JSON Access
+  path: stdout 설정 시
+  format: JSON·ISO 계열 timestamp 설정
+  check: HTTP 요청·응답코드·bytes·host·requestLine 구조화 분석
+  sample: '{"eventSource":"web-access","hostName":"default-host","remoteHost":"127.0.0.1","responseCode":200}'
+- name: 관리 Audit 로그
+  path: Standalone EAP_HOME/standalone/data/audit-log.log, Domain은 domain/data/audit-log.log 등
+  format: JSON·timestamp 필드
+  check: CLI·Console·Management API의 write operation과 구성변경
+  sample: '{"type":"core","r/o":false,"booting":false,"user":...,"ops":[...]}'
+- name: Elytron 보안 Audit
+  path: Standalone EAP_HOME/standalone/log/audit.log, Domain EAP_HOME/domain/log/audit.log
+  format: SIMPLE 또는 JSON·yyyy-MM-dd HH:mm:ss
+  check: 인증·인가 성공/실패·SecurityPermission 이벤트
+  sample: 2023-10-24 23:31:04,WARNING,{event=SecurityPermissionCheckSuccessfulEvent,...}
+- name: 애플리케이션 로그
+  path: 버전별 상이(per-deployment logging/profile 설정)
+  format: JBoss LogManager·텍스트/JSON·설정 timestamp
+  check: 애플리케이션 예외·프레임워크 로그·배포별 오류 격리
+  sample: 2026-09-09 12:00:00,123 ERROR [com.example.App] ...
+- name: Syslog 로그
+  path: syslog handler 설정 대상
+  format: RFC3164/RFC5424·syslog timestamp
+  check: 중앙집중 서버·보안·관리 이벤트·WFLY 코드 상관분석
+  sample: <PRI>1 2026-09-09T12:00:00+09:00 host wildfly ... WFLYSRV...
+- name: JVM 스레드덤프
+  path: 버전별 상이(stdout 또는 수집 파일)
+  format: 텍스트·수집시각
+  check: BLOCKED·WAITING·deadlock·stuck request
+  sample: 'Full thread dump ... "default task-1" #... RUNNABLE'
+- name: JVM 힙/Crash 덤프
+  path: 버전별 상이(JVM 옵션/작업 디렉터리)
+  format: HPROF/텍스트/코어
+  check: OutOfMemoryError·heap 누수·hs_err_pid*
+  sample: java_pid1234.hprof / hs_err_pid1234.log
+sections:
+- heading: 로그 종류 카탈로그 (전수)
+  body: '서버 로그: EAP_HOME/standalone/log/server.log 또는 domain/servers/<SERVER>/log/server.log · Host Controller 로그: EAP_HOME/domain/log/host-controller.log · Process Controller 로그: EAP_HOME/domain/log/process-controller.log
+    · GC 로그: EAP_HOME/standalone/log/gc.log.<DIGIT>.current 기본 EAP · Undertow Access 로그: ${jboss.server.log.dir}/access_log.log 또는 설정 prefix/suffix · 콘솔 JSON Access: stdout 설정 시 · 관리 Audit 로그: Standalone
+    EAP_HOME/standalone/data/audit-log.log, Domain은 domain/data/audit-log.log 등 · Elytron 보안 Audit: Standalone EAP_HOME/standalone/log/audit.log, Domain EAP_HOME/domain/log/audit.log · 애플리케이션 로그: 버전별 상이(per-deployment
+    logging/profile 설정) · Syslog 로그: syslog handler 설정 대상 · JVM 스레드덤프: 버전별 상이(stdout 또는 수집 파일) · JVM 힙/Crash 덤프: 버전별 상이(JVM 옵션/작업 디렉터리)'
+- heading: '로그: 서버 로그'
+  body: 경로 EAP_HOME/standalone/log/server.log 또는 domain/servers/<SERVER>/log/server.log / 형식 텍스트·yyyy-MM-dd HH:mm:ss,SSS 계열 / 확인 WFLY/JBAS 코드·기동·배포·datasource·Undertow·transaction 오류 / 샘플 2026-09-09 12:00:00,123
+    ERROR [org.jboss.as...] (...) WFLYSRV...
+- heading: '로그: Host Controller 로그'
+  body: 경로 EAP_HOME/domain/log/host-controller.log / 형식 텍스트·JBoss LogManager timestamp / 확인 Host Controller 기동·domain.xml·DC 연결·서버 관리 실패 / 샘플 2026-09-09 12:00:00,123 ERROR [org.jboss.as.host.controller]
+    ... WFLYHC...
+- heading: '로그: Process Controller 로그'
+  body: 경로 EAP_HOME/domain/log/process-controller.log / 형식 텍스트·JBoss LogManager timestamp / 확인 Host Controller와 서버 프로세스 생성·종료·재시작 오류 / 샘플 2026-09-09 12:00:00,123 ERROR [org.jboss.as.process] ...
+- heading: '로그: GC 로그'
+  body: 경로 EAP_HOME/standalone/log/gc.log.<DIGIT>.current 기본 EAP / 형식 텍스트·JVM GC timestamp / 확인 Full GC·pause·old generation 포화·메모리 압박 / 샘플 [12.345s][info][gc] GC(4) Pause Young ...
+- heading: '로그: Undertow Access 로그'
+  body: 경로 ${jboss.server.log.dir}/access_log.log 또는 설정 prefix/suffix / 형식 Common/Combined·dd/MMM/yyyy:HH:mm:ss Z / 확인 HTTP 4xx·5xx·URI·처리량·remote host / 샘플 127.0.0.1 - - [09/Sep/2026:12:00:00 +0900] "GET
+    / HTTP/1.1" 200 1234
+- heading: '로그: 콘솔 JSON Access'
+  body: 경로 stdout 설정 시 / 형식 JSON·ISO 계열 timestamp 설정 / 확인 HTTP 요청·응답코드·bytes·host·requestLine 구조화 분석 / 샘플 {"eventSource":"web-access","hostName":"default-host","remoteHost":"127.0.0.1","responseCode":200}
+- heading: '로그: 관리 Audit 로그'
+  body: 경로 Standalone EAP_HOME/standalone/data/audit-log.log, Domain은 domain/data/audit-log.log 등 / 형식 JSON·timestamp 필드 / 확인 CLI·Console·Management API의 write operation과 구성변경 / 샘플 {"type":"core","r/o":false,"booting":false,"user":...,"ops":[...]}
+- heading: '로그: Elytron 보안 Audit'
+  body: 경로 Standalone EAP_HOME/standalone/log/audit.log, Domain EAP_HOME/domain/log/audit.log / 형식 SIMPLE 또는 JSON·yyyy-MM-dd HH:mm:ss / 확인 인증·인가 성공/실패·SecurityPermission 이벤트 / 샘플 2023-10-24 23:31:04,WARNING,{event=SecurityPermissionCheckSuccessfulEvent,...}
+- heading: '로그: 애플리케이션 로그'
+  body: 경로 버전별 상이(per-deployment logging/profile 설정) / 형식 JBoss LogManager·텍스트/JSON·설정 timestamp / 확인 애플리케이션 예외·프레임워크 로그·배포별 오류 격리 / 샘플 2026-09-09 12:00:00,123 ERROR [com.example.App] ...
+- heading: '로그: Syslog 로그'
+  body: 경로 syslog handler 설정 대상 / 형식 RFC3164/RFC5424·syslog timestamp / 확인 중앙집중 서버·보안·관리 이벤트·WFLY 코드 상관분석 / 샘플 <PRI>1 2026-09-09T12:00:00+09:00 host wildfly ... WFLYSRV...
+- heading: '로그: JVM 스레드덤프'
+  body: '경로 버전별 상이(stdout 또는 수집 파일) / 형식 텍스트·수집시각 / 확인 BLOCKED·WAITING·deadlock·stuck request / 샘플 Full thread dump ... "default task-1" #... RUNNABLE'
+- heading: '로그: JVM 힙/Crash 덤프'
+  body: 경로 버전별 상이(JVM 옵션/작업 디렉터리) / 형식 HPROF/텍스트/코어 / 확인 OutOfMemoryError·heap 누수·hs_err_pid* / 샘플 java_pid1234.hprof / hs_err_pid1234.log

@@ -1,0 +1,58 @@
+# 아이디어 3(2026-10-16) — WAS 묶음(Tomcat·JEUS·JBoss EAP·WebLogic·WebSphere) '같은 제품·유형' 연결 판정 중
+# 기존 절차가 그 판정의 1차 확인·2차 조치까지 실제로 맞는 것만 '전용'으로 잇는다(절차 파일은 고치지 않는다).
+# 맞지 않는 판정은 r6_was_procedures.yaml 의 전용 절차로 보냈다.
+links:
+- procedure: TOMCAT-PROC-R5-CAPACITY
+  match: [TOMCAT-ACCEPT-FAILED]
+  reviewed: "2026-10-16 판정 적합성 확인 — 소켓 수락 실패의 주원인 Too many open files 를 1차 로그 구분·FD 사용량/한도로 확인하고 2차 nofile 상향으로 조치"
+- procedure: TOMCAT-PROC-SECURITY
+  match: [WAS-TC-016, WAS-TC-022]
+  reviewed: "2026-10-16 판정 적합성 확인 — 키스토어·AJP secret 오류(WAS-TC-016)와 SSLv3 허용(WAS-TC-022)을 2차 SSLHostConfig protocols(TLSv1.2+)·AJP secret 설정으로 바로 조치"
+- procedure: TOMCAT-PROC-THREAD
+  match: [WAS-TC-019]
+  reviewed: "2026-10-16 판정 적합성 확인 — 요청 스레드 풀 거절(고갈)을 1차 커넥터 스레드 상태·스레드 덤프 3회, 2차 maxThreads·acceptCount 조정으로 다룸"
+- procedure: JEUS-PROC-INTERNAL
+  match: [DEPLOY-0005, LEG-JEUS-DEPLOY-XML, SERVER-0522, JEUS-DAS-CONNECT-FAIL, SERVER-0249, LAUNCHER-0054]
+  reviewed: "2026-10-16 판정 적합성 확인 — 배포 ID 중복·DD 스키마·설정 파일 예외는 1차 원인 줄과 2차 재배포/롤백·domain.xml 복원, DAS 접속 실패·독립/로컬 설정 기동은 2차 'MASTER 통신 실패 시 MASTER 기동 후 재기동·INDEPENDENT' 단계와 일치"
+- procedure: JEUS-PROC-R5-HARDWARE
+  match: [LEG-JEUS-ABNORMAL-SHUTDOWN]
+  reviewed: "2026-10-16 판정 적합성 확인 — 비정상 강제 종료를 1차 hs_err_pid·dmesg OOM·종료 직전 로그로 확인, 2차 자료 보존 후 기동으로 그대로 대응"
+- procedure: WASC-PROC-R5-INTERNAL
+  match: [SESSION-2512]
+  reviewed: "2026-10-16 판정 적합성 확인 — 세션 리스너 예외(SESSION-2512)를 1차에서 직접 grep 하고 2차 세션 매니저 설정 정합으로 다루는 공통 절차"
+- procedure: JEUS-PROC-MEMORY
+  match: [LEG-JEUS-SESSION, LEG-JEUS-WARN-HEAP-HIGH]
+  reviewed: "2026-10-16 판정 적합성 확인 — 세션 누적·힙 80% 경고를 1차 jstat·스레드 덤프, 2차 힙 덤프·세션 타임아웃 단계로 다룸"
+- procedure: JEUS-PROC-THREAD
+  match: [LEG-JEUS-SLOW]
+  reviewed: "2026-10-16 판정 적합성 확인 — 응답 지연을 1차 thread-info·스레드 덤프 3회로 병목 확인, 2차 스레드 풀·query-timeout 조정으로 다룸"
+- procedure: EAP-PROC-R5-HARDWARE
+  match: [LEG-WFLY-ORA-CONV-ALL]
+  reviewed: "2026-10-16 판정 적합성 확인 — Oracle 데이터 변환 오류 계열을 1차 UT005023 문맥의 ORA 코드·매핑 ID, 2차 매핑 jdbcType 수정 배포로 그대로 다룸"
+- procedure: EAP-PROC-CONNECTION
+  match: [WAS-JB-010, WFLYJCA0047]
+  reviewed: "2026-10-16 판정 적합성 확인 — 연결 획득 실패·연결 검증 실패를 1차 풀 통계·test-connection-in-pool, 2차 풀·검증 설정으로 다룸"
+- procedure: EAP-PROC-INTERNAL
+  match: [WFLYSRV0007, WFLYSRV0011, WFLYSRV0014, WFLYSRV0022, WFLYSRV0043, WAS-JB-014, WFLYCTL0006, WFLYCTL0027, WFLYCTL0190]
+  reviewed: "2026-10-16 판정 적합성 확인 — 배포 작업 롤백·서브시스템 기동 실패·재시작 필요·롤백 처리기 실패·부팅 실패를 1차 read-boot-errors·server-state·deployment-info, 2차 재배포/롤백·재기동·설정 이력 복원으로 다룸"
+- procedure: WLS-PROC-R5-CAPACITY
+  match: [BEA-000409, BEA-002616, BEA-002617, WAS-WLS-019, BEA-000205]
+  reviewed: "2026-10-16 판정 적합성 확인 — muxer 등록·채널 리슨·서버 소켓 재개방·ListenThread 오류·리슨 복구는 FD 고갈이 주원인으로 1차 BEA-002616 grep·FD 한도, 2차 nofile 상향과 일치"
+- procedure: WLS-PROC-CONNECTION
+  match: [WAS-WLS-011]
+  reviewed: "2026-10-16 판정 적합성 확인 — 풀 비활성·고갈을 1차 WLST 데이터소스 런타임(State·Waiting), 2차 용량 조정·reset 으로 다룸"
+- procedure: WLS-PROC-INTERNAL
+  match: [BEA-000342, WAS-WLS-013, WAS-WLS-021, WAS-WLS-016, BEA-160197]
+  reviewed: "2026-10-16 판정 적합성 확인 — 서버 초기화 실패·FAILED·기동 설정 오류·앱 활성화 실패·디스크립터 로드 실패를 1차 Critical/Error 원인 줄, 2차 재기동·재배포/롤백·config.xml 복원으로 다룸"
+- procedure: WLS-PROC-THREAD
+  match: [WAS-WLS-018]
+  reviewed: "2026-10-16 판정 적합성 확인 — 실행 큐 적체를 1차 ThreadPoolRuntime(Queue·Stuck)·스레드 덤프, 2차 Stuck 판정·Work Manager 로 다룸"
+- procedure: WAS-PROC-CONNECTION
+  match: [J2CA0020E]
+  reviewed: "2026-10-16 판정 적합성 확인 — 관리 연결 할당 실패(DB 연결 실패)를 1차 showPoolContents·DB 포트, 2차 풀 설정·purge 로 다룸"
+- procedure: WAS-PROC-INTERNAL
+  match: [ADMU0111E, WSVR0194I, WSVR0201E, WSVR0209E, WSVR0501E]
+  reviewed: "2026-10-16 판정 적합성 확인 — 관리 도구 기동 오류·앱/EJB JAR/컴포넌트 기동 실패를 1차 startServer.log·ffdc·serverStatus, 2차 재기동·앱 재시작/롤백·구성 복원으로 다룸"
+- procedure: WSP-PROC-R5-DISK
+  match: [HMGR0020E]
+  reviewed: "2026-10-16 판정 적합성 확인 — HA 관리자 구성 문서 읽기 실패를 1차 구성 문서 권한·공간, 2차 권한 교정·restoreConfig 로 다룸"

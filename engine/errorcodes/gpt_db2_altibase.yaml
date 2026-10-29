@@ -1,0 +1,1013 @@
+product: altibase
+layer: db
+note: GPT 협업 수집분 — 벤더 공식 문서와 대조 후 확정
+codes:
+- code: ERR-0109D
+  severity: error
+  category: memory
+  title: 메모리 부족
+  immediate:
+  - OS 가용 메모리·스왑 확인 — Linux `free -m ; vmstat 1 5`, AIX `svmon -G`, Solaris `vmstat 1 5`
+  - iSQL `SELECT * FROM V$MEMSTAT;` 로 Altibase 모듈별 메모리 사용 상위 확인(읽기 전용)
+  short:
+  - '(2차·승인 후, 롤백: 없음) 비필수 부하(배치·대량 조회) 중지 요청, 메모리 관련 property 조정은 변경 관리 후'
+  - 프로세스별 메모리와 메모리 관련 property 및 누수 여부를 분석
+  mid:
+  - 물리 메모리와 Altibase 메모리 설정을 워크로드 기준으로 재산정
+  long:
+  - 메모리 헤드룸과 할당 실패 조기경보를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.altibase.com/display/FAQE/ERR-0109D%2BInsufficient%2Bmemory)
+  note: 쿼리 수행을 위한 메모리 부족 오류로 단독 코드만으로 서비스 전체 중단을 뜻하지 않음
+  vendor_cause: 쿼리 실행 메모리 할당 중 EXECUTE_STMT_MEMORY_MAXIMUM 한도를 초과했다.
+  vendor_action: Query_Execute 증가량과 현재 한도를 확인하고 EXECUTE_STMT_MEMORY_MAXIMUM을 ALLOC_SIZE보다 크게 설정해 설정 파일에도 반영한다.
+  vendor_url: https://docs.altibase.com/display/FAQE/ERR-0109D%2BInsufficient%2Bmemory
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR-xxxxx(16진 5자리) 코드는 5.x~7.3 공통. 6.3.1 부터 qp 로그에 ERR-xxxxx 직접 출력, 6.1.1 이하는 8자리 10진 errorcode(예 822329545=0x3103C049→ERR-3103C) → 파서가 변환해 대응
+- code: ERR-01027
+  severity: error
+  category: capacity
+  title: IPC 채널 고갈
+  immediate:
+  - "isql 로 sys 접속 후 `SELECT NAME, VALUE1 FROM V$PROPERTY WHERE NAME = 'IPC_CHANNEL_COUNT';` 와 `SELECT SUBSTR(COMM_NAME,1,3) CONN, COUNT(*) FROM V$SESSION GROUP BY SUBSTR(COMM_NAME,1,3);` — IPC 세션 수가 IPC_CHANNEL_COUNT 와 같으면 확정"
+  - "IPC 세션 상세: `SELECT ID, COMM_NAME, DB_USERNAME, CLIENT_PID, IDLE_START_TIME FROM V$SESSION WHERE COMM_NAME LIKE 'IPC%';` 뒤 `ps -p <CLIENT_PID>` — 클라이언트 프로세스가 없으면 미반납 채널 (7.x 컬럼, 6.5 는 `SELECT * FROM V$SESSION;`)"
+  short:
+  - "(2차·승인 후, 롤백: 원래 접속 방식·값) 신규 접속을 TCP 로 돌리고, IPC_CHANNEL_COUNT 상향은 altibase.properties 수정 뒤 계획 재기동"
+  - 비정상 세션과 IPC 채널 미반납 여부를 점검
+  mid:
+  - 업무량 기준으로 IPC_CHANNEL_COUNT를 조정하고 서버를 재기동
+  long:
+  - IPC 사용률과 동시접속량을 상시 모니터링
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.altibase.com/display/FAQE/ERR-01027%2BNo%2Bmore%2BIPC%2Bchannel)
+  note: IPC 접속 채널 한도 초과로 해당 접속이 실패하므로 error가 타당함
+  vendor_cause: IPC_CHANNEL_COUNT가 최대값을 초과해 IPC 연결을 설정할 수 없다.
+  vendor_action: IPC_CHANNEL_COUNT를 늘린 후 서버를 재시작한다.
+  vendor_url: https://docs.altibase.com/display/FAQE/ERR-01027%2BNo%2Bmore%2BIPC%2Bchannel
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR-xxxxx(16진 5자리) 코드는 5.x~7.3 공통. 6.3.1 부터 qp 로그에 ERR-xxxxx 직접 출력, 6.1.1 이하는 8자리 10진 errorcode(예 822329545=0x3103C049→ERR-3103C) → 파서가 변환해 대응
+- code: ERR-11030
+  severity: error
+  category: storage
+  title: 데이터파일 확장 한도 초과
+  immediate:
+  - "isql 로 sys 접속 후 `SELECT ID, NAME, SPACEID, CURRSIZE, MAXSIZE, NEXTSIZE, AUTOEXTEND FROM V$DATAFILES;` — 대상 파일 AUTOEXTEND 가 꺼져 있고 요청 크기가 MAXSIZE 보다 크면 확정(크기 단위는 페이지)"
+  - "`SELECT ID, NAME, TOTAL_PAGE_COUNT, ALLOCATED_PAGE_COUNT, PAGE_SIZE FROM V$TABLESPACES;` 로 테이블스페이스 여유, `df -h <datafile 디렉터리>` 로 OS 여유 확인 (7.x 컬럼, 6.5 는 `SELECT * FROM V$DATAFILES;`)"
+  short:
+  - "(2차·승인 후, 롤백: AUTOEXTEND 원래 상태) `ALTER TABLESPACE <TBS> ALTER DATAFILE '<file>' AUTOEXTEND ON MAXSIZE <크기>;` 뒤 크기 작업 재수행"
+  - AUTOEXTEND와 파일 최대 크기 및 디스크 용량을 점검
+  mid:
+  - datafile 추가 또는 tablespace 재배치로 용량을 확보
+  long:
+  - 데이터파일 증가율과 최대 크기 도달률을 상시 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.altibase.com/pages/viewpage.action?pageId=16876378)
+  note: 데이터파일 확장 작업 실패로 단독 코드만으로 서비스 전체 중단을 뜻하지 않음
+  vendor_cause: AUTOEXTEND OFF 데이터파일을 MAXSIZE보다 크게 변경하려 했다.
+  vendor_action: 데이터파일의 AUTOEXTEND를 ON으로 변경한 뒤 파일 크기 변경 작업을 수행한다.
+  vendor_url: https://docs.altibase.com/pages/viewpage.action?pageId=16876378
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR-xxxxx(16진 5자리) 코드는 5.x~7.3 공통. 6.3.1 부터 qp 로그에 ERR-xxxxx 직접 출력, 6.1.1 이하는 8자리 10진 errorcode(예 822329545=0x3103C049→ERR-3103C) → 파서가 변환해 대응
+- code: ERR-11035
+  severity: error
+  category: storage
+  title: 테이블스페이스 공간 부족
+  immediate:
+  - 대상 tablespace의 free space와 datafile 상태를 확인하고 공간을 확보
+  short:
+  - 대량 DML과 datafile 확장 가능 여부 및 디스크 용량을 점검
+  mid:
+  - datafile 증설과 tablespace 용량을 재산정
+  long:
+  - tablespace 사용률과 증가율 기반 선제 증설을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.altibase.com/display/FAQE/Altibase%2BError%2BMessages)
+  note: 공간 부족으로 DML이 실패하지만 단독 코드만으로 서비스 전체 중단을 뜻하지 않음
+  vendor_cause: 테이블스페이스에 사용 가능한 여유 공간이 부족하다.
+  vendor_action: 데이터파일을 추가해 테이블스페이스의 사용 가능 공간을 늘린다.
+  vendor_url: https://docs.altibase.com/display/FAQE/ERR-11035%2BThe%2Btablespace%2Bdoes%2Bnot%2Bhave%2Benough%2Bfree%2Bspace
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR-xxxxx(16진 5자리) 코드는 5.x~7.3 공통. 6.3.1 부터 qp 로그에 ERR-xxxxx 직접 출력, 6.1.1 이하는 8자리 10진 errorcode(예 822329545=0x3103C049→ERR-3103C) → 파서가 변환해 대응
+- code: ERR-11036
+  severity: error
+  category: storage
+  title: 데이터파일 사용 중
+  immediate:
+  - '`SELECT * FROM V$DATAFILES;` 로 대상 데이터파일 상태·소속 테이블스페이스 확인(읽기 전용)'
+  - 같은 시각 DDL·백업(ALTER TABLESPACE … BEGIN BACKUP 등) 작업 여부를 작업 이력과 `SELECT * FROM V$STATEMENT;` 로 확인
+  short:
+  - '(2차·승인 후, 롤백: 없음) 충돌하는 변경 작업 종료를 기다린 뒤 데이터파일 변경 재시도'
+  - 활성 트랜잭션과 파일 상태 및 DDL 충돌 여부를 점검
+  mid:
+  - 정비창에서 안전한 절차로 datafile 작업을 수행
+  long:
+  - 데이터파일 변경 전 사용상태 자동검증 절차를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.altibase.com/pages/viewpage.action?pageId=16876380)
+  vendor_cause: 한 번이라도 사용된 데이터파일을 DROP하려 했다.
+  vendor_action: 사용 이력이 있는 데이터파일은 직접 삭제할 수 없으므로 테이블스페이스를 재생성한다.
+  vendor_url: https://docs.altibase.com/pages/viewpage.action?pageId=16876380
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR-xxxxx(16진 5자리) 코드는 5.x~7.3 공통. 6.3.1 부터 qp 로그에 ERR-xxxxx 직접 출력, 6.1.1 이하는 8자리 10진 errorcode(예 822329545=0x3103C049→ERR-3103C) → 파서가 변환해 대응
+- code: ERR-11041
+  severity: error
+  category: lock
+  title: 교착상태 감지
+  immediate:
+  - "`grep -n -B3 \"ERR-11041\" <app_log> | tail -40` 로 실패 SQL·시각 확인 — 같은 테이블 쌍에서 반복되면 접근 순서 문제"
+  - "isql 로 sys 접속 후 `SELECT TRANS_ID, WAIT_FOR_TRANS_ID FROM V$LOCK_WAIT;` 와 `SELECT SESSION_ID, TX_ID, QUERY FROM V$STATEMENT WHERE TX_ID IN (SELECT WAIT_FOR_TRANS_ID FROM V$LOCK_WAIT);` — 서로를 기다리는 쌍이 계속 보이면 교착 반복 중 (7.x 컬럼)"
+  - "이중화 환경이면 `SELECT REP_NAME, STATUS, PEER_IP FROM V$REPSENDER;` — 이중화 수신 반영과 업무 DML 이 같은 행을 다투면 이중화 잠금 원인"
+  short:
+  - 잠금 객체와 트랜잭션 접근 순서 및 이중화 lock을 분석
+  mid:
+  - 트랜잭션 범위를 줄이고 잠금 획득 순서를 통일
+  long:
+  - deadlock 로그 수집과 재시도 정책을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.altibase.com/display/FAQE/ERR-11041%2BA%2Bdeadlock%2Bsituation%2Bhas%2Bbeen%2Bdetected)
+  vendor_cause: 교착상태가 발생해 동시성 제어를 위해 해당 쿼리를 실행하지 않았다.
+  vendor_action: 잠금을 유발한 쿼리와 교착 논리를 찾아 수정하고, 복제 환경이면 복제 중 획득되는 잠금도 확인한다.
+  vendor_url: https://docs.altibase.com/display/FAQE/ERR-11041%2BA%2Bdeadlock%2Bsituation%2Bhas%2Bbeen%2Bdetected
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR-xxxxx(16진 5자리) 코드는 5.x~7.3 공통. 6.3.1 부터 qp 로그에 ERR-xxxxx 직접 출력, 6.1.1 이하는 8자리 10진 errorcode(예 822329545=0x3103C049→ERR-3103C) → 파서가 변환해 대응
+- code: ERR-11098
+  severity: error
+  category: storage
+  title: NOARCHIVE 온라인백업 불가
+  immediate:
+  - "`isql -s localhost -u sys` 로 접속(비밀번호는 프롬프트 입력) 후 `SELECT * FROM V$ARCHIVE;` 로 아카이브 모드 표시 칼럼 확인 — 아카이브 모드가 꺼져(NOARCHIVE) 있으면 확정 (읽기 전용)"
+  - "실행한 백업 구문: `grep -n -i \"BACKUP\" <backup_script>` 로 온라인 백업(ALTER DATABASE BACKUP …) 사용 여부와 수행 시각 확인 — 오프라인 백업으로 대체 가능한지 판단 자료"
+  short:
+  - "(2차·승인 후, 롤백: NOARCHIVELOG 로 원복) 온라인 백업이 필요하면 CONTROL 단계에서 `ALTER DATABASE ARCHIVELOG;` 로 아카이브 모드 전환(서버 재기동 동반), 그전엔 오프라인 백업 사용"
+  - 백업 정책과 archive log 설정 및 복구 요구사항을 점검
+  mid:
+  - 필요 시 archive log 모드 전환 절차를 검토하고 백업 방식을 조정
+  long:
+  - 백업과 복구정책을 archive mode 기준으로 표준화
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.altibase.com/display/FAQE/ERR-11098%2BsmERR_ABORT_BackupLogMode%2Bcannot%2Bbe%2Bexecuted%2Bin%2Bno%2Barchive%2Blog%2Bmode)
+  note: 공식 의미는 NOARCHIVE LOG 모드에서 온라인 백업을 수행할 수 없다는 뜻임
+  vendor_cause: NO ARCHIVING 모드에서 온라인 백업을 수행했다.
+  vendor_action: DB를 ARCHIVING 모드로 변경한 뒤 SERVICE 단계에서 온라인 백업을 다시 수행한다.
+  vendor_url: https://docs.altibase.com/display/FAQE/ERR-11098%2BsmERR_ABORT_BackupLogMode%2Bcannot%2Bbe%2Bexecuted%2Bin%2Bno%2Barchive%2Blog%2Bmode
+  verify_note: "미검증 — 이전 1차 줄의 `SELECT ARCHIVELOG_MODE FROM V$LOG` 에서 V$LOG 의 ARCHIVELOG_MODE 칼럼을 Altibase General Reference 로 확인하지 못해 칼럼 이름을 단정하지 않는 `SELECT * FROM V$ARCHIVE` 로 바꿈 — 아카이브 모드를 나타내는 실제 칼럼 이름은 버전별 매뉴얼에서 확인"
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR-xxxxx(16진 5자리) 코드는 5.x~7.3 공통. 6.3.1 부터 qp 로그에 ERR-xxxxx 직접 출력, 6.1.1 이하는 8자리 10진 errorcode(예 822329545=0x3103C049→ERR-3103C) → 파서가 변환해 대응
+- code: ERR-11183
+  severity: error
+  category: capacity
+  title: TEMP 페이지영역 부족
+  immediate:
+  - "isql 로 sys 접속 후 `SELECT NAME, VALUE1 FROM V$PROPERTY WHERE NAME IN ('TEMP_MAX_PAGE_COUNT','TOTAL_WA_SIZE');` 와 `SELECT ID, NAME, TYPE, TOTAL_PAGE_COUNT, ALLOCATED_PAGE_COUNT FROM V$TABLESPACES;` 로 TEMP 한도·사용량 확인"
+  - "대형 정렬·해시 쿼리: `SELECT SESSION_ID, TOTAL_TIME, USED_MEMORY, QUERY FROM V$STATEMENT WHERE EXECUTE_FLAG = 1 ORDER BY TOTAL_TIME DESC LIMIT 10;` — 실패 시각에 큰 SORT/GROUP BY/HASH JOIN 이 돌았으면 확정 (7.x 컬럼)"
+  short:
+  - SORT와 HASH 대형 쿼리 및 temp 사용량을 분석
+  mid:
+  - temporary tablespace와 관련 한도를 업무량에 맞게 조정
+  long:
+  - TEMP 사용량과 대형 정렬 쿼리를 상시 모니터링
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.altibase.com/pages/viewpage.action?pageId=16876409)
+  vendor_cause: 디스크 TEMP 최대 크기가 TEMP_MAX_PAGE_COUNT보다 크고 이를 초과하는 TEMP가 필요한 쿼리를 실행했다.
+  vendor_action: 디스크 TEMP 최대 크기 합계에 맞게 TEMP_MAX_PAGE_COUNT를 조정하고 관련 Work Area 프로퍼티도 함께 조정한다.
+  vendor_url: https://docs.altibase.com/pages/viewpage.action?pageId=16876409
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR-xxxxx(16진 5자리) 코드는 5.x~7.3 공통. 6.3.1 부터 qp 로그에 ERR-xxxxx 직접 출력, 6.1.1 이하는 8자리 10진 errorcode(예 822329545=0x3103C049→ERR-3103C) → 파서가 변환해 대응
+- code: ERR-11184
+  severity: error
+  category: memory
+  title: Work Area 공간 부족
+  immediate:
+  - "isql 로 sys 접속 후 `SELECT NAME, VALUE1 FROM V$PROPERTY WHERE NAME IN ('TOTAL_WA_SIZE','SORT_AREA_SIZE','HASH_AREA_SIZE');` 로 Work Area 한도 확인"
+  - "동시 정렬·해시: `SELECT SESSION_ID, USED_MEMORY, TOTAL_TIME, QUERY FROM V$STATEMENT WHERE EXECUTE_FLAG = 1 ORDER BY USED_MEMORY DESC LIMIT 10;` — 상위 USED_MEMORY 합이 TOTAL_WA_SIZE 에 가까우면 확정"
+  - "`SELECT NAME, ALLOC_SIZE, MAX_TOTAL_SIZE FROM V$MEMSTAT ORDER BY ALLOC_SIZE DESC LIMIT 10;` 로 모듈별 메모리 상위 확인 (7.x 컬럼)"
+  short:
+  - "(2차·승인 후, 롤백: 원래 값) 대형 정렬·해시 배치의 동시 실행 수를 낮추고, `ALTER SYSTEM SET TOTAL_WA_SIZE = <값>;` 적용 뒤 altibase.properties 에도 반영"
+  - SORT_AREA_SIZE와 HASH_AREA_SIZE 및 Work Area 사용량을 분석
+  mid:
+  - Work Area와 서버 메모리를 워크로드 기준으로 재산정
+  long:
+  - 대형 정렬과 해시 작업의 메모리 사용량을 지속 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.altibase.com/display/FAQE/ERR-11184%2B%28%2B%2B70020%29%2BInsufficient%2Bfree%2Bspace%2Bin%2Bwork%2Barea)
+  vendor_cause: SORT/HASH용 Work Area에 SORT_AREA_SIZE 또는 HASH_AREA_SIZE를 할당할 여유 메모리가 없다.
+  vendor_action: TOTAL_WA_SIZE를 현재보다 크게 설정하고 재시작 후에도 유지되도록 설정 파일에도 반영한다.
+  vendor_url: https://docs.altibase.com/display/FAQE/ERR-11184%2B%28%2B%2B70020%29%2BInsufficient%2Bfree%2Bspace%2Bin%2Bwork%2Barea
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR-xxxxx(16진 5자리) 코드는 5.x~7.3 공통. 6.3.1 부터 qp 로그에 ERR-xxxxx 직접 출력, 6.1.1 이하는 8자리 10진 errorcode(예 822329545=0x3103C049→ERR-3103C) → 파서가 변환해 대응
+- code: ERR-110F0
+  severity: error
+  category: memory
+  title: MEM_MAX_DB_SIZE 초과
+  immediate:
+  - "isql 로 sys 접속 후 `SELECT NAME, VALUE1 FROM V$PROPERTY WHERE NAME = 'MEM_MAX_DB_SIZE';` 와 `SELECT SPACE_NAME, CURRENT_SIZE, MAXSIZE, AUTOEXTEND_MODE FROM V$MEM_TABLESPACES;` — CURRENT_SIZE 합계가 MEM_MAX_DB_SIZE 에 닿았으면 확정 (7.x 컬럼)"
+  - "물리 메모리 여유: Linux `free -m`, AIX `svmon -G` — MEM_MAX_DB_SIZE 상향 가능 폭 판단 자료"
+  short:
+  - "(2차·승인 후, 롤백: 원래 값) altibase.properties 의 MEM_MAX_DB_SIZE 를 실제 사용량+여유로 수정 뒤 계획 재기동, 그전엔 불필요 메모리 테이블 데이터 정리 검토"
+  - 메모리 tablespace 증가 원인과 물리 메모리 여유를 분석
+  mid:
+  - MEM_MAX_DB_SIZE와 서버 메모리를 검증 후 조정
+  long:
+  - 메모리 DB 크기와 한도 사용률을 상시 관리
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.altibase.com/pages/viewpage.action?pageId=7340747)
+  note: 메모리 테이블스페이스 합계가 MEM_MAX_DB_SIZE를 초과해 DML이 실패하는 오류임
+  vendor_cause: 메모리 테이블스페이스 총합이 MEM_MAX_DB_SIZE를 초과했다.
+  vendor_action: MEM_MAX_DB_SIZE가 실제 사용량보다 작으면 altibase.properties에서 값을 늘리고 서버를 재시작한다.
+  vendor_url: https://docs.altibase.com/pages/viewpage.action?pageId=7340747
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR-xxxxx(16진 5자리) 코드는 5.x~7.3 공통. 6.3.1 부터 qp 로그에 ERR-xxxxx 직접 출력, 6.1.1 이하는 8자리 10진 errorcode(예 822329545=0x3103C049→ERR-3103C) → 파서가 변환해 대응
+- code: ERR-31010
+  severity: error
+  category: security
+  title: 사용자 없음
+  immediate:
+  - 접속 설정의 계정명·DB 이름 확인(대소문자 포함), SYS 로 `SELECT USER_NAME FROM SYSTEM_.SYS_USERS_;` 계정 존재 확인(읽기 전용)
+  - 같은 출처에서 반복 실패 중인지 `$ALTIBASE_HOME/trc/altibase_error.log` 와 애플리케이션 로그로 확인
+  short:
+  - '(2차·승인 후, 롤백: 설정 원복) 잘못된 계정으로 반복 접속하는 애플리케이션 연결 설정 수정 요청'
+  - 계정 생성 여부와 대소문자 및 접속 설정을 점검
+  mid:
+  - 계정 관리와 애플리케이션 접속정보를 표준화
+  long:
+  - 계정 변경과 접속정보 배포를 중앙관리
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.altibase.com/pages/viewpage.action?pageId=15138837)
+  vendor_cause: 접속 시 사용자 계정을 잘못 입력한 경우가 있다.
+  vendor_action: 입력한 사용자 계정·비밀번호·접속 IP와 altibase.properties의 PORT_NO를 확인한다.
+  vendor_url: https://docs.altibase.com/pages/viewpage.action?pageId=15138837
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR-xxxxx(16진 5자리) 코드는 5.x~7.3 공통. 6.3.1 부터 qp 로그에 ERR-xxxxx 직접 출력, 6.1.1 이하는 8자리 10진 errorcode(예 822329545=0x3103C049→ERR-3103C) → 파서가 변환해 대응
+- code: ERR-31370
+  severity: error
+  category: security
+  title: 계정 잠김
+  immediate:
+  - "isql 로 sys 접속 후 `SELECT USER_NAME, ACCOUNT_LOCK, ACCOUNT_LOCK_DATE, FAILED_LOGIN_COUNT, FAILED_LOGIN_ATTEMPTS FROM SYSTEM_.DBA_USERS_ WHERE USER_NAME = '<USER>';` — 잠금 표시이고 실패 횟수가 FAILED_LOGIN_ATTEMPTS 이상이면 확정 (7.x 컬럼, 6.5 는 `DESC SYSTEM_.DBA_USERS_` 로 확인)"
+  - "실패 출처: `grep -n \"ERR-31370\" <app_log> | tail -20` 와 최근 비밀번호 변경 일정 대조 — 한 서버에서 반복되면 저장 비밀번호 불일치"
+  short:
+  - "(2차·승인 후, 롤백: `ALTER USER <USER> ACCOUNT LOCK;`) 정상 사용자 확인 뒤 `ALTER USER <USER> ACCOUNT UNLOCK;`"
+  - 암호 정책과 반복 로그인 실패 및 애플리케이션 저장 암호를 점검
+  mid:
+  - 정상 절차로 계정을 해제하고 접속정보를 수정
+  long:
+  - 계정 잠금 임계치와 인증 실패 모니터링을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.altibase.com/pages/viewpage.action?pageId=15138837)
+  vendor_cause: 비밀번호 관리 정책에 따라 계정이 잠긴 상태일 수 있다.
+  vendor_action: 사용자 계정·비밀번호·접속 IP와 PORT_NO 등 접속 설정을 확인한다.
+  vendor_url: https://docs.altibase.com/pages/viewpage.action?pageId=15138837
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR-xxxxx(16진 5자리) 코드는 5.x~7.3 공통. 6.3.1 부터 qp 로그에 ERR-xxxxx 직접 출력, 6.1.1 이하는 8자리 10진 errorcode(예 822329545=0x3103C049→ERR-3103C) → 파서가 변환해 대응
+- code: ERR-4102E
+  severity: error
+  category: security
+  title: 비밀번호 오류
+  immediate:
+  - "접속 설정 대조: `grep -nE \"^ *PORT_NO\" $ALTIBASE_HOME/conf/altibase.properties` 와 앱 데이터소스의 서버·포트·계정 — 다른 서버·포트로 접속 중이면 설정 원인"
+  - "실패 누적: isql 로 sys 접속 후 `SELECT USER_NAME, FAILED_LOGIN_COUNT, ACCOUNT_LOCK FROM SYSTEM_.DBA_USERS_ WHERE USER_NAME = '<USER>';` — 실패 횟수가 늘고 있으면 잘못된 저장 비밀번호로 반복 접속 중(잠기기 전 앱 담당 통보) (7.x 컬럼)"
+  short:
+  - "(2차·승인 후, 롤백: 이전 설정 파일) 잘못된 비밀번호로 반복 접속하는 앱의 데이터소스 비밀번호 수정·재배포, 그 사이 해당 앱의 접속 시도 멈춤"
+  - 패스워드 변경 이력과 애플리케이션 저장정보를 점검
+  mid:
+  - 비밀정보 저장과 배포 방식을 정비하고 계정정보를 동기화
+  long:
+  - 인증정보 수명주기와 실패율 모니터링을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.altibase.com/pages/viewpage.action?pageId=15138837)
+  vendor_cause: 접속 시 비밀번호를 잘못 입력한 경우가 있다.
+  vendor_action: 입력한 사용자 계정·비밀번호·접속 IP와 altibase.properties의 PORT_NO를 확인한다.
+  vendor_url: https://docs.altibase.com/pages/viewpage.action?pageId=15138837
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR-xxxxx(16진 5자리) 코드는 5.x~7.3 공통. 6.3.1 부터 qp 로그에 ERR-xxxxx 직접 출력, 6.1.1 이하는 8자리 10진 errorcode(예 822329545=0x3103C049→ERR-3103C) → 파서가 변환해 대응
+- code: ERR-41041
+  severity: error
+  category: capacity
+  title: SYSDBA 세션 중복
+  immediate:
+  - "isql 로 sys(일반) 접속 후 `SELECT ID, COMM_NAME, CLIENT_PID, LOGIN_TIME, IDLE_START_TIME, CURRENT_STMT_ID FROM V$SESSION WHERE SYSDBA_FLAG = 1;` — 행이 있으면 기존 SYSDBA 세션 존재 확정 (7.x 컬럼)"
+  - "그 세션의 실행 문장: `SELECT SESSION_ID, QUERY, TOTAL_TIME FROM V$STATEMENT WHERE SESSION_ID = <ID>;` 와 OS `ps -ef | grep [i]sql` — 작업 중인 관리자 세션이면 끝날 때까지 대기"
+  short:
+  - "(2차·승인 후, 롤백: 해당 없음 — 세션 소유자 확인) 잔존 SYSDBA 세션이면 소유자 동의 뒤 그 isql 을 정상 종료(exit)시키고 다시 접속"
+  - 기존 SYSDBA 세션이 정상 작업 중인지와 비정상 잔존 여부를 점검
+  mid:
+  - 관리 작업 절차와 SYSDBA 동시 실행 통제를 정비
+  long:
+  - SYSDBA 세션 감사와 관리작업 잠금 절차를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.altibase.com/display/FAQE/ERR-41041%2BAnother%2BSYSDBA%2Bsession%2Bis%2Balready%2Brunning)
+  note: SYSDBA 접속이 실패하는 오류이므로 warn보다 error가 타당함
+  vendor_cause: 이미 다른 클라이언트가 SYSDBA로 연결된 상태에서 SYSDBA 접속을 시도했다.
+  vendor_action: 기존 SYSDBA 세션이 있는지 확인하고 필요하면 세션을 정리한 뒤 다시 연결한다.
+  vendor_url: https://docs.altibase.com/display/FAQE/ERR-41041%2BAnother%2BSYSDBA%2Bsession%2Bis%2Balready%2Brunning
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR-xxxxx(16진 5자리) 코드는 5.x~7.3 공통. 6.3.1 부터 qp 로그에 ERR-xxxxx 직접 출력, 6.1.1 이하는 8자리 10진 errorcode(예 822329545=0x3103C049→ERR-3103C) → 파서가 변환해 대응
+- code: ERR-410CF
+  severity: error
+  category: capacity
+  title: 세션 Statement 한도
+  immediate:
+  - "isql 로 sys 접속 후 `SELECT ID, DB_USERNAME, COMM_NAME, OPENED_STMT_COUNT FROM V$SESSION ORDER BY OPENED_STMT_COUNT DESC LIMIT 10;` — 상위 세션 값이 한도와 같으면 확정 (7.x 컬럼)"
+  - "`SELECT NAME, VALUE1 FROM V$PROPERTY WHERE NAME = 'MAX_STATEMENTS_PER_SESSION';` 로 한도 확인, `SELECT COUNT(*) FROM V$STATEMENT WHERE SESSION_ID = <ID>;` 가 계속 늘면 statement close 누락"
+  short:
+  - 애플리케이션 statement close 누락과 세션 사용 패턴을 분석
+  mid:
+  - 누수 코드를 수정하고 필요한 경우 세션당 statement 한도를 조정
+  long:
+  - statement 누수 탐지와 세션 자원 사용량을 상시 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.altibase.com/display/FAQE/ERR-410CF%2BToo%2Bmany%2Bstatements%2Bhave%2Bbeen%2Ballocated%2Bto%2Bthis%2Bsession)
+  vendor_cause: 한 세션에 prepare용으로 할당된 쿼리 수가 한도를 초과했다.
+  vendor_action: 세션의 prepared 쿼리를 확인하고 MAX_STATEMENTS_PER_SESSION을 늘리며 애플리케이션의 statement close 여부를 확인한다.
+  vendor_url: https://docs.altibase.com/display/FAQE/ERR-410CF%2BToo%2Bmany%2Bstatements%2Bhave%2Bbeen%2Ballocated%2Bto%2Bthis%2Bsession
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR-xxxxx(16진 5자리) 코드는 5.x~7.3 공통. 6.3.1 부터 qp 로그에 ERR-xxxxx 직접 출력, 6.1.1 이하는 8자리 10진 errorcode(예 822329545=0x3103C049→ERR-3103C) → 파서가 변환해 대응
+- code: ERR-410D5
+  severity: error
+  category: connection
+  title: 클라이언트 접속 실패
+  immediate:
+  - "서버 기동·리슨: `ps -ef | grep [a]ltibase` 와 `netstat -an | grep <PORT_NO> | grep LISTEN` (PORT_NO 는 `grep -nE \"^ *PORT_NO\" $ALTIBASE_HOME/conf/altibase.properties`)"
+  - "클라이언트에서 `nc -zvw3 <server> <PORT_NO>` — 거부·시간초과면 방화벽·포트 원인, 일반 사용자가 IPC(SYSDBA 전용 채널)로 접속했는지 접속 문자열 확인"
+  - "IPC 채널: isql 로 sys 접속 후 `SELECT SUBSTR(COMM_NAME,1,3) CONN, COUNT(*) FROM V$SESSION GROUP BY SUBSTR(COMM_NAME,1,3);` 와 IPC_CHANNEL_COUNT 비교 — 같으면 IPC 고갈"
+  short:
+  - 접속 주소와 방화벽 및 서버 상태와 계정 설정을 점검
+  mid:
+  - 연결 설정과 failover 정책을 표준화
+  long:
+  - 접속 성공률과 DB 서비스 상태를 상시 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.altibase.com/pages/viewpage.action?pageId=6979736)
+  note: 클라이언트 접속 작업 실패로 단독 코드만으로 서비스 전체 중단을 뜻하지 않음
+  vendor_cause: 일반 사용자가 SYSDBA 전용 IPC 채널로 접속했거나 포트·접속방식이 틀리거나 방화벽에 차단됐다.
+  vendor_action: V$SESSION에서 불필요한 IPC 세션을 확인해 정리하고 IPC 채널을 확보한 뒤 다시 연결한다.
+  vendor_url: https://docs.altibase.com/pages/viewpage.action?pageId=6979736
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR-xxxxx(16진 5자리) 코드는 5.x~7.3 공통. 6.3.1 부터 qp 로그에 ERR-xxxxx 직접 출력, 6.1.1 이하는 8자리 10진 errorcode(예 822329545=0x3103C049→ERR-3103C) → 파서가 변환해 대응
+- code: ERR-410E3
+  severity: error
+  category: security
+  title: TCP 접속 제한
+  immediate:
+  - "isql 로 sys 접속 후 `SELECT USER_NAME, DISABLE_TCP FROM SYSTEM_.DBA_USERS_ WHERE USER_NAME = '<USER>';` — TCP 접속 금지로 설정돼 있으면 확정 (7.x 컬럼, 6.5 는 `DESC SYSTEM_.DBA_USERS_` 로 확인)"
+  - "접속 IP 제한: `grep -n \"ACCESS_LIST\" $ALTIBASE_HOME/conf/altibase.properties` 와 접속 클라이언트 IP 대조 — 목록 밖 IP 면 IP 제한 원인"
+  short:
+  - "(2차·승인 후, 롤백: `ALTER USER <USER> DISABLE TCP;`) 업무상 TCP 접속이 필요하면 `ALTER USER <USER> ENABLE TCP;`"
+  - 계정 보안정책과 허용 네트워크 및 접속 방식 설정을 점검
+  mid:
+  - 업무 필요 범위에서 접근정책을 수정하고 최소권한을 유지
+  long:
+  - 계정별 네트워크 접근정책과 차단 이력을 관리
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.altibase.com/pages/viewpage.action?pageId=15138837)
+  vendor_cause: 비밀번호 관리 정책에 따라 TCP 접속 제한이 설정된 경우가 있다.
+  vendor_action: 사용자 계정·비밀번호·접속 IP와 PORT_NO 등 접속 설정을 확인한다.
+  vendor_url: https://docs.altibase.com/pages/viewpage.action?pageId=15138837
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR-xxxxx(16진 5자리) 코드는 5.x~7.3 공통. 6.3.1 부터 qp 로그에 ERR-xxxxx 직접 출력, 6.1.1 이하는 8자리 10진 errorcode(예 822329545=0x3103C049→ERR-3103C) → 파서가 변환해 대응
+  verify_note: "미검증 — ALTER USER … ENABLE/DISABLE TCP 구문과 DBA_USERS_.DISABLE_TCP 컬럼의 6.5 적용 여부(7.3 General Reference 로만 대조)"
+- code: ERR-51024
+  severity: error
+  category: connection
+  title: 프로토콜 버전 불일치
+  immediate:
+  - "양쪽 서버에서 isql 로 sys 접속 후 `SELECT PRODUCT_VERSION, REPL_PROTOCOL_VERSION FROM V$VERSION;` — REPL_PROTOCOL_VERSION 이 다르면 확정 (7.x 컬럼)"
+  - "`grep -n \"ERR-51024\" $ALTIBASE_HOME/trc/altibase_rp.log | tail -20` 로 상대 IP·발생 시각 확인 — 한쪽만 패치·업그레이드한 직후인지 작업 이력 대조"
+  short:
+  - "(2차·승인 후, 롤백: 이전 패키지) 버전이 다른 동안 해당 이중화를 멈춘 채 두고 양쪽 패키지 버전을 맞춘 뒤 이중화 재개"
+  - 드라이버와 서버의 protocol 호환성을 점검
+  mid:
+  - 지원되는 동일 호환 버전으로 클라이언트를 교체
+  long:
+  - 서버 패치 시 클라이언트 호환성 검증을 배포 절차에 포함
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.altibase.com/display/FAQE/Altibase%2BError%2BMessages)
+  vendor_cause: 복제 서버 간 replication protocol version이 서로 다르다.
+  vendor_action: 양쪽 서버의 replication protocol version을 확인해 동일하게 맞춘다.
+  vendor_url: https://docs.altibase.com/display/FAQE/ERR-51024%2BDifferent%2Bprotocol%2Bversions
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR-xxxxx(16진 5자리) 코드는 5.x~7.3 공통. 6.3.1 부터 qp 로그에 ERR-xxxxx 직접 출력, 6.1.1 이하는 8자리 10진 errorcode(예 822329545=0x3103C049→ERR-3103C) → 파서가 변환해 대응
+- code: ERR-51043
+  severity: error
+  category: connection
+  title: 통신 링크 단절
+  immediate:
+  - "서버 가동 시간: isql 로 sys 접속 후 `SELECT STARTUP_PHASE, WORKING_TIME_SEC FROM V$INSTANCE;` — WORKING_TIME_SEC 가 오류 시각 이후만큼이면 서버가 다시 올라온 것 (7.x 컬럼)"
+  - "timeout 종료: `SELECT NAME, VALUE1 FROM V$PROPERTY WHERE NAME IN ('QUERY_TIMEOUT','IDLE_TIMEOUT','FETCH_TIMEOUT','UTRANS_TIMEOUT');` 와 `grep -in \"timeout\" $ALTIBASE_HOME/trc/altibase_boot.log | tail -20` — 오류 시각에 timeout 기록이 있으면 확정"
+  - "네트워크: 클라이언트에서 `ping -c 5 <server>` 와 `nc -zvw3 <server> <PORT_NO>` — 손실·거부가 있으면 네트워크 원인"
+  short:
+  - timeout과 서버 종료 및 클라이언트 강제종료 여부를 분석
+  mid:
+  - 장기 쿼리를 튜닝하고 연결 타임아웃과 재접속 정책을 조정
+  long:
+  - 통신 단절률과 DB 가용성을 통합 모니터링
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.altibase.com/display/FAQE/ERR-51043%2BCommunication%2Blink%2Bfailure)
+  note: 개별 연결 단절 오류로 단독 코드만으로 서비스 전체 중단을 뜻하지 않음
+  vendor_cause: 서버의 timeout 강제 종료, 사용자 강제 종료 또는 DB 종료로 연결이 끊겼다.
+  vendor_action: 장시간 쿼리를 튜닝하고 세션 timeout을 늘리며 DB 서비스가 정상 동작하는지 확인한다.
+  vendor_url: https://docs.altibase.com/display/FAQE/ERR-51043%2BCommunication%2Blink%2Bfailure
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR-xxxxx(16진 5자리) 코드는 5.x~7.3 공통. 6.3.1 부터 qp 로그에 ERR-xxxxx 직접 출력, 6.1.1 이하는 8자리 10진 errorcode(예 822329545=0x3103C049→ERR-3103C) → 파서가 변환해 대응
+- code: ERR-5104D
+  severity: error
+  category: connection
+  title: 연결 시간초과
+  immediate:
+  - "클라이언트에서 `nc -zvw3 <server> <PORT_NO>` 와 `ping -c 5 <server>` — 응답 지연·시간초과면 네트워크·방화벽 원인"
+  - "서버 측: `netstat -an | grep <PORT_NO> | grep LISTEN` 과 `vmstat 1 5` — 리슨 없음이면 서버 미기동, run queue 과다면 서버 응답 지연"
+  - "애플리케이션 연결 속성의 CONNECTION_TIMEOUT(연결 문자열·데이터소스 설정) 값 확인 — 수 초 이하로 짧으면 설정 원인"
+  short:
+  - 네트워크 지연과 방화벽 및 DB 응답 상태를 분석
+  mid:
+  - 네트워크 병목을 개선하고 타임아웃 값을 업무 기준에 맞게 조정
+  long:
+  - 접속 지연 SLO와 timeout 발생률을 지속 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.altibase.com/display/FAQE/ERR-5104D%2BConnection%2Btimeout)
+  vendor_cause: 클라이언트가 CONNECTION_TIMEOUT 내 서버 응답을 받지 못했다.
+  vendor_action: 네트워크 연결 상태를 확인한다.
+  vendor_url: https://docs.altibase.com/display/FAQE/ERR-5104D%2BConnection%2Btimeout
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR-xxxxx(16진 5자리) 코드는 5.x~7.3 공통. 6.3.1 부터 qp 로그에 ERR-xxxxx 직접 출력, 6.1.1 이하는 8자리 10진 errorcode(예 822329545=0x3103C049→ERR-3103C) → 파서가 변환해 대응
+- code: ERR-5104F
+  severity: error
+  category: connection
+  title: 통신 링크 실패
+  immediate:
+  - '`grep -Ein ''ERR-5104F|Communication link failure|timeout'' $ALTIBASE_HOME/trc/altibase_boot.log | tail -20` 로 오류 시각 전후 세션 종료·timeout 기록 확인 — timeout 줄이 같은 시각이면 timeout 원인'
+  - isql 실행 후 계정·암호를 대화식으로 입력하고 `SELECT NAME, VALUE1 FROM V$PROPERTY WHERE NAME IN ('QUERY_TIMEOUT','FETCH_TIMEOUT','UTRANS_TIMEOUT','IDLE_TIMEOUT');` 를 실패 질의 실행 시간과 비교
+  - '서버 생존·네트워크: `ps -ef | grep [a]ltibase` 와 `ping -c 5 <server>`, 방화벽 유휴 세션 시간과 IDLE_TIMEOUT 비교 — 멀티스레드 앱이면 연결 공유 여부를 개발팀 확인'
+  short:
+  - "(2차·승인 후, 롤백: 원래 값) 장시간 쿼리 튜닝 전까지 QUERY_TIMEOUT 등 관련 프로퍼티 상향(`ALTER SYSTEM SET` 뒤 altibase.properties 반영), 영향 세션은 앱에서 재연결"
+  - 서버 종료와 TCP 오류 및 중간장비 타임아웃을 분석
+  mid:
+  - 네트워크와 연결 재시도 정책을 개선
+  long:
+  - 연결 실패율과 네트워크 품질을 상시 모니터링
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.altibase.com/pages/viewpage.action?pageId=7340245)
+  note: 세션 통신 실패로 단독 코드만으로 서비스 전체 중단을 뜻하지 않음
+  vendor_cause: 통신 링크 실패 — 질의 처리 중 클라이언트와 서버 사이 세션 연결이 끊겼다는 뜻. 서버 timeout 속성(QUERY/FETCH/UTRANS/IDLE_TIMEOUT)에 의한 세션 종료, 네트워크·방화벽 유휴 연결 끊김, 서버 비정상 종료, 연결 객체를 여러 스레드가 공유하는 애플리케이션 결함 등 원인이 여럿이다(timeout 이 유일한 원인은 아님).
+  vendor_action: altibase_boot.log의 세션 종료 정보를 확인하고 스레드 프로그램 주의사항과 네트워크 문제를 점검한다.
+  vendor_url: https://docs.altibase.com/pages/viewpage.action?pageId=7340245
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR-xxxxx(16진 5자리) 코드는 5.x~7.3 공통. 6.3.1 부터 qp 로그에 ERR-xxxxx 직접 출력, 6.1.1 이하는 8자리 10진 errorcode(예 822329545=0x3103C049→ERR-3103C) → 파서가 변환해 대응
+- code: ERR-5105A
+  severity: error
+  category: connection
+  title: 연결 객체 없음
+  immediate:
+  - "`grep -n -B10 \"ERR-5105A\" <app_log> | tail -60` 로 직전 단절·timeout 오류와 사용한 연결명 확인 — 직전에 ERR-5104F 등이 있으면 단절된 연결 재사용"
+  - "isql 로 sys 접속 후 `SELECT NAME, VALUE1 FROM V$PROPERTY WHERE NAME IN ('IDLE_TIMEOUT','QUERY_TIMEOUT');` — IDLE_TIMEOUT 보다 긴 유휴 뒤 첫 쿼리에서 나면 timeout 단절 확정"
+  short:
+  - 종료된 연결 재사용과 connection lifecycle 오류를 분석
+  mid:
+  - 연결풀 검증과 유효성 검사 및 재연결 로직을 보완
+  long:
+  - 연결 상태검증과 stale connection 탐지를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.altibase.com/pages/viewpage.action?pageId=7340243)
+  vendor_cause: DB 미접속 상태에서 쿼리를 처리했거나 timeout으로 연결이 끊겼거나 존재하지 않는 연결명을 사용했다.
+  vendor_action: 세션 timeout을 늘리거나 쿼리를 튜닝하고, 스레드 프로그램에서는 해당 고유 연결명이 존재하는지 확인한다.
+  vendor_url: https://docs.altibase.com/pages/viewpage.action?pageId=7340243
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR-xxxxx(16진 5자리) 코드는 5.x~7.3 공통. 6.3.1 부터 qp 로그에 ERR-xxxxx 직접 출력, 6.1.1 이하는 8자리 10진 errorcode(예 822329545=0x3103C049→ERR-3103C) → 파서가 변환해 대응
+- code: ERR-51192
+  severity: error
+  category: connection
+  title: 호스트명 조회 실패
+  immediate:
+  - "호스트명 해석: `getent hosts <서버명>` 와 `getent hosts localhost` — 결과가 없거나 localhost 가 ::1 만 돌려주면 확정"
+  - "`grep -n \"localhost\" /etc/hosts` 와 `cat /etc/resolv.conf` 로 hosts·DNS 설정, is 스크립트의 서버값은 `grep -oE \"[-]s [^ ]+\" $ALTIBASE_HOME/bin/is` 로 확인"
+  short:
+  - getaddrinfo 실패 원인과 DNS 서버 및 hosts 설정을 점검
+  mid:
+  - 이름해석 구성을 표준화하고 DNS 이중화를 검토
+  long:
+  - DNS 응답성과 DB 접속 이름해석을 상시 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.altibase.com/display/FAQE/ERR-51192%2BThe%2Bcall%2Bto%2Bgetaddrinfo%28%29%2Bfailed.%2BThe%2Bhost%2Bname%2Bor%2Bservice%2Bmay%2Bbe%2Bunknown)
+  vendor_cause: is 스크립트로 DB 접속 시 잘못된 서버 정보를 사용했다.
+  vendor_action: is 스크립트의 서버 정보를 확인하고 계속 발생하면 localhost를 127.0.0.1로 변경해 다시 연결한다.
+  vendor_url: https://docs.altibase.com/display/FAQE/ERR-51192%2BThe%2Bcall%2Bto%2Bgetaddrinfo%28%29%2Bfailed.%2BThe%2Bhost%2Bname%2Bor%2Bservice%2Bmay%2Bbe%2Bunknown
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR-xxxxx(16진 5자리) 코드는 5.x~7.3 공통. 6.3.1 부터 qp 로그에 ERR-xxxxx 직접 출력, 6.1.1 이하는 8자리 10진 errorcode(예 822329545=0x3103C049→ERR-3103C) → 파서가 변환해 대응
+- code: ERR-61000
+  severity: error
+  category: upstream
+  title: 복제 대상 레코드 없음
+  immediate:
+  - "`tail -100 $ALTIBASE_HOME/trc/altibase_rp_conflict.log` 로 대상 테이블·PK·SQL 확인 — 같은 테이블이 반복되면 데이터 불일치 확정"
+  - "양쪽 서버에서 isql 로 `SELECT * FROM <owner>.<table> WHERE <PK컬럼> = <값>;` — 수신 측에 행이 없거나 값이 다르면 불일치"
+  - "`SELECT REP_NAME, APPLY_XSN, UPDATE_FAILURE_COUNT, DELETE_FAILURE_COUNT FROM V$REPRECEIVER;` — 실패 건수가 계속 늘면 충돌 진행 중 (7.x 컬럼)"
+  short:
+  - 송수신 서버의 해당 데이터와 이중화 지연 및 업무 DML 흐름을 비교
+  mid:
+  - 원천과 대상 데이터 정합성을 복구하고 충돌 원인을 수정
+  long:
+  - 복제 conflict 자동수집과 데이터 정합성 검증을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.altibase.com/pages/viewpage.action?pageId=19333729)
+  vendor_cause: 복제 테이블 UPDATE 데이터 값이 다르거나 해당 기본키가 존재하지 않는다.
+  vendor_action: 대상 데이터가 존재하는지 확인한 뒤 문장을 실행한다.
+  vendor_url: https://docs.altibase.com/display/FAQE/ERR-61000%2BThe%2Breceived%2Brecord%2Bwas%2Bnot%2Bfound%2Bin%2Bthe%2Bdatabase
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR-xxxxx(16진 5자리) 코드는 5.x~7.3 공통. 6.3.1 부터 qp 로그에 ERR-xxxxx 직접 출력, 6.1.1 이하는 8자리 10진 errorcode(예 822329545=0x3103C049→ERR-3103C) → 파서가 변환해 대응
+- code: ERR-61001
+  severity: error
+  category: upstream
+  title: 복제 실행 충돌
+  immediate:
+  - "`tail -200 $ALTIBASE_HOME/trc/altibase_rp_conflict.log` 에서 충돌 UPDATE 의 테이블·PK·before/after 값 확인"
+  - "양쪽 서버에서 `SELECT * FROM <owner>.<table> WHERE <PK컬럼> = <값>;` 비교 — 양쪽에서 같은 행을 갱신하는 업무(양방향 DML)면 확정"
+  - "`SELECT REP_NAME, UPDATE_SUCCESS_COUNT, UPDATE_FAILURE_COUNT FROM V$REPRECEIVER;` 로 실패 증가 추이 확인 (7.x 컬럼)"
+  short:
+  - 송수신 데이터의 before와 after 값과 트랜잭션 흐름을 분석
+  mid:
+  - 데이터를 정합화하고 양방향 변경 로직을 개선
+  long:
+  - 복제 conflict 추세와 업무별 충돌률을 상시 관리
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.altibase.com/pages/viewpage.action?pageId=19333729)
+  vendor_cause: 서로 다른 값의 복제 테이블 데이터에 UPDATE를 수행해 충돌이 발생했다.
+  vendor_action: 대상 데이터가 존재하는지 확인한 뒤 문장을 실행한다.
+  vendor_url: https://docs.altibase.com/display/FAQE/ERR-61001%2BA%2Bconflict%2Boccurred%2Bwhile%2Bexecuting%2Bthe%2Breceived%2Bstatement
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR-xxxxx(16진 5자리) 코드는 5.x~7.3 공통. 6.3.1 부터 qp 로그에 ERR-xxxxx 직접 출력, 6.1.1 이하는 8자리 10진 errorcode(예 822329545=0x3103C049→ERR-3103C) → 파서가 변환해 대응
+- code: ERR-6100C
+  severity: critical
+  category: upstream
+  title: 복제 Receiver 없음
+  immediate:
+  - "상대 서버에서 isql 로 `SELECT REP_NAME, PEER_IP, PEER_PORT FROM V$REPRECEIVER;` — 행이 없으면 Receiver 미동작 확정 (7.x 컬럼)"
+  - "상대 서버 `ps -ef | grep [a]ltibase` 와 로컬에서 `nc -zvw3 <peer_ip> <REPLICATION_PORT_NO>` — 포트 거부면 상대 서버·이중화 포트 원인"
+  - "`SELECT REPLICATION_NAME, IS_STARTED FROM SYSTEM_.SYS_REPLICATIONS_;` 와 `SELECT REPLICATION_NAME, HOST_IP, PORT_NO FROM SYSTEM_.SYS_REPL_HOSTS_;` 로 대상 주소 확인"
+  short:
+  - replication 설정과 상대 서버 주소 및 객체 상태를 점검
+  mid:
+  - receiver를 정상화하고 이중화 객체를 재기동 또는 재구성
+  long:
+  - Sender와 Receiver 상태 헬스체크를 상시 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.altibase.com/display/FAQE/ERR-6100C%2BrpERR_ABORT_RP_RECEIVER_NOT_FOUND%2BThe%2Breceiver%2Bdoes%2Bnot%2Bexist)
+  vendor_cause: 복제 Receiver가 중지되어 복제를 시작하거나 중지할 수 없다.
+  vendor_action: 원격 복제 대상 서버 상태와 네트워크 연결을 확인한다.
+  vendor_url: https://docs.altibase.com/display/FAQE/ERR-6100C%2BrpERR_ABORT_RP_RECEIVER_NOT_FOUND%2BThe%2Breceiver%2Bdoes%2Bnot%2Bexist
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR-xxxxx(16진 5자리) 코드는 5.x~7.3 공통. 6.3.1 부터 qp 로그에 ERR-xxxxx 직접 출력, 6.1.1 이하는 8자리 10진 errorcode(예 822329545=0x3103C049→ERR-3103C) → 파서가 변환해 대응
+- code: ERR-6100D
+  severity: critical
+  category: upstream
+  title: 복제 Handshake 실패
+  immediate:
+  - "로컬 `SELECT REPLICATION_NAME, HOST_IP, PORT_NO FROM SYSTEM_.SYS_REPL_HOSTS_;` 와 상대 서버 `SELECT NAME, VALUE1 FROM V$PROPERTY WHERE NAME = 'REPLICATION_PORT_NO';` 비교 — IP·포트가 다르면 확정"
+  - "`nc -zvw3 <peer_ip> <REPLICATION_PORT_NO>` 와 `tail -100 $ALTIBASE_HOME/trc/altibase_rp.log` — 연결 거부·handshake 실패 사유 확인"
+  short:
+  - "(2차·승인 후, 롤백: 기존 객체 DDL 보관) IP·포트를 바로잡아 이중화 객체 재생성(DROP·CREATE REPLICATION) — 재생성 동안 이중화 공백"
+  - 양쪽 서버 버전과 replication 설정 및 테이블 정의를 점검
+  mid:
+  - 설정 불일치를 수정하고 replication 객체를 재구성
+  long:
+  - 이중화 구성 변경 시 사전 호환성 검증을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.altibase.com/display/FAQE/ERR-6100D%2BSender%2Bfailed%2Bto%2Bhandshake%2Bwith%2Bthe%2Bpeer%2Bserver)
+  vendor_cause: 복제 대상 IP 또는 REPLICATION_PORT_NO가 서로 다르다.
+  vendor_action: IP와 포트 번호를 확인하고 복제 객체를 다시 생성한다.
+  vendor_url: https://docs.altibase.com/display/FAQE/ERR-6100D%2BSender%2Bfailed%2Bto%2Bhandshake%2Bwith%2Bthe%2Bpeer%2Bserver
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR-xxxxx(16진 5자리) 코드는 5.x~7.3 공통. 6.3.1 부터 qp 로그에 ERR-xxxxx 직접 출력, 6.1.1 이하는 8자리 10진 errorcode(예 822329545=0x3103C049→ERR-3103C) → 파서가 변환해 대응
+- code: ERR-61016
+  severity: critical
+  category: upstream
+  title: 복제 XLog 생성 실패
+  immediate:
+  - "isql 로 sys 접속 후 `SELECT NAME, VALUE1 FROM V$PROPERTY WHERE NAME = 'LOG_DIR';` 로 리두 로그 경로 확인 뒤 `df -h <LOG_DIR>` — 사용률 95% 이상이면 확정"
+  - "`tail -100 $ALTIBASE_HOME/trc/altibase_rp.log` 와 `SELECT REP_NAME, REP_GAP FROM V$REPGAP;` — 갭이 크면 이중화가 로그 파일을 붙잡고 있음"
+  - "체크포인트: `grep -in \"checkpoint\" $ALTIBASE_HOME/trc/altibase_sm.log | tail -20` — 장시간 기록이 없거나 실패면 로그 파일 누적 원인"
+  short:
+  - redo와 replication 로그 상태 및 메모리와 디스크 오류를 분석
+  mid:
+  - 원인 자원을 복구하고 sender를 재기동해 동기화를 검증
+  long:
+  - XLog 생성 실패와 sender 상태를 상시 모니터링
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.altibase.com/display/FAQE/Altibase%2BError%2BMessages)
+  vendor_cause: 리두 로그 영역의 디스크 공간 부족으로 Sender가 XLog를 생성하지 못했다.
+  vendor_action: SQL로 리두 로그 디렉터리와 디스크 공간을 확인하고, 장기간 체크포인트 미수행·실패 원인도 확인한다.
+  vendor_url: https://docs.altibase.com/display/FAQE/ERR-61016%2BrpERR_ABORT_RP_SENDER_MAKE_XLOG%2BSender%2BFailed%2Bto%2Bmake%2Ban%2Bxlog
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR-xxxxx(16진 5자리) 코드는 5.x~7.3 공통. 6.3.1 부터 qp 로그에 ERR-xxxxx 직접 출력, 6.1.1 이하는 8자리 10진 errorcode(예 822329545=0x3103C049→ERR-3103C) → 파서가 변환해 대응
+- code: ERR-61023
+  severity: error
+  category: upstream
+  title: 복제 기능 비활성화
+  immediate:
+  - "isql 로 sys 접속 후 `SELECT NAME, VALUE1 FROM V$PROPERTY WHERE NAME = 'REPLICATION_PORT_NO';` — 0 이면 이중화 비활성 확정"
+  - "`grep -nE \"^ *(REPLICATION_PORT_NO|PORT_NO)\" $ALTIBASE_HOME/conf/altibase.properties` 로 파일 값과 서비스 포트(PORT_NO, 기본 20300)가 겹치지 않는지 확인"
+  short:
+  - "(2차·승인 후, 롤백: 원래 값 0) altibase.properties 의 REPLICATION_PORT_NO 를 PORT_NO 와 다른 값으로 설정 뒤 계획 재기동"
+  - 비활성화 원인과 최근 설정 변경 및 서버 로그를 분석
+  mid:
+  - 정상 설정으로 replication을 활성화하고 데이터 정합성을 검증
+  long:
+  - 복제 활성 상태와 설정 변경 감사를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.altibase.com/display/FAQE/ERR-61023%2BrpERR_ABORT_RP_REPLICATION_DISABLED%2BReplication%2Bis%2Bdisabled)
+  note: 비활성화된 복제 기능에서 객체 생성이 실패하는 설정 오류로 error가 타당함
+  vendor_cause: 복제 기능이 비활성화되어 복제 객체를 생성할 수 없다.
+  vendor_action: REPLICATION_PORT_NO를 기본 0에서 DB 기본 포트 20300이 아닌 값으로 변경하고 DB를 재시작한다.
+  vendor_url: https://docs.altibase.com/display/FAQE/ERR-61023%2BrpERR_ABORT_RP_REPLICATION_DISABLED%2BReplication%2Bis%2Bdisabled
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR-xxxxx(16진 5자리) 코드는 5.x~7.3 공통. 6.3.1 부터 qp 로그에 ERR-xxxxx 직접 출력, 6.1.1 이하는 8자리 10진 errorcode(예 822329545=0x3103C049→ERR-3103C) → 파서가 변환해 대응
+- code: ERR-61035
+  severity: error
+  category: upstream
+  title: 복제 UPDATE 충돌
+  immediate:
+  - "`SELECT REP_NAME, UPDATE_FAILURE_COUNT FROM V$REPRECEIVER;` 를 1분 간격 두 번 — 늘고 있으면 UPDATE 충돌 지속 (7.x 컬럼)"
+  - "`tail -200 $ALTIBASE_HOME/trc/altibase_rp_conflict.log` 로 충돌 테이블·PK·before/after 값 확인 뒤 양쪽 `SELECT * FROM <owner>.<table> WHERE <PK컬럼> = <값>;` 대조"
+  - "`SELECT NAME, VALUE1 FROM V$PROPERTY WHERE NAME = 'REPLICATION_UPDATE_REPLACE';` 로 현재 충돌 처리 방식 확인(바꾸는 일은 2차)"
+  short:
+  - 송수신 데이터 차이와 양방향 DML 순서를 분석
+  mid:
+  - 대상 데이터를 정합화하고 충돌을 유발하는 업무 로직을 수정
+  long:
+  - UPDATE conflict 자동탐지와 정합성 점검을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.altibase.com/display/FAQE/ERR-61035%2BReceiver%2B-%2BAn%2Bupdate%2Bconflict%2Boccurred)
+  vendor_cause: 업데이트할 데이터가 없거나 대상 값이 달라 복제 UPDATE 충돌이 발생했다.
+  vendor_action: 필요하면 REPLICATION_UPDATE_REPLACE=1로 설정하고 서버를 재시작한다.
+  vendor_url: https://docs.altibase.com/display/FAQE/ERR-61035%2BReceiver%2B-%2BAn%2Bupdate%2Bconflict%2Boccurred
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR-xxxxx(16진 5자리) 코드는 5.x~7.3 공통. 6.3.1 부터 qp 로그에 ERR-xxxxx 직접 출력, 6.1.1 이하는 8자리 10진 errorcode(예 822329545=0x3103C049→ERR-3103C) → 파서가 변환해 대응
+- code: ERR-61036
+  severity: error
+  category: upstream
+  title: 복제 DELETE 대상 없음
+  immediate:
+  - "`tail -200 $ALTIBASE_HOME/trc/altibase_rp_conflict.log` 에서 테이블·PK 확인 뒤 수신 측 `SELECT COUNT(*) FROM <owner>.<table> WHERE <PK컬럼> = <값>;` — 0 이면 이미 없는 행(불일치)"
+  - "`SELECT REP_NAME, DELETE_SUCCESS_COUNT, DELETE_FAILURE_COUNT FROM V$REPRECEIVER;` — 실패만 늘면 불일치 누적 (7.x 컬럼)"
+  short:
+  - 원천과 대상 데이터 불일치 발생 시점과 관련 SQL을 분석
+  mid:
+  - 데이터 정합성을 맞추고 삭제 처리 로직을 재검토
+  long:
+  - DELETE conflict와 데이터 누락을 정기 점검
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.altibase.com/display/arch/3.%2BAltibase%2BTrace%2BLogs)
+  vendor_cause: 복제 환경에서 DELETE할 대상 데이터가 존재하지 않는다.
+  vendor_action: 대상 데이터가 존재하는지 확인한 뒤 DELETE 문을 실행한다.
+  vendor_url: https://docs.altibase.com/pages/viewpage.action?pageId=7340210
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR-xxxxx(16진 5자리) 코드는 5.x~7.3 공통. 6.3.1 부터 qp 로그에 ERR-xxxxx 직접 출력, 6.1.1 이하는 8자리 10진 errorcode(예 822329545=0x3103C049→ERR-3103C) → 파서가 변환해 대응
+- code: ERR-6103A
+  severity: error
+  category: upstream
+  title: 복제 UPDATE 대상 없음
+  immediate:
+  - "`SELECT REP_NAME, UPDATE_SUCCESS_COUNT, UPDATE_FAILURE_COUNT FROM V$REPRECEIVER;` — UPDATE 실패 증가 확인 (7.x 컬럼)"
+  - "`tail -200 $ALTIBASE_HOME/trc/altibase_rp_conflict.log` 의 PK 로 수신 측 `SELECT COUNT(*) FROM <owner>.<table> WHERE <PK컬럼> = <값>;` — 0 이면 대상 행 누락 확정"
+  short:
+  - 송수신 데이터 차이와 누락 발생 원인을 분석
+  mid:
+  - 누락 데이터를 복구하고 UPDATE 처리 흐름을 수정
+  long:
+  - UPDATE not found 충돌과 데이터 정합성을 상시 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.altibase.com/display/arch/3.%2BAltibase%2BTrace%2BLogs)
+  vendor_cause: 복제 환경에서 UPDATE할 대상 데이터가 존재하지 않는다.
+  vendor_action: 대상 데이터가 존재하는지 확인한 뒤 UPDATE 문을 실행한다.
+  vendor_url: https://docs.altibase.com/pages/viewpage.action?pageId=7340213
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR-xxxxx(16진 5자리) 코드는 5.x~7.3 공통. 6.3.1 부터 qp 로그에 ERR-xxxxx 직접 출력, 6.1.1 이하는 8자리 10진 errorcode(예 822329545=0x3103C049→ERR-3103C) → 파서가 변환해 대응
+- code: ERR-610CF
+  severity: critical
+  category: upstream
+  title: 복제 TX 테이블 불일치
+  immediate:
+  - "양쪽 서버에서 isql 로 sys 접속 후 `SELECT NAME, VALUE1 FROM V$PROPERTY WHERE NAME = 'TRANSACTION_TABLE_SIZE';` — 값이 다르면 확정"
+  - "`SELECT PRODUCT_VERSION, REPL_PROTOCOL_VERSION FROM V$VERSION;` 양쪽 비교와 `grep -n \"TRANSACTION_TABLE_SIZE\" $ALTIBASE_HOME/conf/altibase.properties` 로 파일 값·메모리 값 일치 확인"
+  short:
+  - "(2차·승인 후, 롤백: 원래 값) 작은 쪽 altibase.properties 의 TRANSACTION_TABLE_SIZE 를 상대와 같게 수정 뒤 계획 재기동, 이중화 재개"
+  - 서버 버전과 replication 구성 및 메타정보 차이를 분석
+  mid:
+  - 호환 설정과 버전으로 맞추고 replication 객체를 재구성
+  long:
+  - 이중화 서버 버전과 설정 일관성 검증을 자동화
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.altibase.com/display/FAQE/ERR-610CF%2BThe%2Btransaction%2Btable%2Bsize%2Bof%2Bthe%2Breplication%2Bdoes%2Bnot%2Bmatch)
+  vendor_cause: 로컬과 원격 서버의 TRANSACTION_TABLE_SIZE 값이 서로 다르다.
+  vendor_action: 양쪽 서버의 TRANSACTION_TABLE_SIZE를 동일하게 설정하고 필요하면 서버를 재시작한다.
+  vendor_url: https://docs.altibase.com/display/FAQE/ERR-610CF%2BThe%2Btransaction%2Btable%2Bsize%2Bof%2Bthe%2Breplication%2Bdoes%2Bnot%2Bmatch
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR-xxxxx(16진 5자리) 코드는 5.x~7.3 공통. 6.3.1 부터 qp 로그에 ERR-xxxxx 직접 출력, 6.1.1 이하는 8자리 10진 errorcode(예 822329545=0x3103C049→ERR-3103C) → 파서가 변환해 대응
+- code: ERR-610D2
+  severity: critical
+  category: upstream
+  title: 복제 PK 컬럼수 불일치
+  immediate:
+  - "양쪽 서버에서 isql `DESC <owner>.<table>` 출력을 파일로 남겨 `diff` — PRIMARY KEY 컬럼 수·순서·타입이 다르면 확정"
+  - "복제 대상 매핑: `SELECT REPLICATION_NAME, LOCAL_USER_NAME, LOCAL_TABLE_NAME, REMOTE_USER_NAME, REMOTE_TABLE_NAME FROM SYSTEM_.SYS_REPL_ITEMS_;` — 다른 테이블끼리 묶였는지 확인"
+  short:
+  - "(2차·승인 후, 롤백: 변경 전 DDL 보관) 양쪽 기본키 정의를 맞추고 이중화 객체 재생성(`ALTER REPLICATION <rep> STOP` → 정의 정합 → 재생성·START)"
+  - 양쪽 스키마의 PK 컬럼 수와 순서 및 타입을 비교
+  mid:
+  - 스키마를 동일하게 맞추고 replication 객체를 재생성
+  long:
+  - 이중화 대상 스키마 변경 사전검증을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.altibase.com/display/FAQE/ERR-610D2%2BThe%2Bprimary%2Bkey%2Bcolumn%2Bcount%2Bof%2Bthe%2Breplicated%2Btable%2Bdoes%2Bnot%2Bmatch)
+  vendor_cause: 양쪽 복제 대상 테이블의 기본키 구성이 서로 다르다.
+  vendor_action: 두 서버 복제 대상 테이블의 기본키를 동일하게 맞춘다.
+  vendor_url: https://docs.altibase.com/display/FAQE/ERR-610D2%2BThe%2Bprimary%2Bkey%2Bcolumn%2Bcount%2Bof%2Bthe%2Breplicated%2Btable%2Bdoes%2Bnot%2Bmatch
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR-xxxxx(16진 5자리) 코드는 5.x~7.3 공통. 6.3.1 부터 qp 로그에 ERR-xxxxx 직접 출력, 6.1.1 이하는 8자리 10진 errorcode(예 822329545=0x3103C049→ERR-3103C) → 파서가 변환해 대응
+- code: ERR-3109F
+  severity: critical
+  category: upstream
+  title: 복제 Sender 협상 실패
+  immediate:
+  - "`grep -n -A5 \"3109F\" $ALTIBASE_HOME/trc/altibase_rp.log | tail -40` 로 협상 실패 테이블·시각 확인"
+  - "양쪽 `DESC <owner>.<table>` 결과 `diff` — 컬럼 수·이름·타입·PK 중 하나라도 다르면 확정"
+  - "`SELECT REPLICATION_NAME, LOCAL_TABLE_NAME, REMOTE_TABLE_NAME FROM SYSTEM_.SYS_REPL_ITEMS_;` 와 `SELECT REP_NAME, STATUS, NET_ERROR_FLAG FROM V$REPSENDER;` 로 대상·송신 상태 확인 (7.x 컬럼)"
+  short:
+  - "(2차·승인 후, 롤백: 변경 전 DDL 보관) 양쪽 테이블 정의를 맞추고 이중화 객체 재생성(`ALTER REPLICATION <rep> STOP` → 정의 정합 → 재생성·START)"
+  - 컬럼과 PK 및 타입 정의 차이를 비교 분석
+  mid:
+  - 대상 스키마를 동일하게 맞추고 replication 객체를 재생성
+  long:
+  - 이중화 스키마 변경 시 양쪽 동기 검증을 강제
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.altibase.com/display/FAQE/ERR-3109F%2BREPL%2Bsender%2Bfailure%2Bto%2Bhandshake%2Bwith%2Bpeer%2Bserver)
+  vendor_cause: 복제 대상 테이블의 스키마가 서로 다르다.
+  vendor_action: 양쪽 복제 대상 테이블의 스키마를 동일하게 맞춘 뒤 복제 객체를 다시 생성한다.
+  vendor_url: https://docs.altibase.com/display/FAQE/ERR-3109F%2BREPL%2Bsender%2Bfailure%2Bto%2Bhandshake%2Bwith%2Bpeer%2Bserver
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR-xxxxx(16진 5자리) 코드는 5.x~7.3 공통. 6.3.1 부터 qp 로그에 ERR-xxxxx 직접 출력, 6.1.1 이하는 8자리 10진 errorcode(예 822329545=0x3103C049→ERR-3103C) → 파서가 변환해 대응
+- code: ERR-7101D
+  severity: warn
+  category: connection
+  title: 프로토콜 헤더 오류
+  immediate:
+  - "`grep -rn \"ERR-7101D\" $ALTIBASE_HOME/trc | tail -20` 로 발생 시각·클라이언트 IP 확인 — 같은 IP 반복이면 그 클라이언트 원인"
+  - "서버 프로토콜: `SELECT PRODUCT_VERSION, PROTOCOL_VERSION FROM V$VERSION;` 와 `SELECT CLIENT_TYPE, CLIENT_PACKAGE_VERSION, CLIENT_PROTOCOL_VERSION, COUNT(*) FROM V$SESSION GROUP BY CLIENT_TYPE, CLIENT_PACKAGE_VERSION, CLIENT_PROTOCOL_VERSION;` 비교 (7.x 컬럼)"
+  - "해당 클라이언트 서버에서 `ls -l <app_lib>/Altibase*.jar` 로 드라이버 버전 확인 — 비호환 버전이면 확정, 서비스 포트로 다른 프로토콜(HTTP·스캐너) 유입 여부도 확인"
+  short:
+  - 서버와 클라이언트 CM protocol 호환성을 점검
+  mid:
+  - 호환 가능한 클라이언트 버전으로 재설치 또는 교체
+  long:
+  - 클라이언트 버전 관리와 호환성 검증을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.altibase.com/display/FAQE/ERR-7101d%2BProtocol%2Bheader%2Berror)
+  vendor_cause: 서버와 호환되지 않는 버전의 클라이언트가 접속을 시도했다.
+  vendor_action: 계속 기록되면 접속 시도 클라이언트를 찾아 서버와 호환되는 버전으로 재설치한다.
+  vendor_url: https://docs.altibase.com/display/FAQE/ERR-7101d%2BProtocol%2Bheader%2Berror
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR-xxxxx(16진 5자리) 코드는 5.x~7.3 공통. 6.3.1 부터 qp 로그에 ERR-xxxxx 직접 출력, 6.1.1 이하는 8자리 10진 errorcode(예 822329545=0x3103C049→ERR-3103C) → 파서가 변환해 대응
+- code: ERR-71015
+  severity: error
+  category: connection
+  title: select 시스템호출 실패
+  immediate:
+  - "`ps -ef | grep [a]ltibase` 로 PID 확인 뒤 `ls /proc/<PID>/fd | wc -l` 와 `grep \"open files\" /proc/<PID>/limits` (Linux) — 사용 FD 가 한도 근처면 확정"
+  - "isql 로 sys 접속 후 `SELECT COUNT(*) FROM V$SESSION;` 와 `SELECT NAME, VALUE1 FROM V$PROPERTY WHERE NAME = 'MAX_CLIENT';` — 접속 수가 한도 근처면 접속 폭주"
+  - "`grep -rn \"ERR-71015\" $ALTIBASE_HOME/trc | tail -20` 의 errno 와 `dmesg | tail -50` — 네트워크 드라이버·메모리 오류 동반 여부"
+  short:
+  - 네트워크와 OS 자원 및 select 호출 실패 원인을 분석
+  mid:
+  - OS 자원한도와 네트워크 구성을 수정하고 필요한 패치를 검토
+  long:
+  - 소켓과 FD 사용률 및 시스템콜 오류를 모니터링
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.altibase.com/display/FAQE/Altibase%2BError%2BMessages)
+  vendor_cause: 네트워크 통신 중 소켓을 감지하는 select() 시스템 함수 호출에 실패했다.
+  vendor_action: OS 네트워크 상태를 확인하거나 접속 요청 부하를 분산한다.
+  vendor_url: https://docs.altibase.com/display/FAQE/ERR-71015%2BcmERR_ABORT_SELECT_ERROR%2BFailed%2Bto%2Binvoke%2Bthe%2Bselect%28%29%2Bsystem%2Bfunction
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR-xxxxx(16진 5자리) 코드는 5.x~7.3 공통. 6.3.1 부터 qp 로그에 ERR-xxxxx 직접 출력, 6.1.1 이하는 8자리 10진 errorcode(예 822329545=0x3103C049→ERR-3103C) → 파서가 변환해 대응
+- code: ERR-71018
+  severity: error
+  category: connection
+  title: read 시스템호출 실패
+  immediate:
+  - "`grep -rn \"ERR-71018\" $ALTIBASE_HOME/trc | tail -20` 로 시각·대상 세션 확인 — 특정 클라이언트에 몰리면 그 클라이언트의 비정상 종료"
+  - "`netstat -s | grep -i reset` 를 1분 간격 두 번 (Linux) — reset 증가가 크면 네트워크·방화벽 세션 단절 의심"
+  - "클라이언트 서버에서 `ps -p <CLIENT_PID>` 와 앱 로그로 프로세스 생존 확인 — 이미 내려갔으면 서버의 정상적 단절 감지"
+  short:
+  - TCP reset과 방화벽 및 서버 종료 여부를 분석
+  mid:
+  - 네트워크 경로와 재접속 및 타임아웃 정책을 개선
+  long:
+  - read 실패율과 연결 품질을 상시 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.altibase.com/display/FAQE/Altibase%2BError%2BMessages)
+  note: 개별 통신 read 시스템 호출 실패로 단독 코드만으로 서비스 전체 중단을 뜻하지 않음
+  vendor_cause: 이미 물리적으로 종료된 클라이언트 세션을 서버가 확인해 연결 단절을 감지했다.
+  vendor_action: 네트워크가 불안정한지와 클라이언트 프로그램이 오동작하는지 확인한다.
+  vendor_url: https://docs.altibase.com/display/FAQE/ERR-71018%2BFailed%2Bto%2Binvoke%2Bthe%2Bread%28%29%2Bsystem%2Bfunction
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR-xxxxx(16진 5자리) 코드는 5.x~7.3 공통. 6.3.1 부터 qp 로그에 ERR-xxxxx 직접 출력, 6.1.1 이하는 8자리 10진 errorcode(예 822329545=0x3103C049→ERR-3103C) → 파서가 변환해 대응
+- code: ERR-71019
+  severity: error
+  category: connection
+  title: write 시스템호출 실패
+  immediate:
+  - "`grep -rn \"ERR-71019\" $ALTIBASE_HOME/trc | tail -20` 로 errno(EPIPE·ECONNRESET 등)와 시각 확인"
+  - "`ss -tn state established '( sport = :<PORT_NO> )' | wc -l` (Linux) 로 현재 연결 수와 앱 연결 풀 크기 비교, 앱 로그에서 같은 시각 연결 종료·예외 확인"
+  short:
+  - "영향 세션은 앱 연결 풀의 연결 검증(validation)으로 자동 재연결되게 하고, 반복되면 네트워크 담당과 방화벽 idle timeout 대조"
+  - 네트워크 단절과 상대 서버 종료 및 FD 문제를 분석
+  mid:
+  - 네트워크 경로와 재시도 정책 및 OS 자원 설정을 개선
+  long:
+  - write 실패율과 연결 오류를 상시 모니터링
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.altibase.com/display/FAQE/Altibase%2BError%2BMessages)
+  note: 개별 통신 write 시스템 호출 실패로 단독 코드만으로 서비스 전체 중단을 뜻하지 않음
+  vendor_cause: 네트워크 문제 또는 클라이언트 프로그램 비정상 종료로 연결이 끊겼다.
+  vendor_action: 네트워크 안정성과 클라이언트 동작 상태를 확인하고 애플리케이션의 DB 연결 종료 처리가 정상인지 점검한다.
+  vendor_url: https://docs.altibase.com/display/FAQE/ERR-71019%2BFailed%2Bto%2Binvoke%2Bthe%2Bwrite%28%29%2Bsystem%2Bfunction%2BFlush%2Bprotocol%2Bfailed.%2BClose%2Bconnection
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR-xxxxx(16진 5자리) 코드는 5.x~7.3 공통. 6.3.1 부터 qp 로그에 ERR-xxxxx 직접 출력, 6.1.1 이하는 8자리 10진 errorcode(예 822329545=0x3103C049→ERR-3103C) → 파서가 변환해 대응
+- code: ERR-91044
+  severity: critical
+  category: disk
+  title: 데이터파일 I/O 오류
+  immediate:
+  - "iLoader 데이터 파일: `ls -l <dat 파일>` 와 `df -h <dat 파일 디렉터리>` — 파일 없음 또는 여유 0 이면 확정"
+  - "파일 크기 한도: iLoader 실행 계정 `ulimit -f` 와 파일 크기 비교 — unlimited 가 아니고 파일이 더 크면 확정, `dmesg | tail -30` 으로 OS I/O 오류 동반 여부"
+  short:
+  - 파일 크기와 OS I/O 오류 및 디스크 상태를 점검
+  mid:
+  - 공간을 확보하거나 정상 파일로 복구하고 I/O 경로를 정비
+  long:
+  - 디스크 사용률과 파일 I/O 실패를 사전 모니터링
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.altibase.com/display/FAQE/Altibase%2BError%2BMessages)
+  vendor_cause: iLoader 파일 I/O 시 파일시스템 공간 부족, 파일 없음 또는 파일 크기 과다 문제가 있다.
+  vendor_action: 파일시스템 여유 공간, 업로드할 파일명의 존재 여부와 파일 크기를 확인한다.
+  vendor_url: https://docs.altibase.com/pages/viewpage.action?pageId=7340233
+  versions:
+  - Altibase 5.x
+  - Altibase 6.1.1
+  - Altibase 6.3.1/6.5.1
+  - Altibase 7.1
+  - Altibase 7.3
+  version_note: ERR-xxxxx(16진 5자리) 코드는 5.x~7.3 공통. 6.3.1 부터 qp 로그에 ERR-xxxxx 직접 출력, 6.1.1 이하는 8자리 10진 errorcode(예 822329545=0x3103C049→ERR-3103C) → 파서가 변환해 대응

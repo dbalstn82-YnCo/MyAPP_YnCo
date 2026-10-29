@@ -1,0 +1,1000 @@
+# 근거 매뉴얼·작성 기준 — R5 DB 묶음 A (Oracle · Tibero · Altibase), 2026-10-16
+# Oracle: Database Reference(V$RESOURCE_LIMIT·V$SESSION·V$TRANSACTION·V$UNDOSTAT·V$ARCHIVE_DEST·DBA_USERS·DBA_PROFILES)·Administrator's Guide·
+#         Backup and Recovery User's Guide(RMAN)·Net Services Administrator's Guide(lsnrctl·listener.ora·sqlnet.ora)·Data Guard Concepts and Administration·
+#         Database Error Messages(docs.oracle.com/en/error-help/db/) — 11gR2·12c+·19c 차이는 note 에 적음(ADR/adrci 11g+, FETCH FIRST·통합 감사 12c+, CDB/PDB 12c+)
+# Tibero: Tibero 6/7 관리자 안내서(기동·종료 tbboot/tbdown, 백업과 복구 V$RECOVER_FILE·RESETLOGS, 로그 $TB_HOME/instance/$TB_SID/log/slog·dlog·lsnr)·
+#         참조 안내서(동적 뷰 V$INSTANCE·V$LOG·V$LOGFILE·V$CONTROLFILE·V$BACKUP·V$PARAMETERS, 초기화 파라미터 MAX_SESSION_COUNT) — technet.tmaxsoft.com
+# Altibase: Altibase 7.1 General Reference(성능 뷰 V$SESSION·V$STATEMENT·V$LOCK·V$LOCK_WAIT·V$TRANSACTION·V$MEMSTAT·V$PROPERTY·V$TABLESPACES·V$DATAFILES·
+#         V$MEM_TABLESPACES·V$VOL_TABLESPACES·V$REPSENDER·V$REPRECEIVER·V$REPGAP·V$VERSION)·Administrator's Manual(trc 로그 altibase_boot/error/rp/qp/sm.log,
+#         server stop·server kill)·iSQL User's Manual(-silent, -f)·6.5.1 패치노트(ALTER DATABASE … SESSION CLOSE) — github.com/ALTIBASE/Documents
+# 작성 기준: 검증도구/knowledge_spec.md (1차 읽기 전용 · 2차 사전조건·영향·승인·백업/롤백 + 성공/실패 · 3차 민감정보 마스킹·전달 승인)
+# 공통: isql·tbsql·sqlplus 의 <pw> 는 명령행에 남지 않게 프롬프트 입력을 권장(ps·셸 이력 노출). 확인 못 한 이름은 verify_note 로 표시.
+procedures:
+# ── Oracle ──
+- id: ORA-PROC-R5-CAPACITY
+  products: [oracle]
+  category: capacity
+  match: [ORA-00059, ORA-01000, TNS-12500, TNS-12540, ORA-01650, ORA-01651, LEG-IND-001, LEG-ORA-01460, LEG-ORA-01460-ALL, LEG-ORA-014XX-FULL]
+  title: 자원 한도(파일·커서·프로세스)·롤백 공간·입력 데이터 길이 초과 (ORA-00059 · ORA-01000 · TNS-12500 · ORA-01460)
+  source: "Oracle Database Reference (V$RESOURCE_LIMIT, OPEN_CURSORS, DB_FILES, PROCESSES, DBA_TAB_COLUMNS)·Administrator's Guide (Managing Tablespaces, ALTER SYSTEM … SCOPE)·Net Services Administrator's Guide (listener.log)·Database Error Messages ORA-00059/01000/01650/01651, TNS-12500/12540"
+  stages:
+  - stage: 1
+    steps:
+    - do: 프로세스·세션·파일·커서 한도 사용률 확인 (읽기 전용)
+      cmd: |
+        sqlplus -s / as sysdba <<'EOF'
+        set lines 200 pages 100
+        select resource_name, current_utilization, max_utilization, limit_value from v$resource_limit where resource_name in ('processes','sessions');
+        select name, value from v$parameter where name in ('db_files','open_cursors','processes');
+        select count(*) datafiles from v$datafile;
+        EOF
+      check: "current_utilization 이 limit_value 의 95% 이상이면 프로세스·세션 한도(TNS-12500/12540) · datafiles = db_files 면 ORA-00059 확정"
+      note: "적용: 10gR2~23ai 공통 · 권한: SYSDBA 또는 SELECT_CATALOG_ROLE(1차는 DBA 에게 결과 요청)"
+    - do: 커서 누수 세션·롤백 공간 확인 (읽기 전용)
+      cmd: |
+        sqlplus -s / as sysdba <<'EOF'
+        select s.sid, s.username, s.program, st.value open_cur from v$sesstat st join v$statname n on st.statistic#=n.statistic# join v$session s on s.sid=st.sid where n.name='opened cursors current' order by st.value desc fetch first 10 rows only;
+        select tablespace_name, round(sum(bytes)/1024/1024) free_mb from dba_free_space where tablespace_name in ('SYSTEM','<rbs_ts>') group by tablespace_name;
+        select tablespace_name, status from dba_tablespaces where status='OFFLINE';
+        EOF
+      check: "상위 세션 open_cur 가 open_cursors 에 닿으면 ORA-01000(애플리케이션 close 누락) · 롤백/SYSTEM 여유 0 근접이면 ORA-01650/01651"
+      note: "적용: FETCH FIRST 는 12c+ — 11gR2 는 서브쿼리 후 rownum <= 10 · 권한: SELECT_CATALOG_ROLE"
+    - do: 입력 길이 초과(ORA-01460/01461/01401/12899 계열) 대상 컬럼과 OS 프로세스 한도 확인
+      cmd: |
+        sqlplus -s / as sysdba <<'EOF'
+        select column_name, data_type, data_length, char_length, char_used from dba_tab_columns where owner=upper('<owner>') and table_name=upper('<table>');
+        select value from nls_database_parameters where parameter='NLS_CHARACTERSET';
+        EOF
+        su - oracle -c 'ulimit -u -n'
+        grep -n "TNS-12500\|TNS-12540" $ORACLE_BASE/diag/tnslsnr/$(hostname -s)/<listener>/trace/<listener>.log | tail -20
+      check: "입력값 바이트 길이 > data_length 면 길이 초과 확정(AL32UTF8 에서 한글은 3바이트) · 리스너 로그에 12500/12540 이 몰린 시각 = 접속 폭주 시각"
+      note: "적용: 11g+ ADR 경로(10gR2 는 $ORACLE_HOME/network/log) · 권한: DBA 조회 권한, ulimit 확인은 root 또는 oracle"
+  - stage: 2
+    steps:
+    - do: 한도 파라미터 조정 (커서는 동적, 프로세스·파일 수는 재기동)
+      cmd: |
+        sqlplus -s / as sysdba <<'EOF'
+        create pfile='/tmp/init_<SID>_before.ora' from spfile;
+        alter system set open_cursors=<값> scope=both;
+        alter system set processes=<값> scope=spfile;
+        alter system set db_files=<값> scope=spfile;
+        EOF
+      check: "성공: v$parameter 에 새 값, 재기동 후 v$resource_limit limit_value 반영·같은 오류 미발생 · 실패: ORA-02095(동적 변경 불가) 면 SCOPE=SPFILE 후 재기동 일정 수립"
+      note: "사전조건: 커서·연결 누수 원인(상위 세션·WAS 풀) 먼저 식별 · 영향: processes·db_files 는 재기동 필요(서비스 중단) · 승인: DBA·서비스 담당 변경 승인 · 백업/롤백: 변경 전 pfile 백업, 원래 값으로 alter system 재설정 또는 백업 pfile 로 기동"
+    - do: 롤백·SYSTEM 공간 확보 (ORA-01650/01651)
+      cmd: |
+        sqlplus -s / as sysdba <<'EOF'
+        alter tablespace <rbs_ts> add datafile '<path>' size 4G autoextend on maxsize 32G;
+        alter tablespace <offline_ts> online;
+        EOF
+      check: "성공: dba_free_space 여유 증가, 대기 트랜잭션 정상 처리 · 실패: ORA-01119/27040(경로·공간) → 경로·디스크 확인"
+      note: "사전조건: 디스크 여유와 오프라인 사유 확인 · 영향: 파일 생성 중 I/O 증가 · 승인: DBA 승인 · 백업/롤백: 추가 데이터파일은 축소 불가하므로 용량 계획에 반영, 온라인 전환은 사유 확인 후"
+    - do: 길이 초과 SQL 수정 (애플리케이션 바인딩·컬럼 변경)
+      cmd: |
+        sqlplus <owner>@<alias>          # 비밀번호는 접속 프롬프트에서 입력(heredoc 으로 SQL 을 넘기면 첫 줄이 비밀번호로 읽힘)
+        SQL> create table <table>_bak_<YYYYMMDD> as select * from <table> where 1=0;
+        SQL> alter table <table> modify (<column> varchar2(<n> char));
+        SQL> quit
+      check: "성공: 같은 입력으로 INSERT/UPDATE 성공·ORA-01460/12899 미발생 · 실패: ORA-01441(줄일 수 없음) 등 → 개발팀과 CLOB 전환·입력 검증으로 변경"
+      note: "사전조건: 개발팀이 입력 최대 길이 확정, 애플리케이션은 jdbcType=CLOB/setClob 우선 검토 · 영향: DDL 중 테이블 잠금 · 승인: DBA·업무 담당 승인 · 백업/롤백: 변경 전 DDL(dbms_metadata.get_ddl) 보관, 되돌릴 때 원래 정의로 modify"
+  - stage: 3
+    steps:
+    - do: Oracle SR 자료 수집
+      cmd: |
+        adrci exec="set home diag/rdbms/<db>/<SID>; show alert -tail 300" > alert_tail_$(date +%Y%m%d).txt
+        sqlplus -s / as sysdba <<'EOF' > limits_$(date +%Y%m%d).txt
+        select * from v$resource_limit;
+        select name, value from v$parameter where name in ('processes','sessions','open_cursors','db_files');
+        EOF
+      check: "alert log 끝부분·v$resource_limit·파라미터·리스너 로그 발췌·WAS 풀 설정"
+      note: "민감정보 마스킹: 호스트명·IP·계정명·SQL 바인드 값 가림 · 전달 승인: 보안 담당 승인 후 SR 업로드"
+
+- id: ORA-PROC-R5-SECURITY
+  products: [oracle]
+  category: security
+  match: [ORA-01017, ORA-01031, ORA-28000, ORA-28001, TNS-01169]
+  title: 인증 실패·권한 부족·계정 잠김/만료·리스너 비밀번호 (ORA-01017 · ORA-28000 · ORA-01031)
+  source: "Oracle Database Security Guide (Managing User Accounts, Password Profiles, Unified Auditing)·Database Reference (DBA_USERS, DBA_PROFILES, UNIFIED_AUDIT_TRAIL, DBA_AUDIT_SESSION)·Net Services Reference (listener.ora ADMIN_RESTRICTIONS)·Database Error Messages ORA-01017/01031/28000/28001, TNS-01169"
+  stages:
+  - stage: 1
+    steps:
+    - do: 계정 상태·프로필 확인 (읽기 전용)
+      cmd: |
+        sqlplus -s / as sysdba <<'EOF'
+        set lines 200
+        select username, account_status, lock_date, expiry_date, profile from dba_users where username=upper('<user>');
+        select resource_name, limit from dba_profiles where profile='<profile>' and resource_name in ('FAILED_LOGIN_ATTEMPTS','PASSWORD_LOCK_TIME','PASSWORD_LIFE_TIME','PASSWORD_GRACE_TIME');
+        EOF
+      check: "LOCKED(TIMED) = 로그인 실패 한도 초과(ORA-28000) · EXPIRED/EXPIRED(GRACE) = 비밀번호 만료(ORA-28001) · OPEN 인데 ORA-01017 이면 자격정보 불일치"
+      note: "적용: 10gR2+ · 11g+ DEFAULT 프로필은 PASSWORD_LIFE_TIME 180일·FAILED_LOGIN_ATTEMPTS 10 · 권한: SELECT_CATALOG_ROLE"
+    - do: 실패 출처 확인 (읽기 전용)
+      cmd: |
+        sqlplus -s / as sysdba <<'EOF'
+        select event_timestamp, dbusername, userhost, client_program_name, return_code from unified_audit_trail where return_code in (1017,28000) order by event_timestamp desc fetch first 20 rows only;
+        EOF
+      check: "같은 userhost·프로그램에서 1017 이 반복되면 그 애플리케이션의 비밀번호 미반영이 원인"
+      note: "적용: 12c+ 통합 감사 — 11gR2 는 `select os_username, userhost, timestamp, returncode from dba_audit_session where returncode=1017 and rownum <= 20;`(AUDIT_TRAIL 설정 시) · 비밀번호 값은 조회·출력하지 않음"
+    - do: 권한 부족·리스너 관리 오류 확인 (읽기 전용)
+      cmd: |
+        sqlplus -s / as sysdba <<'EOF'
+        select privilege from dba_sys_privs where grantee=upper('<user>') union all select granted_role from dba_role_privs where grantee=upper('<user>');
+        select owner, table_name, privilege from dba_tab_privs where grantee=upper('<user>') and table_name=upper('<object>');
+        EOF
+        grep -i "ADMIN_RESTRICTIONS\|PASSWORDS_\|LOCAL_OS_AUTHENTICATION" $ORACLE_HOME/network/admin/listener.ora
+      check: "필요 권한이 롤로만 있고 정의자 권한 PL/SQL 안에서 쓰면 ORA-01031 · listener.ora 에 비밀번호 설정이 있고 다른 OS 계정에서 관리 명령을 실행했으면 TNS-01169"
+      note: "적용: 11g+ 리스너는 소유 OS 계정 로컬 인증이 기본 · 권한: DBA 조회 권한"
+  - stage: 2
+    steps:
+    - do: 계정 잠금 해제·비밀번호 갱신
+      cmd: |
+        sqlplus / as sysdba          # 대화형 — 새 비밀번호는 PASSWORD 명령의 프롬프트로만(셸 기록·heredoc·스크립트에 남기지 않음)
+        SQL> alter user <user> account unlock;
+        SQL> password <user>
+        SQL> exit
+      check: "성공: dba_users.account_status=OPEN, 해당 서비스 정상 로그인 · 실패: 곧바로 LOCKED(TIMED) 재발 → 잘못된 비밀번호를 쓰는 출처가 남아 있음"
+      note: "사전조건: 실패 출처(WAS 데이터소스·배치) 자격정보를 먼저 수정, 계정 소유 부서 확인 · 영향: 비밀번호 변경 시 모든 사용처 동시 반영 필요 · 승인: 보안 담당·계정 소유자 승인 · 백업/롤백: 변경 전 프로필·상태 기록, 잠금 원복은 `alter user <user> account lock;`"
+    - do: 필요 권한 부여·리스너 관리 방식 정비
+      cmd: |
+        sqlplus -s / as sysdba <<'EOF'
+        grant <privilege> on <owner>.<object> to <user>;
+        EOF
+        cp -p $ORACLE_HOME/network/admin/listener.ora $ORACLE_HOME/network/admin/listener.ora.bak_$(date +%Y%m%d)
+        lsnrctl reload <listener>
+      check: "성공: 실패 작업 재실행 성공·dba_tab_privs 에 권한 표시, 리스너 관리 명령이 소유 계정에서 정상 · 실패: 여전히 ORA-01031 → 롤 대신 직접 권한 필요 여부 재확인"
+      note: "사전조건: 최소 권한 원칙 검토, listener.ora 편집 내용 확정 · 영향: reload 순간 신규 접속 지연 가능 · 승인: 보안 담당·DBA 승인 · 백업/롤백: `revoke <privilege> on <owner>.<object> from <user>;`, listener.ora 는 .bak 복원 후 reload"
+  - stage: 3
+    steps:
+    - do: 보안 사고 의심 시 자료 보존·전달
+      cmd: |
+        sqlplus -s / as sysdba <<'EOF' > auth_fail_$(date +%Y%m%d).txt
+        select event_timestamp, dbusername, userhost, return_code from unified_audit_trail where return_code in (1017,28000,1031) and event_timestamp > systimestamp - interval '1' day;
+        EOF
+      check: "인증 실패 목록·프로필 설정·리스너 로그 발췌"
+      note: "민감정보 마스킹: 계정명·클라이언트 IP·호스트명 가림(비밀번호 값은 절대 포함하지 않음) · 전달 승인: 보안 담당 승인 후 제조사·보안팀 전달"
+
+- id: ORA-PROC-R5-UPSTREAM
+  products: [oracle]
+  category: upstream
+  match: [ORA-02068, ORA-16198, ORA-16401]
+  title: DB 링크 원격 오류·Data Guard 리두 전송 지연/거부 (ORA-02068 · ORA-16198 · ORA-16401)
+  source: "Oracle Administrator's Guide (Managing Database Links, DBA_DB_LINKS)·Data Guard Concepts and Administration (LOG_ARCHIVE_DEST_n NET_TIMEOUT, V$ARCHIVE_DEST, V$ARCHIVE_GAP, V$DATAGUARD_STATS)·Data Guard Broker (NetTimeout)·Database Error Messages ORA-02068/16198/16401"
+  stages:
+  - stage: 1
+    steps:
+    - do: DB 링크 대상 연결성 확인 (읽기 전용)
+      cmd: |
+        sqlplus -s / as sysdba <<'EOF'
+        select owner, db_link, username, host from dba_db_links;
+        select 1 from dual@<link>;
+        EOF
+        tnsping <link_host_alias>
+      check: "select 1 이 ORA-12541/12514/03113 이면 원격 DB·리스너 장애 · 성공하면 일시 단절 후 회복"
+      note: "적용: 10gR2+ · 권한: 링크 소유자 또는 DBA · 원격 DB 상태는 원격 담당에 확인 요청"
+    - do: Data Guard 전송 상태 확인 (읽기 전용, primary·standby 각각)
+      cmd: |
+        sqlplus -s / as sysdba <<'EOF'
+        select dest_id, status, error, net_timeout from v$archive_dest where target='STANDBY';
+        select * from v$archive_gap;
+        select name, value, time_computed from v$dataguard_stats;
+        EOF
+        ping -c 10 <standby_host>
+      check: "ERROR 에 ORA-16198 이 반복·transport lag 증가면 네트워크 지연 · v$archive_gap 행이 없고 ORA-16401 만 있으면 중복 전송 정보 메시지(조치 불필요)"
+      note: "적용: v$archive_gap·v$dataguard_stats 는 standby 에서 조회(10gR2+) · 권한: SYSDBA"
+  - stage: 2
+    steps:
+    - do: 전송 타임아웃 조정·목적지 재활성
+      cmd: |
+        dgmgrl / "edit database '<db_unique_name>' set property NetTimeout=<초>;"
+        sqlplus -s / as sysdba <<'EOF'
+        alter system set log_archive_dest_state_<n>=enable scope=both;
+        alter session close database link <link>;
+        EOF
+      check: "성공: v$archive_dest status=VALID·error 비어 있음, transport lag 감소, 링크 조회 성공 · 실패: 같은 오류 지속 → 네트워크 담당과 구간 지연 측정"
+      note: "사전조건: 네트워크·standby I/O 원인 확인, Broker 미사용이면 log_archive_dest_n 의 NET_TIMEOUT 속성으로 조정 · 영향: SYNC 전송이면 primary 커밋 지연 변화 · 승인: DBA·DR 담당 승인 · 백업/롤백: 변경 전 `show database verbose '<db>'`·`show parameter log_archive_dest_<n>` 결과 보관 후 이전 값으로 되돌림"
+  - stage: 3
+    steps:
+    - do: Oracle SR 자료 (primary·standby)
+      cmd: |
+        adrci exec="set home diag/rdbms/<db>/<SID>; show alert -tail 500" > alert_$(hostname -s)_$(date +%Y%m%d).txt
+        dgmgrl / "show configuration verbose" > dg_config_$(date +%Y%m%d).txt
+      check: "양쪽 alert log·Broker 구성·v$archive_dest 출력·구간 ping 결과"
+      note: "민감정보 마스킹: 호스트명·IP·DB 링크 계정명 가림 · 전달 승인: 보안 담당 승인 후 SR 업로드"
+
+- id: ORA-PROC-R5-DISK
+  products: [oracle]
+  category: disk
+  match: [ORA-19502, ORA-19504, ORA-27037, ORA-01114, ORA-27072]
+  title: 백업·아카이브·데이터파일 쓰기/생성/상태 확인 실패 (ORA-19502 · ORA-19504 · ORA-27037 · ORA-27072)
+  source: "Oracle Backup and Recovery User's Guide (RMAN CROSSCHECK·DELETE OBSOLETE·CONFIGURE CHANNEL FORMAT)·Administrator's Guide (Renaming and Relocating Datafiles)·Database Reference (V$RECOVERY_AREA_USAGE, V$DATAFILE)·Database Error Messages ORA-19502/19504/27037/01114/27072"
+  stages:
+  - stage: 1
+    steps:
+    - do: 오류 파일과 OS 오류 번호 확인 (읽기 전용)
+      cmd: |
+        grep -n -A4 "ORA-19502\|ORA-19504\|ORA-27037\|ORA-01114\|ORA-27072" $ORACLE_BASE/diag/rdbms/<db>/<SID>/trace/alert_<SID>.log | tail -40
+      check: "Linux Error: 28(공간 없음)·13(권한)·2(파일 없음)·5(I/O 오류) 로 원인 분류"
+      note: "적용: 11g+ ADR 경로(10gR2 는 background_dump_dest) · 권한: oracle 계정"
+    - do: 대상 경로 공간·권한·마운트 확인 (읽기 전용)
+      cmd: |
+        df -h <dest> ; df -i <dest>
+        ls -ld <dest> ; mount | grep <mount>
+        dmesg -T | grep -i "i/o error\|remount" | tail -20
+      check: "사용률 100%·inode 100%·oracle 쓰기 권한 없음·ro 마운트·I/O 오류 중 해당 항목이 원인"
+      note: "적용: Linux(타 OS 는 bdf/df -k 등 동일 목적 명령) · 권한: 일반 사용자 가능, dmesg 는 root 필요할 수 있음"
+    - do: FRA·데이터파일 등록 경로 확인 (읽기 전용)
+      cmd: |
+        sqlplus -s / as sysdba <<'EOF'
+        select file_type, percent_space_used, percent_space_reclaimable from v$recovery_area_usage;
+        select file#, name, status from v$datafile where status not in ('ONLINE','SYSTEM');
+        EOF
+      check: "FRA 사용 합계 95% 이상이면 공간 부족 · OFFLINE/RECOVER 데이터파일이 있으면 ORA-01114/27072 영향 파일"
+      note: "적용: 10gR2+ · 권한: SELECT_CATALOG_ROLE"
+  - stage: 2
+    steps:
+    - do: 공간 확보 (만료 백업·백업 완료 아카이브 정리)
+      cmd: |
+        rman target / <<'EOF'
+        crosscheck backup;
+        crosscheck archivelog all;
+        delete noprompt obsolete;
+        EOF
+      check: "성공: v$recovery_area_usage 사용률 하락·df 여유 확보 후 백업/아카이브 재실행 성공 · 실패: RMAN-08137(필요 아카이브) 등으로 삭제 불가 → 볼륨 증설"
+      note: "사전조건: 보존 정책(`show retention policy`)·최근 백업 성공 확인 · 영향: 정리 중 RMAN 부하 · 승인: DBA·백업 담당 승인 · 백업/롤백: 삭제는 되돌릴 수 없으므로 `list backup summary` 결과를 먼저 저장"
+    - do: 경로·권한 정정 또는 데이터파일 위치 변경
+      cmd: |
+        mkdir -p <dest> && chown oracle:oinstall <dest>
+        sqlplus -s / as sysdba <<'EOF'
+        alter database rename file '<old_path>' to '<new_path>';
+        EOF
+      check: "성공: 재실행한 백업·아카이브가 정상 완료, v$datafile 경로 갱신 · 실패: ORA-01511/27037 지속 → 파일 실재·마운트 다시 확인"
+      note: "사전조건: rename 은 MOUNT 상태 또는 해당 파일 OFFLINE 에서, 대상 파일을 OS 에서 먼저 복사 · 영향: 데이터파일 오프라인 동안 해당 테이블스페이스 사용 불가 · 승인: DBA·시스템 담당 승인 · 백업/롤백: 원래 경로 기록 후 같은 rename 으로 되돌림"
+  - stage: 3
+    steps:
+    - do: Oracle SR·스토리지 의뢰 자료
+      cmd: |
+        adrci exec="set home diag/rdbms/<db>/<SID>; show alert -tail 300" > alert_tail_$(date +%Y%m%d).txt
+        df -h > df_$(date +%Y%m%d).txt ; dmesg -T | tail -300 > dmesg_$(date +%Y%m%d).txt
+      check: "alert log·RMAN 로그·df·dmesg·v$recovery_area_usage 출력"
+      note: "민감정보 마스킹: 호스트명·IP·경로 안 고객명 가림 · 전달 승인: 보안 담당 승인 후 전달"
+
+- id: ORA-PROC-R5-UNDO
+  products: [oracle]
+  category: undo
+  match: [ORA-01555, DB-ORA-009]
+  title: 스냅샷 과거(ORA-01555) — UNDO 보존 부족
+  source: "Oracle Administrator's Guide (Managing Undo: UNDO_RETENTION, RETENTION GUARANTEE, V$UNDOSTAT, Undo Advisor)·Database Reference (V$UNDOSTAT, TUNED_UNDORETENTION)·Database Error Messages ORA-01555"
+  stages:
+  - stage: 1
+    steps:
+    - do: UNDO 보존·사용 이력 확인 (읽기 전용)
+      cmd: |
+        sqlplus -s / as sysdba <<'EOF'
+        select name, value from v$parameter where name in ('undo_retention','undo_tablespace','undo_management');
+        select begin_time, maxquerylen, tuned_undoretention, ssolderrcnt, nospaceerrcnt from v$undostat where begin_time > sysdate-1 order by begin_time;
+        EOF
+      check: "maxquerylen(초) > tuned_undoretention 이거나 ssolderrcnt > 0 인 구간이 ORA-01555 발생 구간"
+      note: "적용: 10gR2+ · 12cR2+ 로컬 UNDO 모드면 해당 PDB 에서 조회 · 권한: SELECT_CATALOG_ROLE"
+    - do: 장기 조회·대량 DML 세션 확인 (읽기 전용)
+      cmd: |
+        sqlplus -s / as sysdba <<'EOF'
+        select sid, username, sql_id, last_call_et from v$session where status='ACTIVE' and type='USER' order by last_call_et desc fetch first 10 rows only;
+        select s.sid, s.username, t.used_ublk from v$transaction t join v$session s on s.taddr=t.addr order by t.used_ublk desc;
+        EOF
+      check: "last_call_et 가 undo_retention 보다 긴 조회와 같은 시각 대량 갱신이 겹치면 확정"
+      note: "적용: FETCH FIRST 는 12c+(11gR2 는 rownum) · 권한: SELECT_CATALOG_ROLE"
+  - stage: 2
+    steps:
+    - do: UNDO 보존 시간·크기 조정
+      cmd: |
+        sqlplus -s / as sysdba <<'EOF'
+        alter system set undo_retention=<초> scope=both;
+        alter tablespace <undo_ts> add datafile '<path>' size 4G autoextend on maxsize 32G;
+        EOF
+      check: "성공: v$undostat tuned_undoretention ≥ 최장 조회 시간·ssolderrcnt 0 · 실패: nospaceerrcnt 증가 → UNDO 공간 추가 확장 필요"
+      note: "사전조건: 최장 조회 시간과 UNDO 생성량(v$undostat undoblks)으로 크기 산정 · 영향: UNDO 공간 사용 증가 · 승인: DBA 승인 · 백업/롤백: 원래 undo_retention 기록 후 같은 명령으로 되돌림, 추가 파일은 축소 불가하므로 용량 계획 반영"
+    - do: 장기 조회·대량 갱신 시간대 분리
+      cmd: |
+        crontab -l -u <batch_user>
+      check: "성공: 조회 배치와 대량 DML 이 겹치지 않음·ORA-01555 재발 없음 · 실패: 재발 → 조회 SQL 튜닝(수행 시간 단축) 요청"
+      note: "사전조건: 업무 담당과 배치 일정 협의 · 영향: 배치 완료 시각 변동 · 승인: 업무 담당 승인 · 백업/롤백: 변경 전 crontab 백업(`crontab -l > crontab.bak`) 후 원복"
+  - stage: 3
+    steps:
+    - do: Oracle SR 자료
+      cmd: |
+        sqlplus -s / as sysdba <<'EOF' > undostat_$(date +%Y%m%d).txt
+        select * from v$undostat where begin_time > sysdate-1;
+        EOF
+      check: "v$undostat·실패 SQL ID·alert log 발췌"
+      note: "민감정보 마스킹: SQL 문 안의 업무 데이터 값·계정명 가림 · 전달 승인: 보안 담당 승인 후 전달"
+
+# ── Tibero ──
+- id: TBR-PROC-R5-DISK
+  products: [tibero]
+  category: disk
+  match: [TBR-1004, TBR-1005]
+  title: 파일 읽기·쓰기 실패 (TBR-1004 · TBR-1005)
+  source: "Tibero 6/7 관리자 안내서 '파일과 데이터 관리'·'로그 파일($TB_HOME/instance/$TB_SID/log/slog·dlog)'·Tibero 오류 참조(TBR-1004/1005)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 대상 파일·오류 확인 (읽기 전용)
+      cmd: |
+        grep -h "TBR-1004\|TBR-1005" $TB_HOME/instance/$TB_SID/log/slog/* $TB_HOME/instance/$TB_SID/log/dlog/* | tail -20
+      check: "오류 줄의 파일 경로·OS errno 확보(28 공간 없음, 5 I/O 오류, 30 읽기 전용)"
+      note: "적용: Tibero 6/7 로그 구조 · 권한: tibero 계정"
+    - do: 공간·마운트·I/O 확인 (읽기 전용)
+      cmd: |
+        df -h <mount> ; mount | grep <mount>
+        dmesg -T | grep -i "i/o error\|remount" | tail -20
+        iostat -x 5 3
+      check: "100%·ro 마운트·I/O 오류·await 급증 중 해당 항목이 원인"
+      note: "적용: Linux · 권한: dmesg 는 root 필요할 수 있음"
+  - stage: 2
+    steps:
+    - do: 공간 확보 또는 스토리지 경로 복구
+      cmd: |
+        ls -lt <archive_dir> | tail -20
+        cp -p <archive_dir>/<backed_up_file> <backup_volume>/ && ls -l <backup_volume>/<backed_up_file>
+      check: "성공: df 여유 확보·sys.log 에 같은 오류 미발생 · 실패: 공간 확보 불가·I/O 오류 지속 → 볼륨 증설·스토리지 교체 요청"
+      note: "사전조건: 이관 대상이 백업 완료 아카이브인지 백업 담당 확인 · 영향: 복사 중 I/O 증가 · 승인: DBA·시스템 담당 승인 · 백업/롤백: 원본은 이관 확인 후에만 정리, 이관 목록 기록"
+  - stage: 3
+    steps:
+    - do: TmaxTibero 기술지원 자료
+      cmd: |
+        tar czf tibero_io_$(date +%Y%m%d).tgz $TB_HOME/instance/$TB_SID/log/slog $TB_HOME/instance/$TB_SID/log/dlog ; dmesg -T | tail -300 > dmesg_$(date +%Y%m%d).txt
+      check: "slog·dlog·dmesg·df 결과"
+      note: "민감정보 마스킹: 호스트명·IP·계정명 가림 · 전달 승인: 보안 담당 승인 후 전달"
+
+- id: TBR-PROC-R5-MEMORY
+  products: [tibero]
+  category: memory
+  match: [TBR-1015]
+  title: 버퍼 캐시 부족 (TBR-1015)
+  source: "Tibero 6/7 참조 안내서 '초기화 파라미터(TOTAL_SHM_SIZE, DB_CACHE_SIZE)'·관리자 안내서 '기동과 종료(tbdown/tbboot)'"
+  verify_note: "미검증 — tbsql 이 비밀번호를 표준입력에서 읽는지(heredoc 으로 SQL 을 넘기면 첫 줄이 비밀번호가 되는지) 공식 문서로 확인하지 못해 SQL 은 대화형(tbsql <user> → 프롬프트 비밀번호 → SQL> 줄)으로 적음"
+  stages:
+  - stage: 1
+    steps:
+    - do: 메모리 설정·부하 확인 (읽기 전용)
+      cmd: |
+        grep -i "SHM_SIZE\|CACHE_SIZE\|MEMORY" $TB_HOME/config/$TB_SID.tip
+        free -m ; vmstat 5 3
+      check: "DB_CACHE_SIZE 가 TOTAL_SHM_SIZE 대비 작고 동시 대량 스캔이 있으면 확정 · OS 여유가 없으면 상향 불가"
+      note: "적용: Tibero 6/7 · 권한: tibero 계정"
+    - do: 세션·동시 작업 확인 (읽기 전용)
+      cmd: |
+        tbsql <user>          # 비밀번호는 접속 프롬프트에서 입력
+        SQL> select name, value from v$parameters where name in ('DB_CACHE_SIZE','TOTAL_SHM_SIZE');
+        SQL> select status, count(*) from v$session group by status;
+        SQL> quit
+      check: "ACTIVE 세션 급증 시각과 TBR-1015 발생 시각이 겹치면 부하성"
+      note: "적용: Tibero 6/7 · 권한: DBA 조회 권한"
+  - stage: 2
+    steps:
+    - do: 버퍼 캐시 상향 (재기동)
+      cmd: |
+        cp -p $TB_HOME/config/$TB_SID.tip $TB_HOME/config/$TB_SID.tip.bak_$(date +%Y%m%d)
+        vi $TB_HOME/config/$TB_SID.tip     # DB_CACHE_SIZE=<값> (TOTAL_SHM_SIZE 범위 안)
+        tbdown immediate ; tbboot
+      check: "성공: v$parameters 에 새 값·TBR-1015 미발생 · 실패: 기동 실패(공유 메모리 부족) → tip 백업본으로 원복 후 tbboot"
+      note: "사전조건: 물리 메모리 여유 확인, 업무 중단 시간 확보 · 영향: 재기동 동안 서비스 중단 · 승인: DBA·서비스 담당 승인 · 백업/롤백: tip 백업본 복원 후 tbboot"
+  - stage: 3
+    steps:
+    - do: TmaxTibero 기술지원 자료
+      cmd: |
+        tar czf tibero_mem_$(date +%Y%m%d).tgz $TB_HOME/config/$TB_SID.tip $TB_HOME/instance/$TB_SID/log/slog
+      check: "tip·slog·free/vmstat 결과"
+      note: "민감정보 마스킹: tip 안 경로의 고객명·호스트명·IP 가림 · 전달 승인: 보안 담당 승인 후 전달"
+
+- id: TBR-PROC-R5-UPSTREAM
+  products: [tibero]
+  category: upstream
+  match: [TBR-1029, TBR-1037, TBR-11048, TBR-12126]
+  title: Standby 로그 전송·응답 실패, DB 링크 원격 오류 (TBR-1029 · TBR-1037 · TBR-11048 · TBR-12126)
+  source: "Tibero 6/7 관리자 안내서 'Tibero Standby Cluster'·'DB Link(Gateway)'·Tibero 오류 참조(TBR-1029/1037/11048/12126)"
+  verify_note: "미검증 — Tibero Standby Cluster 의 전송 목적지 tip 파라미터 이름과 상태 조회 뷰를 공식 문서로 확인하지 못해 tip 은 grep 키워드로만 조회한다 · tbsql 이 비밀번호를 표준입력에서 읽는지(heredoc 으로 SQL 을 넘기면 첫 줄이 비밀번호가 되는지) 공식 문서로 확인하지 못해 SQL 은 대화형(tbsql <user> → 프롬프트 비밀번호 → SQL> 줄)으로 적음"
+  stages:
+  - stage: 1
+    steps:
+    - do: Standby 연결·전송 오류 확인 (읽기 전용)
+      cmd: |
+        grep -h "TBR-1029\|TBR-1037" $TB_HOME/instance/$TB_SID/log/slog/* | tail -20
+        grep -i "standby\|replication" $TB_HOME/config/$TB_SID.tip
+        nc -zvw3 <standby_host> <standby_port>
+      check: "포트 연결 실패면 네트워크·standby 미기동 · 연결은 되는데 TBR-1037 반복이면 standby 처리 지연"
+      note: "적용: Tibero 6/7 TSC · 권한: tibero 계정"
+    - do: DB 링크 대상 확인 (읽기 전용)
+      cmd: |
+        tbsql <user>          # 비밀번호는 접속 프롬프트에서 입력
+        SQL> select owner, db_link, host from dba_db_links;
+        SQL> quit
+        grep -h "TBR-11048\|TBR-12126" $TB_HOME/instance/$TB_SID/log/slog/* | tail -10
+      check: "오류 줄의 원격 DB 메시지(대소문자·권한·문자셋)를 원격 담당과 대조"
+      note: "적용: Tibero 6/7 · 권한: DBA 조회 권한"
+  - stage: 2
+    steps:
+    - do: Standby 측 복구·링크 SQL 수정
+      cmd: |
+        ssh <standby_host> "ps -ef | grep [t]bsvr"
+        tbsql <user>@<standby_alias>          # 비밀번호는 접속 프롬프트에서 입력
+        SQL> select status from v$instance;
+        SQL> quit
+      check: "성공: standby 정상(v$instance 상태 확인)·primary sys.log 에 TBR-1029/1037 미발생, 링크 SQL 수정 후 원격 조회 성공 · 실패: 지속 → TmaxTibero 기술지원"
+      note: "사전조건: standby 재기동·네트워크 조치는 DR 담당과 일정 협의 · 영향: 동기 전송 구성이면 primary 커밋 지연 · 승인: DBA·DR 담당 승인 · 백업/롤백: 링크 SQL 변경은 이전 SQL 보관 후 배포, standby 설정 변경 전 tip 백업"
+  - stage: 3
+    steps:
+    - do: TmaxTibero 기술지원 자료 (primary·standby)
+      cmd: |
+        tar czf tibero_tsc_$(hostname -s)_$(date +%Y%m%d).tgz $TB_HOME/config/$TB_SID.tip $TB_HOME/instance/$TB_SID/log/slog
+      check: "양쪽 tip·slog·네트워크 시험 결과"
+      note: "민감정보 마스킹: 호스트명·IP·링크 계정명 가림 · 전달 승인: 보안 담당 승인 후 전달"
+
+- id: TBR-PROC-R5-CONNECTION
+  products: [tibero]
+  category: connection
+  match: [TBR-1038, TBR-2048, TBR-12050, TBR-12130]
+  title: 접속 별칭·데이터소스·원격 연결 실패 (TBR-2048 · TBR-12050 · TBR-12130 · TBR-1038)
+  source: "Tibero 6/7 클라이언트 안내서 'tbdsn.tbr'·관리자 안내서 'DB Link(Gateway, DBLINK_CONN_TIMEOUT)'·'Tibero Standby Cluster'"
+  verify_note: "미검증 — tbsql 이 비밀번호를 표준입력에서 읽는지(heredoc 으로 SQL 을 넘기면 첫 줄이 비밀번호가 되는지) 공식 문서로 확인하지 못해 SQL 은 대화형(tbsql <user> → 프롬프트 비밀번호 → SQL> 줄)으로 적음"
+  stages:
+  - stage: 1
+    steps:
+    - do: 데이터소스 별칭 확인 (읽기 전용)
+      cmd: |
+        echo $TB_HOME
+        grep -n -A8 -i "<alias>" $TB_HOME/client/config/tbdsn.tbr
+      check: "별칭이 없으면 TBR-2048 · 별칭에 주소가 2개 이상이고 MOUNT 접속이면 TBR-12050"
+      note: "적용: Tibero 6/7 · 권한: 일반 사용자"
+    - do: 원격·standby 도달성 확인 (읽기 전용)
+      cmd: |
+        nc -zvw3 <remote_or_standby_host> <port>
+        tbsql <user>          # 비밀번호는 접속 프롬프트에서 입력
+        SQL> select name, value from v$parameters where name='DBLINK_CONN_TIMEOUT';
+        SQL> quit
+      check: "포트 연결 실패면 네트워크·대상 미기동(TBR-12130/1038) · 연결 지연이 DBLINK_CONN_TIMEOUT 보다 길면 시간 초과"
+      note: "적용: Tibero 6/7 · 권한: DBA 조회 권한"
+  - stage: 2
+    steps:
+    - do: tbdsn.tbr 정정 또는 링크 시간 초과 조정
+      cmd: |
+        cp -p $TB_HOME/client/config/tbdsn.tbr $TB_HOME/client/config/tbdsn.tbr.bak_$(date +%Y%m%d)
+        vi $TB_HOME/client/config/tbdsn.tbr
+        tbsql <user>@<alias>          # 비밀번호는 접속 프롬프트에서 입력
+        SQL> select status from v$instance;
+        SQL> quit
+      check: "성공: 별칭으로 접속·DB 링크 조회 성공 · 실패: 같은 오류 → 별칭 문법·대상 포트 재확인"
+      note: "사전조건: 접속 대상 주소·포트를 DBA 와 확정 · 영향: 같은 파일을 쓰는 모든 클라이언트 접속에 반영 · 승인: DBA·애플리케이션 담당 승인 · 백업/롤백: tbdsn.tbr.bak 복원"
+  - stage: 3
+    steps:
+    - do: TmaxTibero 기술지원 자료
+      cmd: |
+        tar czf tibero_conn_$(date +%Y%m%d).tgz $TB_HOME/client/config/tbdsn.tbr $TB_HOME/instance/$TB_SID/log/lsnr
+      check: "tbdsn.tbr·리스너 로그·Gateway 로그·네트워크 시험 결과"
+      note: "민감정보 마스킹: 호스트명·IP·포트·계정명 가림 · 전달 승인: 보안 담당 승인 후 전달"
+
+- id: TBR-PROC-R5-UNDO
+  products: [tibero]
+  category: undo
+  match: [TBR-21023, TBR-21028]
+  title: 트랜잭션 복구 중 작업 불가·UNDO 세그먼트 기동 실패 (TBR-21023 · TBR-21028)
+  source: "Tibero 6/7 관리자 안내서 'UNDO 관리(UNDO_TABLESPACE)'·'기동과 종료'·Tibero 오류 참조(TBR-21023/21028)"
+  verify_note: "미검증 — tbsql 이 비밀번호를 표준입력에서 읽는지(heredoc 으로 SQL 을 넘기면 첫 줄이 비밀번호가 되는지) 공식 문서로 확인하지 못해 SQL 은 대화형(tbsql <user> → 프롬프트 비밀번호 → SQL> 줄)으로 적음"
+  stages:
+  - stage: 1
+    steps:
+    - do: UNDO 테이블스페이스 공간 확인 (읽기 전용)
+      cmd: |
+        tbsql <user>          # 비밀번호는 접속 프롬프트에서 입력
+        SQL> select name, value from v$parameters where name='UNDO_TABLESPACE';
+        SQL> select tablespace_name, round(sum(bytes)/1024/1024) free_mb from dba_free_space where tablespace_name='<UNDO_TS>' group by tablespace_name;
+        SQL> select file_name, round(bytes/1024/1024) mb, autoextensible from dba_data_files where tablespace_name='<UNDO_TS>';
+        SQL> quit
+      check: "free_mb 가 0 근접이고 자동확장 없음이면 UNDO 부족"
+      note: "적용: Tibero 6/7 · 권한: DBA 조회 권한"
+    - do: 트랜잭션 복구 진행 확인 (읽기 전용)
+      cmd: |
+        grep -h -i "recover\|TBR-21023\|TBR-21028" $(ls -tr $TB_HOME/instance/$TB_SID/log/slog/* | tail -5) | tail -20
+      check: "복구 진행 기록이 계속 늘면 완료 대기 · 멈춰 있으면 2차 판단"
+      note: "적용: Tibero 6/7 · 권한: tibero 계정"
+  - stage: 2
+    steps:
+    - do: UNDO 공간 확장
+      cmd: |
+        tbsql <user>          # 비밀번호는 접속 프롬프트에서 입력
+        SQL> alter tablespace <UNDO_TS> add datafile '<path>' size 4G autoextend on maxsize 32G;
+        SQL> quit
+      check: "성공: dba_free_space 증가·TBR-21028 미발생 · 실패: 파일 생성 오류(TBR-1014) → 경로·공간 확인"
+      note: "사전조건: 디스크 여유 확인 · 영향: 파일 생성 중 I/O 증가 · 승인: DBA 승인 · 백업/롤백: 추가 파일은 축소 불가하므로 용량 계획 반영, 숨은 파라미터(_USGMT_ONLINE_MIN 등) 변경은 TmaxTibero 기술지원 확인 후"
+  - stage: 3
+    steps:
+    - do: TmaxTibero 기술지원 자료
+      cmd: |
+        tar czf tibero_undo_$(date +%Y%m%d).tgz $TB_HOME/config/$TB_SID.tip $TB_HOME/instance/$TB_SID/log/slog
+      check: "tip·slog·UNDO 조회 결과"
+      note: "민감정보 마스킹: 호스트명·계정명 가림 · 전달 승인: 보안 담당 승인 후 전달"
+
+- id: TBR-PROC-R5-SECURITY
+  products: [tibero]
+  category: security
+  match: [TBR-1062, TBR-130005, TBR-17001]
+  title: 로그인 실패·원격 인증 실패·블록 복호화 실패 (TBR-17001 · TBR-130005 · TBR-1062)
+  source: "Tibero 6/7 관리자 안내서 '사용자 관리(ALTER USER)'·'DB Link(Java Gateway)'·'암호화(보안 지갑)'·Tibero 오류 참조(TBR-17001)"
+  verify_note: "미검증 — Tibero DBA_USERS 의 ACCOUNT_STATUS 컬럼, ALTER USER … ACCOUNT UNLOCK 구문, 보안 지갑 tip 파라미터 이름을 공식 문서로 확인하지 못함 · tbsql 이 비밀번호를 표준입력에서 읽는지(heredoc 으로 SQL 을 넘기면 첫 줄이 비밀번호가 되는지) 공식 문서로 확인하지 못해 SQL 은 대화형(tbsql <user> → 프롬프트 비밀번호 → SQL> 줄)으로 적음"
+  stages:
+  - stage: 1
+    steps:
+    - do: 실패 출처·계정 상태 확인 (읽기 전용)
+      cmd: |
+        grep -h "TBR-17001\|TBR-130005\|TBR-1062" $TB_HOME/instance/$TB_SID/log/slog/* | tail -20
+        tbsql <user>          # 비밀번호는 접속 프롬프트에서 입력
+        SQL> select username, account_status from dba_users where username=upper('<user>');
+        SQL> select owner, db_link, username, host from dba_db_links;
+        SQL> quit
+      check: "같은 출처에서 TBR-17001 반복이면 애플리케이션 자격정보 미반영 · 링크 계정이 원격에서 잠기면 TBR-130005"
+      note: "적용: Tibero 6/7 · 권한: DBA 조회 권한 · 비밀번호 값은 조회·출력하지 않음"
+    - do: 보안 지갑 상태 확인 (읽기 전용)
+      cmd: |
+        grep -i "wallet" $TB_HOME/config/$TB_SID.tip
+        ls -l <wallet_path>
+      check: "지갑 파일 부재·변경 시각이 오류 직전이면 TBR-1062 원인 후보"
+      note: "적용: 암호화 테이블스페이스 사용 시 · 권한: tibero 계정"
+  - stage: 2
+    steps:
+    - do: 자격정보 정정·계정 잠금 해제
+      cmd: |
+        tbsql <user>          # 비밀번호는 접속 프롬프트에서 입력
+        SQL> alter user <user> account unlock;
+        # 비밀번호 변경: 값이 든 IDENTIFIED BY 문은 tbsql 입력 기록·화면·감사에 남을 수 있다 — 판 매뉴얼의 비밀번호 변경 방법으로,
+        #   계정 담당이 직접 입력(이 화면·작업 기록에 값을 쓰지 않음)
+        SQL> quit
+      check: "성공: 해당 서비스 정상 로그인·TBR-17001 미발생 · 실패: 곧바로 재잠금 → 잘못된 자격정보 출처가 남아 있음"
+      note: "사전조건: 실패 출처(WAS·배치) 자격정보를 먼저 수정, 계정 소유자 확인 · 영향: 비밀번호 변경 시 모든 사용처 동시 반영 필요 · 승인: 보안 담당·계정 소유자 승인 · 백업/롤백: 변경 전 계정 상태 기록, 잠금 원복은 `alter user <user> account lock;`"
+  - stage: 3
+    steps:
+    - do: 보안 사고 의심 시 자료 보존·전달
+      cmd: |
+        grep -h "TBR-17001" $TB_HOME/instance/$TB_SID/log/slog/* > tbr17001_$(date +%Y%m%d).txt
+      check: "인증 실패 기록·링크 정의·지갑 파일 목록(내용 제외)"
+      note: "민감정보 마스킹: 계정명·IP·호스트명 가림, 지갑 파일 자체는 전달하지 않음 · 전달 승인: 보안 담당 승인 후 전달"
+
+- id: TBR-PROC-R5-CAPACITY
+  products: [tibero]
+  category: capacity
+  match: [TBR-12003, TBR-7107, TBR-21025, LEG-TBR-MAXSESSION]
+  title: 세션 수 한도·데이터파일 크기 범위·세그먼트 확장 한계 (TBR-12003 · TBR-7107 · TBR-21025)
+  source: "Tibero 6/7 참조 안내서 '초기화 파라미터(MAX_SESSION_COUNT, DB_BLOCK_SIZE)'·관리자 안내서 '테이블스페이스 관리'·Tibero 오류 참조(TBR-12003/7107/21025)"
+  verify_note: "미검증 — tbsql 이 비밀번호를 표준입력에서 읽는지(heredoc 으로 SQL 을 넘기면 첫 줄이 비밀번호가 되는지) 공식 문서로 확인하지 못해 SQL 은 대화형(tbsql <user> → 프롬프트 비밀번호 → SQL> 줄)으로 적음"
+  stages:
+  - stage: 1
+    steps:
+    - do: 세션 한도 사용률 확인 (읽기 전용)
+      cmd: |
+        grep -i "SESSION_COUNT" $TB_HOME/config/$TB_SID.tip
+        tbsql <user>          # 비밀번호는 접속 프롬프트에서 입력
+        SQL> select count(*) from v$session;
+        SQL> select status, count(*) from v$session group by status;
+        SQL> select name, value from v$parameters where name like '%SESSION_COUNT%';
+        SQL> quit
+      check: "세션 수 ≈ MAX_SESSION_COUNT 면 TBR-12003 확정 · INACTIVE 다수면 WAS 풀 누수"
+      note: "적용: Tibero 6/7 (MAX_SESSION_COUNT 기본 20) · 권한: DBA 조회 권한"
+    - do: 파일 크기·세그먼트 확장 상태 확인 (읽기 전용)
+      cmd: |
+        tbsql <user>          # 비밀번호는 접속 프롬프트에서 입력
+        SQL> select name, value from v$parameters where name='DB_BLOCK_SIZE';
+        SQL> select owner, segment_name, extents, max_extents from dba_segments where segment_name=upper('<segment>');
+        SQL> select tablespace_name, round(sum(bytes)/1024/1024) free_mb from dba_free_space group by tablespace_name;
+        SQL> quit
+      check: "요청 SIZE 가 블록 크기별 상한을 넘으면 TBR-7107 · extents = max_extents 면 TBR-21025"
+      note: "적용: Tibero 6/7 · 권한: DBA 조회 권한"
+  - stage: 2
+    steps:
+    - do: 세션 한도 상향 (재기동)
+      cmd: |
+        cp -p $TB_HOME/config/$TB_SID.tip $TB_HOME/config/$TB_SID.tip.bak_$(date +%Y%m%d)
+        vi $TB_HOME/config/$TB_SID.tip     # MAX_SESSION_COUNT=<값>
+        tbdown immediate ; tbboot
+      check: "성공: v$parameters 에 새 값·TBR-12003 미발생 · 실패: 기동 실패(메모리 부족) → tip 백업본 원복 후 tbboot"
+      note: "사전조건: WAS 풀 누수 회수 먼저, 세션당 메모리 여유 확인 · 영향: 재기동 동안 서비스 중단 · 승인: DBA·서비스 담당 승인 · 백업/롤백: tip 백업본 복원 후 tbboot"
+    - do: 데이터파일 크기·세그먼트 저장 구조 조정
+      cmd: |
+        tbsql <user>          # 비밀번호는 접속 프롬프트에서 입력
+        SQL> alter tablespace <TS> add datafile '<path>' size <블록 크기 상한 이내> autoextend on maxsize <상한 이내>;
+        SQL> quit
+      check: "성공: TBR-7107/21025 미발생·대상 작업 완료 · 실패: 같은 오류 → 세그먼트 재구성(이동) 계획을 기술지원과 협의"
+      note: "사전조건: 블록 크기별 데이터파일 상한 확인 · 영향: 파일 생성 중 I/O 증가 · 승인: DBA 승인 · 백업/롤백: 추가 파일은 축소 불가하므로 용량 계획 반영"
+  - stage: 3
+    steps:
+    - do: TmaxTibero 기술지원 자료
+      cmd: |
+        tar czf tibero_cap_$(date +%Y%m%d).tgz $TB_HOME/config/$TB_SID.tip $TB_HOME/instance/$TB_SID/log/slog
+      check: "tip·slog·세션/공간 조회 결과"
+      note: "민감정보 마스킹: 호스트명·계정명·세그먼트 이름 안 업무명 가림 · 전달 승인: 보안 담당 승인 후 전달"
+
+- id: TBR-PROC-R5-LOCK
+  products: [tibero]
+  category: lock
+  match: [TBR-12034, TBR-20018]
+  title: 잠금 대기 시간 초과·통계 잠금 (TBR-12034 · TBR-20018 — TBR-12033 NOWAIT 은 TBR-PROC-R6C-NOWAIT)
+  source: "Tibero 6/7 참조 안내서 '동적 뷰(V$LOCK, V$TRANSACTION, V$SESSION)'·관리자 안내서 '세션 관리'·Tibero 오류 참조(TBR-12033/12034/20018)"
+  verify_note: "미검증 — Tibero 세션 종료 구문(ALTER SYSTEM KILL SESSION (sid, serial#))과 DBA_TAB_STATISTICS.STATTYPE_LOCKED·DBMS_STATS.UNLOCK_TABLE_STATS 지원, 3차의 tbsql SPOOL 명령 지원을 공식 문서로 확인하지 못함(안 되면 화면 출력을 복사해 보관) · tbsql 이 비밀번호를 표준입력에서 읽는지(heredoc 으로 SQL 을 넘기면 첫 줄이 비밀번호가 되는지) 공식 문서로 확인하지 못해 SQL 은 대화형(tbsql <user> → 프롬프트 비밀번호 → SQL> 줄)으로 적음"
+  stages:
+  - stage: 1
+    steps:
+    - do: 잠금·트랜잭션 현황 확인 (읽기 전용)
+      cmd: |
+        tbsql <user>          # 비밀번호는 접속 프롬프트에서 입력
+        SQL> select * from v$lock where rownum <= 50;
+        SQL> select * from v$transaction where rownum <= 20;
+        SQL> select status, count(*) from v$session group by status;
+        SQL> quit
+      check: "같은 객체에 오래 머무는 보유 트랜잭션이 있으면 TBR-12033/12034 원인"
+      note: "적용: Tibero 6/7 · 권한: DBA 조회 권한"
+    - do: 통계 잠금 대상 확인 — TBR-20018(통계 잠금 오류)일 때만, 행 잠금(TBR-12033/12034)에는 해당 없음 (읽기 전용)
+      cmd: |
+        tbsql <user>          # 비밀번호는 접속 프롬프트에서 입력
+        SQL> select owner, table_name, stattype_locked from dba_tab_statistics where stattype_locked is not null;
+        SQL> quit
+      check: "통계 수집 대상 테이블이 목록에 있으면 TBR-20018"
+      note: "적용: Tibero 6/7(컬럼 제공 여부 미검증) · 권한: DBA 조회 권한"
+  - stage: 2
+    steps:
+    - do: 보유 트랜잭션 정리 (업무 확인 후)
+      cmd: |
+        tbsql <user>          # 비밀번호는 접속 프롬프트에서 입력
+        SQL> alter system kill session (<sid>, <serial#>);
+        SQL> quit
+      check: "성공: 대기 세션 진행·v$lock 에서 보유 건 소멸 · 실패: 세션 남음 → 롤백 진행 중인지 v$transaction 으로 확인"
+      note: "사전조건: 보유 세션의 업무·트랜잭션 내용을 업무 담당이 확인 · 영향: 종료 세션의 미커밋 작업 롤백 · 승인: DBA·업무 담당 승인 · 백업/롤백: 되돌릴 수 없음 — 종료 전 세션 정보(v$session 출력) 보관"
+    - do: 통계 잠금 해제 후 수집 (의도된 고정이 아닐 때만)
+      cmd: |
+        tbsql <user>          # 비밀번호는 접속 프롬프트에서 입력
+        SQL> exec dbms_stats.unlock_table_stats('<owner>','<table>');
+        SQL> exec dbms_stats.gather_table_stats('<owner>','<table>');
+        SQL> quit
+      check: "성공: 통계 수집 완료·TBR-20018 미발생 · 실패: 같은 오류 → 스키마 단위 잠금 여부 확인"
+      note: "사전조건: 통계를 고정한 사유(실행계획 고정)를 개발·DBA 와 확인 · 영향: 새 통계로 실행계획 변경 가능 · 승인: DBA 승인 · 백업/롤백: `dbms_stats.export_table_stats` 로 기존 통계 보관 후 필요 시 import·lock_table_stats"
+  - stage: 3
+    steps:
+    - do: TmaxTibero 기술지원 자료
+      cmd: |
+        tbsql <user>          # 비밀번호는 접속 프롬프트에서 입력
+        SQL> spool tibero_lock_<YYYYMMDD>.txt
+        SQL> select * from v$lock where rownum <= 200;
+        SQL> spool off
+        SQL> quit
+      check: "잠금 조회 결과·slog·실패 SQL"
+      note: "민감정보 마스킹: 계정명·SQL 안 업무 데이터 값 가림 · 전달 승인: 보안 담당 승인 후 전달"
+
+# ── Altibase ──
+- id: ALT-PROC-R5-MEMORY
+  products: [altibase]
+  category: memory
+  match: [ERR-0109D, ERR-01067, ERR-11009, DB-ALT-004]
+  title: 문장 메모리 한도·공유 메모리 연결·메모리 할당 실패 (ERR-0109D · ERR-01067 · ERR-11009)
+  source: "Altibase 7.1 General Reference '성능 뷰(V$MEMSTAT, V$STATEMENT, V$PROPERTY)'·'프로퍼티(EXECUTE_STMT_MEMORY_MAXIMUM, PREPARE_STMT_MEMORY_MAXIMUM, MEM_MAX_DB_SIZE)'·Administrator's Manual 'trc 로그'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 메모리 사용·한도 확인 (읽기 전용)
+      cmd: |
+        cat > /tmp/alt_mem.sql <<'EOF'
+        SELECT NAME, ALLOC_SIZE, MAX_TOTAL_SIZE FROM V$MEMSTAT ORDER BY ALLOC_SIZE DESC LIMIT 10;
+        SELECT NAME, VALUE1 FROM V$PROPERTY WHERE NAME IN ('MEM_MAX_DB_SIZE','EXECUTE_STMT_MEMORY_MAXIMUM','PREPARE_STMT_MEMORY_MAXIMUM');
+        SELECT SESSION_ID, USED_MEMORY, SUBSTR(QUERY,1,100) FROM V$STATEMENT ORDER BY USED_MEMORY DESC LIMIT 10;
+        EOF
+        isql -s localhost -u sys -silent -f /tmp/alt_mem.sql
+      check: "USED_MEMORY 상위 문장이 STMT_MEMORY_MAXIMUM 근접이면 ERR-01067/0109D · V$MEMSTAT 상위 모듈이 급증하면 메모리 할당 실패 원인"
+      note: "적용: Altibase 6.5/7.x 성능 뷰(7.1 매뉴얼 기준 컬럼) · 권한: SYS 또는 조회 권한 · /tmp 스크립트는 조회문만 담음"
+    - do: OS·공유 메모리 확인 (읽기 전용)
+      cmd: |
+        free -m ; ipcs -m | grep <altibase_user>
+        sysctl kernel.shmmax kernel.shmall
+        tail -50 $ALTIBASE_HOME/trc/altibase_boot.log
+      check: "OS 여유 부족·커널 한도 미달·남은 세그먼트가 있으면 ERR-11009 원인"
+      note: "적용: Linux · 권한: 일반 사용자(ipcs), altibase 계정(trc)"
+  - stage: 2
+    steps:
+    - do: 문장 메모리 한도·메모리 파라미터 조정
+      cmd: |
+        cp -p $ALTIBASE_HOME/conf/altibase.properties $ALTIBASE_HOME/conf/altibase.properties.bak_$(date +%Y%m%d)
+        vi $ALTIBASE_HOME/conf/altibase.properties     # PREPARE_STMT_MEMORY_MAXIMUM / EXECUTE_STMT_MEMORY_MAXIMUM
+        server stop ; server start
+      check: "성공: V$PROPERTY 에 새 값·ERR-01067/0109D 미발생 · 실패: 기동 실패 → properties 백업본 복원 후 server start"
+      note: "사전조건: 원인 SQL 튜닝(긴 IN 목록·복잡 조인) 먼저 검토, 물리 메모리 여유 확인 · 영향: 재기동 동안 서비스 중단 · 승인: DBA·서비스 담당 승인 · 백업/롤백: altibase.properties 백업본 복원 후 재기동(동적 변경 가능 여부는 General Reference 프로퍼티 속성 확인)"
+    - do: 남은 공유 메모리 정리·커널 한도 조정 (ERR-11009)
+      cmd: |
+        ps -ef | grep [a]ltibase
+        ipcrm -m <shmid>
+      check: "성공: server start 후 ERR-11009 미발생 · 실패: 같은 오류 → 커널 shmmax/shmall 조정(sysctl.conf) 후 재시도"
+      note: "사전조건: Altibase 서버 프로세스가 없음을 확인한 세그먼트만 정리 · 영향: 다른 프로세스 세그먼트 오삭제 시 장애 · 승인: 시스템·DBA 승인 · 백업/롤백: `ipcs -m` 출력 보관(세그먼트는 복원 불가 — 대상 확인이 핵심)"
+  - stage: 3
+    steps:
+    - do: Altibase 기술지원 자료
+      cmd: |
+        tar czf altibase_mem_$(date +%Y%m%d).tgz $ALTIBASE_HOME/conf/altibase.properties $ALTIBASE_HOME/trc/altibase_boot.log $ALTIBASE_HOME/trc/altibase_error.log
+      check: "properties·trc 로그·V$MEMSTAT 결과"
+      note: "민감정보 마스킹: 호스트명·IP·SQL 안 업무 데이터 값 가림 · 전달 승인: 보안 담당 승인 후 전달"
+
+- id: ALT-PROC-R5-LOCK
+  products: [altibase]
+  category: lock
+  match: [ERR-11041, ERR-11075, ERR-40029, DB-ALT-001]
+  title: 교착·잠금 시간 초과·서버 잠금 파일 중복 (ERR-11041 · ERR-11075 · ERR-40029)
+  source: "Altibase 7.1 General Reference '성능 뷰(V$LOCK_WAIT, V$LOCK, V$TRANSACTION, V$SESSION, V$STATEMENT)'·Altibase FAQ 'Lock related properties'·6.5.1 패치노트(ALTER DATABASE … SESSION CLOSE)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 잠금 대기 관계 확인 (읽기 전용)
+      cmd: |
+        cat > /tmp/alt_lock.sql <<'EOF'
+        SELECT TRANS_ID, WAIT_FOR_TRANS_ID FROM V$LOCK_WAIT;
+        SELECT T.ID, T.SESSION_ID, S.CLIENT_PID, S.CLIENT_APP_INFO, SUBSTR(ST.QUERY,1,100) FROM V$TRANSACTION T JOIN V$SESSION S ON S.ID=T.SESSION_ID LEFT JOIN V$STATEMENT ST ON ST.SESSION_ID=S.ID WHERE T.ID IN (SELECT WAIT_FOR_TRANS_ID FROM V$LOCK_WAIT);
+        EOF
+        isql -s localhost -u sys -silent -f /tmp/alt_lock.sql
+      check: "WAIT_FOR_TRANS_ID 가 같은 보유 트랜잭션에 몰리면 그 세션이 원인(ERR-11075) · 서로 기다리면 교착(ERR-11041)"
+      note: "적용: Altibase 6.5/7.x · 권한: SYS"
+    - do: 서버 중복 기동 확인 (ERR-40029, 읽기 전용)
+      cmd: |
+        ps -ef | grep [a]ltibase
+        tail -50 $ALTIBASE_HOME/trc/altibase_boot.log
+      check: "같은 ALTIBASE_HOME 의 서버가 이미 실행 중이면 중복 기동 시도가 원인"
+      note: "적용: Altibase 6.x/7.x · 권한: altibase 계정"
+  - stage: 2
+    steps:
+    - do: 보유 세션 종료 (업무 확인 후)
+      cmd: |
+        isql -s localhost -u sys -sysdba
+        # isql 프롬프트에서: ALTER DATABASE <db_name> SESSION CLOSE <session_id>;
+      check: "성공: V$LOCK_WAIT 대기 소멸·대기 작업 진행 · 실패: 세션 유지 → 롤백 진행 여부를 V$TRANSACTION 으로 확인"
+      note: "사전조건: 보유 세션 업무를 업무 담당이 확인(CLIENT_APP_INFO·CLIENT_PID) · 영향: 종료 세션의 미커밋 작업 롤백 · 승인: DBA·업무 담당 승인 · 백업/롤백: 되돌릴 수 없음 — 종료 전 세션·문장 조회 결과 보관"
+  - stage: 3
+    steps:
+    - do: Altibase 기술지원 자료
+      cmd: |
+        isql -s localhost -u sys -silent -f /tmp/alt_lock.sql > altibase_lock_$(date +%Y%m%d).txt
+        tar czf altibase_lock_$(date +%Y%m%d).tgz $ALTIBASE_HOME/trc/altibase_error.log altibase_lock_$(date +%Y%m%d).txt
+      check: "잠금 조회 결과·trc 로그·실패 SQL"
+      note: "민감정보 마스킹: 클라이언트 IP·계정명·SQL 안 업무 데이터 값 가림 · 전달 승인: 보안 담당 승인 후 전달"
+
+- id: ALT-PROC-R5-SECURITY
+  products: [altibase]
+  category: security
+  match: [ERR-31010, ERR-31370, ERR-4102E]
+  title: 사용자 없음·계정 잠김·비밀번호 오류 (ERR-31010 · ERR-31370 · ERR-4102E)
+  source: "Altibase 7.1 SQL Reference '사용자 관리(ALTER USER)'·General Reference '메타 테이블(SYSTEM_.SYS_USERS_)'·Altibase 오류 메시지(ERR-31010/31370/4102E)"
+  verify_note: "미검증 — Altibase ALTER USER … ACCOUNT UNLOCK 구문과 SYS_USERS_ 의 잠금 관련 컬럼 이름을 공식 문서로 확인하지 못해 전체 컬럼 조회로 둠"
+  stages:
+  - stage: 1
+    steps:
+    - do: 계정 존재·상태 확인 (읽기 전용)
+      cmd: |
+        cat > /tmp/alt_user.sql <<'EOF'
+        SELECT * FROM SYSTEM_.SYS_USERS_ WHERE USER_NAME = '<USER>';
+        EOF
+        isql -s localhost -u sys -silent -f /tmp/alt_user.sql
+      check: "행이 없으면 ERR-31010(계정명 오류) · 잠금 표시가 있으면 ERR-31370"
+      note: "적용: Altibase 6.5/7.x · 권한: SYS · 비밀번호 관련 컬럼 값은 출력·전달하지 않음"
+    - do: 실패 출처 확인 (읽기 전용)
+      cmd: |
+        grep -n "31010\|31370\|4102E" $ALTIBASE_HOME/trc/altibase_error.log | tail -20
+      check: "같은 출처·시각대 반복이면 애플리케이션 자격정보 미반영"
+      note: "적용: 7.1 trc 파일명 기준 · 권한: altibase 계정"
+  - stage: 2
+    steps:
+    - do: 자격정보 정정·잠금 해제
+      cmd: |
+        isql -s localhost -u sys
+        # isql 프롬프트에서: ALTER USER <user> ACCOUNT UNLOCK;  — 비밀번호 변경은 판 매뉴얼 방법으로 계정 담당이 직접(값이 든 IDENTIFIED BY 문은 입력 기록에 남을 수 있음)
+      check: "성공: 해당 서비스 정상 접속·ERR-31370/4102E 미발생 · 실패: 곧바로 재잠금 → 잘못된 자격정보 출처가 남아 있음"
+      note: "사전조건: 실패 출처(WAS·배치) 자격정보 먼저 수정, 계정 소유자 확인 · 영향: 비밀번호 변경 시 모든 사용처 동시 반영 필요 · 승인: 보안 담당·계정 소유자 승인 · 백업/롤백: 변경 전 계정 상태 조회 결과 보관, 잠금 원복은 ACCOUNT LOCK"
+  - stage: 3
+    steps:
+    - do: 보안 사고 의심 시 자료 보존·전달
+      cmd: |
+        grep -n "31010\|31370\|4102E" $ALTIBASE_HOME/trc/altibase_error.log > alt_auth_fail_$(date +%Y%m%d).txt
+      check: "인증 실패 기록·계정 상태(비밀번호 컬럼 제외)"
+      note: "민감정보 마스킹: 계정명·클라이언트 IP·호스트명 가림 · 전달 승인: 보안 담당 승인 후 전달"
+
+- id: ALT-PROC-R5-CAPACITY
+  products: [altibase]
+  category: capacity
+  match: [ERR-41041, ERR-410CF, ERR-71016, ERR-11118, ERR-11107]
+  title: SYSDBA 중복·세션 문장 수·FD 한도·UPDATE 로그 크기·Volatile 한도 (ERR-410CF · ERR-71016 · ERR-11118 · ERR-11107)
+  source: "Altibase 7.1 General Reference '프로퍼티(MAX_STATEMENTS_PER_SESSION, TRX_UPDATE_MAX_LOGSIZE, VOLATILE_MAX_DB_SIZE)'·'성능 뷰(V$SESSION, V$VOL_TABLESPACES, V$PROPERTY)'·Altibase 오류 메시지"
+  stages:
+  - stage: 1
+    steps:
+    - do: 한도 프로퍼티·사용량 확인 (읽기 전용)
+      cmd: |
+        cat > /tmp/alt_cap.sql <<'EOF'
+        SELECT NAME, VALUE1 FROM V$PROPERTY WHERE NAME IN ('MAX_STATEMENTS_PER_SESSION','TRX_UPDATE_MAX_LOGSIZE','VOLATILE_MAX_DB_SIZE','MAX_CLIENT');
+        SELECT ID, OPENED_STMT_COUNT, MAX_STATEMENTS_PER_SESSION, SYSDBA_FLAG, CLIENT_APP_INFO FROM V$SESSION ORDER BY OPENED_STMT_COUNT DESC LIMIT 10;
+        SELECT SPACE_NAME, CURRENT_SIZE, MAX_SIZE FROM V$VOL_TABLESPACES;
+        EOF
+        isql -s localhost -u sys -silent -f /tmp/alt_cap.sql
+      check: "OPENED_STMT_COUNT ≈ MAX_STATEMENTS_PER_SESSION 이면 ERR-410CF · SYSDBA_FLAG=1 세션이 이미 있으면 ERR-41041 · Volatile 합계 ≈ VOLATILE_MAX_DB_SIZE 면 ERR-11107"
+      note: "적용: Altibase 7.1 컬럼 기준(6.x 는 일부 컬럼 없음) · 권한: SYS"
+    - do: OS 파일 디스크립터 확인 (ERR-71016, 읽기 전용)
+      cmd: |
+        su - <altibase_user> -c 'ulimit -n'
+        ls /proc/$(pgrep -u <altibase_user> -f "altibase -p" | head -1)/fd | wc -l
+      check: "열린 FD 수가 ulimit -n 에 닿으면 ERR-71016 확정"
+      note: "적용: Linux · 권한: root 또는 altibase 계정"
+  - stage: 2
+    steps:
+    - do: 한도 프로퍼티·OS 한도 조정
+      cmd: |
+        cp -p $ALTIBASE_HOME/conf/altibase.properties $ALTIBASE_HOME/conf/altibase.properties.bak_$(date +%Y%m%d)
+        cp -p /etc/security/limits.conf /etc/security/limits.conf.bak_$(date +%Y%m%d)
+        vi $ALTIBASE_HOME/conf/altibase.properties     # MAX_STATEMENTS_PER_SESSION / TRX_UPDATE_MAX_LOGSIZE / VOLATILE_MAX_DB_SIZE
+        server stop ; server start
+      check: "성공: V$PROPERTY 에 새 값·해당 오류 미발생 · 실패: 기동 실패 → 백업본 복원 후 server start"
+      note: "사전조건: 대량 UPDATE 는 작업 단위 분할을 먼저 검토(ERR-11118), 문장 미반환 누수(ERR-410CF)는 애플리케이션 수정 우선 · 영향: 재기동 동안 서비스 중단 · 승인: DBA·서비스 담당 승인 · 백업/롤백: properties·limits.conf 백업본 복원 후 재기동"
+  - stage: 3
+    steps:
+    - do: Altibase 기술지원 자료
+      cmd: |
+        isql -s localhost -u sys -silent -f /tmp/alt_cap.sql > alt_cap_$(date +%Y%m%d).txt
+        tar czf altibase_cap_$(date +%Y%m%d).tgz $ALTIBASE_HOME/conf/altibase.properties alt_cap_$(date +%Y%m%d).txt $ALTIBASE_HOME/trc/altibase_error.log
+      check: "properties·한도 조회 결과·trc 로그"
+      note: "민감정보 마스킹: 호스트명·계정명·CLIENT_APP_INFO 안 업무명 가림 · 전달 승인: 보안 담당 승인 후 전달"
+
+- id: ALT-PROC-R5-UPSTREAM
+  products: [altibase]
+  category: upstream
+  match: [ERR-61000, ERR-61001, ERR-6100C, ERR-6100D, ERR-61016, ERR-61023, ERR-61035, ERR-61036, ERR-6103A, ERR-610CF, ERR-610D2, ERR-3109F, ERR-31020, ERR-31088]
+  title: 이중화(Replication) 충돌·연결·구성 불일치 (ERR-61000 · ERR-6100D · ERR-3109F · ERR-31020)
+  source: "Altibase 7.1 Replication Manual·General Reference '성능 뷰(V$REPSENDER, V$REPRECEIVER, V$REPGAP)'·'프로퍼티(REPLICATION_PORT_NO, REPLICATION_DDL_ENABLE)'·Administrator's Manual 'trc 로그(altibase_rp.log)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 송수신 상태·갭 확인 (읽기 전용, 양쪽 서버)
+      cmd: |
+        cat > /tmp/alt_rep.sql <<'EOF'
+        SELECT REP_NAME, STATUS, NET_ERROR_FLAG, PEER_IP, PEER_PORT FROM V$REPSENDER;
+        SELECT REP_NAME, PEER_IP, PEER_PORT, INSERT_FAILURE_COUNT, UPDATE_FAILURE_COUNT, DELETE_FAILURE_COUNT FROM V$REPRECEIVER;
+        SELECT REP_NAME, REP_GAP, REP_GAP_SIZE FROM V$REPGAP;
+        SELECT NAME, VALUE1 FROM V$PROPERTY WHERE NAME LIKE 'REPLICATION%';
+        EOF
+        isql -s localhost -u sys -silent -f /tmp/alt_rep.sql
+      check: "NET_ERROR_FLAG=1·Receiver 없음이면 연결 문제(ERR-6100C/6100D) · *_FAILURE_COUNT 증가면 데이터 충돌(ERR-61000/61035/61036/6103A) · REP_GAP 증가면 전송 지연"
+      note: "적용: Altibase 7.1 컬럼 기준 · 권한: SYS"
+    - do: 이중화 로그 확인 (읽기 전용)
+      cmd: |
+        grep -n "ERR-6\|ERR-3109F\|ERR-31020\|ERR-31088" $ALTIBASE_HOME/trc/altibase_rp.log | tail -30
+        df -h $ALTIBASE_HOME/logs
+      check: "스키마·PK 불일치(ERR-3109F/610D2)·TX 테이블 크기 불일치(ERR-610CF)·로그 공간 부족(ERR-61016) 구분"
+      note: "적용: 7.1 trc 파일명 · 로그 디렉터리는 altibase.properties LOG_DIR 기준 · 권한: altibase 계정"
+  - stage: 2
+    steps:
+    - do: 이중화 중지·구성 정정·재시작
+      cmd: |
+        isql -s localhost -u sys
+        # isql 프롬프트에서(양쪽): ALTER REPLICATION <rep_name> STOP;
+        #   구성 정정(테이블 스키마·PK·REPLICATION_PORT_NO·TRANSACTION_TABLE_SIZE 일치) 후
+        # ALTER REPLICATION <rep_name> START;
+      check: "성공: V$REPSENDER STATUS 정상·REP_GAP 감소·FAILURE_COUNT 증가 멈춤 · 실패: 같은 오류 → 충돌 레코드 정합화(양쪽 데이터 비교) 후 재시작"
+      note: "사전조건: 양쪽 데이터 기준(마스터) 합의, 충돌 레코드 목록 확보 · 영향: 중지 동안 이중화 지연 누적 · 승인: DBA·업무 담당 승인 · 백업/롤백: 변경 전 대상 테이블 백업(aexport/iLoader), 정정 전 구성 정의 보관"
+  - stage: 3
+    steps:
+    - do: Altibase 기술지원 자료 (양쪽 서버)
+      cmd: |
+        isql -s localhost -u sys -silent -f /tmp/alt_rep.sql > alt_rep_$(hostname -s)_$(date +%Y%m%d).txt
+        tar czf altibase_rep_$(hostname -s)_$(date +%Y%m%d).tgz $ALTIBASE_HOME/trc/altibase_rp.log $ALTIBASE_HOME/conf/altibase.properties alt_rep_$(hostname -s)_$(date +%Y%m%d).txt
+      check: "양쪽 altibase_rp.log·properties·이중화 조회 결과"
+      note: "민감정보 마스킹: IP·호스트명·충돌 레코드 안 개인정보 가림 · 전달 승인: 보안 담당 승인 후 전달"
+
+- id: ALT-PROC-R5-DISK
+  products: [altibase]
+  category: disk
+  match: [ERR-91044, ERR-01052]
+  title: 파일 I/O·open/write 호출 실패 (ERR-91044 · ERR-01052)
+  source: "Altibase 7.1 iLoader User's Manual·Administrator's Manual 'trc 로그'·Altibase 오류 메시지(ERR-91044/01052)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 대상 파일·공간·FD 확인 (읽기 전용)
+      cmd: |
+        grep -n "01052\|91044" $ALTIBASE_HOME/trc/altibase_error.log | tail -20
+        df -h <target_dir> ; df -i <target_dir> ; ls -l <target_file>
+        su - <altibase_user> -c 'ulimit -n'
+      check: "공간·inode 100%·파일 없음·권한 없음·FD 한도 도달 중 해당 항목이 원인"
+      note: "적용: Altibase 6.x/7.x(iLoader 는 클라이언트 측에서 확인) · 권한: altibase 계정"
+  - stage: 2
+    steps:
+    - do: 공간 확보·FD 한도 조정
+      cmd: |
+        cp -p /etc/security/limits.conf /etc/security/limits.conf.bak_$(date +%Y%m%d)
+        vi /etc/security/limits.conf     # <altibase_user> soft/hard nofile <값>
+      check: "성공: 재실행한 작업(iLoader·서버 파일 쓰기) 정상 완료 · 실패: 같은 오류 → errno 기준 재진단"
+      note: "사전조건: 공간 확보 대상 파일이 DB 사용 파일이 아닌지 확인 · 영향: limits 변경은 서버 재기동 후 적용 · 승인: 시스템·DBA 승인 · 백업/롤백: limits.conf 백업본 복원"
+  - stage: 3
+    steps:
+    - do: Altibase 기술지원 자료
+      cmd: |
+        tar czf altibase_io_$(date +%Y%m%d).tgz $ALTIBASE_HOME/trc/altibase_error.log $ALTIBASE_HOME/trc/altibase_boot.log
+      check: "trc 로그·df·ulimit 결과"
+      note: "민감정보 마스킹: 경로 안 고객명·호스트명 가림 · 전달 승인: 보안 담당 승인 후 전달"
+
+- id: ALT-PROC-R5-INTERNAL
+  products: [altibase]
+  category: internal
+  match: [ERR-01044, ERR-01050, ERR-0108D, DB-ALT-005, LEG-ALTIBASE-ERR-W-036F, LEG-ALTIBASE-0XX-5661]
+  title: 서버 비정상 중단·라이선스·질의 시간 초과 (DB-ALT-005 · ERR-01050 · ERR-0108D · ERR-01044)
+  source: "Altibase 7.1 Administrator's Manual 'trc 로그(altibase_boot.log·altibase_error.log·altibase_dump.log)'·'서버 종료(server stop, server kill)'·General Reference '프로퍼티(QUERY_TIMEOUT)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 서버 생존·중단 원인 확인 (읽기 전용)
+      cmd: |
+        ps -ef | grep [a]ltibase
+        tail -100 $ALTIBASE_HOME/trc/altibase_boot.log
+        tail -100 $ALTIBASE_HOME/trc/altibase_error.log
+        dmesg -T | grep -i -E "out of memory|segfault" | tail
+      check: "boot log 의 라이선스 오류면 ERR-01050/0108D · error log 콜스택이면 비정상 종료 · OS 메모리 고갈 기록 확인"
+      note: "적용: altibase_error.log 는 7.1 trc 파일명 · 권한: altibase 계정, dmesg 는 root 필요할 수 있음"
+    - do: 라이선스·질의 시간 초과 확인 (읽기 전용)
+      cmd: |
+        ls -l $ALTIBASE_HOME/conf/license
+        cat > /tmp/alt_qt.sql <<'EOF'
+        SELECT NAME, VALUE1 FROM V$PROPERTY WHERE NAME='QUERY_TIMEOUT';
+        EOF
+        isql -s localhost -u sys -silent -f /tmp/alt_qt.sql
+      check: "라이선스 파일 부재·만료면 기동 불가 · QUERY_TIMEOUT 대비 장시간 SQL 이면 ERR-01044"
+      note: "적용: 라이선스 경로는 설치 안내서 확인 · 권한: altibase 계정"
+  - stage: 2
+    steps:
+    - do: 원인 조치 후 서버 기동
+      cmd: |
+        cp -r $ALTIBASE_HOME/trc $ALTIBASE_HOME/trc_bak_$(date +%Y%m%d%H%M)
+        server start
+      check: "성공: isql 접속·V$INSTANCE STARTUP_PHASE 정상 · 실패: boot log 의 새 오류 확인 후 기술지원"
+      note: "사전조건: 중단 원인(라이선스·메모리·디스크) 조치 완료, trc 자료 보존 · 영향: 기동 중 접속 불가 · 승인: DBA·서비스 담당 승인 · 백업/롤백: trc 사본 보관, 기동 실패 시 `server stop`(필요 시 `server kill`) 후 원인 재확인"
+  - stage: 3
+    steps:
+    - do: Altibase 기술지원 자료
+      cmd: |
+        tar czf altibase_crash_$(date +%Y%m%d).tgz $ALTIBASE_HOME/trc/altibase_boot.log $ALTIBASE_HOME/trc/altibase_error.log $ALTIBASE_HOME/trc/altibase_dump.log $ALTIBASE_HOME/conf/altibase.properties
+      check: "boot·error·dump 로그·properties·버전(V$VERSION)"
+      note: "민감정보 마스킹: 호스트명·IP·덤프 안 업무 데이터 가림 · 전달 승인: 보안 담당 승인 후 전달"
+
+- id: ALT-PROC-R5-PERFORMANCE
+  products: [altibase]
+  category: performance
+  match: [DB-ALT-006]
+  title: 질의 시간 초과로 서버가 질의 취소 (Query Timeout)
+  source: "Altibase 7.1 General Reference '성능 뷰(V$SESSION QUERY_TIME_LIMIT, V$STATEMENT TOTAL_TIME, V$LOCK_WAIT)'·'프로퍼티(QUERY_TIMEOUT)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 해당 세션·문장 확인 (읽기 전용)
+      cmd: |
+        cat > /tmp/alt_perf.sql <<'EOF'
+        SELECT ID, QUERY_TIME_LIMIT, CLIENT_APP_INFO FROM V$SESSION WHERE ID = <session_id>;
+        SELECT SESSION_ID, TOTAL_TIME, EXECUTE_TIME, SUBSTR(QUERY,1,100) FROM V$STATEMENT ORDER BY TOTAL_TIME DESC LIMIT 10;
+        SELECT TRANS_ID, WAIT_FOR_TRANS_ID FROM V$LOCK_WAIT;
+        EOF
+        isql -s localhost -u sys -silent -f /tmp/alt_perf.sql
+      check: "TOTAL_TIME 상위 문장이 QUERY_TIME_LIMIT 를 넘으면 지연 SQL · V$LOCK_WAIT 가 있으면 잠금 대기가 원인"
+      note: "적용: Altibase 6.x~7.x(7.1 컬럼 기준) · 권한: SYS"
+    - do: 같은 시각 I/O 지연 확인 (읽기 전용)
+      cmd: |
+        iostat -x 5 3
+        grep -n -i "checkpoint" $ALTIBASE_HOME/trc/altibase_sm.log | tail -10
+      check: "await 급증·체크포인트 시각과 겹치면 I/O 원인"
+      note: "적용: Linux · 권한: altibase 계정"
+  - stage: 2
+    steps:
+    - do: 지연 SQL 튜닝 또는 시간 제한 조정
+      cmd: |
+        isql -s localhost -u sys
+        # isql 프롬프트에서 실행계획 확인: ALTER SESSION SET EXPLAIN PLAN = ONLY;  후 대상 SQL 실행
+      check: "성공: TOTAL_TIME 단축·Query Timeout 미발생 · 실패: 업무상 장시간 SQL 이면 해당 애플리케이션 세션만 시간 제한 조정"
+      note: "사전조건: 개발팀과 SQL·인덱스 변경 검토 · 영향: 인덱스 추가 시 DML 부하 증가 · 승인: DBA·개발 담당 승인 · 백업/롤백: 변경 전 실행계획·QUERY_TIMEOUT 값 보관 후 원복"
+  - stage: 3
+    steps:
+    - do: Altibase 기술지원 자료
+      cmd: |
+        isql -s localhost -u sys -silent -f /tmp/alt_perf.sql > alt_perf_$(date +%Y%m%d).txt
+      check: "세션·문장 조회 결과·altibase_boot.log 의 Query Timeout 줄"
+      note: "민감정보 마스킹: SQL 안 업무 데이터 값·CLIENT_APP_INFO 가림 · 전달 승인: 보안 담당 승인 후 전달"

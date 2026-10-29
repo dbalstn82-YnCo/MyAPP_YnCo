@@ -1,0 +1,48 @@
+product: solaris
+layer: os
+note: 5차 핵심 코드 보강(2026-10-16) — FMA 메시지 ID(SUNW-MSG-ID / MSG-ID)를 그대로 코드로 등록. syslog 파서는 MSG-ID 를 코드로 뽑지 않으므로 _aliases.yaml 의 같은 이름 별칭으로 연결. 근거=Oracle Solaris 11 'Displaying Information About Faults or Defects', Sun SPARC Enterprise M8000/M9000 Product Notes
+codes:
+- code: PCIEX-8000-5Y
+  severity: error
+  category: hardware
+  title: PCIe 장치 잘못된 요청(fault.io.pci.device-invreq)
+  vendor_cause: 'FMA 진단 PCIEX-8000-5Y(심각도 Major, 결함 클래스 fault.io.pci.device-invreq) — PCIe 장치가 잘못된 요청(invalid request)을 보냈다(The transmitting device sent an invalid request). 관련 장치 인스턴스가 비활성화될 수 있어 그 장치(HBA·NIC 등)가 제공하던 서비스를 잃을 수 있다.'
+  vendor_action: 'fmadm faulty 로 상세 내용을 확인하고 support.oracle.com/msg/PCIEX-8000-5Y 의 최신 서비스 절차를 따름'
+  vendor_url: https://docs.oracle.com/cd/E26502_01/html/E29003/glisy.html
+  immediate:
+  - "`fmadm faulty` 로 EVENT-ID·Affects(장치 경로)·FRU(슬롯)·상태(faulty·taken out of service) 기록(읽기 전용)"
+  - "`fmdump -v -u <EVENT-ID>` 로 진단 상세, `grep '<Affects 장치 경로>' /etc/path_to_inst` 로 드라이버 인스턴스(예 qlc·igb) 확인 — 그 장치를 쓰는 다중 경로(MPxIO·IPMP)의 다른 경로가 살아 있는지 `mpathadm list lu`·`ipmpstat -i` 로 확인 (ipmpstat 은 Solaris 11 · 10 은 `ifconfig -a` 의 groupname·FAILED 플래그)"
+  - "`fmdump -e | tail -30` 로 같은 장치의 ereport 반복 여부 확인 — 반복이면 하드웨어 결함 가능성 높음"
+  short:
+  - "(2차·승인 후, 롤백: 해당 없음) Oracle 서비스로 해당 슬롯 카드 재장착·교체 일정 수립, 교체 후 `fmadm repaired <FRU FMRI>`(Solaris 11 · 10 은 `fmadm repair`)로 수리 기록 — 경로가 하나뿐인 장치면 업무 영향 사전 공지"
+  mid:
+  - "해당 카드 드라이버·펌웨어와 OS SRU(10 은 패치) 수준을 Oracle 권고와 대조해 갱신 계획 수립, 단일 경로 장치를 다중 경로로 이중화"
+  long:
+  - "`fmadm faulty` 결과를 정기 수집해 비어 있지 않으면 경보, 같은 슬롯 반복 결함 이력 관리"
+  versions:
+  - Solaris 10
+  - Solaris 11.x
+  version_note: Oracle Solaris 11 문서 예시(fmadm faulty, MSG-ID PCIEX-8000-5Y) 원문 확인 — 링크가 11 초기판은 sun.com/msg, 11.1 은 support.oracle.com/msg. Solaris 10 도 FMA 사용(같은 MSG-ID 체계)
+  source: 공식 문서 대조(2026-10-16 5차 보강)
+- code: FMD-8000-2K
+  severity: warn
+  category: internal
+  title: FMA 진단 모듈 비활성화(fmd 자가 진단 결함)
+  vendor_cause: 'FMD-8000-2K(TYPE Defect, SEVERITY Minor, 결함 클래스 defect.sunos.fmd.module) — Fault Manager 구성 요소(진단 모듈)에 오류가 나서 그 모듈이 비활성화되었다. 이후 그 모듈 대상 이벤트는 자동 진단·대응이 되지 않고 수동 진단용으로만 저장된다(예: cpumem-diagnosis 가 꺼지면 CPU·메모리 결함 자동 격리 안 됨).'
+  vendor_action: 'fmdump -v -u <EVENT-ID> 로 모듈을 찾고 fmadm reset <module> 로 모듈 초기화, fmd 서비스가 실패했으면 svcadm clear fmd (Oracle 문서 REC-ACTION)'
+  vendor_url: https://docs.oracle.com/cd/E19170-01/820-5186-11/DCpnotes.html
+  immediate:
+  - "`fmadm faulty` 로 Affects 의 모듈 이름(fmd:///module/<module>) 확인, `fmdump -v -u <EVENT-ID>` 로 상세 기록(읽기 전용)"
+  - "`fmadm config | head -40` 로 모듈 상태 목록, `svcs -l svc:/system/fmd:default` 로 fmd 서비스가 online 인지 확인"
+  - "모듈이 꺼진 동안의 하드웨어 이벤트를 `fmdump -e | tail -30` 로 직접 확인 — CPU·메모리 ereport 가 있으면 수동 진단 대상"
+  short:
+  - "(2차·승인 후, 롤백: 해당 없음) `fmadm reset <module>` 로 모듈 초기화(문서 권고), fmd 가 maintenance 면 `svcadm clear fmd` — 이후 `fmadm config` 에서 모듈 active 확인"
+  mid:
+  - "모듈 실패를 부른 이벤트(예: M 시리즈 ubc.piowbeue-cpu 후 cpumem-diagnosis 실패, 버그 6660168)를 제품 노트·SRU 와 대조해 수정 적용 계획 수립"
+  long:
+  - "`fmadm config` 의 모듈 상태를 정기 점검해 비활성 모듈이 생기면 경보"
+  versions:
+  - Solaris 10
+  - Solaris 11.x
+  version_note: Sun SPARC Enterprise M8000/M9000 Product Notes(Solaris 10 시절)와 Oracle Linux FMA 사용자 가이드에서 같은 MSG-ID 원문 확인 — Solaris 11 은 fmadm faulty 로 표시
+  source: 공식 문서 대조(2026-10-16 5차 보강)

@@ -1,0 +1,362 @@
+product: aix
+layer: os
+note: GPT 협업 수집분 — 벤더 공식 문서와 대조 후 확정
+codes:
+- code: AIX-INODE-FULL
+  severity: error
+  category: capacity
+  title: inode 고갈
+  vendor_cause: 파일시스템의 inode(파일 개수 한도)가 소진되어 공간이 남아도 새 파일을 만들 수 없는 상태. JFS 는 생성 시
+    nbpi 로 inode 수가 고정되어 작은 파일 대량 생성(세션·큐·임시 파일) 시 흔하고, JFS2 는 inode 를 동적으로 할당하므로
+    대개 블록 고갈과 함께 나타난다.
+  immediate:
+  - '`df -g <mount>` 의 %Iused 와 %Used 확인 — %Iused 95% 이상이면 inode 고갈 확정, %Used 도 100%
+    근처면 JFS2 블록 고갈이 원인'
+  - '`lsfs -q <mount>` 로 JFS/JFS2 종류·nbpi 확인, `find <mount> -xdev -type d -size +200
+    | head` 로 파일이 많이 쌓인 디렉터리 후보 식별(삭제는 2차)'
+  short:
+  - '(2차·승인 후, 롤백: 정리 대상 tar 보관) 애플리케이션 담당과 합의해 오래된 세션·임시·큐 파일을 정리하고 생성 주체 프로세스 확인'
+  mid:
+  - 'JFS 는 nbpi 를 작게(예: 4096) 다시 만든 JFS2 로 이전 계획, JFS2 는 `chfs -a size=+<크기>` 로 증설(블록이
+    늘면 inode 도 늘어남)'
+  long:
+  - df -g 의 %Iused 85%/95% 감시 임계 등록, 소파일 생성 디렉터리의 보존 주기(cron 정리) 표준화
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: 일반 문구
+- code: AIX-FS-MOUNT-FAIL
+  severity: error
+  category: storage
+  title: 파일시스템 마운트 실패
+  vendor_cause: mount 명령이 파일시스템을 붙이지 못한 상태. 흔한 원인은 VG 미활성(varyoff)·LV closed, /etc/filesystems
+    스탠자 오류, JFS2 로그 장치 문제, fsck 가 필요한 손상(dirty) 상태, 마운트 지점 사용 중.
+  immediate:
+  - '`grep -p <mount> /etc/filesystems` 로 dev·log·vfs 값 확인, `lsvg -o` 로 해당 VG 활성 여부
+    확인'
+  - '`lsvg -l <vg>` 에서 LV STATE 가 closed/stale 인지, `errpt | head -20` 에 같은 시각 JFS2·LVM·디스크
+    오류가 있는지 확인'
+  short:
+  - '(2차·승인 후, 롤백: 마운트 전 상태 기록) 원인별 조치 — VG 미활성이면 varyonvg, dirty 면 `fsck -y <dev>`(언마운트
+    상태에서), 스탠자 오류면 백업 후 /etc/filesystems 수정'
+  mid:
+  - 부팅 시 자동 마운트 순서(mount=true·VG auto-varyon) 와 JFS2 inline log 사용 여부를 표준 구성으로 정리
+  long:
+  - 재부팅·변경 작업 후 `mount` 결과와 /etc/filesystems 대조 점검 항목 등록
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: mount 명령 문구 전 버전
+- code: AIX-TAPE-ERROR
+  severity: error
+  category: hardware
+  title: 테이프 장치 오류
+  vendor_cause: 테이프 드라이브(rmt) 또는 매체에서 읽기/쓰기·하드웨어 오류가 errpt 에 기록된 상태(TAPE_ERR1~ 계열).
+    매체 불량·헤드 오염·드라이브 고장·SCSI/FC 경로 오류가 흔한 원인.
+  immediate:
+  - '`errpt -a -N rmt<N> | head -60` 로 LABEL(TAPE_ERRn)·sense data·발생 시각 확인'
+  - '`lsdev -Cc tape` 로 드라이브 Available 여부, `lsattr -El rmt<N>` 로 block_size 등 설정 확인
+    — 백업 작업 로그의 실패 시각과 대조'
+  short:
+  - (2차·승인 후) 백업 작업이 없는 시간에 `tctl -f /dev/rmt<N> status` 와 클리닝 카트리지 투입, 다른 매체로 재시도해
+    매체/드라이브 원인 구분
+  mid:
+  - 같은 드라이브에서 TAPE_ERR 이 반복되면 HW 유지보수 업체에 드라이브 교체 의뢰, 노후 매체는 사용 횟수 기준으로 폐기
+  long:
+  - 백업 결과(성공/실패)와 errpt TAPE_ERR 건수를 일 단위로 감시, 매체 순환·클리닝 주기 표준화
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: TAPE_ERR* 전 버전
+- code: AIX-DUMP-DEVICE-FULL
+  severity: error
+  category: disk
+  title: 덤프 디바이스 부족
+  vendor_cause: 시스템 덤프 장치(기본 lg_dumplv 또는 paging)가 예상 덤프 크기보다 작다는 경고. 메모리 증설·작업량 증가로
+    덤프 예상 크기가 커졌을 때 dumpcheck 가 errpt 에 기록하며, 이대로면 장애 시 덤프가 잘려 원인 분석이 불가능해진다.
+  immediate:
+  - '`sysdumpdev -l` 로 primary/secondary 덤프 장치, `sysdumpdev -e` 로 예상 덤프 크기 확인'
+  - '`lslv <덤프LV>` 의 LPs×PP SIZE 로 실제 크기 계산 — 예상 크기보다 작으면 확정'
+  short:
+  - '(2차·승인 후, 롤백: 늘린 LV 는 줄일 수 없어 VG 여유 확인 후 진행) `extendlv <덤프LV> <LP수>` 로 덤프 LV
+    확장 또는 전용 덤프 LV 신설 후 `sysdumpdev -P -p /dev/<덤프LV>`'
+  mid:
+  - 메모리 증설·LPAR 재구성 때마다 `sysdumpdev -e` 재측정을 변경 체크리스트에 포함, 덤프 압축(7.x 기본) 여부 확인
+  long:
+  - errpt 의 덤프 장치 크기 경고(dumpcheck)를 감시 대상에 등록
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: sysdumpdev 'DUMP DEVICE TOO SMALL' 전 버전
+- code: AIX-ERRLOG-FULL
+  severity: warn
+  category: disk
+  title: 에러 로그 가득참
+  vendor_cause: AIX 오류 로그(/var/adm/ras/errlog)는 고정 크기 순환 파일이라 크기가 작으면 오래된 항목이 빨리 덮어써지고,
+    /var 가 가득 차면 기록 자체가 실패한다. 하드웨어 오류 폭주가 흔한 원인.
+  immediate:
+  - '`/usr/lib/errdemon -l` 로 로그 파일 경로·크기·버퍼 확인, `ls -l /var/adm/ras/errlog` 와 `df
+    -g /var` 로 공간 확인'
+  - '`errpt | head -30` 과 `errpt | awk ''{print $1}'' | sort | uniq -c | sort -rn
+    | head` 로 폭주하는 IDENTIFIER 식별'
+  short:
+  - '(2차·승인 후, 롤백: 기존 값 기록) 증거 보존용 `errpt -a > /var/tmp/errpt_$(date +%Y%m%d).txt`
+    후 `/usr/lib/errdemon -s <바이트>` 로 로그 크기 확대'
+  mid:
+  - 폭주 원인(특정 장치 오류) 을 HW 조치로 제거, 필요 시 무의미 항목만 errlogger 대신 errupdate 로 기록 제외(제조사 확인
+    후)
+  long:
+  - errpt 일일 추출·보관(cron) 과 /var 사용률 감시를 운영 점검 항목으로 등록
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: ERRLOG_ON/OFF·errlog 크기 경고 전 버전
+- code: AIX-LICENSE-EXPIRE
+  severity: error
+  category: security
+  title: 라이선스 만료
+  vendor_cause: AIX 위에서 동작하는 소프트웨어(라이선스 관리 데몬·제품 키 기반 프로그램)가 라이선스 만료·한도 초과를 보고한 상태.
+    AIX 운영체제 자체보다 미들웨어·모니터링 도구의 평가판·기간제 키 만료가 흔한 원인.
+  immediate:
+  - 로그 원문에서 만료를 보고한 제품명·라이선스 서버 이름을 확인하고 `lslpp -L | grep -i <제품>` 으로 설치 버전 확인
+  - '`lslicense` 로 AIX 로그인 사용자 라이선스(고정/유동) 상태 확인 — 제품 라이선스 문제와 구분'
+  short:
+  - (2차·승인 후) 구매·자산 담당에 갱신 키 요청, 새 키 적용은 제품 매뉴얼 절차대로 변경 작업으로 진행
+  mid:
+  - 기간제 라이선스 목록(제품·만료일·담당자)을 자산 대장에 등록하고 만료 60일 전 갱신 요청
+  long:
+  - 라이선스 만료일 30/14/7일 전 알림 감시 등록
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: 일반 문구
+- code: AIX-SSH-FAIL
+  severity: error
+  category: security
+  title: SSH 인증 실패 반복
+  vendor_cause: sshd 에 대한 인증 실패가 반복된 상태. 비밀번호 오입력·만료·잠금, 키 권한 오류, 또는 외부의 무차별 대입 시도가
+    흔한 원인.
+  immediate:
+  - '`grep -i auth /etc/syslog.conf` 로 인증 로그 위치를 찾은 뒤 그 파일에서 `grep -i sshd <로그> |
+    grep -i -E ''fail|invalid'' | tail -30` 으로 계정·출발지 IP 확인'
+  - '`lsuser -a unsuccessful_login_count account_locked <user>` 로 잠금 여부, `who /etc/security/failedlogin
+    | tail -20` 으로 실패 이력 확인'
+  short:
+  - '(2차·승인 후, 롤백: 차단 규칙 제거) 외부 반복 시도면 출발지 IP 를 방화벽/`/etc/hosts.deny`(TCP Wrapper
+    사용 시) 로 차단, 정상 사용자면 `chsec -f /etc/security/lastlog -a unsuccessful_login_count=0
+    -s <user>` 로 잠금 해제'
+  mid:
+  - sshd_config 의 PermitRootLogin no·MaxAuthTries·AllowUsers 정비, /etc/security/user
+    의 loginretries 설정
+  long:
+  - 인증 실패 건수(계정·IP 별) 임계 감시와 월 1회 접근 이력 점검
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: OpenSSH 문구 전 버전
+- code: AIX-SUDO-FAIL
+  severity: warn
+  category: security
+  title: sudo 실패
+  vendor_cause: sudo 실행이 거부되었거나 비밀번호 인증에 실패한 상태. sudoers 에 없는 명령 실행, 비밀번호 오입력, sudoers
+    문법 오류가 흔한 원인.
+  immediate:
+  - sudo 로그 위치(sudoers 의 logfile 또는 syslog auth)에서 `grep -i sudo <로그> | tail -30`
+    으로 사용자·명령·'not in sudoers'/'incorrect password' 문구 확인
+  - '`sudo -l -U <user>` (root 로) 로 해당 사용자에게 허용된 명령 확인'
+  short:
+  - '(2차·승인 후, 롤백: sudoers 백업 복원) 정당한 업무면 `visudo` 로 최소 권한 규칙 추가, 아니면 보안 담당에 오남용 보고'
+  mid:
+  - sudoers 를 역할별 Cmnd_Alias 로 정리하고 변경 이력 관리
+  long:
+  - sudo 거부 건수 감시와 분기별 권한 재검토
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: sudo 문구
+- code: AIX-DISK-FULL
+  severity: critical
+  category: disk
+  title: 디스크 가득참
+  vendor_cause: 파일시스템 사용률이 한도에 도달해 쓰기가 실패하는 상태(JFS2_FS_FULL 등). 로그·코어·덤프·백업 파일 누적,
+    삭제했지만 프로세스가 열고 있는 파일이 흔한 원인.
+  immediate:
+  - '`df -g` 로 %Used 95% 이상 파일시스템 식별, `du -sm <mount>/* 2>/dev/null | sort -rn | head`
+    로 큰 디렉터리 확인'
+  - '`find <mount> -xdev -type f -size +2097152 -exec ls -l {} \; | head` 로 1GB 이상
+    파일과 소유자 식별(삭제는 2차)'
+  short:
+  - '(2차·승인 후, 롤백: 정리 대상 tar 보관) 담당자 확인 후 오래된 로그·코어 정리, 열린 파일은 `fuser -cu <mount>`
+    로 소유 프로세스 확인 후 재시작 일정과 함께 비우기'
+  mid:
+  - '`chfs -a size=+<n>G <mount>` 로 온라인 증설(VG 여유 PP 필요, `lsvg <vg>` 의 FREE PPs 확인),
+    로그 순환 정책 정비'
+  long:
+  - df -g 사용률 85%/95% 감시 임계와 월별 증가율 기반 증설 계획
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: 일반 문구
+- code: AIX-TMP-FULL
+  severity: error
+  category: disk
+  title: /tmp 가득참
+  vendor_cause: /tmp(기본 hd3, JFS2) 공간이 가득 차 임시 파일을 만들 수 없는 상태. 설치·snap 수집 잔여물, 애플리케이션
+    임시 파일, 대용량 덤프 파일 누적이 흔한 원인.
+  immediate:
+  - '`df -g /tmp` 로 사용률 확인, `du -sm /tmp/* 2>/dev/null | sort -rn | head` 로 큰 항목(/tmp/ibmsupt
+    등 snap 잔여물 포함) 식별'
+  - '`fuser -cu /tmp` 로 /tmp 를 쓰는 프로세스와 사용자 확인(정리는 2차)'
+  short:
+  - '(2차·승인 후, 롤백: 정리 전 tar 보관) 소유자 확인 후 오래된 임시 파일·snap 잔여물 정리, 열린 파일은 해당 서비스 재시작
+    일정과 함께'
+  mid:
+  - '`chfs -a size=+<n>G /tmp` 로 증설(hd3 는 rootvg 여유 PP 필요), 애플리케이션 임시 경로를 별도 FS 로
+    분리'
+  long:
+  - /tmp 사용률 85%/95% 감시와 임시 파일 보존 주기(cron 정리) 표준화
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: 일반 문구
+- code: AIX-CPU-HIGH
+  severity: warn
+  category: capacity
+  title: CPU 부하 과다
+  vendor_cause: LPAR 의 CPU 사용률이 지속적으로 높아 응답이 지연되는 상태. 특정 프로세스 폭주, 배치 작업 겹침, Entitled
+    Capacity 부족(공유 프로세서 LPAR)이 흔한 원인.
+  immediate:
+  - '`vmstat 2 5` 로 us+sy 와 run queue(r) 확인, `lparstat 2 5` 의 physc·%entc 로 할당량(Entitlement)
+    초과 여부 확인 — %entc 100% 이상 지속이면 할당 부족'
+  - '`ps aux | sort -rn -k3 | head -10` 으로 CPU 상위 프로세스·사용자 확인(종료는 2차)'
+  short:
+  - '(2차·승인 후, 롤백: 우선순위 원복) 폭주 프로세스는 담당자 확인 후 `renice` 또는 배치 일정 조정, 필요 시 `tprof -x
+    sleep 30` 으로 프로파일 수집'
+  mid:
+  - HMC 에서 LPAR Entitled Capacity·가상 CPU 수 재산정(DLPAR 변경은 변경 관리), 배치 작업 시간 분산
+  long:
+  - nmon/topas 기록(topasrec) 으로 CPU 추세를 수집하고 %entc 80% 지속 감시 임계 등록
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: 모니터링 문구
+- code: AIX-PROCESS-KILLED
+  severity: error
+  category: internal
+  title: 프로세스 강제 종료
+  vendor_cause: 프로세스가 신호로 비정상 종료된 상태. AIX 에서는 페이징 공간 부족 시 커널이 SIGDANGER 후 프로세스를 끝내는
+    경우(PGSP_KILL)가 대표적이며, 운영자 kill 명령·애플리케이션 자체 abort 도 원인.
+  immediate:
+  - '`errpt | grep -i -E ''pgsp|core''` 로 같은 시각 페이징 부족·코어 항목 확인, `lsps -s` 로 현재 페이징
+    사용률 확인'
+  - 애플리케이션 로그와 `last | head -20`, `who` 로 그 시각 운영자 작업 여부를 대조
+  short:
+  - (2차·승인 후) 페이징 부족이 원인이면 메모리 상위 프로세스 정리·재시작 일정 수립, 운영자 작업이면 작업 절차 재확인
+  mid:
+  - 페이징 공간 증설(`chps -s`) 또는 메모리 증설, 애플리케이션 메모리 한도(ulimit data/rss) 정비
+  long:
+  - lsps 사용률 70% 감시와 프로세스 생존 감시(SRC/모니터링 도구) 등록
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: 일반 문구
+- code: AIX-DNS-FAIL
+  severity: error
+  category: connection
+  title: DNS 해석 실패
+  vendor_cause: 이름 해석(resolver)이 DNS 서버로부터 응답을 받지 못했거나 이름이 없다는 응답을 받은 상태. DNS 서버 장애·방화벽
+    차단, /etc/resolv.conf 오류, /etc/netsvc.conf 해석 순서 설정이 흔한 원인.
+  immediate:
+  - '`cat /etc/resolv.conf` 와 `cat /etc/netsvc.conf` 로 nameserver·해석 순서(hosts=local,bind
+    등) 확인'
+  - '`nslookup <host> <nameserver>` 로 서버별 응답 확인, `ping -c 3 <nameserver>` 로 도달성 확인'
+  short:
+  - '(2차·승인 후, 롤백: 원본 파일 백업 복원) 장애 서버를 resolv.conf 에서 뒤로 돌리거나, 업무 핵심 호스트는 /etc/hosts
+    임시 등록'
+  mid:
+  - DNS 서버 2대 이상 지정·options timeout/attempts 조정, 핵심 호스트의 hosts 파일 관리 기준 수립
+  long:
+  - 주요 이름의 해석 시간·실패를 주기 점검하는 감시 등록
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: resolver 문구 전 버전
+- code: AIX-NIM-FAIL
+  severity: warn
+  category: internal
+  title: NIM 작업 실패
+  vendor_cause: NIM(Network Installation Management) 작업(설치·mksysb 복원·업데이트)이 실패한 상태.
+    NIM 마스터-클라이언트 간 네트워크·NFS export 문제, 리소스(lpp_source/SPOT) 불일치, 클라이언트 상태(Cstate)
+    잔류가 흔한 원인.
+  immediate:
+  - NIM 마스터에서 `lsnim -l <client>` 로 Cstate·info·err_info 확인
+  - '`nim -o showlog <client>` 로 설치 로그 확인, `showmount -e <NIM마스터>` 로 NFS export 상태
+    확인'
+  short:
+  - '(2차·승인 후, 롤백: 이전 Cstate 기록) 원인 해결 후 `nim -Fo reset <client>` 와 `nim -o deallocate
+    -a subclass=all <client>` 로 상태 정리 후 재수행'
+  mid:
+  - lpp_source/SPOT 레벨을 대상 TL/SP 와 일치하게 재구성(`nim -o check`), 클라이언트 /etc/niminfo 정합성
+    점검
+  long:
+  - NIM 작업 결과와 리소스 레벨을 월별 점검 항목으로 관리
+  source: 자체 정의 의사코드(메시지 별칭 regex 기반, _aliases.yaml)
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  version_note: NIM 전 버전

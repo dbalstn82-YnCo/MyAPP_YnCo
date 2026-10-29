@@ -1,0 +1,111 @@
+product: weblogic
+layer: was
+title: weblogic 로그 종류 카탈로그 (GPT 수집 — 벤더 문서 대조 필요)
+source: GPT 수집(벤더 문서 대조 필요)
+sources: []
+logtypes:
+- name: 서버 로그
+  path: DOMAIN_HOME/servers/<SERVER>/logs/<SERVER>.log
+  format: 텍스트·locale timestamp·#### <...> 속성형
+  check: BEA-코드·기동·종료·배포·JDBC·JMS·스레드·서브시스템 실패
+  sample: '####<Sep 9, 2026 ...> <Error> <WebLogicServer> ... <BEA-...> <message>'
+- name: 도메인 로그
+  path: DOMAIN_HOME/servers/<AdminServer>/logs/<DOMAIN>.log
+  format: 텍스트·원 서버 locale timestamp
+  check: Managed Server Notice 이상 집계·클러스터 전체 장애 상관분석
+  sample: '####<timestamp> <Error> <subsystem> <server> ... <BEA-...>'
+- name: AdminServer 로그
+  path: DOMAIN_HOME/servers/<AdminServer>/logs/<AdminServer>.log
+  format: 텍스트·#### WebLogic 형식
+  check: 도메인 관리·배포·구성변경·Managed Server 통신 장애
+  sample: '####<timestamp> <Error> <Management> <AdminServer> ...'
+- name: 서버 콘솔 출력
+  path: DOMAIN_HOME/servers/<SERVER>/logs/<SERVER>.out Node Manager 기동 시
+  format: 텍스트·JVM/WebLogic stdout/stderr
+  check: JVM 기동 실패·OOM·thread dump·초기 classpath 오류
+  sample: <Sep 9, 2026 ...> <Notice> <WebLogicServer> ...
+- name: Node Manager 로그
+  path: DOMAIN_HOME/nodemanager/nodemanager.log 기본
+  format: java.util.logging 텍스트·locale timestamp
+  check: 서버 start/stop·PID·연결·인증·CrashRecovery 실패
+  sample: <timestamp> <INFO> <Server output log file is ...>
+- name: HTTP Access 로그
+  path: DOMAIN_HOME/servers/<SERVER>/logs/access.log 기본 설정 계열
+  format: Common 또는 Extended·dd/MMM/yyyy:HH:mm:ss Z
+  check: 4xx·5xx·URI·응답크기·클라이언트·처리 결과
+  sample: 127.0.0.1 - - [09/Sep/2026:12:00:00 +0900] "GET / HTTP/1.1" 200 1234
+- name: 보안 Audit 로그
+  path: <server>/logs/DefaultAuditRecorder.log 기본
+  format: 텍스트·MMM dd, yyyy hh:mm:ss a
+  check: Authentication·Authorization·USERUNLOCKED·SUCCESS/FAILURE
+  sample: '### Audit Record Begin <Feb 23, 2005 11:42:17 AM> <Severity=SUCCESS>'
+- name: JMS 메시지 로그
+  path: DOMAIN_HOME/servers/<SERVER>/logs/jmsservers/<JMSServer>/<JMSServer>-jms.messages.log
+  format: 텍스트·WebLogic JMS event timestamp
+  check: Produced·Consumed·Removed·Expired·Retry exceeded
+  sample: <timestamp> <event> <JMS message attributes...>
+- name: JDBC 서브시스템 로그
+  path: DOMAIN_HOME/servers/<SERVER>/logs/<SERVER>.log
+  format: WebLogic 텍스트·locale timestamp
+  check: connection create/refresh·pool suspend·reserve 실패·BEA-001xxx
+  sample: '####<timestamp> <Error> <JDBC> ... <BEA-001129> ...'
+- name: WLDF 진단 이미지
+  path: DOMAIN_HOME/servers/<SERVER>/logs/diagnostic_images/diagnostic_image_<DOMAIN>_<SERVER>_<YYYY_MM_DD_HH_MM_SS>.zip
+  format: ZIP·파일명 timestamp
+  check: JVM·JDBC·JMS·EJB·JNDI·Work Manager·구성·로그 캐시 상태
+  sample: diagnostic_image_DOMAIN_SERVER_2026_09_09_12_00_00.zip
+- name: JFR 진단 로그
+  path: WLDF 진단 이미지 내부 FlightRecording.jfr 또는 JVM 설정 경로
+  format: JFR 바이너리·고해상도 timestamp
+  check: GC·thread·lock·socket·WebLogic 진단 이벤트
+  sample: FlightRecording.jfr 바이너리 이벤트 레코드
+- name: GC 로그
+  path: 버전별 상이(JVM GC 옵션 지정 경로)
+  format: JVM 텍스트·JDK별 timestamp
+  check: Full GC·긴 pause·allocation failure·heap 압박
+  sample: '[12.345s][info][gc] GC(3) Pause Full ...'
+- name: JVM 덤프
+  path: 버전별 상이(JVM 작업 디렉터리/옵션)
+  format: HPROF·텍스트·코어덤프
+  check: OOM·deadlock·fatal JVM crash·hs_err_pid*
+  sample: java_pid1234.hprof / hs_err_pid1234.log
+sections:
+- heading: 로그 종류 카탈로그 (전수)
+  body: '서버 로그: DOMAIN_HOME/servers/<SERVER>/logs/<SERVER>.log · 도메인 로그: DOMAIN_HOME/servers/<AdminServer>/logs/<DOMAIN>.log · AdminServer 로그: DOMAIN_HOME/servers/<AdminServer>/logs/<AdminServer>.log ·
+    서버 콘솔 출력: DOMAIN_HOME/servers/<SERVER>/logs/<SERVER>.out Node Manager 기동 시 · Node Manager 로그: DOMAIN_HOME/nodemanager/nodemanager.log 기본 · HTTP Access 로그: DOMAIN_HOME/servers/<SERVER>/logs/access.log
+    기본 설정 계열 · 보안 Audit 로그: <server>/logs/DefaultAuditRecorder.log 기본 · JMS 메시지 로그: DOMAIN_HOME/servers/<SERVER>/logs/jmsservers/<JMSServer>/<JMSServer>-jms.messages.log · JDBC 서브시스템 로그: DOMAIN_HOME/servers/<SERVER>/logs/<SERVER>.log
+    · WLDF 진단 이미지: DOMAIN_HOME/servers/<SERVER>/logs/diagnostic_images/diagnostic_image_<DOMAIN>_<SERVER>_<YYYY_MM_DD_HH_MM_SS>.zip · JFR 진단 로그: WLDF 진단 이미지 내부 FlightRecording.jfr 또는 JVM 설정 경로 · GC 로그:
+    버전별 상이(JVM GC 옵션 지정 경로) · JVM 덤프: 버전별 상이(JVM 작업 디렉터리/옵션)'
+- heading: '로그: 서버 로그'
+  body: '경로 DOMAIN_HOME/servers/<SERVER>/logs/<SERVER>.log / 형식 텍스트·locale timestamp·#### <...> 속성형 / 확인 BEA-코드·기동·종료·배포·JDBC·JMS·스레드·서브시스템 실패 / 샘플 ####<Sep 9, 2026 ...> <Error> <WebLogicServer> ... <BEA-...>
+    <message>'
+- heading: '로그: 도메인 로그'
+  body: '경로 DOMAIN_HOME/servers/<AdminServer>/logs/<DOMAIN>.log / 형식 텍스트·원 서버 locale timestamp / 확인 Managed Server Notice 이상 집계·클러스터 전체 장애 상관분석 / 샘플 ####<timestamp> <Error> <subsystem> <server> ... <BEA-...>'
+- heading: '로그: AdminServer 로그'
+  body: '경로 DOMAIN_HOME/servers/<AdminServer>/logs/<AdminServer>.log / 형식 텍스트·#### WebLogic 형식 / 확인 도메인 관리·배포·구성변경·Managed Server 통신 장애 / 샘플 ####<timestamp> <Error> <Management> <AdminServer> ...'
+- heading: '로그: 서버 콘솔 출력'
+  body: 경로 DOMAIN_HOME/servers/<SERVER>/logs/<SERVER>.out Node Manager 기동 시 / 형식 텍스트·JVM/WebLogic stdout/stderr / 확인 JVM 기동 실패·OOM·thread dump·초기 classpath 오류 / 샘플 <Sep 9, 2026 ...> <Notice> <WebLogicServer>
+    ...
+- heading: '로그: Node Manager 로그'
+  body: 경로 DOMAIN_HOME/nodemanager/nodemanager.log 기본 / 형식 java.util.logging 텍스트·locale timestamp / 확인 서버 start/stop·PID·연결·인증·CrashRecovery 실패 / 샘플 <timestamp> <INFO> <Server output log file is ...>
+- heading: '로그: HTTP Access 로그'
+  body: 경로 DOMAIN_HOME/servers/<SERVER>/logs/access.log 기본 설정 계열 / 형식 Common 또는 Extended·dd/MMM/yyyy:HH:mm:ss Z / 확인 4xx·5xx·URI·응답크기·클라이언트·처리 결과 / 샘플 127.0.0.1 - - [09/Sep/2026:12:00:00 +0900] "GET / HTTP/1.1"
+    200 1234
+- heading: '로그: 보안 Audit 로그'
+  body: '경로 <server>/logs/DefaultAuditRecorder.log 기본 / 형식 텍스트·MMM dd, yyyy hh:mm:ss a / 확인 Authentication·Authorization·USERUNLOCKED·SUCCESS/FAILURE / 샘플 ### Audit Record Begin <Feb 23, 2005 11:42:17 AM>
+    <Severity=SUCCESS>'
+- heading: '로그: JMS 메시지 로그'
+  body: 경로 DOMAIN_HOME/servers/<SERVER>/logs/jmsservers/<JMSServer>/<JMSServer>-jms.messages.log / 형식 텍스트·WebLogic JMS event timestamp / 확인 Produced·Consumed·Removed·Expired·Retry exceeded / 샘플 <timestamp>
+    <event> <JMS message attributes...>
+- heading: '로그: JDBC 서브시스템 로그'
+  body: '경로 DOMAIN_HOME/servers/<SERVER>/logs/<SERVER>.log / 형식 WebLogic 텍스트·locale timestamp / 확인 connection create/refresh·pool suspend·reserve 실패·BEA-001xxx / 샘플 ####<timestamp> <Error> <JDBC> ... <BEA-001129>
+    ...'
+- heading: '로그: WLDF 진단 이미지'
+  body: 경로 DOMAIN_HOME/servers/<SERVER>/logs/diagnostic_images/diagnostic_image_<DOMAIN>_<SERVER>_<YYYY_MM_DD_HH_MM_SS>.zip / 형식 ZIP·파일명 timestamp / 확인 JVM·JDBC·JMS·EJB·JNDI·Work Manager·구성·로그 캐시 상태 / 샘플
+    diagnostic_image_DOMAIN_SERVER_2026_09_09_12_00_00.zip
+- heading: '로그: JFR 진단 로그'
+  body: 경로 WLDF 진단 이미지 내부 FlightRecording.jfr 또는 JVM 설정 경로 / 형식 JFR 바이너리·고해상도 timestamp / 확인 GC·thread·lock·socket·WebLogic 진단 이벤트 / 샘플 FlightRecording.jfr 바이너리 이벤트 레코드
+- heading: '로그: GC 로그'
+  body: 경로 버전별 상이(JVM GC 옵션 지정 경로) / 형식 JVM 텍스트·JDK별 timestamp / 확인 Full GC·긴 pause·allocation failure·heap 압박 / 샘플 [12.345s][info][gc] GC(3) Pause Full ...
+- heading: '로그: JVM 덤프'
+  body: 경로 버전별 상이(JVM 작업 디렉터리/옵션) / 형식 HPROF·텍스트·코어덤프 / 확인 OOM·deadlock·fatal JVM crash·hs_err_pid* / 샘플 java_pid1234.hprof / hs_err_pid1234.log

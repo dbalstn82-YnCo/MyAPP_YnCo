@@ -1,0 +1,142 @@
+product: jboss
+layer: was
+note: Claude 야간 수집 2026-09-18 — 벤더 공식 문서와 대조 후 확정 · 2026-10-16 G7a 4단 보강(WildFly 34·EAP 7.3 Log Message Reference 원문 대조 — 0027/0028/0050 은 공식 INFO)
+codes:
+- code: WFLYCTL0190
+  severity: error
+  category: internal
+  title: 롤백 단계 핸들러 실패
+  immediate:
+  - "`grep -n -B10 -A10 'WFLYCTL0190' $JBOSS_HOME/standalone/log/server.log | grep -E 'WFLYCTL|Caused by' | head -20` 로 실패한 원래 작업·주소, 동반 실패 서비스 이름과 rollback 단계 실패 사유 확인"
+  - "`$JBOSS_HOME/bin/jboss-cli.sh -c ':read-attribute(name=server-state)'` 로 reload-required·restart-required 여부 확인(읽기 전용, EAP 7/8) — 설정이 반쯤 적용된 상태일 수 있음"
+  short:
+  - "(2차·승인 후, 롤백: standalone_xml_history 의 직전 설정) 원래 작업의 실패 원인 수정 후 작업 재실행, server-state 가 reload-required 면 영향 확인 뒤 :reload"
+  mid:
+  - "관리 작업은 CLI batch 로 묶어 검증 환경 시험 후 운영 반영"
+  long:
+  - "관리 작업 감사 로그와 구성 변경 이력 관리"
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/7.3/mgmt_model/log-message-reference.html)
+  vendor_cause: 실패한 관리 작업을 되돌리는(rollback) 단계에서 step handler 가 다시 실패했다(Step handler %s for operation %s at address %s failed handling operation rollback). 원래 작업 실패에 더해 자원 상태가 일관되지 않을 때 나타나며, 설정이 일부만 적용됐을 수 있다.
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/7.3/mgmt_model/log-message-reference.html
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 롤백 처리 중 step handler 실패
+- code: WFLYCTL0412
+  severity: critical
+  category: internal
+  title: 필수 서비스 누락
+  immediate:
+  - 누락 서비스(데이터소스·JNDI) 정의 확인
+  - "`grep -n -A10 'WFLYCTL0412' $JBOSS_HOME/standalone/log/server.log | tail -20` 로 설치되지 않은 서비스 이름(jboss.naming.context...·jboss.data-source...) 확인 후 `jboss-cli.sh -c '/subsystem=datasources:read-children-names(child-type=data-source)'` 로 정의 여부 확인(읽기 전용)"
+  short:
+  - "(2차·승인 후, 롤백: standalone.xml 백업 복원) 누락 서비스 정의(데이터소스·JMS 자원·모듈) 추가 또는 참조 이름 수정 후 재배포/:reload"
+  mid:
+  - 구성 의존성 관리
+  - "배포별 필요 자원 목록(JNDI 이름) 문서화와 배포 전 존재 점검"
+  long:
+  - "배포 전 의존 자원 자동 점검과 누락 서비스 경보"
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/7.3/mgmt_model/log-message-reference.html)
+  vendor_cause: '배포·서비스가 요구하는 서비스가 설치되지 않았다(Required services that are not installed:). 데이터소스·JMS 자원·모듈 정의 누락, JNDI 이름 불일치, 의존 서비스 자체의 기동 실패가 흔한 원인.'
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/7.3/mgmt_model/log-message-reference.html
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: '-'
+- code: WFLYSRV0028
+  severity: warn
+  category: internal
+  title: 배포 중지
+  immediate:
+  - 의도된 배포 해제인지 확인
+  - "`grep -n -E 'WFLYSRV0028|WFLYSRV0009|undeploy|WFLYSRV0050' $JBOSS_HOME/standalone/log/server.log | tail -10` 로 같은 시각 배포 해제·서버 정지 동반 여부 확인, `jboss-cli.sh -c 'deployment-info'` 로 현재 배포 상태 확인(읽기 전용)"
+  short:
+  - 비의도면 배포 실패 로그 분석
+  - "(2차·승인 후, 롤백: 해당 없음) 비계획 정지면 관리 감사 로그로 수행자 확인 후 배포 재활성(deploy)"
+  mid:
+  - 배포 절차 정비
+  - "배포·해제 작업 변경 관리 대장 기록"
+  long:
+  - "비계획 배포 정지 경보와 배포 상태 감시"
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/7.3/mgmt_model/log-message-reference.html)
+  vendor_cause: 배포 단위가 정지됐다는 공식 INFO 메시지다(Stopped deployment %s (runtime-name %s) in %dms). 재배포·배포 해제·서버 정지 과정에서 정상적으로 나타나며, 계획에 없던 시각이면 운영자 작업이나 배포 스캐너 동작을 확인한다.
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/7.3/mgmt_model/log-message-reference.html
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 공식 메시지는 INFO
+- code: WFLYSRV0050
+  severity: warn
+  category: internal
+  title: 서버 중지
+  immediate:
+  - 의도된 종료인지 확인
+  - "`grep -n -B20 'WFLYSRV0050' $JBOSS_HOME/standalone/log/server.log | grep -E 'ERROR|OutOfMemory|shutdown|SIGTERM' | tail -10` 로 종료 직전 오류·종료 요청 흔적 확인, `ls -lt $JBOSS_HOME/hs_err_pid*.log $JBOSS_HOME/bin/hs_err_pid*.log 2>/dev/null | head` 로 JVM 크래시 여부 확인"
+  short:
+  - 비의도면 원인(OOM·신호) 분석
+  - "(2차·승인 후, 롤백: 해당 없음 — 기동 전 로그·hs_err 보존) 비계획 종료면 원인 자료 보존 후 standalone.sh(또는 서비스) 로 기동"
+  mid:
+  - 재기동 자동화
+  - "서비스 단위(systemd) 관리와 정지·기동 작업 변경 관리"
+  long:
+  - 운영 절차
+  - "비계획 종료 경보와 프로세스 생존 감시"
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/7.3/mgmt_model/log-message-reference.html)
+  vendor_cause: 서버가 정지됐다는 공식 INFO 메시지다(%s stopped in %dms). 운영자 정지·:shutdown·OS 신호(SIGTERM)로 정상 정지할 때 나타나며, 계획에 없던 시각이면 직전 오류·OOM 을 확인한다.
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/7.3/mgmt_model/log-message-reference.html
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 공식 메시지는 INFO
+- code: WFLYSRV0027
+  severity: warn
+  category: internal
+  title: 배포 시작 중
+  immediate:
+  - 배포 지연·실패 여부 후속 로그 확인
+  - "`grep -n -E 'WFLYSRV0010|WFLYSRV0016|WFLYSRV0027|WFLYCTL0013' $JBOSS_HOME/standalone/log/server.log | tail -10` 로 같은 배포의 완료(Deployed) 또는 실패 기록이 뒤따르는지 확인, `jboss-cli.sh -c 'deployment-info'`(읽기 전용)"
+  short:
+  - 배포 실패 시 원인 분석
+  - "(정보 로그) 완료 기록이 뒤따르면 조치 없음, 실패·장시간 미완료면 WFLYCTL0348·WFLYSRV0153 기준으로 2차 분석"
+  mid:
+  - 배포 검증
+  - "배포 소요 시간 기준값 기록"
+  long:
+  - 변경 관리
+  - "배포 이력과 배포 소요 시간 추세 관리"
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/7.3/mgmt_model/log-message-reference.html)
+  vendor_cause: 배포를 시작한다는 공식 INFO 메시지다(Starting deployment of "%s" (runtime-name "%s")). 그 자체는 정상이며 뒤따르는 완료·실패 메시지로 결과를 판단한다.
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/7.3/mgmt_model/log-message-reference.html
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: 공식 메시지는 INFO
+- code: WFLYJCA0047
+  severity: error
+  category: connection
+  title: 연결 유효성 검사 실패
+  immediate:
+  - DB 상태·네트워크 확인
+  - "`grep -n -B5 -A10 'WFLYJCA0047' $JBOSS_HOME/standalone/log/server.log | grep -E 'IJ0|Caused by|SQLException' | head -10` 로 동반 원인 확인, `nc -zvw3 <db_host> <db_port>` 로 도달성 확인"
+  - "`$JBOSS_HOME/bin/jboss-cli.sh -c '/subsystem=datasources/data-source=<DS>:read-attribute(name=background-validation)'` 로 유휴 연결 검사 설정 확인(읽기 전용)"
+  short:
+  - "(2차·승인 후, 롤백: 이전 설정값 복원) check-valid-connection-sql 또는 valid-connection-checker·background-validation 설정 후 :flush-gracefully-connection-in-pool 로 깨진 연결 교체"
+  mid:
+  - 연결풀 설정 표준
+  - "방화벽 유휴 세션 시간보다 짧은 background-validation-millis 표준"
+  long:
+  - DB 가용성 관리
+  - "연결 검증 실패 건수와 방화벽 정책 변경 이력 함께 관리"
+  source: Claude 수집 2026-09-18·GPT 벤더 문서 대조 완료(https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/7.3/mgmt_model/log-message-reference.html)
+  vendor_cause: 데이터소스 연결이 유효하지 않다고 판정됐다(IllegalStateException Connection is not valid). DB 재기동·방화벽 유휴 세션 정리로 끊긴 연결이 풀에 남아 있거나 검증 설정이 없는 경우가 흔한 원인.
+  vendor_url: https://access.redhat.com/webassets/avalon/d/red_hat_jboss_enterprise_application_platform/7.3/mgmt_model/log-message-reference.html
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: 야간 수집 2026-09-18 — 버전 범위 미확인(제품 공통값 적용)
+  note: Connection is not valid

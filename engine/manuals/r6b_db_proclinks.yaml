@@ -1,0 +1,16 @@
+# r6b (2026-10-16) — 검토자 지적으로 기존 절차(db_procedures.yaml MY-PROC-CONNECTION·MY-PROC-STORAGE)의 match 에서 뺀 MySQL 판정을
+# 원인·1차 확인·2차 조치가 맞는 r6 전용 절차(r6_dbb_procedures.yaml)에 '이 판정 전용'으로 잇는다. 절차 파일은 고치지 않는다.
+# MY-1045(인증 실패)는 MY-PROC-R6-ACCOUNT 의 2차가 1396·1819(계정 관리 문·비밀번호 정책) 전용이라 잇지 않고 r6b_db_procedures.yaml 의 MY-PROC-R6B-AUTH 로 옮겼다.
+links:
+- procedure: MY-PROC-R6-REACH
+  match: [MY-2003]
+  reviewed: "2026-10-16 판정 적합성 확인 — 2003 은 클라이언트가 서버 TCP 포트에 닿지 못한 것(서버 미기동·방화벽·bind-address)이라 서버 로그인이 필요한 MY-PROC-CONNECTION 1차는 쓸 수 없음. REACH 1차의 getent·nc -zvw3 도달성·systemctl status·ss 리슨 포트 확인과 2차 기동·포트 정정이 맞음"
+- procedure: MY-PROC-R6-DISCONNECT
+  match: [MY-2006, MY-2013]
+  reviewed: "2026-10-16 판정 적합성 확인 — 2006(gone away)·2013(쿼리 중 연결 소실)은 접속 수 한도가 아니라 연결 단절 계열. DISCONNECT 1차의 Aborted_*·Uptime(서버 재기동 여부)·wait_timeout·net_read/write_timeout·max_allowed_packet 확인과 2차 풀 유효성 검사·타임아웃·패킷 조정이 맞음"
+- procedure: MY-PROC-R6-MYISAM
+  match: [MY-1194]
+  reviewed: "2026-10-16 판정 적합성 확인 — 1194(테이블이 crashed 로 표시됨)는 MyISAM 테이블 손상이라 InnoDB 강제 복구(innodb_force_recovery)를 2차로 둔 MY-PROC-STORAGE 와 맞지 않음. MYISAM 1차의 엔진·error log('marked as crashed')·공간/I/O 확인과 2차 백업 후 CHECK/REPAIR TABLE·InnoDB 전환 검토가 맞음"
+- procedure: MY-PROC-R6B-AUTH
+  match: [MY-1130]
+  reviewed: "2026-10-16 판정 적합성 확인 — 1130(이 호스트에서 접속 불허)은 계정의 Host 칸이 접속지와 맞지 않는 계정·권한 문제라 접속 수 한도를 보는 MY-PROC-CONNECTION 1차와 맞지 않음. R6B-AUTH 1차의 mysql.user host 대조가 맞음"

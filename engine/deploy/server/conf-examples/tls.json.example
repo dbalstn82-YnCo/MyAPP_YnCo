@@ -1,0 +1,10 @@
+{
+  "_설명": "서버가 직접 HTTPS(TLS)로 받도록 하는 설정. 이 파일을 conf/tls.json 으로 복사하고 인증서 경로를 적으십시오.",
+  "_인증서": "회사 인증기관(CA)에서 받은 서버 인증서와 키. 경로는 설치 경로 기준 상대경로 또는 절대경로.",
+  "_상호인증": "client_ca 를 지정하면 그 CA 가 발급한 클라이언트 인증서를 가진 단말만 접속할 수 있습니다(VPN 대체 수단).",
+  "cert": "conf/server.crt",
+  "key": "conf/server.key",
+  "key_password": "",
+  "client_ca": "",
+  "min_version": "TLS1.2"
+}

@@ -1,0 +1,89 @@
+product: aix
+layer: os
+title: aix 로그 종류 카탈로그 (GPT 수집 — 벤더 문서 대조 필요)
+source: GPT 수집(벤더 문서 대조 필요)
+sources: []
+logtypes:
+- name: 오류 로그(errpt)
+  path: /var/adm/ras/errlog → errpt -a
+  format: 바이너리(errpt로 텍스트) 'IDENTIFIER TIMESTAMP T C RESOURCE_NAME DESCRIPTION'
+  check: DISK_ERR·SC_DISK_ERR·LVM_IO_FAIL·PGSP_KILL·CORE_DUMP·SYSDUMP·FCS_ERR·ETHERNET DOWN
+  sample: DCB47997   0909140226 T H hdisk3         DISK OPERATION ERROR
+- name: 시스템 로그(syslog)
+  path: /var/log/syslog · /var/log/messages (/etc/syslog.conf 설정)
+  format: 텍스트·RFC3164
+  check: sshd 인증 실패·데몬 오류·su
+  sample: 'Sep  9 14:00:01 db1 sshd[2211]: Failed password for root from 10.0.0.5'
+- name: su·로그인 실패
+  path: /var/adm/sulog · /etc/security/failedlogin(who -a)
+  format: 텍스트/바이너리
+  check: 권한 상승 실패·반복 로그인 실패
+  sample: SU 09/09 14:00 - pts/1 oper-root
+- name: 감사(audit)
+  path: /audit/trail → auditpr
+  format: 바이너리(auditpr로 텍스트)
+  check: USER_Login 실패·FILE_Open·PROC_Execute 권한
+  sample: USER_Login  root  ... FAIL
+- name: 시스템 덤프
+  path: /var/adm/ras/vmcore.N (sysdumpdev -L)
+  format: 바이너리(kdb)
+  check: 커널 크래시 원인·덤프 상태
+  sample: 'Device name: /dev/lg_dumplv  Dump status: 0'
+- name: 콘솔 로그
+  path: /var/adm/ras/conslog (alog -t console -o)
+  format: alog 바이너리(alog로 텍스트)
+  check: 부팅 오류·마운트 실패·콘솔 경고
+  sample: 0513-059 The sshd Subsystem has been started.
+- name: 부팅 로그
+  path: alog -t boot -o
+  format: alog 바이너리
+  check: 부팅 단계 실패·cfgmgr 오류
+  sample: Saving Base Customize Data to boot disk
+- name: PowerHA 로그
+  path: /var/hacmp/log/hacmp.out · /var/hacmp/adm/cluster.log · clstrmgr.debug
+  format: 텍스트
+  check: 이벤트 스크립트 실패·node_down·리소스 그룹 실패
+  sample: 'Sep  9 14:02:11 EVENT FAILED: 1: node_down db2'
+- name: 성능 이력(nmon/sar)
+  path: /var/adm/sa/saDD · nmon 출력 *.nmon
+  format: 바이너리/CSV
+  check: CPU·메모리·페이징·I/O 추세
+  sample: 14:00:01 %usr %sys %wio %idle physc
+- name: 로그인 이력
+  path: /var/adm/wtmp (last) · /etc/utmp
+  format: 바이너리(last)
+  check: 접속 사용자·재부팅 이력
+  sample: reboot ~ Tue Sep  9 14:10
+- name: NIM·설치 로그
+  path: /var/adm/ras/devinst.log · /var/adm/ras/bosinstlog · smit.log
+  format: 텍스트
+  check: 패치·파일셋 설치 실패 이력
+  sample: 'installp: APPLYING software for: bos.rte.libc'
+sections:
+- heading: 로그 종류 카탈로그 (전수)
+  body: '오류 로그(errpt): /var/adm/ras/errlog → errpt -a · 시스템 로그(syslog): /var/log/syslog · /var/log/messages (/etc/syslog.conf 설정) · su·로그인 실패: /var/adm/sulog · /etc/security/failedlogin(who -a) · 감사(audit):
+    /audit/trail → auditpr · 시스템 덤프: /var/adm/ras/vmcore.N (sysdumpdev -L) · 콘솔 로그: /var/adm/ras/conslog (alog -t console -o) · 부팅 로그: alog -t boot -o · PowerHA 로그: /var/hacmp/log/hacmp.out · /var/hacmp/adm/cluster.log
+    · clstrmgr.debug · 성능 이력(nmon/sar): /var/adm/sa/saDD · nmon 출력 *.nmon · 로그인 이력: /var/adm/wtmp (last) · /etc/utmp · NIM·설치 로그: /var/adm/ras/devinst.log · /var/adm/ras/bosinstlog · smit.log'
+- heading: '로그: 오류 로그(errpt)'
+  body: 경로 /var/adm/ras/errlog → errpt -a / 형식 바이너리(errpt로 텍스트) 'IDENTIFIER TIMESTAMP T C RESOURCE_NAME DESCRIPTION' / 확인 DISK_ERR·SC_DISK_ERR·LVM_IO_FAIL·PGSP_KILL·CORE_DUMP·SYSDUMP·FCS_ERR·ETHERNET DOWN
+    / 샘플 DCB47997   0909140226 T H hdisk3         DISK OPERATION ERROR
+- heading: '로그: 시스템 로그(syslog)'
+  body: '경로 /var/log/syslog · /var/log/messages (/etc/syslog.conf 설정) / 형식 텍스트·RFC3164 / 확인 sshd 인증 실패·데몬 오류·su / 샘플 Sep  9 14:00:01 db1 sshd[2211]: Failed password for root from 10.0.0.5'
+- heading: '로그: su·로그인 실패'
+  body: 경로 /var/adm/sulog · /etc/security/failedlogin(who -a) / 형식 텍스트/바이너리 / 확인 권한 상승 실패·반복 로그인 실패 / 샘플 SU 09/09 14:00 - pts/1 oper-root
+- heading: '로그: 감사(audit)'
+  body: 경로 /audit/trail → auditpr / 형식 바이너리(auditpr로 텍스트) / 확인 USER_Login 실패·FILE_Open·PROC_Execute 권한 / 샘플 USER_Login  root  ... FAIL
+- heading: '로그: 시스템 덤프'
+  body: '경로 /var/adm/ras/vmcore.N (sysdumpdev -L) / 형식 바이너리(kdb) / 확인 커널 크래시 원인·덤프 상태 / 샘플 Device name: /dev/lg_dumplv  Dump status: 0'
+- heading: '로그: 콘솔 로그'
+  body: 경로 /var/adm/ras/conslog (alog -t console -o) / 형식 alog 바이너리(alog로 텍스트) / 확인 부팅 오류·마운트 실패·콘솔 경고 / 샘플 0513-059 The sshd Subsystem has been started.
+- heading: '로그: 부팅 로그'
+  body: 경로 alog -t boot -o / 형식 alog 바이너리 / 확인 부팅 단계 실패·cfgmgr 오류 / 샘플 Saving Base Customize Data to boot disk
+- heading: '로그: PowerHA 로그'
+  body: '경로 /var/hacmp/log/hacmp.out · /var/hacmp/adm/cluster.log · clstrmgr.debug / 형식 텍스트 / 확인 이벤트 스크립트 실패·node_down·리소스 그룹 실패 / 샘플 Sep  9 14:02:11 EVENT FAILED: 1: node_down db2'
+- heading: '로그: 성능 이력(nmon/sar)'
+  body: 경로 /var/adm/sa/saDD · nmon 출력 *.nmon / 형식 바이너리/CSV / 확인 CPU·메모리·페이징·I/O 추세 / 샘플 14:00:01 %usr %sys %wio %idle physc
+- heading: '로그: 로그인 이력'
+  body: 경로 /var/adm/wtmp (last) · /etc/utmp / 형식 바이너리(last) / 확인 접속 사용자·재부팅 이력 / 샘플 reboot ~ Tue Sep  9 14:10
+- heading: '로그: NIM·설치 로그'
+  body: '경로 /var/adm/ras/devinst.log · /var/adm/ras/bosinstlog · smit.log / 형식 텍스트 / 확인 패치·파일셋 설치 실패 이력 / 샘플 installp: APPLYING software for: bos.rte.libc'

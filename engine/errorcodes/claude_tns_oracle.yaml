@@ -1,0 +1,404 @@
+product: oracle
+layer: db
+note: GPT 협업 수집분 — 벤더 공식 문서와 대조 후 확정
+codes:
+- code: TNS-12514
+  severity: critical
+  category: connection
+  title: 리스너가 서비스 모름
+  immediate:
+  - lsnrctl status 로 서비스 등록 확인, 인스턴스 기동 여부 확인
+  short:
+  - 접속 문자열 SERVICE_NAME 과 등록 서비스 대조
+  mid:
+  - local_listener·정적 등록 정비
+  long:
+  - 서비스 등록 헬스체크
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/tns-12514/)
+  vendor_cause: 요청 서비스명이 리스너에 동적 등록되지 않았거나 listener.ora에 정적으로 구성되지 않았다.
+  vendor_action: 연결 문자열·DB/PDB 상태·SERVICE_NAME을 확인하고 잠시 후 재시도하며 필요하면 lsnrctl services로 등록 상태를 확인한다.
+  vendor_url: https://docs.oracle.com/en/error-help/db/tns-12514/
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: TNS 코드 체계는 8i 이후 동일 — listener.log(10g 텍스트)·11g+ ADR(listener/alert/log.xml + trace/listener.log) 모두 같은 코드
+- code: TNS-12505
+  severity: critical
+  category: connection
+  title: 리스너가 SID 모름
+  immediate:
+  - "등록 인스턴스: `lsnrctl services <listener>` — 요청 SID 가 없으면 미등록"
+  - "요청 값: `grep -n \"12505\" $ORACLE_BASE/diag/tnslsnr/<host>/<listener>/trace/<listener>.log | tail -10` 의 CONNECT_DATA(SID=…) 확인"
+  - "12c+ PDB 접속이면 SID 대신 SERVICE_NAME 사용 여부 확인"
+  short:
+  - "(2차·승인 후, 롤백: 원래 접속 문자열·listener.ora 백업 복원) 접속 문자열을 SERVICE_NAME 방식으로 바꾸거나 `alter system register;`, 정적 등록 필요 시 SID_LIST 추가 후 `lsnrctl reload`"
+  mid:
+  - "애플리케이션 접속 문자열을 SERVICE_NAME 방식으로 통일"
+  long:
+  - "리스너 서비스 등록 상태 감시와 접속 문자열 표준 문서화"
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/tns-12505/)
+  vendor_cause: "리스너가 접속 요청의 SID 를 모름 — 인스턴스가 동적 등록되지 않았고 listener.ora 정적 등록도 없음. 인스턴스 미기동·SID 오타·12c+ PDB 를 SID 로 접속한 경우가 흔함."
+  vendor_action: 연결 문자열과 SID를 확인하고 잠시 후 재시도하며 lsnrctl services로 리스너가 아는 인스턴스를 확인한다.
+  vendor_url: https://docs.oracle.com/en/error-help/db/tns-12505/
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: TNS 코드 체계는 8i 이후 동일 — listener.log(10g 텍스트)·11g+ ADR(listener/alert/log.xml + trace/listener.log) 모두 같은 코드
+- code: TNS-12518
+  severity: critical
+  category: capacity
+  title: 접속 hand-off 실패
+  immediate:
+  - "프로세스 한도: `select resource_name, current_utilization, limit_value from v$resource_limit where resource_name='processes';` — 한도 근접이면 확정"
+  - "접속 폭주: `grep \"<날짜 시:분>\" $ORACLE_BASE/diag/tnslsnr/<host>/<listener>/trace/<listener>.log | grep -c establish` 를 분 단위로 비교"
+  - "OS 한도: oracle 계정 `ulimit -u`·`ps -u oracle | wc -l`·`free -m`"
+  short:
+  - "(2차·승인 후, 롤백: 원래 값 SCOPE=SPFILE·listener.ora 백업 복원) 접속 폭주 출처(WAS 재시도 폭주) 차단 후 PROCESSES 상향(재기동) 또는 listener.ora `CONNECTION_RATE_<listener>`(11gR2+)로 접속률 제한"
+  mid:
+  - "모든 WAS 풀 최대값 합계 기준 PROCESSES 재산정, 풀 재시도 간격(backoff) 설정"
+  long:
+  - "리스너 분당 접속 수와 processes 사용률 감시"
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/tns-12518/)
+  vendor_cause: "리스너가 받은 연결을 서버 프로세스(전용 서버·디스패처)에 넘기지 못함. PROCESSES 한도 도달·OS 프로세스/메모리 한도(ulimit -u)·접속 폭주·디스패처 장애가 흔한 원인."
+  vendor_action: 리스너 tracing을 켜고 재실행하며 리스너와 DB 인스턴스의 direct handoff 구성을 확인하고 지속되면 Oracle Support에 문의한다.
+  vendor_url: https://docs.oracle.com/en/error-help/db/tns-12518/
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: TNS 코드 체계는 8i 이후 동일 — listener.log(10g 텍스트)·11g+ ADR(listener/alert/log.xml + trace/listener.log) 모두 같은 코드
+- code: TNS-12520
+  severity: critical
+  category: capacity
+  title: 핸들러 사용 불가
+  immediate:
+  - "핸들러 상태: `lsnrctl services <listener>` — `state:blocked`·`refused` 확인"
+  - "한도: `select resource_name, current_utilization, limit_value from v$resource_limit where resource_name in ('processes','sessions');`"
+  - "접속 문자열이 `(SERVER=SHARED)` 인데 `select value from v$parameter where name='dispatchers';` 가 비어 있는지 확인"
+  short:
+  - "(2차·승인 후, 롤백: 원래 값으로 SCOPE=SPFILE) 누수 연결 회수 후 PROCESSES 상향(재기동), 공유 서버 요청이면 접속 문자열을 DEDICATED 로 수정"
+  mid:
+  - "WAS 풀 총합 기준 PROCESSES 재산정과 풀 재시도 간격 설정"
+  long:
+  - "리스너 핸들러 BLOCKED 상태·processes 사용률 감시"
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/tns-12520/)
+  vendor_cause: "요청한 서버 유형(전용·공유)에 맞는 사용 가능한 핸들러가 없어 리스너가 연결을 처리하지 못함. PROCESSES 한도 도달로 인스턴스가 BLOCKED 로 등록되었거나 공유 서버 디스패처가 없을 때 흔함."
+  vendor_action: 연결 문자열과 SERVER 유형을 확인하고 잠시 후 재시도하며 lsnrctl services로 적절한 핸들러의 등록·수락 상태를 확인한다.
+  vendor_url: https://docs.oracle.com/en/error-help/db/tns-12520/
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: TNS 코드 체계는 8i 이후 동일 — listener.log(10g 텍스트)·11g+ ADR(listener/alert/log.xml + trace/listener.log) 모두 같은 코드
+- code: TNS-12541
+  severity: critical
+  category: connection
+  title: 리스너 없음
+  immediate:
+  - lsnrctl status 확인 후 start
+  short:
+  - 리스너 정지 원인 추적
+  mid:
+  - 자동 기동 구성
+  long:
+  - 리스너 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/tns-12541/)
+  vendor_cause: 지정 호스트·포트에 리스너가 없거나 IPC 키에 대한 로컬 리스너가 실행 중이지 않았다.
+  vendor_action: 지정 호스트·포트 또는 IPC 키에서 리스너가 실행·수신 중인지 확인하고 연결 문자열의 주소가 올바른지 확인한다.
+  vendor_url: https://docs.oracle.com/en/error-help/db/tns-12541/
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: TNS 코드 체계는 8i 이후 동일 — listener.log(10g 텍스트)·11g+ ADR(listener/alert/log.xml + trace/listener.log) 모두 같은 코드
+- code: TNS-12535
+  severity: error
+  category: connection
+  title: 접속 시간 초과
+  immediate:
+  - "포트 도달성: `nc -zvw3 <host> <port>` (또는 `telnet <host> <port>`)"
+  - "출처 집중: `grep -n -B5 \"TNS-12535\" $ORACLE_BASE/diag/rdbms/<db>/<SID>/trace/alert_<SID>.log | grep -i \"Client address\" | tail -20`"
+  short:
+  - "서버 sqlnet.ora `SQLNET.EXPIRE_TIME=10` 으로 방화벽 유휴 세션 만료 방지(2차·승인 후, 롤백: 항목 제거), 방화벽 idle timeout 값 확인"
+  mid:
+  - "DB 구간 방화벽 세션 타임아웃 정책 정비와 클라이언트 연결 타임아웃 설정"
+  long:
+  - "접속 구간 지연·단절 감시와 방화벽 정책 변경 시 DB 담당 사전 통보"
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/tns-12535/)
+  vendor_cause: "요청한 TNS 작업이 지정 시간 안에 끝나지 않음. 방화벽 차단·세션 만료, 네트워크 지연, 서버 과부하가 흔한 원인이며 11g+ 에서는 alert log 에 Fatal NI connect error 로 기록됨."
+  vendor_action: 보조 오류 문서를 확인하고 SQLNET.LOG에서 보조 오류를 찾으며 필요하면 tracing을 활성화해 추가 정보를 수집한다.
+  vendor_url: https://docs.oracle.com/en/error-help/db/tns-12535/
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: TNS 코드 체계는 8i 이후 동일 — listener.log(10g 텍스트)·11g+ ADR(listener/alert/log.xml + trace/listener.log) 모두 같은 코드
+- code: TNS-12547
+  severity: error
+  category: connection
+  title: 접속 중 연결 끊김
+  immediate:
+  - "`lsnrctl status <listener>` 의 'Listener Log File' 경로 확인 뒤 `grep -n -B2 -A6 \"TNS-12547\" <listener.log> | tail -60` — 바로 앞이 TNS-12518/12537 이면 서버 프로세스 생성 실패"
+  - "프로세스 한도: `select resource_name, current_utilization, max_utilization, limit_value from v$resource_limit where resource_name='processes';` — max_utilization=limit 이면 확정"
+  - "OS: oracle 계정 `ulimit -u -n` 과 `free -m` (AIX `svmon -G`) — 프로세스 수·메모리 여유가 없으면 OS 자원 원인"
+  short:
+  - 리스너·서버 프로세스 생성 실패 분석
+  mid:
+  - 한도 재산정
+  long:
+  - 연결 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/tns-12547/)
+  vendor_cause: 상대 프로세스가 예기치 않게 사라졌으며 주로 프로세스 시작 중 발생한다.
+  vendor_action: 상대 애플리케이션의 비정상 종료 여부를 조사한다. Interchange에서는 시스템 과부하 여부도 확인한다.
+  vendor_url: https://docs.oracle.com/en/error-help/db/tns-12547/
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: TNS 코드 체계는 8i 이후 동일 — listener.log(10g 텍스트)·11g+ ADR(listener/alert/log.xml + trace/listener.log) 모두 같은 코드
+- code: TNS-12560
+  severity: error
+  category: connection
+  title: 프로토콜 어댑터 오류
+  immediate:
+  - "동반 오류: 리스너·클라이언트 로그에서 TNS-12560 다음 줄의 TNS-00xxx 확인 — 그 코드로 판정을 다시 본다"
+  - "환경·기동: `echo $ORACLE_SID $ORACLE_HOME` 와 `ps -ef | grep \"[o]ra_pmon_\\|[t]nslsnr\"` (Windows: `sc query OracleService<SID>`)"
+  short:
+  - "(2차·승인 후) 내려간 리스너·인스턴스는 원인 확인 후 기동, 환경변수 오류면 `. oraenv` 로 맞춰 재접속, 주소 불일치면 tnsnames.ora 수정(롤백: 백업본 복원)"
+  mid:
+  - "서버 계정 환경 고정(oratab·oraenv)과 리스너·인스턴스 자동 기동 구성"
+  long:
+  - "리스너·인스턴스 생존 감시와 접속 환경 표준 문서화"
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/tns-12560/)
+  vendor_cause: "하위 통신 프로토콜 어댑터 오류. 로컬 접속의 ORACLE_SID·ORACLE_HOME 불일치, 인스턴스·서비스 미기동, 리스너 주소 불일치가 흔한 원인이며 실제 원인은 동반 TNS 오류(TNS-00511 등)에 있음."
+  vendor_action: 오류 스택의 하위 네트워크 오류와 연결 주소의 프로토콜을 확인하고 tracing 후 재실행하며 필요하면 Oracle Support에 문의한다.
+  vendor_url: https://docs.oracle.com/en/error-help/db/tns-12560/
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: TNS 코드 체계는 8i 이후 동일 — listener.log(10g 텍스트)·11g+ ADR(listener/alert/log.xml + trace/listener.log) 모두 같은 코드
+- code: TNS-12170
+  severity: error
+  category: connection
+  title: 접속 시간 초과(연결 단계)
+  immediate:
+  - "포트 도달성: `nc -zvw3 <host> <port>` — 응답 없음이면 방화벽·라우팅"
+  - "클라이언트 주소 집중: `grep -n -A8 \"12170\" $ORACLE_BASE/diag/rdbms/<db>/<SID>/trace/alert_<SID>.log | grep -i \"Client address\" | sort | uniq -c | sort -rn | head`"
+  - "서버 부하: `uptime`·`vmstat 5 3` — 런큐 과다면 서버측 지연"
+  short:
+  - "방화벽 정책·라우팅 확인을 네트워크 담당에 요청, 서버 `SQLNET.INBOUND_CONNECT_TIMEOUT`·리스너 `INBOUND_CONNECT_TIMEOUT_<listener>` 값 점검(변경은 2차·승인 후, 롤백: 원래 값)"
+  mid:
+  - "클라이언트 `SQLNET.OUTBOUND_CONNECT_TIMEOUT`(11gR2+)·재시도 설정, DB 구간 네트워크 경로 이중화"
+  long:
+  - "접속 시험 주기 실행과 12170 발생 건수 일 단위 감시"
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/tns-12170/)
+  vendor_cause: "연결 단계에서 제한 시간 안에 연결이 성립하지 않음 — 네트워크·시스템 지연, 방화벽 차단, 대상 주소 오류, 서버 과부하(또는 DoS)가 원인. 11g+ 서버 alert log 에 Fatal NI connect error 12170 으로 남음."
+  vendor_action: 클라이언트·서버 연결성과 방화벽을 확인하고 관련 CONNECT/RECV timeout을 늘리며 악성 클라이언트가 의심되면 접근을 제한한다.
+  vendor_url: https://docs.oracle.com/en/error-help/db/tns-12170/
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: TNS 코드 체계는 8i 이후 동일 — listener.log(10g 텍스트)·11g+ ADR(listener/alert/log.xml + trace/listener.log) 모두 같은 코드
+- code: TNS-12154
+  severity: error
+  category: connection
+  title: TNS 이름 해석 실패
+  immediate:
+  - "설정 위치: `echo $TNS_ADMIN` 후 `ls -l $TNS_ADMIN/tnsnames.ora` (미설정 시 $ORACLE_HOME/network/admin)"
+  - "해석 시험: `tnsping <alias>` 와 `grep -i directory_path $TNS_ADMIN/sqlnet.ora`"
+  short:
+  - "(2차·승인 후, 롤백: tnsnames.ora 백업본 복원) 별칭 추가·수정 또는 Easy Connect 문자열로 변경"
+  mid:
+  - "tnsnames.ora 중앙 배포(TNS_ADMIN 공용 경로)"
+  long:
+  - "접속 정보 변경을 구성관리로 관리하고 배포 후 tnsping 확인"
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/tns-12154/)
+  vendor_cause: "접속 별칭을 구성된 이름 해석 방식으로 connect descriptor 로 바꾸지 못함. 별칭 오타·TNS_ADMIN 경로 차이·tnsnames.ora 미배포·sqlnet.ora 의 NAMES.DIRECTORY_PATH 순서가 흔한 원인."
+  vendor_action: 연결 문자열, NAMES.DIRECTORY_PATH, tnsnames.ora의 위치·별칭·문법 또는 LDAP 서버 설정·접근성을 확인한다.
+  vendor_url: https://docs.oracle.com/en/error-help/db/tns-12154/
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: TNS 코드 체계는 8i 이후 동일 — listener.log(10g 텍스트)·11g+ ADR(listener/alert/log.xml + trace/listener.log) 모두 같은 코드
+- code: TNS-01169
+  severity: error
+  category: security
+  title: 리스너 비밀번호 불인식
+  immediate:
+  - "실행 계정·호스트 확인 — 리스너 소유 OS 계정(`ps -ef | grep [t]nslsnr` 의 사용자)과 명령 실행 계정이 같은지"
+  - "설정 확인: `grep -i \"PASSWORDS_\\|ADMIN_RESTRICTIONS\\|LOCAL_OS_AUTHENTICATION\" $ORACLE_HOME/network/admin/listener.ora`"
+  - "실패 기록: `grep -n \"1169\\|1190\" $ORACLE_BASE/diag/tnslsnr/<host>/<listener>/trace/<listener>.log | tail -10`"
+  short:
+  - "(2차·승인 후, 롤백: listener.ora 백업 복원) 리스너 소유 OS 계정으로 관리 명령 실행, 원격 관리가 불필요하면 비밀번호 설정을 없애고 로컬 OS 인증 사용(11g+ 권장)"
+  mid:
+  - "listener.ora `ADMIN_RESTRICTIONS_<listener>=ON` 으로 런타임 설정 변경 차단"
+  long:
+  - "리스너 관리 명령 실행 이력(리스너 로그) 정기 검토"
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/tns-01169/)
+  note: 비밀번호 필요가 아니라 제공된 비밀번호를 리스너가 인식하지 못한 오류임
+  vendor_cause: "리스너 비밀번호가 설정된 상태에서 권한 명령(stop·set 등)에 준 비밀번호를 리스너가 인정하지 않음. 11g+ 는 리스너 소유 OS 계정의 로컬 인증이 기본이라 다른 계정·원격에서 실행할 때 흔함."
+  vendor_action: 권한 사용자라면 LSNRCTL의 SET PASSWORD로 올바른 리스너 비밀번호를 설정한다. 비밀번호를 모르면 해당 명령을 실행하지 않는다.
+  vendor_url: https://docs.oracle.com/en/error-help/db/tns-01169/
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: 리스너 비밀번호 — 12c 부터 비권장(deprecated)이나 메시지는 유지
+- code: TNS-00511
+  severity: critical
+  category: connection
+  title: 리스너 없음(하위)
+  immediate:
+  - "리스너 실행: `ps -ef | grep [t]nslsnr` 와 `lsnrctl status <listener>`"
+  - "포트 대기: `ss -ltnp | grep <port>` (구버전 `netstat -an | grep <port>`) — LISTEN 이 없으면 미기동"
+  - "클라이언트 접속 문자열의 HOST/PORT 와 listener.ora ADDRESS 대조"
+  short:
+  - "(2차·승인 후, 롤백: 해당 없음) `lsnrctl start <listener>` — 기동 실패면 listener.ora 문법·포트 충돌(`ss -ltnp`) 확인 후 재시도"
+  mid:
+  - "리스너 자동 기동(Oracle Restart/CRS 리소스 또는 OS 서비스) 구성"
+  long:
+  - "리스너 포트 생존 감시(주기적 tnsping) 등록"
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/tns-00511/)
+  vendor_cause: "지정 주소에서 대기 중인 리스너가 없거나 연결 요청을 충분히 빨리 처리하지 못함(TNS-12541 의 하위 오류). 리스너 미기동·포트/호스트 불일치·리스너 큐 포화가 흔한 원인."
+  vendor_action: TNSNAMES.ORA 주소를 LISTENER.ORA 주소와 비교해 확인하고 원격 시스템에서 리스너를 시작한다.
+  vendor_url: https://docs.oracle.com/en/error-help/db/tns-00511/
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: TNS 코드 체계는 8i 이후 동일 — listener.log(10g 텍스트)·11g+ ADR(listener/alert/log.xml + trace/listener.log) 모두 같은 코드
+- code: TNS-12500
+  severity: critical
+  category: capacity
+  title: 전용 서버 프로세스 생성 실패
+  immediate:
+  - "동반 오류: `grep -n -A5 \"12500\" $ORACLE_BASE/diag/tnslsnr/<host>/<listener>/trace/<listener>.log | tail -30` — OS 오류(Error: 11 자원 일시 부족, 12 메모리 부족) 확인"
+  - "한도: `select resource_name, current_utilization, limit_value from v$resource_limit where resource_name='processes';` 와 oracle 계정 `ulimit -u`·`free -m`"
+  - "실행파일: `ls -l $ORACLE_HOME/bin/oracle` (Windows 는 `sc query OracleService<SID>`)"
+  short:
+  - "(2차·승인 후, 롤백: 원래 값·limits.conf 백업 복원) PROCESSES 또는 OS nproc·메모리 한도를 원인에 맞게 조정, 실행파일 권한 이상이면 relink 계획"
+  mid:
+  - "접속 총량(WAS 풀 합계) 기준 PROCESSES·OS 한도 재산정"
+  long:
+  - "processes 사용률과 OS 메모리 여유 감시"
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/tns-12500/)
+  vendor_cause: "리스너가 전용 서버 프로세스를 시작하지 못함 — 동반 TNS-12540/12560 과 OS 오류에 원인이 나옴. PROCESSES 한도, OS 프로세스·메모리 한도, oracle 실행파일 부재·권한, 환경 설정 오류가 흔한 원인."
+  vendor_action: ADMIN tracing 후 실행파일·실행 권한·LISTENER.ORA의 Oracle 환경과 프로토콜 어댑터 링크를 확인하고 지속되면 Support에 문의한다.
+  vendor_url: https://docs.oracle.com/en/error-help/db/tns-12500/
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: TNS 코드 체계는 8i 이후 동일 — listener.log(10g 텍스트)·11g+ ADR(listener/alert/log.xml + trace/listener.log) 모두 같은 코드
+- code: TNS-12540
+  severity: critical
+  category: capacity
+  title: 내부 한도 초과
+  immediate:
+  - "한도: `select resource_name, current_utilization, limit_value from v$resource_limit where resource_name in ('processes','sessions');`"
+  - "OS 한도: oracle 계정 `ulimit -n -u` 와 `grep -i \"open files\" /proc/<tnslsnr PID>/limits`"
+  - "리스너 로그의 분당 접속 수로 폭주 여부 확인"
+  short:
+  - "(2차·승인 후, 롤백: limits.conf·원래 파라미터 값 복원) 연결 누수 출처 회수 후 OS nofile/nproc 또는 PROCESSES 상향(재기동)"
+  mid:
+  - "WAS 풀 최대값·재시도 정책 정비로 연결 총량 제한"
+  long:
+  - "리스너 접속 수·OS 파일 디스크립터 사용률 감시"
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/tns-12540/)
+  vendor_cause: "동시에 열린 TNS 연결이 너무 많아 내부 한도를 넘음. 접속 폭주·연결 누수, OS 파일 디스크립터·프로세스 한도 부족이 흔한 원인."
+  vendor_action: 연결이 종료될 때까지 기다린 뒤 다시 시도한다.
+  vendor_url: https://docs.oracle.com/en/error-help/db/tns-12540/
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: TNS 코드 체계는 8i 이후 동일 — listener.log(10g 텍스트)·11g+ ADR(listener/alert/log.xml + trace/listener.log) 모두 같은 코드
+- code: TNS-12537
+  severity: info
+  category: connection
+  title: TNS 연결 종료
+  immediate:
+  - "리스너 로그: `grep -n \"12537\\|12547\\|refused\" $ORACLE_BASE/diag/tnslsnr/<host>/<listener>/trace/<listener>.log | tail -20`"
+  - "허용 목록: `grep -i \"invited_nodes\\|excluded_nodes\\|validnode\" $ORACLE_HOME/network/admin/sqlnet.ora`"
+  - "클라이언트 애플리케이션 로그에서 같은 시각 연결 종료 원인(타임아웃·프로세스 종료) 확인"
+  short:
+  - "(2차·승인 후, 롤백: sqlnet.ora 백업 복원) 허용 목록 수정 후 `lsnrctl reload`, 방화벽 세션 리셋이면 네트워크 담당과 타임아웃 조정"
+  mid:
+  - "방화벽 세션 정책·서버 프로세스 생성 자원 점검"
+  long:
+  - "리스너 거부·EOF 건수 일 단위 감시"
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.oracle.com/en/error-help/db/tns-12537/)
+  note: Oracle 공식 문서가 조치 불필요한 정보 메시지로 명시함
+  vendor_cause: "TNS 연결 도중 상대편이 연결을 닫아 EOF 를 받음. 리스너 접속 거부(INVITED_NODES·접속률 제한), 서버 프로세스 즉시 종료, 방화벽 세션 리셋, 클라이언트 쪽 비정상 종료가 흔한 원인."
+  vendor_action: 조치 불필요. 정보 메시지다.
+  vendor_url: https://docs.oracle.com/en/error-help/db/tns-12537/
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: TNS 코드 체계는 8i 이후 동일 — listener.log(10g 텍스트)·11g+ ADR(listener/alert/log.xml + trace/listener.log) 모두 같은 코드

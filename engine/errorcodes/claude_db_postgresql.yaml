@@ -1,0 +1,831 @@
+product: postgresql
+layer: db
+note: GPT 협업 수집분 — 벤더 공식 문서와 대조 후 확정
+codes:
+- code: 08001
+  severity: error
+  category: connection
+  title: 클라이언트 SQL 연결 수립 불가
+  immediate:
+  - "서버 수신 확인: `pg_isready -h <server> -p <port>` — 'no response' 면 미기동·포트 미수신, 'accepting connections' 면 서버 정상 (PostgreSQL 10~16, 읽기 전용)"
+  - "서버에서 `SELECT name, setting FROM pg_settings WHERE name IN ('listen_addresses','port','max_connections');` 와 `ss -ltnp | grep <port>` — listen_addresses 가 localhost 뿐이면 원격 접속 불가"
+  - "pg_hba 규칙: `SELECT line_number, type, database, user_name, address, auth_method FROM pg_hba_file_rules;` (10+, superuser) — 클라이언트 주소에 맞는 규칙이 없으면 'no pg_hba.conf entry' 로 거부"
+  short:
+  - "(2차·승인 후, 롤백: postgresql.conf·pg_hba.conf 백업) pg_hba.conf 규칙 추가 후 `SELECT pg_reload_conf();`, listen_addresses 수정은 재시작 필요 — 방화벽 포트 허용은 보안 담당 승인"
+  mid:
+  - 접속 구성 표준화
+  long:
+  - 접속 헬스체크
+  source: GPT 수집·벤더 문서 대조 완료(https://www.postgresql.org/docs/current/errcodes-appendix.html)
+  note: 개별 클라이언트의 연결 수립 실패이므로 서비스 전체 중단 수준의 critical보다 error가 타당함
+  vendor_cause: 클라이언트가 PostgreSQL 서버와 SQL 연결을 수립하지 못함
+  vendor_action: 호스트·포트·데이터베이스·사용자 등 연결 매개변수를 확인하고 서버가 해당 주소에서 수신 중인지 확인
+  vendor_url: https://www.postgresql.org/docs/current/app-psql.html
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: SQLSTATE 5자리 코드 — 9.2 오류 코드 표에 전부 존재(부록 확인), 18 까지 동일
+- code: 08003
+  severity: error
+  category: connection
+  title: 연결 없음
+  immediate:
+  - "서버 로그에서 같은 시각 연결 종료 원인 확인: `grep -E 'terminating connection|could not receive data from client' <로그 파일> | tail -30` (로그 위치 `SHOW log_directory;`, 읽기 전용)"
+  - "서버 기동 시각 `SELECT pg_postmaster_start_time();` 과 유휴 정리 설정 `SHOW idle_in_transaction_session_timeout;` (9.6+) 확인"
+  short:
+  - "(2차·승인 후) 커넥션 풀 유효성 검사(대여 시 검증)·유휴 수명을 방화벽/서버 타임아웃보다 짧게 설정 — 롤백: 이전 풀 설정 보관"
+  mid:
+  - "tcp_keepalives_idle 과 네트워크 장비 세션 타임아웃 정렬"
+  long:
+  - "애플리케이션 재연결 로직 표준과 연결 끊김 건수 감시"
+  source: GPT 수집·벤더 문서 대조 완료(https://www.postgresql.org/docs/current/errcodes-appendix.html)
+  vendor_cause: 현재 사용 가능한 데이터베이스 연결이 존재하지 않음
+  vendor_action: ''
+  vendor_url: https://www.postgresql.org/docs/current/errcodes-appendix.html
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: SQLSTATE 5자리 코드 — 9.2 오류 코드 표에 전부 존재(부록 확인), 18 까지 동일
+- code: 08P01
+  severity: error
+  category: connection
+  title: 프로토콜 위반
+  immediate:
+  - "서버 로그의 상세 문구와 클라이언트 주소 기록: `grep -n -E 'invalid frontend message type|incomplete startup packet|unexpected message type' <로그 경로> | tail -50` (경로는 `SELECT pg_current_logfile();`, 10+) (읽기 전용)"
+  - "출처 기록 가능 여부: `SELECT name, setting FROM pg_settings WHERE name IN ('log_line_prefix','log_connections');` — log_line_prefix 에 %h 가 없으면 출처 IP 를 알 수 없음"
+  - "해당 클라이언트 드라이버(JDBC·libpq·Npgsql) 버전과 중간 프록시(pgbouncer·L4) 경유 여부 확인 — 'incomplete startup packet' 만 반복이면 L4 TCP 헬스체크가 흔한 원인"
+  short:
+  - "(2차·승인 후) 드라이버를 서버 버전 지원 버전으로 갱신, TCP 연결만 하는 L4 헬스체크는 정상 로그인 방식으로 변경 — 롤백: 이전 드라이버 보관"
+  mid:
+  - "클라이언트 드라이버·프록시 버전 표준화"
+  long:
+  - "08P01 발생 출처 감시와 드라이버 호환성 검증 절차"
+  source: GPT 수집·벤더 문서 대조 완료(https://www.postgresql.org/docs/current/errcodes-appendix.html)
+  vendor_cause: 클라이언트와 서버 간 PostgreSQL 프로토콜 규칙을 위반함
+  vendor_action: ''
+  vendor_url: https://www.postgresql.org/docs/current/errcodes-appendix.html
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: SQLSTATE 5자리 코드 — 9.2 오류 코드 표에 전부 존재(부록 확인), 18 까지 동일
+- code: 22P02
+  severity: warn
+  category: internal
+  title: 잘못된 텍스트 표현
+  immediate:
+  - "서버 로그의 invalid input syntax for type <형식> 문구와 STATEMENT 줄의 SQL·입력값 기록 (읽기 전용)"
+  - "대상 컬럼 형식 확인: `SELECT column_name, data_type FROM information_schema.columns WHERE table_name='<table>';`"
+  short:
+  - "(2차) 애플리케이션의 형 변환·바인드 형식 수정(문자열을 숫자·날짜·uuid 컬럼에 넣는 부분) — 운영 반영은 승인 후"
+  mid:
+  - "입력 검증 단계에서 형식 검사 추가"
+  long:
+  - "22P02 발생 건수 감시와 데이터 검증 표준"
+  source: GPT 수집·벤더 문서 대조 완료(https://www.postgresql.org/docs/current/errcodes-appendix.html)
+  vendor_cause: 입력 텍스트가 대상 데이터 형식의 유효한 표현이 아님
+  vendor_action: ''
+  vendor_url: https://www.postgresql.org/docs/current/errcodes-appendix.html
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: SQLSTATE 5자리 코드 — 9.2 오류 코드 표에 전부 존재(부록 확인), 18 까지 동일
+- code: '23505'
+  severity: warn
+  category: internal
+  title: 고유 제약 위반
+  immediate:
+  - "서버 로그의 duplicate key value violates unique constraint 줄의 제약 이름과 DETAIL 의 Key (…)=(…) 값 기록 (읽기 전용)"
+  - "시퀀스와 실제 최대값 비교: `SELECT last_value FROM <sequence>;` 와 `SELECT max(<key>) FROM <table>;` — 시퀀스가 작으면 데이터 이관 후 시퀀스 미조정"
+  short:
+  - "(2차·승인 후) 시퀀스 조정(`SELECT setval('<sequence>', <값>);`)·재처리 멱등성(INSERT … ON CONFLICT, 9.5+) 적용 — 롤백: 조정 전 last_value 기록"
+  mid:
+  - "키 생성 방식 표준화(IDENTITY 10+·시퀀스)와 이관 절차에 시퀀스 재설정 포함"
+  long:
+  - "고유 제약 위반 건수 감시와 데이터 정합성 점검"
+  source: GPT 수집·벤더 문서 대조 완료(https://www.postgresql.org/docs/current/errcodes-appendix.html)
+  vendor_cause: UNIQUE 제약 열 조합과 동일한 값의 행이 둘 이상 존재하려 함
+  vendor_action: 중복되지 않는 값을 사용하거나 의도한 고유성 규칙에 맞게 UNIQUE 제약을 정의
+  vendor_url: https://www.postgresql.org/docs/current/ddl-constraints.html
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: SQLSTATE 5자리 코드 — 9.2 오류 코드 표에 전부 존재(부록 확인), 18 까지 동일
+- code: 25P02
+  severity: warn
+  category: internal
+  title: 트랜잭션 중단 상태
+  immediate:
+  - "같은 세션의 첫 오류 확인 — 서버 로그에서 25P02 직전 같은 PID(log_line_prefix %p)의 ERROR 줄: `grep '<PID>' <로그 파일> | tail -30` (읽기 전용)"
+  - "실패 상태 세션 확인: `SELECT pid, state, xact_start, LEFT(query,80) FROM pg_stat_activity WHERE state LIKE 'idle in transaction%';`"
+  short:
+  - "(2차) 애플리케이션 예외 처리에서 오류 후 ROLLBACK(또는 SAVEPOINT 복귀) 누락 수정 — 운영 반영은 승인 후"
+  mid:
+  - "트랜잭션 처리 표준(오류 시 ROLLBACK, 커넥션 반환 전 상태 초기화)"
+  long:
+  - "idle in transaction (aborted) 세션 수 감시"
+  source: GPT 수집·벤더 문서 대조 완료(https://www.postgresql.org/docs/current/errcodes-appendix.html)
+  vendor_cause: 현재 트랜잭션이 이전 오류로 실패 상태에 있음
+  vendor_action: ROLLBACK으로 현재 트랜잭션을 중단하고 변경 내용을 폐기
+  vendor_url: https://www.postgresql.org/docs/current/sql-rollback.html
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: SQLSTATE 5자리 코드 — 9.2 오류 코드 표에 전부 존재(부록 확인), 18 까지 동일
+- code: '28000'
+  severity: error
+  category: security
+  title: 잘못된 인증 명세
+  immediate:
+  - "서버 로그의 no pg_hba.conf entry for host … user … database … 줄에서 출처·계정·DB 기록 (읽기 전용)"
+  - "현재 규칙 확인: `SELECT line_number, type, database, user_name, address, auth_method FROM pg_hba_file_rules;` (10+, superuser) — 출처 IP 와 대조"
+  short:
+  - "(2차·승인 후) pg_hba.conf 에 필요한 출처만 규칙 추가 후 `SELECT pg_reload_conf();` — 롤백: 수정 전 pg_hba.conf 백업, 성공: pg_hba_file_rules 의 error 컬럼 NULL·접속 재개"
+  mid:
+  - "pg_hba.conf 규칙 표준(출처 대역·인증 방식 scram-sha-256, 10+) 정비"
+  long:
+  - "인증 거부 출처 감시와 pg_hba.conf 형상 관리"
+  source: GPT 수집·벤더 문서 대조 완료(https://www.postgresql.org/docs/current/errcodes-appendix.html)
+  note: 공식 조건명은 invalid_authorization_specification으로 인증 실패에만 한정되지 않음
+  vendor_cause: 연결 요청의 인증 명세가 유효하지 않음
+  vendor_action: pg_hba.conf에서 접속 조건과 인증 방식을 확인
+  vendor_url: https://www.postgresql.org/docs/current/auth-pg-hba-conf.html
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: SQLSTATE 5자리 코드 — 9.2 오류 코드 표에 전부 존재(부록 확인), 18 까지 동일
+- code: 28P01
+  severity: error
+  category: security
+  title: 비밀번호 인증 실패
+  immediate:
+  - "서버 로그의 password authentication failed for user 줄에서 계정·출처 기록(log_connections·%h 설정 시) (읽기 전용)"
+  - "계정 상태(비밀번호 제외): `SELECT rolname, rolcanlogin, rolvaliduntil FROM pg_roles WHERE rolname='<user>';` — 만료일 경과 여부"
+  - "해당 pg_hba 규칙의 auth_method(md5·scram-sha-256) 확인 — 드라이버가 SCRAM 미지원이면 실패 (10+)"
+  short:
+  - "(2차·승인 후) 비밀번호 재설정(`ALTER ROLE <user> PASSWORD …`)은 앱 설정 변경과 같은 작업 창에서 — 롤백: 이전 비밀번호 복원 불가하므로 영향 앱 목록 사전 확인"
+  mid:
+  - "애플리케이션 계정 비밀번호 보관·교체 절차(보안 담당) 표준화"
+  long:
+  - "반복 인증 실패 출처 감시(5분 내 반복 경보)"
+  source: GPT 수집·벤더 문서 대조 완료(https://www.postgresql.org/docs/current/errcodes-appendix.html)
+  vendor_cause: 제공된 비밀번호가 인증에 유효하지 않음
+  vendor_action: 사용자 비밀번호와 pg_hba.conf에 선택된 비밀번호 인증 방식을 확인
+  vendor_url: https://www.postgresql.org/docs/current/auth-pg-hba-conf.html
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: SQLSTATE 5자리 코드 — 9.2 오류 코드 표에 전부 존재(부록 확인), 18 까지 동일
+- code: 3D000
+  severity: error
+  category: internal
+  title: DB 없음
+  immediate:
+  - "서버 로그·접속 문자열의 DB 이름 기록 후 존재 확인: `SELECT datname FROM pg_database;` (읽기 전용)"
+  - "대소문자 확인 — 큰따옴표로 만든 대문자 DB 이름은 그대로 지정해야 함, 최근 DB 제거·이름 변경 이력 대조"
+  short:
+  - "(2차·승인 후) 접속 문자열 수정 또는 백업에서 DB 복원(pg_restore) — 롤백: 수정 전 설정 파일 보관"
+  mid:
+  - "배포 체크리스트에 대상 DB 존재 확인 단계 추가"
+  long:
+  - "DB 생성·삭제 변경 관리(승인 기록)"
+  source: GPT 수집·벤더 문서 대조 완료(https://www.postgresql.org/docs/current/errcodes-appendix.html)
+  vendor_cause: 지정한 데이터베이스 이름이 유효한 카탈로그를 가리키지 않음
+  vendor_action: 존재하는 데이터베이스 이름으로 연결하거나 필요한 데이터베이스를 생성
+  vendor_url: https://www.postgresql.org/docs/current/sql-createdatabase.html
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: SQLSTATE 5자리 코드 — 9.2 오류 코드 표에 전부 존재(부록 확인), 18 까지 동일
+- code: '42501'
+  severity: error
+  category: security
+  title: 권한 부족
+  immediate:
+  - "서버 로그의 permission denied for <객체> 줄과 실행 계정 기록 (읽기 전용)"
+  - "권한 확인: `SELECT has_table_privilege('<user>', '<schema>.<table>', 'SELECT'), has_schema_privilege('<user>', '<schema>', 'USAGE');` 와 psql `\\dp <schema>.<table>`"
+  short:
+  - "(2차·승인 후) 필요한 최소 권한만 `GRANT SELECT ON <schema>.<table> TO <role>;` (스키마 USAGE 포함) — 롤백: 대응 REVOKE 준비, 보안 담당 승인"
+  mid:
+  - "역할 기반 권한 표준과 ALTER DEFAULT PRIVILEGES 로 신규 객체 권한 자동화"
+  long:
+  - "권한 변경 이력 관리와 분기별 권한 검토"
+  source: GPT 수집·벤더 문서 대조 완료(https://www.postgresql.org/docs/current/errcodes-appendix.html)
+  vendor_cause: 요청한 작업에 필요한 객체 권한 또는 역할 권한이 없음
+  vendor_action: 객체 소유자나 권한 보유자가 필요한 권한을 GRANT
+  vendor_url: https://www.postgresql.org/docs/current/ddl-priv.html
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: SQLSTATE 5자리 코드 — 9.2 오류 코드 표에 전부 존재(부록 확인), 18 까지 동일
+- code: 42P01
+  severity: warn
+  category: internal
+  title: 테이블 없음
+  immediate:
+  - "서버 로그의 relation … does not exist 줄과 STATEMENT 의 SQL 기록, 실행 계정의 `SHOW search_path;` 확인 (읽기 전용)"
+  - "객체 위치 확인: `SELECT schemaname, tablename FROM pg_tables WHERE tablename ILIKE '<table>';` — 다른 스키마에 있거나 대소문자(큰따옴표 식별자) 차이 여부"
+  short:
+  - "(2차·승인 후) 누락 테이블 배포 또는 SQL 에 스키마 한정(schema.table)·search_path 수정 — 롤백: 배포 전 스키마 덤프(`pg_dump -s`)"
+  mid:
+  - "배포 검증 단계에 대상 객체 존재 확인 추가"
+  long:
+  - "환경 간 스키마 비교 정례화와 스키마 변경 관리"
+  source: GPT 수집·벤더 문서 대조 완료(https://www.postgresql.org/docs/current/errcodes-appendix.html)
+  vendor_cause: SQL 문이 참조한 테이블이 정의되어 있지 않음
+  vendor_action: ''
+  vendor_url: https://www.postgresql.org/docs/current/errcodes-appendix.html
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: SQLSTATE 5자리 코드 — 9.2 오류 코드 표에 전부 존재(부록 확인), 18 까지 동일
+- code: '53000'
+  severity: critical
+  category: capacity
+  title: 자원 부족
+  immediate:
+  - "서버 로그의 53000 오류 원문·DETAIL·HINT 기록 — 어떤 자원(공유 메모리·세마포어·파일 디스크립터 등)이 부족한지 확인 (읽기 전용)"
+  - "OS 자원 확인: `free -m` · postgres 계정 `ulimit -a` · 세마포어 사용 `ipcs -s | wc -l` — 한도 근접 여부"
+  short:
+  - "(2차·승인 후) 부족 자원에 맞춰 OS 한도(limits.conf·kernel.sem) 또는 PostgreSQL 설정 조정 — 영향: 일부 설정은 재기동 필요, 롤백: 변경 전 설정 파일 백업"
+  mid:
+  - "max_connections 와 OS 자원 한도의 정합 재산정"
+  long:
+  - "OS 자원(메모리·세마포어·FD) 사용률 감시"
+  source: GPT 수집·벤더 문서 대조 완료(https://www.postgresql.org/docs/current/errcodes-appendix.html)
+  vendor_cause: PostgreSQL이 작업 수행에 필요한 자원을 확보하지 못함
+  vendor_action: ''
+  vendor_url: https://www.postgresql.org/docs/current/errcodes-appendix.html
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: SQLSTATE 5자리 코드 — 9.2 오류 코드 표에 전부 존재(부록 확인), 18 까지 동일
+- code: '54000'
+  severity: error
+  category: capacity
+  title: 프로그램 한도 초과
+  immediate:
+  - "서버 로그의 54000 원문 기록 — 한도 종류(테이블 컬럼 수 1600·인덱스 행 크기·행 크기·인자 수 등) 확인 (읽기 전용)"
+  - "관련 테이블 정의 확인: psql `\\d+ <schema>.<table>` 와 STATEMENT 의 SQL 기록"
+  short:
+  - "(2차) 스키마·쿼리를 한도 안으로 재설계(테이블 분할·큰 값 컬럼 인덱스 제외) — 변경은 승인·사전 `pg_dump -s` 백업(롤백) 후"
+  mid:
+  - "스키마 설계 검토 기준에 PostgreSQL 한도(컬럼 수·인덱스 행 크기) 반영"
+  long:
+  - "설계 표준 문서화와 54000 발생 감시"
+  source: GPT 수집·벤더 문서 대조 완료(https://www.postgresql.org/docs/current/errcodes-appendix.html)
+  vendor_cause: PostgreSQL의 프로그램 구현 한도를 초과함
+  vendor_action: ''
+  vendor_url: https://www.postgresql.org/docs/current/errcodes-appendix.html
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: SQLSTATE 5자리 코드 — 9.2 오류 코드 표에 전부 존재(부록 확인), 18 까지 동일
+- code: '54001'
+  severity: error
+  category: capacity
+  title: 구문 너무 복잡
+  immediate:
+  - "서버 로그의 54001 원문(예: stack depth limit exceeded)과 STATEMENT 의 SQL 기록 (읽기 전용)"
+  - "현재 한도 `SHOW max_stack_depth;` 와 SQL 의 재귀(함수·CTE)·중첩 깊이 검토"
+  short:
+  - "(2차) 재귀 함수·깊은 중첩 표현식 단순화, max_stack_depth 상향은 OS 스택 한도(`ulimit -s`) 안에서만(superuser·승인 후, 롤백: 이전 값 기록)"
+  mid:
+  - "ORM 생성 대형 IN 목록·깊은 중첩 조건 제한 규칙"
+  long:
+  - "SQL 검토 기준(재귀 깊이·표현식 크기) 운영"
+  source: GPT 수집·벤더 문서 대조 완료(https://www.postgresql.org/docs/current/errcodes-appendix.html)
+  vendor_cause: SQL 문 구조가 PostgreSQL이 처리할 수 있는 복잡도 한도를 초과함
+  vendor_action: ''
+  vendor_url: https://www.postgresql.org/docs/current/errcodes-appendix.html
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: SQLSTATE 5자리 코드 — 9.2 오류 코드 표에 전부 존재(부록 확인), 18 까지 동일
+- code: '55000'
+  severity: error
+  category: internal
+  title: 객체 상태 부적합
+  immediate:
+  - "서버 로그의 55000 원문 기록 — 예: currval of sequence … is not yet defined in this session (읽기 전용)"
+  - "STATEMENT 의 SQL 과 같은 시각 DDL·유지보수 작업 여부: `SELECT pid, state, LEFT(query,80) FROM pg_stat_activity WHERE state <> 'idle';`"
+  short:
+  - "(2차) 원인별로 작업 순서 수정(예: 같은 세션에서 nextval 후 currval 호출) — 운영 반영은 승인 후"
+  mid:
+  - "운영 작업(DDL·유지보수) 순서 표준화"
+  long:
+  - "55000 발생 건수 감시와 변경 관리"
+  source: GPT 수집·벤더 문서 대조 완료(https://www.postgresql.org/docs/current/errcodes-appendix.html)
+  vendor_cause: 대상 객체가 요청 작업을 수행할 전제 상태가 아님
+  vendor_action: ''
+  vendor_url: https://www.postgresql.org/docs/current/errcodes-appendix.html
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: SQLSTATE 5자리 코드 — 9.2 오류 코드 표에 전부 존재(부록 확인), 18 까지 동일
+- code: '55006'
+  severity: error
+  category: lock
+  title: 객체 사용 중
+  immediate:
+  - "사용 중 세션 확인: `SELECT pid, usename, datname, state, LEFT(query,80) FROM pg_stat_activity WHERE datname='<db>';` — DB 제거 등 DDL 은 접속 세션이 있으면 실패 (읽기 전용)"
+  - "복제 슬롯이 대상이면 `SELECT slot_name, active, active_pid FROM pg_replication_slots;` (9.4+)"
+  short:
+  - "(2차·승인 후) 세션 소유 앱과 협의해 정리(`SELECT pg_terminate_backend(<pid>);`) 후 작업 재시도 — 영향: 해당 세션 트랜잭션 롤백, 롤백: 작업 전 세션 목록 저장"
+  mid:
+  - "DDL·DB 삭제 작업은 접속 차단 후 수행하는 절차 표준화"
+  long:
+  - "온라인 변경 절차 표준과 작업 시간대 관리"
+  source: GPT 수집·벤더 문서 대조 완료(https://www.postgresql.org/docs/current/errcodes-appendix.html)
+  vendor_cause: 대상 데이터베이스 객체가 현재 사용 중임
+  vendor_action: ''
+  vendor_url: https://www.postgresql.org/docs/current/errcodes-appendix.html
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: SQLSTATE 5자리 코드 — 9.2 오류 코드 표에 전부 존재(부록 확인), 18 까지 동일
+- code: '57014'
+  severity: warn
+  category: internal
+  title: 쿼리 취소됨
+  immediate:
+  - "서버 로그 문구로 취소 원인 구분: due to statement timeout(타임아웃) / due to user request(클라이언트·관리자 취소) — `grep 'canceling statement' <로그 파일> | tail -30` (읽기 전용)"
+  - "현재 설정 확인: `SHOW statement_timeout;` 와 역할·DB 별 설정 `SELECT setdatabase, setrole, setconfig FROM pg_db_role_setting;`"
+  short:
+  - "(2차) 장기 쿼리 실행계획을 `EXPLAIN <SQL>`(실행 안 함, EXPLAIN ANALYZE 금지)로 확인해 인덱스·쿼리 개선, 타임아웃 조정은 역할·세션 단위로 승인 후(롤백: 이전 값 기록)"
+  mid:
+  - "업무별 statement_timeout 기준과 애플리케이션 타임아웃 정렬"
+  long:
+  - "쿼리 SLO 와 57014 발생 건수 감시"
+  source: GPT 수집·벤더 문서 대조 완료(https://www.postgresql.org/docs/current/errcodes-appendix.html)
+  vendor_cause: 실행 중인 문장이 취소된 경우(query_canceled). statement_timeout 초과, 관리자의 pg_cancel_backend 호출, 클라이언트 취소 요청(드라이버 타임아웃·Ctrl+C)이 흔한 원인이며 서버 로그 문구로 구분된다.
+  vendor_action: ''
+  vendor_url: https://www.postgresql.org/docs/current/errcodes-appendix.html
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: SQLSTATE 5자리 코드 — 9.2 오류 코드 표에 전부 존재(부록 확인), 18 까지 동일
+- code: 57P04
+  severity: critical
+  category: internal
+  title: DB 삭제됨
+  immediate:
+  - "DB 존재 확인 `SELECT datname FROM pg_database;` 와 서버 로그의 DDL 기록 `grep -iE 'drop.database' <로그 파일> | tail -20` (log_statement=ddl 이상일 때, 읽기 전용)"
+  - "대기 서버(standby)에서 발생했으면 원본의 DB 제거가 복제로 반영된 것 — 원본 작업 이력과 대조"
+  short:
+  - "(2차·승인 후) 의도치 않은 제거면 최신 백업·PITR(WAL 보관 시)로 복원 — 롤백: 복원은 별도 경로·서버에 먼저 수행해 검증"
+  mid:
+  - "DB 제거 권한(소유자·superuser) 최소화"
+  long:
+  - "log_statement=ddl 로 DDL 감사와 변경 관리"
+  source: GPT 수집·벤더 문서 대조 완료(https://www.postgresql.org/docs/current/errcodes-appendix.html)
+  vendor_cause: 접속 또는 작업 대상 데이터베이스가 삭제됨
+  vendor_action: ''
+  vendor_url: https://www.postgresql.org/docs/current/errcodes-appendix.html
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: SQLSTATE 5자리 코드 — 9.2 오류 코드 표에 전부 존재(부록 확인), 18 까지 동일
+- code: '58030'
+  severity: critical
+  category: disk
+  title: I/O 오류
+  immediate:
+  - "서버 로그의 58030 원문(could not read/write … 파일 경로) 기록과 같은 시각 커널 오류: `dmesg -T | tail -50` · `journalctl -k --since '1 hour ago' | tail -50` (읽기 전용)"
+  - "대상 파일시스템 상태: `df -h <data_directory>` · `mount | grep <마운트지점>` — 읽기 전용(ro) 재마운트 여부"
+  short:
+  - "(2차·승인 후) 스토리지 담당과 디스크·경로 결함 조치, 손상 의심 시 백업·복제본 상태 확인 후 복구 계획 — 롤백: 조치 전 최신 백업 유효성 확인"
+  mid:
+  - "디스크·컨트롤러 결함 제거와 data_checksums 사용 검토"
+  long:
+  - "커널 I/O 오류 감시와 백업 검증"
+  source: GPT 수집·벤더 문서 대조 완료(https://www.postgresql.org/docs/current/errcodes-appendix.html)
+  vendor_cause: PostgreSQL 외부의 시스템에서 I/O 오류가 발생함
+  vendor_action: ''
+  vendor_url: https://www.postgresql.org/docs/current/errcodes-appendix.html
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: SQLSTATE 5자리 코드 — 9.2 오류 코드 표에 전부 존재(부록 확인), 18 까지 동일
+- code: 58P01
+  severity: critical
+  category: storage
+  title: 정의되지 않은 파일
+  immediate:
+  - "서버 로그의 could not open file … No such file or directory 줄의 경로 기록 — extension 라이브러리(.so)인지 데이터 파일인지 구분 (읽기 전용)"
+  - "extension 이면 `SELECT name, default_version, installed_version FROM pg_available_extensions WHERE installed_version IS NOT NULL;` 와 `ls -l $(pg_config --pkglibdir)`, 데이터 파일이면 `ls -l <경로>` — 파일이 없으면 누락 확정"
+  short:
+  - "(2차·승인 후) 누락 확장 패키지 재설치(서버 메이저 버전 일치) 또는 데이터 파일 누락이면 백업 복원 — 롤백: 패키지 변경 전 설치 목록 저장"
+  mid:
+  - "확장 패키지 버전 형상 관리와 OS 패치 시 확장 호환성 점검"
+  long:
+  - "데이터 디렉터리 파일 직접 조작 금지 정책과 무결성 점검"
+  source: GPT 수집·벤더 문서 대조 완료(https://www.postgresql.org/docs/current/errcodes-appendix.html)
+  vendor_cause: 요청된 파일이 정의되거나 존재하지 않음
+  vendor_action: ''
+  vendor_url: https://www.postgresql.org/docs/current/errcodes-appendix.html
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: SQLSTATE 5자리 코드 — 9.2 오류 코드 표에 전부 존재(부록 확인), 18 까지 동일
+- code: XX000
+  severity: critical
+  category: internal
+  title: 내부 오류
+  immediate:
+  - "서버 로그의 XX000 원문(예: cache lookup failed for …)과 STATEMENT·CONTEXT 기록, 로그 파일 사본 보존 (읽기 전용)"
+  - "버전 확인 `SELECT version();` — 같은 문구가 이후 마이너 버전 릴리스 노트에서 수정됐는지 대조, 코어 파일 생성 여부 확인"
+  short:
+  - "(2차) 재현 조건(SQL·데이터) 수집, 손상 의심 시 amcheck 확장(`bt_index_check`, 10+)으로 인덱스 검사 — 수정 작업은 승인 후"
+  mid:
+  - "최신 마이너 버전 업데이트(롤백: 업데이트 전 백업·이전 패키지 보관)"
+  long:
+  - "마이너 버전 정기 적용 정책"
+  source: GPT 수집·벤더 문서 대조 완료(https://www.postgresql.org/docs/current/errcodes-appendix.html)
+  vendor_cause: PostgreSQL 내부 오류가 발생함
+  vendor_action: ''
+  vendor_url: https://www.postgresql.org/docs/current/errcodes-appendix.html
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: SQLSTATE 5자리 코드 — 9.2 오류 코드 표에 전부 존재(부록 확인), 18 까지 동일
+- code: XX001
+  severity: critical
+  category: storage
+  title: 데이터 손상
+  immediate:
+  - "서버 로그의 invalid page in block N of relation <경로> 줄 기록 — 블록 번호·relation 경로 보존 (읽기 전용)"
+  - "체크섬 사용·실패 수: `SHOW data_checksums;` · `SELECT datname, checksum_failures FROM pg_stat_database;` (checksum_failures 12+)"
+  - "같은 시각 OS I/O 오류 `dmesg -T | tail -50` 와 최근 백업·복제본 상태 확인"
+  short:
+  - "(2차·승인 후) 손상 범위 확인(`pg_amcheck` 14+ / amcheck 확장 10+) 후 백업·복제본에서 복구, 쓰기 차단 여부는 업무 담당과 결정 — zero_damaged_pages 는 데이터 손실 감수 승인 시에만, 롤백: 작업 전 데이터 디렉터리 백업"
+  mid:
+  - "백업 복구 후 디스크·컨트롤러·메모리 진단"
+  long:
+  - "data_checksums 활성화 검토와 정기 무결성 검사"
+  source: GPT 수집·벤더 문서 대조 완료(https://www.postgresql.org/docs/current/errcodes-appendix.html)
+  vendor_cause: 테이블 페이지 등 데이터 파일 내용이 손상되어 읽을 수 없는 경우(data_corrupted). invalid page in block·체크섬 불일치가 대표 문구이며 디스크·컨트롤러·메모리 결함이나 비정상 종료가 흔한 원인이다.
+  vendor_action: 손상 페이지 복구를 포기한 경우에만 zero_damaged_pages를 사용해 정상 페이지를 회수하고 이후 테이블·인덱스를 재생성
+  vendor_url: https://www.postgresql.org/docs/current/runtime-config-developer.html
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: SQLSTATE 5자리 코드 — 9.2 오류 코드 표에 전부 존재(부록 확인), 18 까지 동일
+- code: XX002
+  severity: critical
+  category: storage
+  title: 인덱스 손상
+  immediate:
+  - "서버 로그의 index … contains unexpected zero page·corrupted 줄에서 인덱스 이름 기록 (읽기 전용)"
+  - "인덱스·테이블 확인: `SELECT indexrelid::regclass, indrelid::regclass, indisvalid FROM pg_index WHERE indexrelid='<schema>.<index>'::regclass;` 와 같은 시각 OS I/O 오류(`dmesg -T | tail -50`)"
+  short:
+  - "(2차·승인 후) `bt_index_check`(amcheck)로 범위 확인 후 `REINDEX INDEX CONCURRENTLY <index>;` (12+, 이전 버전 REINDEX INDEX 는 쓰기 잠금) 로 재구축 — 롤백: 실패 시 남은 invalid 인덱스 정리, 성공: 오류 재발 없음"
+  mid:
+  - "하드웨어·버그 원인 분석(릴리스 노트의 인덱스 손상 수정 확인)"
+  long:
+  - "정기 amcheck 인덱스 검사 운영"
+  source: GPT 수집·벤더 문서 대조 완료(https://www.postgresql.org/docs/current/errcodes-appendix.html)
+  vendor_cause: 인덱스가 손상되어 유효한 데이터를 포함하지 않음
+  vendor_action: 사용자 인덱스는 REINDEX INDEX 또는 REINDEX TABLE로 재구축
+  vendor_url: https://www.postgresql.org/docs/current/sql-reindex.html
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: SQLSTATE 5자리 코드 — 9.2 오류 코드 표에 전부 존재(부록 확인), 18 까지 동일
+- code: PG-WAL-FULL
+  severity: critical
+  category: disk
+  title: WAL 디렉터리 가득참
+  immediate:
+  - "pg_wal 크기와 디스크: `du -sh <data_directory>/pg_wal` · `df -h <data_directory>` (10+, 9.x 는 pg_xlog) — pg_wal 파일은 절대 직접 지우지 않음 (읽기 전용)"
+  - "보관 실패·슬롯 지연: `SELECT failed_count, last_failed_wal FROM pg_stat_archiver;` (9.4+) · `SELECT slot_name, active, restart_lsn FROM pg_replication_slots;`"
+  short:
+  - "(2차·승인 후) archive_command 실패 원인 해소, 쓰이지 않는 복제 슬롯은 소유 확인 후 `SELECT pg_drop_replication_slot('<slot>');` — 영향: 해당 standby 재구축 필요, 롤백 불가이므로 승인 필수"
+  mid:
+  - "max_slot_wal_keep_size(13+)로 슬롯이 붙잡는 WAL 상한 설정과 pg_wal 별도 볼륨 분리"
+  long:
+  - "pg_wal 사용률·pg_stat_archiver failed_count 감시"
+  source: GPT 수집·벤더 문서 대조 완료(https://www.postgresql.org/docs/current/diskusage.html)
+  note: 의사코드
+  vendor_cause: WAL 파일이 있는 디스크가 가득 차면 서버 PANIC과 종료가 발생할 수 있음
+  vendor_action: 불필요한 파일을 삭제해 공간을 확보하고, 필요하면 일부 데이터베이스 파일을 다른 파일시스템의 tablespace로 이동
+  vendor_url: https://www.postgresql.org/docs/current/diskusage.html
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: 디렉터리 이름이 10 부터 pg_wal(9.x 는 pg_xlog) — 별칭에 두 이름 모두 포함
+- code: PG-REPLICATION-LAG
+  severity: error
+  category: upstream
+  title: 복제 지연
+  immediate:
+  - "원본에서 지연 측정: `SELECT application_name, state, write_lag, flush_lag, replay_lag, pg_wal_lsn_diff(pg_current_wal_lsn(), replay_lsn) AS lag_bytes FROM pg_stat_replication;` (10+, 읽기 전용)"
+  - "대기 서버에서 `SELECT pg_is_in_recovery(), now() - pg_last_xact_replay_timestamp() AS replay_delay;` 와 같은 시각 디스크 I/O(`iostat -x 5 3`)·네트워크 확인"
+  short:
+  - "(2차·승인 후) 원인별 조치 — 대기 서버 장기 쿼리(복제 충돌) 정리, 네트워크 대역 확보, wal_compression 검토, 설정 변경 시 이전 값 기록(롤백)"
+  mid:
+  - "동기/비동기 복제 구성과 대기 서버 하드웨어 사양 재검토"
+  long:
+  - "replay_lag 임계(예: 60초) 감시 알림"
+  source: GPT 수집·벤더 문서 대조 완료(https://www.postgresql.org/docs/current/monitoring-stats.html)
+  note: 의사코드
+  vendor_cause: standby가 최근 WAL을 write·flush·replay하고 sender에 알릴 때까지 지연이 발생함
+  vendor_action: pg_stat_replication의 write_lag·flush_lag·replay_lag로 지연을 측정
+  vendor_url: https://www.postgresql.org/docs/current/monitoring-stats.html
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: 스트리밍 복제 9.0 이후
+- code: PG-TXID-WRAPAROUND
+  severity: critical
+  category: capacity
+  title: 트랜잭션 ID 소진 임박
+  immediate:
+  - "DB별 나이: `SELECT datname, age(datfrozenxid) AS xid_age, mxid_age(datminmxid) AS mxid_age FROM pg_database ORDER BY 2 DESC;` — `SHOW autovacuum_freeze_max_age;`(기본 2억) 를 넘으면 강제 autovacuum 대상, 로그에 'must be vacuumed within' 경고가 있으면 긴급 (10~16, 읽기 전용)"
+  - "freeze 를 막는 원인: `SELECT pid, datname, state, age(backend_xmin) AS xmin_age, xact_start FROM pg_stat_activity WHERE backend_xmin IS NOT NULL ORDER BY 3 DESC LIMIT 10;` · `SELECT slot_name, active, xmin, catalog_xmin FROM pg_replication_slots;` · `SELECT gid, prepared FROM pg_prepared_xacts;` — 오래된 xmin·비활성 슬롯·준비 트랜잭션이 있으면 그것이 원인"
+  - "테이블별 나이와 진행 중 vacuum: `SELECT c.oid::regclass, age(c.relfrozenxid) FROM pg_class c WHERE c.relkind IN ('r','m','t') ORDER BY 2 DESC LIMIT 10;` 와 `SELECT * FROM pg_stat_progress_vacuum;`"
+  short:
+  - "(2차·승인 후, 롤백: 논리 데이터 변경 없음 — 중단 시 다시 실행, I/O 부하로 업무 외 시간 권장) 나이가 가장 큰 테이블부터 `VACUUM (FREEZE, VERBOSE) <table>;` — VACUUM FULL 은 쓰지 않는다"
+  - "(2차·승인 후, 롤백: 종료 세션의 트랜잭션은 되돌릴 수 없음 — pid·SQL 기록 선행) freeze 를 막는 장기 세션 `SELECT pg_terminate_backend(<pid>);`, 미사용 복제 슬롯 `SELECT pg_drop_replication_slot('<slot>');`(대기 서버 재구성 필요), 준비 트랜잭션은 `COMMIT PREPARED`/`ROLLBACK PREPARED '<gid>'` 를 업무 담당 결정에 따라"
+  mid:
+  - autovacuum 튜닝
+  long:
+  - wraparound 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://www.postgresql.org/docs/current/routine-vacuuming.html)
+  note: 의사코드
+  vendor_cause: 32비트 XID가 순환하면 과거 행이 미래로 보일 수 있어 데이터 접근 불능 위험이 생김
+  vendor_action: 모든 DB의 테이블을 주기적으로 VACUUM하고, 임박 시 오래된 트랜잭션·prepared transaction·slot을 정리한 뒤 DB 전체 VACUUM
+  vendor_url: https://www.postgresql.org/docs/current/routine-vacuuming.html
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: wraparound 보호 문구 — 8.x 이후 동일
+- code: PG-CHECKPOINT-FREQ
+  severity: warn
+  category: performance
+  title: 체크포인트 과다 발생
+  immediate:
+  - "서버 로그의 checkpoints are occurring too frequently (N seconds apart) 빈도 기록 (읽기 전용)"
+  - "요청형 체크포인트 비율: `SELECT checkpoints_timed, checkpoints_req FROM pg_stat_bgwriter;` (16 이하) / `SELECT num_timed, num_requested FROM pg_stat_checkpointer;` (17+) 와 `SHOW max_wal_size;` (9.5+)"
+  short:
+  - "(2차·승인 후) max_wal_size 상향(`ALTER SYSTEM SET max_wal_size = '<값>'; SELECT pg_reload_conf();`, 재기동 불필요) — 영향: 복구 시간·pg_wal 사용량 증가, 롤백: 이전 값으로 ALTER SYSTEM"
+  mid:
+  - "checkpoint_timeout·checkpoint_completion_target 과 대량 적재 시간대 조정"
+  long:
+  - "checkpoints_req 비율·체크포인트 소요 시간 감시"
+  source: GPT 수집·벤더 문서 대조 완료(https://www.postgresql.org/docs/current/runtime-config-wal.html)
+  note: 의사코드 의미는 맞으나 빈번한 체크포인트의 직접 영향은 성능 저하이므로 유형을 performance로 수정
+  vendor_cause: WAL 세그먼트가 빨리 차서 checkpoint_warning보다 짧은 간격으로 체크포인트가 발생함
+  vendor_action: max_wal_size를 늘리는 것을 고려
+  vendor_url: https://www.postgresql.org/docs/current/runtime-config-wal.html
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: checkpoint_warning 문구 — 8.x 이후 동일
+- code: PG-IDLE-IN-TXN
+  severity: warn
+  category: lock
+  title: 유휴 트랜잭션 장기 점유
+  immediate:
+  - "`SELECT pid, usename, application_name, client_addr, now()-xact_start AS xact_age, now()-state_change AS idle_age, LEFT(query,80) AS last_query FROM pg_stat_activity WHERE state = 'idle in transaction' ORDER BY xact_start;` — idle_age 가 수 분 이상이면 장기 점유 확정 (10~16, 읽기 전용)"
+  - "다른 세션을 막는지: `SELECT pid, pg_blocking_pids(pid) AS blocked_by, wait_event_type, LEFT(query,60) FROM pg_stat_activity WHERE cardinality(pg_blocking_pids(pid)) > 0;` — blocked_by 에 위 pid 가 있으면 업무 영향 확정"
+  - "현재 시간 제한: `SHOW idle_in_transaction_session_timeout;` — 0 이면 미설정"
+  short:
+  - "(2차·승인 후, 롤백: 종료한 세션의 트랜잭션은 롤백되어 되돌릴 수 없음 — pid·사용자·마지막 SQL 기록 선행) 애플리케이션 담당 확인 후 `SELECT pg_terminate_backend(<pid>);`"
+  - "(2차) 해당 application_name 의 코드에서 트랜잭션 시작 후 커밋·롤백 누락 경로(예외 처리, autocommit=false 후 조회만 하고 방치) 확인 요청"
+  mid:
+  - idle_in_transaction_session_timeout 설정
+  long:
+  - 세션 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://www.postgresql.org/docs/current/runtime-config-client.html)
+  note: 의사코드
+  vendor_cause: 열린 트랜잭션에서 세션이 오래 idle이면 잠금을 오래 보유하고 VACUUM의 dead tuple 제거를 막을 수 있음
+  vendor_action: idle_in_transaction_session_timeout을 설정해 지정 시간 이상 idle인 열린 트랜잭션 세션을 종료
+  vendor_url: https://www.postgresql.org/docs/current/runtime-config-client.html
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: idle_in_transaction_session_timeout 은 9.6 도입(9.5 이하 없음)

@@ -1,0 +1,12 @@
+# 2026-10-16 GPT 56차 제품 대조 — ID 가 같아도 제품이 다르면 전용 연결이 아니게 바꾼 뒤(procedures._product_ok),
+# 다른 제품 절차에 붙어 있던 판정을 같은 제품의 맞는 절차에 다시 잇는다.
+links:
+- procedure: GD-PROC-R5-MEMORY
+  match: [ERR-11030]
+  reviewed: "GOLDILOCKS ERR-11030 공유메모리 할당 실패 — 공유메모리·시스템 메모리 절차가 맞음(전에는 같은 ERR 번호의 Altibase 데이터파일 절차가 붙었음)"
+- procedure: GD-PROC-R5-CAPACITY
+  match: [ERR-11035]
+  reviewed: "GOLDILOCKS ERR-11035 세마포어 획득 실패 — 세마포어·시스템 자원 절차(ipcs·커널 한도)가 맞음(전에는 Altibase 테이블스페이스 절차)"
+- procedure: JAVA-PROC-MEMORY
+  match: [WAS-JVM-001]
+  reviewed: "WAS-JVM-001 java.lang.OutOfMemoryError(여러 WAS 공통 룰) — 제품 전용 메모리 절차가 없는 WebLogic·JBoss 는 자바 힙 OOM 절차, JEUS·Tomcat 은 제품 절차가 먼저(같은 제품 우선)"

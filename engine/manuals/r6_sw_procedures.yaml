@@ -1,0 +1,885 @@
+# 근거 매뉴얼·작성 기준 — 아이디어 3(2026-10-16) SW 묶음(Java · MESIM · BizMaster · Indigo ESB) '유형만으로 붙던' 판정의 전용 절차
+#  - 기존 절차(sw_procedures.yaml·r5_db_c_sw_procedures.yaml)가 판정에 맞지 않는 것만 새로 만든다. 맞는 것은 r6_sw_proclinks.yaml 로 잇는다.
+#  - Java: Oracle Java SE 17 API Specification(각 예외 클래스 설명)·JDK 17 Troubleshooting Guide(jcmd·jstat, hs_err)·Java Networking Properties(networkaddress.cache.ttl)
+#    · Apache Tomcat 9 API(ClientAbortException)·Access Log Valve · Netty 4.1 API(ChannelOption.CONNECT_TIMEOUT_MILLIS) · HikariCP Configuration · Redis 문서(INFO·maxclients·timeout)·Apache Commons Pool2(GenericObjectPoolConfig)
+#    · Spring Security Reference(Authentication 예외) · Microsoft Active Directory LDAP 오류 49 하위코드(data 52e·775·532…)
+#  - MESIM(메타빌드)·BizMaster(Tmax)·Indigo ESB 는 공개 매뉴얼이 없다 — 관리 콘솔 메뉴 이름·조작 명령은 납품본 확인 전까지 verify_note 로 미검증 표시.
+#  - 1차 = 읽기 전용(재기동·kill·삭제·설정 변경·바인드 시도 없음) · 2차 = 사전조건·영향·승인·백업/롤백 + 성공/실패 판단 · 3차 = 민감정보 마스킹·전달 승인
+#  - JDK 버전 표기: GC.heap_info 는 JDK 9+(JDK 8 은 jstat -gcutil), GC.class_histogram 은 Full GC 를 일으키므로 1차 금지, 스레드 덤프는 jcmd <PID> Thread.print(프로세스 유지)
+#  - 비밀번호는 명령줄에 쓰지 않는다(프롬프트 입력·비밀 저장소). nc 는 `nc -zvw3 <host> <port>` 형식만.
+procedures:
+# ── Java / JVM ──
+- id: JAVA-PROC-R6-NETPATH
+  scope: id
+  products: [java]
+  category: connection
+  match: [JAVA.NET.UNKNOWNHOSTEXCEPTION, JAVA.NET.NOROUTETOHOSTEXCEPTION, IO.NETTY.CHANNEL.CONNECTTIMEOUTEXCEPTION]
+  title: 대상 도달 불가 — 이름 해석 실패·경로 없음·연결 시간 초과(네트워크 경로)
+  source: "Oracle Java SE 17 API(java.net.UnknownHostException·NoRouteToHostException)·'Networking Properties'(networkaddress.cache.ttl·networkaddress.cache.negative.ttl) — docs.oracle.com/en/java/javase/17 · Netty 4.1 API 'ChannelOption.CONNECT_TIMEOUT_MILLIS'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 실패한 대상 이름·주소·포트와 예외 종류 확인 (읽기 전용)
+      cmd: |
+        grep -n -E "UnknownHostException|NoRouteToHostException|ConnectTimeoutException" <app_log> | tail -30
+        grep -c -E "UnknownHostException|NoRouteToHostException|ConnectTimeoutException" <app_log>
+      check: "UnknownHost=이름 해석 실패(DNS·/etc/hosts), NoRouteToHost=경로 없음 또는 대상 방화벽 REJECT(icmp-host-prohibited), ConnectTimeout=SYN 응답 없음(대상 다운·방화벽 DROP·연결 시간 초과값 과소) — 한 대상에 몰리면 대상·구간 문제"
+      note: "적용: JDK 8/11/17/21 · Netty 4.x · 권한: 애플리케이션 로그 읽기"
+    - do: 이 서버에서 이름 해석·경로·포트 도달 직접 확인 (읽기 전용)
+      cmd: |
+        getent hosts <host> ; nslookup <host>
+        grep -E "^hosts:" /etc/nsswitch.conf ; cat /etc/resolv.conf
+        ip route get <host_ip> ; ping -c 3 <host_ip>
+        nc -zvw3 <host> <port>
+      check: "getent·nslookup 둘 다 실패=DNS 미등록/DNS 서버 장애, nslookup 만 성공=nsswitch 순서·/etc/hosts 문제 · ip route get 이 실패하거나 엉뚱한 게이트웨이면 라우팅, ping 성공·nc 실패면 포트 차단(방화벽)·대상 미기동 · 모두 성공이면 JVM DNS 캐시(이전 실패 결과)·간헐 장애로 발생 시각만 기록"
+      note: "적용: Linux(getent·iproute2·nc) · 접속 시도만 함(데이터 변경 없음) · ping 은 ICMP 차단 환경에서 실패할 수 있어 nc 결과를 우선 · 권한: 일반 사용자"
+    - do: JVM 의 DNS 캐시 설정 확인 (읽기 전용)
+      cmd: |
+        jcmd <PID> VM.system_properties | grep -E "networkaddress|sun.net.inetaddr"
+        grep -E "^networkaddress.cache" $JAVA_HOME/conf/security/java.security
+      check: "networkaddress.cache.ttl 이 -1(영구 캐시)이면 DNS 변경이 재기동 전까지 반영되지 않음 · negative.ttl(기본 10초) 동안은 실패 결과가 재사용됨"
+      note: "적용: java.security 경로 JDK 9+ $JAVA_HOME/conf/security, JDK 8 $JAVA_HOME/jre/lib/security · 보안 관리자 사용 시 기본 TTL 이 영구 캐시 · 권한: JVM 실행 계정"
+  - stage: 2
+    steps:
+    - do: 이름 해석 등록·정정 (DNS 레코드 요청 또는 /etc/hosts)
+      config:
+        file: /etc/hosts (DNS 등록 전 임시) 또는 DNS 서버 레코드(네트워크 담당)
+        snippet: |
+          <host_ip>   <host_fqdn>   <host_short>
+      cmd: |
+        cp -p /etc/hosts /etc/hosts.bak.$(date +%Y%m%d) ; vi /etc/hosts
+        getent hosts <host>
+      check: "성공: getent 가 올바른 주소를 돌려주고 같은 기능 재실행 시 UnknownHostException 미발생(JVM 캐시가 영구면 재기동 후) · 실패: 계속 실패면 nsswitch.conf 의 hosts 순서·resolv.conf search 접미사 재확인, 다른 서비스 해석이 깨지면 백업 hosts 원복"
+      note: "사전조건: 대상 주소를 대상 시스템 담당에게 확인(추측 주소 금지), DNS 정식 등록 일정 확보 · 영향: /etc/hosts 는 이 서버의 모든 프로세스에 적용, DNS 변경과 어긋나면 이후 주소 변경을 놓침 · 승인: 시스템 담당·네트워크 담당 · 백업/롤백: hosts.bak 사본 보관, 이상 시 복원 · 적용: Linux/UNIX(Windows 는 C:\\Windows\\System32\\drivers\\etc\\hosts)"
+    - do: 경로·방화벽 정책 요청 및 연결 시간 초과값 조정
+      config:
+        file: 애플리케이션 설정(Netty 클라이언트 Bootstrap 옵션 또는 해당 라이브러리 connect-timeout 항목)
+        snippet: |
+          # Netty: bootstrap.option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 5000)  (기본 30000ms)
+          # 경로 없음·DROP 은 값 조정으로 해결되지 않음 — 네트워크 담당에 출발지 <src_ip> → 목적지 <host_ip>:<port> 허용 요청
+      cmd: |
+        nc -zvw3 <host> <port>
+      check: "성공: 방화벽·라우팅 반영 후 nc 성공, ConnectTimeout·NoRouteToHost 미발생 · 실패: 정책 반영 후에도 실패면 대상 서버 방화벽(firewalld/iptables REJECT)·대상 미기동을 대상 담당에 확인, timeout 값 변경 후 스레드 대기가 늘면 원래 값으로 원복"
+      note: "사전조건: 1차 결과(ip route get·nc)로 구간을 특정, 대상 담당과 포트·주소 확인 · 영향: 방화벽 변경은 보안 정책 변경, timeout 상향은 장애 시 스레드 점유 시간 증가 · 승인: 네트워크 담당·보안 담당·애플리케이션 담당 · 백업/롤백: 변경 전 설정값 기록·설정 파일 사본 보관, 이상 시 원복 후 재배포 · 적용: Netty 4.x, 다른 클라이언트(Lettuce·WebClient)는 해당 라이브러리 항목명 사용"
+  - stage: 3
+    steps:
+    - do: 네트워크·대상 담당 전달 자료
+      cmd: |
+        grep -n -E "UnknownHostException|NoRouteToHostException|ConnectTimeoutException" <app_log> > netpath_$(date +%Y%m%d).txt
+        ip route > route.txt ; cat /etc/resolv.conf > resolv.txt
+      check: "실패 시각·대상 이름/주소·포트·라우팅 표·resolv.conf·nc 결과"
+      note: "민감정보 마스킹: 내부 호스트명·IP 대역·사용자 계정·요청 URL 의 쿼리 값을 가림 · 전달 승인: 보안 담당 승인 후 네트워크 담당·외부 유지보수사 전달"
+
+- id: JAVA-PROC-R6-CONNRESET
+  scope: id
+  products: [java]
+  category: connection
+  match: [JAVA.NET.SOCKETEXCEPTION, ORG.APACHE.CATALINA.CONNECTOR.CLIENTABORTEXCEPTION]
+  title: 맺어진 연결이 끊김 — Connection reset·Broken pipe·클라이언트 중단(ClientAbort)
+  source: "Oracle Java SE 17 API(java.net.SocketException)·Apache Tomcat 9 API(org.apache.catalina.connector.ClientAbortException)·Tomcat 9 'Access Log Valve(%D 처리시간)'·nginx 'ngx_http_proxy_module(proxy_read_timeout)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 끊긴 방향·상대·문구 확인 (읽기 전용)
+      cmd: |
+        grep -n -E "SocketException: (Connection reset|Broken pipe|Socket closed)|ClientAbortException" <app_log> | tail -30
+        grep -n -B2 -A12 -E "SocketException|ClientAbortException" <app_log> | grep -E "at .*(Socket|jdbc|http|Response)" | head -20
+      check: "ClientAbortException·Response 쓰기 중 Broken pipe = 요청한 쪽(브라우저·프록시)이 먼저 닫음 · 외부 호출·JDBC 프레임에서 Connection reset = 상대 서버·중간 방화벽이 RST · 산발이면 사용자 이탈, 특정 API·시각에 몰리면 처리 지연이나 유휴 세션 정리"
+      note: "적용: JDK 8~21 · Tomcat 8.5/9/10(내장 포함) · 권한: 로그 읽기"
+    - do: 처리시간·유휴 시간과 앞단 timeout 비교, 소켓 재전송 확인 (읽기 전용)
+      cmd: |
+        grep "<요청 URI>" <path>/localhost_access_log.*.txt | tail -20
+        ss -tni dst <상대 IP> | head -40
+        sysctl net.ipv4.tcp_keepalive_time
+      check: "액세스 로그 처리시간이 앞단 프록시 timeout(예: nginx proxy_read_timeout 기본 60초) 이상이면 프록시가 먼저 닫은 것 · retrans 가 계속 늘면 구간 네트워크 문제 · 연결 유휴 시간이 방화벽 세션 timeout 보다 길면 유휴 끊김"
+      note: "적용: 처리시간 칸은 AccessLogValve pattern 에 %D(ms) 또는 %T 가 있을 때만 · Linux iproute2 · 권한: 로그 읽기·일반 사용자"
+  - stage: 2
+    steps:
+    - do: timeout 정렬(앞단 ≥ 뒷단 처리시간)·유휴 연결 정리 주기 조정
+      config:
+        file: 앞단 프록시 설정(nginx proxy_read_timeout · Apache ProxyTimeout) / 애플리케이션 HTTP·JDBC 클라이언트 설정
+        snippet: |
+          # 앞단: proxy_read_timeout 은 업무 최대 처리시간보다 길게(장시간 API 는 비동기 전환 검토)
+          # 뒷단 연결 풀: 유휴 연결을 방화벽 세션 timeout 보다 먼저 정리
+          #   HikariCP max-lifetime / idle-timeout < 방화벽 유휴 timeout
+          #   Apache HttpClient 4.4+: HttpClientBuilder.evictIdleConnections(<초>, TimeUnit.SECONDS)
+      cmd: |
+        cp -p <설정파일> <설정파일>.bak.$(date +%Y%m%d)
+        <배포 스크립트> <설정 반영본>
+      check: "성공: 같은 API 의 ClientAbort·Connection reset 건수 감소, 액세스 로그 처리시간이 앞단 timeout 미만 · 실패: 처리시간 자체가 길면 timeout 조정이 아니라 지연 원인(SQL·외부 연계) 분석으로 이관, 다른 연계 오류가 생기면 백업 설정 원복"
+      note: "사전조건: 1차에서 끊는 쪽(앞단·상대·방화벽)을 특정, 방화벽 세션 timeout 값을 네트워크 담당에게 확인 · 영향: 앞단 timeout 상향은 장애 시 연결 점유 증가, 설정 반영 시 재기동·재적재 필요 · 승인: 애플리케이션 담당·웹 담당·변경 관리 · 백업/롤백: 설정 파일 .bak 사본, 이상 시 복원 후 재배포 · 적용: nginx 1.x·Apache 2.4·HikariCP·HttpClient 4.4+"
+  - stage: 3
+    steps:
+    - do: 웹·네트워크 담당 전달 자료
+      cmd: |
+        grep -n -E "SocketException|ClientAbortException" <app_log> > reset_$(date +%Y%m%d).txt
+        ss -tni dst <상대 IP> > ss_retrans.txt
+      check: "끊긴 시각·상대 주소·API·처리시간·재전송 수치·앞단 timeout 값"
+      note: "민감정보 마스킹: 클라이언트 IP·세션 ID·쿠키·요청 쿼리 값·내부 호스트명을 가림 · 전달 승인: 보안 담당 승인 후 반출"
+
+- id: JAVA-PROC-R6-BIND
+  scope: id
+  products: [java]
+  category: connection
+  match: [JAVA.NET.BINDEXCEPTION]
+  title: 로컬 주소·포트 바인드 실패 — Address already in use·Cannot assign requested address
+  source: "Oracle Java SE 17 API(java.net.BindException)·Linux ss(8)·ip(8)·proc(5) net.ipv4.ip_local_port_range — man7.org"
+  stages:
+  - stage: 1
+    steps:
+    - do: 실패 사유·포트 확인 (읽기 전용)
+      cmd: |
+        grep -n -A3 "BindException" <app_log> | tail -20
+      check: "'Address already in use'=포트 점유(중복 기동·이전 프로세스 잔존·다른 제품) · 'Cannot assign requested address'=바인드 주소가 이 서버에 없음 또는 임시 포트 고갈"
+      note: "적용: JDK 8~21 · 권한: 로그 읽기"
+    - do: 점유 프로세스·주소·임시 포트 상태 확인 (읽기 전용)
+      cmd: |
+        ss -ltnp "sport = :<port>"
+        ps -ef | grep "[j]ava" | awk '{print $2, $5, $8}'
+        ip -br addr
+        cat /proc/sys/net/ipv4/ip_local_port_range ; ss -tan state time-wait | wc -l
+      check: "점유 PID 가 같은 애플리케이션의 이전 프로세스면 중복 기동, 다른 제품이면 포트 충돌 · 바인드 주소가 ip -br addr 에 없으면 VIP 미부착·설정 오류 · TIME-WAIT 가 임시 포트 범위 개수에 근접하면 임시 포트 고갈"
+      note: "적용: Linux iproute2 · ss -p 의 다른 사용자 PID 는 root 에서만 보임 · ps 출력은 PID·시작 시각·명령만(JVM 인자의 비밀번호 노출 방지) · 권한: 일반 사용자(전체 PID 확인은 root)"
+  - stage: 2
+    steps:
+    - do: 잔존·중복 프로세스 정리 또는 포트·바인드 주소 정정
+      cmd: |
+        jcmd <PID> Thread.print > /var/tmp/td_before_stop_$(date +%H%M%S).txt
+        kill <잔존 PID>      # 정상 종료(SIGTERM) 후 30초 대기, 남으면 담당 재확인
+        ss -ltnp "sport = :<port>"
+      check: "성공: 포트가 비고 애플리케이션 재기동 후 BindException 미발생 · 실패: 종료 후에도 다른 제품이 같은 포트를 쓰면 포트 설정 변경으로, 정리한 프로세스가 실제 서비스 중이었다면 즉시 재기동"
+      note: "사전조건: 종료 대상 PID 가 서비스 중이 아닌 잔존·중복 프로세스인지 담당과 확인(L4 상태·요청 처리 여부) · 영향: 잘못된 PID 종료 시 서비스 중단 · 승인: 애플리케이션 담당·시스템 담당 · 백업/롤백: 종료 전 스레드 덤프·ps 결과 보관, 잘못 종료했으면 기동 스크립트로 즉시 재기동 · 적용: Linux/UNIX(Windows 는 netstat -ano·작업 관리자)"
+    - do: 임시 포트 고갈 시 범위 조정 (Cannot assign requested address)
+      cmd: |
+        sysctl net.ipv4.ip_local_port_range > /var/tmp/sysctl_portrange.bak
+        sysctl -w net.ipv4.ip_local_port_range="<시작> <끝>"
+      check: "성공: TIME-WAIT 수가 범위보다 충분히 적고 예외 미발생 · 실패: 범위를 넓혀도 고갈되면 연결 재사용(풀·keep-alive) 미적용 — 애플리케이션 수정으로 이관하고 값 원복"
+      note: "사전조건: 새 범위가 다른 서비스 리슨 포트와 겹치지 않는지 확인 · 영향: 서버 전체 출발 포트 범위 변경 · 승인: 시스템 담당·변경 관리 · 백업/롤백: 이전 값 파일 보관, sysctl -w 로 이전 값 복원(영구 반영은 /etc/sysctl.d/ 에 별도 승인) · 적용: Linux"
+  - stage: 3
+    steps:
+    - do: 전달 자료
+      cmd: |
+        grep -n -A3 "BindException" <app_log> > bind_$(date +%Y%m%d).txt ; ss -ltn > listen.txt
+      check: "예외 시각·포트·점유 프로세스 정보·리슨 목록"
+      note: "민감정보 마스킹: 프로세스 명령줄의 계정·비밀번호 인자, 내부 IP 를 가림 · 전달 승인: 보안 담당 승인 후 반출"
+
+- id: JAVA-PROC-R6-DBCONN
+  scope: id
+  products: [java]
+  category: connection
+  match: ["COM.ZAXXER.HIKARI.POOL.HIKARIPOOL$POOLINITIALIZATIONEXCEPTION", JAVA.SQL.SQLNONTRANSIENTCONNECTIONEXCEPTION]
+  title: DB 연결 수립 실패 — 풀 초기화 실패·비일시적 연결 오류(계정·URL·DB 연결 한도)
+  source: "HikariCP 'Configuration (initializationFailTimeout, jdbcUrl)'·Oracle Java SE 17 API(java.sql.SQLNonTransientConnectionException, SQLState 08)·Oracle Database Error Messages(ORA-01017·ORA-28000·ORA-12514·ORA-12519)·MySQL Reference Manual(max_connections, Error 1040)·PostgreSQL 문서(max_connections)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 최하위 원인 문구 확인 (읽기 전용)
+      cmd: |
+        grep -n -A20 -E "PoolInitializationException|SQLNonTransientConnectionException" <app_log> | grep -E "Caused by|SQLState|ORA-|Access denied|Too many connections|too many clients|password authentication" | head -20
+      check: "계정(ORA-01017·ORA-28000 잠김·Access denied·password authentication failed) / 접속 대상(ORA-12514 서비스명·ORA-12505 SID·Unknown database) / DB 한도(ORA-12519·ORA-00018·Too many connections·too many clients) 중 무엇인지 확정"
+      note: "적용: HikariCP 2.x~5.x · JDK 8~21 · 권한: 로그 읽기 — 로그·설정에 나온 비밀번호 값은 옮겨 적지 않음"
+    - do: DB 도달과 DB 측 계정·연결 수 조회 의뢰 (읽기 전용)
+      cmd: |
+        nc -zvw3 <db_host> <db_port>
+        # DBA 조회(읽기): Oracle  SELECT username, account_status, expiry_date FROM dba_users WHERE username = '<USER>';
+        # MySQL  SHOW VARIABLES LIKE 'max_connections'; SHOW GLOBAL STATUS LIKE 'Threads_connected';
+        # PostgreSQL  SHOW max_connections; SELECT count(*) FROM pg_stat_activity;
+      check: "nc 실패=DB 미기동·방화벽 · account_status 가 LOCKED·EXPIRED 면 계정 · 연결 수가 한도에 근접하면 DB 한도(다른 애플리케이션 풀 합계 확인)"
+      note: "적용: Oracle 11g~19c·MySQL 5.7/8.0·PostgreSQL 10+ · 접속 시도·조회만(계정 잠금 해제·한도 변경 없음) — 틀린 비밀번호로 반복 접속 시험 금지(계정 잠김 유발) · 권한: 일반 사용자(nc)·DBA(조회)"
+  - stage: 2
+    steps:
+    - do: 계정·URL 정정 또는 DB 연결 한도 조정
+      config:
+        file: application.yml / datasource 설정(비밀번호는 비밀 저장소·암호화 속성)
+        snippet: |
+          spring.datasource.url=jdbc:oracle:thin:@//<db_host>:<db_port>/<service_name>
+          spring.datasource.username=<user>
+          # 비밀번호: 평문 대신 비밀 저장소·환경 변수 참조(값을 명령줄·이력에 남기지 않음)
+          spring.datasource.hikari.initialization-fail-timeout=1      # 기본 1ms — 기동 시 DB 실패를 즉시 드러냄
+      cmd: |
+        cp -p <설정파일> <설정파일>.bak.$(date +%Y%m%d)
+        systemctl restart <app>
+      check: "성공: 기동 로그에 'HikariPool-1 - Start completed', 예외 미발생 · 실패: 같은 ORA/SQLState 반복이면 DBA 와 계정·서비스명 재확인 후 백업 설정 원복, Too many connections 지속이면 다른 애플리케이션 풀 합계 조정으로"
+      note: "사전조건: DBA 가 계정 상태·서비스명·한도를 확인, 변경할 비밀번호를 비밀 저장소에 등록 · 영향: 재기동 동안 서비스 중단, DB 한도 상향(processes·max_connections)은 DB 메모리 증가·DB 재기동이 필요할 수 있음 · 승인: 애플리케이션 담당·DBA·변경 관리 · 백업/롤백: 설정 파일 .bak 사본, 이상 시 복원 후 재기동(DB 파라미터는 DBA 절차로 원복) · 적용: Spring Boot 2.x/3.x + HikariCP(다른 풀은 해당 항목명)"
+  - stage: 3
+    steps:
+    - do: DBA·개발팀 전달 자료
+      cmd: |
+        grep -n -A20 -E "PoolInitializationException|SQLNonTransientConnectionException" <app_log> > dbconn_$(date +%Y%m%d).txt
+      check: "예외 원문(Caused by·SQLState)·발생 시각·JDBC 드라이버 버전·DB 측 조회 결과"
+      note: "민감정보 마스킹: JDBC URL 의 호스트명·IP, DB 계정명·비밀번호·설정 파일의 암호화 키를 가림 · 전달 승인: 보안 담당·DBA 승인 후 반출"
+
+- id: JAVA-PROC-R6-REDIS
+  scope: id
+  products: [java]
+  category: connection
+  match: [REDIS.CLIENTS.JEDIS.EXCEPTIONS.JEDISCONNECTIONEXCEPTION]
+  title: Jedis Redis 연결 실패·풀 자원 획득 실패
+  source: "Redis 문서 'INFO (clients·stats rejected_connections)'·'Redis client handling (maxclients, timeout)'·Apache Commons Pool2 'GenericObjectPoolConfig (maxTotal·maxWait·testWhileIdle)'·Spring Boot 'spring.redis.jedis.pool.*'(2.x)/'spring.data.redis.jedis.pool.*'(3.x)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 문구로 풀 고갈과 연결 실패 구분 (읽기 전용)
+      cmd: |
+        grep -n -A5 "JedisConnectionException" <app_log> | grep -E "Could not get a resource|Unexpected end of stream|Connection refused|Read timed out|Caused by" | tail -30
+      check: "'Could not get a resource from the pool' + Caused by NoSuchElementException(Timeout waiting for idle object)=풀 고갈 · Connection refused=Redis 미기동·포트 차단 · Unexpected end of stream=Redis 가 연결을 닫음(timeout·maxclients·재기동)"
+      note: "적용: Jedis 2.x~5.x · 권한: 로그 읽기"
+    - do: Redis 응답·클라이언트 수 확인 (읽기 전용)
+      cmd: |
+        nc -zvw3 <redis_host> <redis_port>
+        redis-cli -h <redis_host> -p <redis_port> ping
+        redis-cli -h <redis_host> -p <redis_port> info clients | grep -E "connected_clients|blocked_clients"
+        redis-cli -h <redis_host> -p <redis_port> info stats | grep rejected_connections
+      check: "PONG 없음=Redis 장애 · connected_clients 가 maxclients(기본 10000)에 근접하거나 rejected_connections 증가=서버 한도 · Redis 정상인데 풀 고갈이면 애플리케이션 풀(maxTotal 기본 8)·미반환(close 누락)"
+      note: "적용: Redis 4.x~7.x · 조회 명령만(CONFIG SET·FLUSH·CLIENT KILL 금지) · 인증이 걸려 있으면 -a 로 비밀번호를 명령줄에 쓰지 않음 · 권한: Redis 접근 허용 서버"
+      verify_note: "미검증 — 인증이 걸린 Redis 에서 비밀번호를 프롬프트로 받는 redis-cli 옵션(--askpass)의 지원 버전을 확인하지 못함"
+  - stage: 2
+    steps:
+    - do: 풀 크기·대기 시간·유휴 검사 조정 (애플리케이션)
+      config:
+        file: application.yml / JedisPoolConfig
+        snippet: |
+          # Spring Boot 2.x: spring.redis.jedis.pool.max-active=32  max-idle=16  min-idle=4  max-wait=2000ms
+          # Spring Boot 3.x: spring.data.redis.jedis.pool.* (같은 항목)
+          # 직접 생성: poolConfig.setMaxTotal(32); poolConfig.setTestWhileIdle(true);  — 사용 후 반드시 jedis.close()
+      cmd: |
+        cp -p <설정파일> <설정파일>.bak.$(date +%Y%m%d)
+        systemctl restart <app>
+      check: "성공: 'Could not get a resource' 미발생, Redis connected_clients 가 (maxTotal × 인스턴스 수) 이내 · 실패: 풀을 키워도 고갈되면 close 누락(누수) — 개발팀 이관 후 설정 원복, Redis maxclients 초과가 생기면 즉시 원복"
+      note: "사전조건: Redis maxclients 가 (풀 최대 × 인스턴스 수)를 감당하는지 Redis 담당 확인, 1차에서 Redis 장애가 아님을 확인 · 영향: 재기동 동안 서비스 중단, 풀 확대는 Redis 연결 수 증가 · 승인: 애플리케이션 담당·Redis 담당·변경 관리 · 백업/롤백: 설정 파일 .bak 사본, 이상 시 복원 후 재기동 · 적용: Jedis 3.x+(commons-pool2), Spring Boot 2.x/3.x"
+  - stage: 3
+    steps:
+    - do: Redis 담당·개발팀 전달 자료
+      cmd: |
+        grep -n -A10 "JedisConnectionException" <app_log> > jedis_$(date +%Y%m%d).txt
+        redis-cli -h <redis_host> -p <redis_port> info clients > redis_clients.txt
+      check: "예외 원문·발생 시각·풀 설정·Redis INFO clients/stats"
+      note: "민감정보 마스킹: Redis 주소·비밀번호·키 이름에 들어간 사용자 식별자·세션 ID 를 가림 · 전달 승인: 보안 담당 승인 후 반출"
+
+- id: JAVA-PROC-R6-AUTH
+  scope: id
+  products: [java]
+  category: security
+  match: [JAVAX.NAMING.AUTHENTICATIONEXCEPTION, ORG.SPRINGFRAMEWORK.SECURITY.AUTHENTICATION.BADCREDENTIALSEXCEPTION, ORG.SPRINGFRAMEWORK.SECURITY.AUTHENTICATION.LOCKEDEXCEPTION]
+  title: 인증 실패 — LDAP 바인드 거부(error 49)·잘못된 자격증명·잠긴 계정(Spring Security)
+  source: "Oracle Java SE 17 API(javax.naming.AuthenticationException)·Spring Security Reference 'Authentication(BadCredentialsException·LockedException·AuthenticationFailureBadCredentialsEvent)'·Microsoft Active Directory LDAP 오류 49 하위코드(data 525·52e·530·531·532·533·701·773·775)·OpenLDAP ldapwhoami(1)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 실패 건수·시각·대상 계정 분포 확인 (읽기 전용)
+      cmd: |
+        grep -c -E "AuthenticationException|BadCredentialsException|LockedException" <app_log>
+        grep -n -E "error code 49|Bad credentials|User account is locked" <app_log> | tail -20
+        grep -o -E "data [0-9a-f]{3}" <app_log> | sort | uniq -c
+      check: "LDAP data 52e=자격증명 불일치, 775=잠김, 532=비밀번호 만료, 533=비활성, 701=계정 만료, 773=비밀번호 재설정 필요, 525=사용자 없음 · 한 서비스 계정(바인드 DN)에 몰리면 서비스 계정 비밀번호 만료·변경, 다수 사용자 계정이면 사용자 입력 오류 또는 대입 공격"
+      note: "적용: JDK 8~21 · Spring Security 4.x~6.x · AD 하위코드는 Active Directory 에만 해당(OpenLDAP 은 49 만) · 비밀번호는 수집·표시하지 않고 사용자 식별자는 보고 시 가림 · 권한: 로그 읽기"
+    - do: 접속 출처 집계·디렉터리 도달 확인 (읽기 전용 — 바인드 시도 없음)
+      cmd: |
+        grep -E "Bad credentials|LockedException" <app_log> | grep -o -E "([0-9]{1,3}\.){3}[0-9]{1,3}" | sort | uniq -c | sort -rn | head
+        nc -zvw3 <ldap_host> 389 ; nc -zvw3 <ldap_host> 636
+      check: "한 IP 에서 여러 계정 실패=대입 공격(보안 담당 즉시 통보), 여러 IP 에서 한 계정=그 계정 비밀번호 변경 후 미반영 · LDAP 포트 도달 실패면 인증 오류가 아니라 연결 문제(CommunicationException 동반)"
+      note: "적용: Linux · 1차에서 ldapwhoami 등 실제 바인드를 시도하지 않음(틀린 비밀번호 시도가 잠금을 유발) · 권한: 로그 읽기·일반 사용자"
+  - stage: 2
+    steps:
+    - do: 서비스 계정 비밀번호 갱신 반영 또는 잠김 해제 요청·공격 출처 차단
+      config:
+        file: 애플리케이션 LDAP 바인드 설정(비밀번호는 비밀 저장소·암호화 속성) / WAF·방화벽 차단 목록
+        snippet: |
+          # LDAP: spring.ldap.username=<bind DN>  — 비밀번호는 평문 설정 대신 비밀 저장소 참조
+          # 잠김 해제·비밀번호 재설정은 디렉터리(AD) 담당이 계정 관리 절차로 수행
+      cmd: |
+        cp -p <설정파일> <설정파일>.bak.$(date +%Y%m%d)
+        ldapwhoami -x -H ldaps://<ldap_host> -D "<bind DN>" -W
+        systemctl restart <app>
+      check: "성공: ldapwhoami 가 'dn:<bind DN>' 출력(-W 로 프롬프트 입력), 재기동 후 error 49 미발생 · 실패: 52e 반복이면 저장된 비밀번호 재확인 후 설정 원복, 775 면 시도 중단하고 디렉터리 담당에 잠금 원인 확인(반복 시도는 잠김 연장)"
+      note: "사전조건: 디렉터리 담당이 새 비밀번호 발급·잠김 원인을 확인, 같은 계정을 쓰는 다른 서버 목록 확보(일부만 바꾸면 남은 서버가 계정을 다시 잠금) · 영향: 재기동 동안 서비스 중단, IP 차단은 정상 사용자도 막을 수 있음 · 승인: 보안 담당·디렉터리 담당·애플리케이션 담당 · 백업/롤백: 설정 .bak 사본, 이상 시 복원 후 재기동, 차단 규칙은 등록 번호 기록 후 해제 가능 · 적용: OpenLDAP 클라이언트 ldapwhoami(-W 는 프롬프트 입력 — 비밀번호를 명령줄에 쓰지 않음)"
+  - stage: 3
+    steps:
+    - do: 보안 담당·디렉터리 담당 전달 자료
+      cmd: |
+        grep -n -E "AuthenticationException|BadCredentialsException|LockedException" <app_log> > auth_$(date +%Y%m%d).txt
+      check: "실패 시각·건수·하위코드 분포·출처 IP 집계"
+      note: "민감정보 마스킹: 사용자 ID·바인드 DN·이메일·클라이언트 IP(공격 분석용 원본은 보안 담당만)·세션 ID 를 가림, 비밀번호가 로그에 찍혔으면 그 줄은 제외하고 비밀번호 변경 요청 · 전달 승인: 보안 담당 승인 후 반출"
+
+- id: JAVA-PROC-R6-NATIVE
+  scope: id
+  products: [java]
+  category: internal
+  match: [JAVA.LANG.UNSATISFIEDLINKERROR, JAVA.LANG.INTERNALERROR]
+  title: JVM·네이티브 계층 오류 — JNI 라이브러리 적재 실패·JVM InternalError
+  source: "Oracle Java SE 17 API(java.lang.UnsatisfiedLinkError·InternalError)·JDK 17 Troubleshooting Guide 'Fatal Error Log (hs_err_pid)'·'Diagnostic Tools (jcmd VM.system_properties, VM.version)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: JNI 적재 실패 사유·검색 경로·아키텍처 확인 (UnsatisfiedLinkError, 읽기 전용)
+      cmd: |
+        grep -n -A5 "UnsatisfiedLinkError" <app_log> | head -40
+        jcmd <PID> VM.system_properties | grep -E "java.library.path|os.arch|sun.arch.data.model"
+        ls -l <lib_dir>/<lib>.so ; file <lib_dir>/<lib>.so
+        objdump -p <lib_dir>/<lib>.so | grep NEEDED
+      check: "'no <lib> in java.library.path'=경로에 없음 · 'wrong ELF class'·file 결과가 JVM 비트(sun.arch.data.model)와 다름=아키텍처 불일치 · 'already loaded in another classloader'=웹앱 재배포 시 같은 라이브러리 이중 적재 · NEEDED 항목이 시스템에 없으면 의존 라이브러리 누락"
+      note: "적용: JDK 8~21, Linux(ELF) — Windows 는 PATH·.dll · objdump 는 실행하지 않고 머리글만 읽음(ldd 는 라이브러리를 실행할 수 있어 신뢰된 파일만) · 권한: JVM 실행 계정"
+    - do: InternalError 메시지·크래시 파일·JDK 버전 확인 (읽기 전용, 프로세스 유지)
+      cmd: |
+        grep -n -A10 "java.lang.InternalError" <app_log> | head -40
+        ls -lt <작업 디렉터리>/hs_err_pid*.log | head
+        jcmd <PID> VM.version
+        jcmd <PID> Thread.print > /var/tmp/td_$(date +%H%M%S).txt
+      check: "'a fault occurred in a recent unsafe memory access operation'=매핑된 파일이 잘렸거나 디스크 가득(파일·FS 확인) · hs_err 파일이 있으면 상단 Problematic frame·JDK 버전 기록 → JDK 결함 의심 · 같은 JDK 업데이트의 알려진 결함 여부는 3차"
+      note: "적용: JDK 8~21 · -XX:ErrorFile 지정 시 그 경로 · 스레드 덤프는 프로세스 유지 · 권한: JVM 실행 계정"
+  - stage: 2
+    steps:
+    - do: 라이브러리 경로·아키텍처 정정 또는 JDK 업데이트 적용
+      config:
+        file: 애플리케이션 기동 스크립트 / JAVA_OPTS
+        snippet: |
+          -Djava.library.path=<lib_dir>
+          # 의존 라이브러리 경로: LD_LIBRARY_PATH=<lib_dir>:$LD_LIBRARY_PATH (기동 스크립트 안에서만)
+          # 'already loaded in another classloader': JNI 를 적재하는 jar 를 웹앱 WEB-INF/lib 가 아닌 공용 lib(Tomcat $CATALINA_HOME/lib)로 옮기고 재기동
+      cmd: |
+        cp -p <기동 스크립트> <기동 스크립트>.bak.$(date +%Y%m%d)
+        systemctl restart <app>
+      check: "성공: 기동 후 UnsatisfiedLinkError·InternalError 미발생, jcmd VM.system_properties 에 새 경로 · 실패: 같은 오류 반복이면 라이브러리 빌드(아키텍처·glibc 버전) 재확인 후 백업 스크립트 원복, JDK 업데이트 후 기동 실패면 이전 JDK 경로로 원복"
+      note: "사전조건: 올바른 아키텍처·버전의 라이브러리(공급사 배포본)를 확보, JDK 업데이트는 개발 환경에서 먼저 시험 · 영향: 재기동 동안 서비스 중단, JDK 교체는 모든 기능에 영향 · 승인: 애플리케이션 담당·시스템 담당·변경 관리 · 백업/롤백: 기동 스크립트 .bak, 이전 JDK 디렉터리 유지(지우지 않음) — 이상 시 JAVA_HOME 원복 후 재기동 · 적용: JDK 8~21, Linux"
+  - stage: 3
+    steps:
+    - do: JDK 공급사·라이브러리 공급사 의뢰 자료
+      cmd: |
+        tar czf native_$(date +%Y%m%d).tgz <작업 디렉터리>/hs_err_pid*.log /var/tmp/td_*.txt
+        jcmd <PID> VM.version > jvm_version.txt
+      check: "hs_err 파일·스레드 덤프·JDK 버전·라이브러리 파일명/버전·OS 버전"
+      note: "민감정보 마스킹: hs_err 의 환경 변수·명령줄 인자(비밀번호·토큰)·호스트명·사용자 경로를 가림 · 전달 승인: 보안 담당 승인 후 반출"
+
+- id: JAVA-PROC-R6-ACCESS
+  scope: id
+  products: [java]
+  category: storage
+  match: [JAVA.NIO.FILE.ACCESSDENIEDEXCEPTION]
+  title: 파일·디렉터리 접근 거부 — 권한·소유자·SELinux·사용 중 파일
+  source: "Oracle Java SE 17 API(java.nio.file.AccessDeniedException)·Linux namei(1)·getfacl(1)/setfacl(1)·SELinux ls -Z — man7.org · Windows icacls"
+  stages:
+  - stage: 1
+    steps:
+    - do: 거부된 경로와 경로 전체 권한 확인 (읽기 전용)
+      cmd: |
+        grep -n -A3 "AccessDeniedException" <app_log> | tail -20
+        namei -l <path>
+        ps -o user=,group= -p <PID> ; id <실행 계정>
+      check: "namei 출력에서 실행 계정이 지나갈 수 없는(x 없음) 상위 디렉터리, 쓰기 대상의 w 없음, 소유자 불일치 중 무엇인지 확정 · 최근 배포·root 로 수동 실행 후 생긴 파일이면 소유자 문제"
+      note: "적용: JDK 7+(java.nio.file) · Linux util-linux namei · Windows 는 icacls <path> · 권한: 일반 사용자"
+    - do: 권한 외 원인 확인 — SELinux·읽기 전용 FS·Windows 파일 잠금 (읽기 전용)
+      cmd: |
+        getenforce 2>/dev/null ; ls -Z <path> 2>/dev/null
+        mount | grep " <마운트지점> "
+      check: "Enforcing 이고 권한 비트가 맞는데 거부되면 SELinux 정책 거부(감사 로그 ausearch -m avc 는 root) · mount 옵션이 ro 면 읽기 전용 FS · Windows 에서는 다른 프로세스가 파일을 열고 있어도 AccessDeniedException"
+      note: "적용: RHEL/CentOS 계열(SELinux), Linux · 권한: 일반 사용자(감사 로그는 root)"
+  - stage: 2
+    steps:
+    - do: 소유자·권한을 설치 기준으로 정정
+      cmd: |
+        getfacl -R <dir> > /var/tmp/acl_backup_$(date +%Y%m%d).txt
+        chown -R <실행 계정>:<그룹> <dir>
+        chmod 750 <dir>
+      check: "성공: namei -l 에서 실행 계정 접근 가능, 같은 기능 재실행 시 예외 미발생 · 실패: 권한이 맞는데 계속 거부되면 SELinux 라벨(restorecon -v <path>) 검토로, 다른 서비스가 같은 경로를 못 읽게 되면 백업으로 원복"
+      note: "사전조건: 설치 기준(소유자·권한)을 문서·다른 서버와 대조, 같은 경로를 쓰는 다른 프로세스 확인 · 영향: 권한 과다 부여는 보안 위험, 잘못된 chown -R 은 다른 서비스 장애 · 승인: 시스템 담당·보안 담당 · 백업/롤백: getfacl 백업 파일로 setfacl --restore=<백업 파일> 원복 · 적용: Linux(Windows 는 icacls <dir> /save <백업> /t 후 변경, 원복 icacls <상위> /restore <백업>)"
+  - stage: 3
+    steps:
+    - do: 전달 자료
+      cmd: |
+        grep -n -A5 "AccessDeniedException" <app_log> > access_$(date +%Y%m%d).txt ; namei -l <path> > namei.txt
+      check: "예외 경로·namei 결과·실행 계정·SELinux 상태"
+      note: "민감정보 마스킹: 경로에 들어간 사용자명·고객 식별자·호스트명을 가림 · 전달 승인: 운영 담당·보안 담당 승인 후 반출"
+
+# ── BizMaster 어댑터 ──
+- id: BM-PROC-R6-MEMORY
+  scope: id
+  products: [bizmaster-adapter]
+  category: memory
+  match: [SW-BM-004]
+  title: 어댑터 JVM 메모리 압박 — [MEMORY USAGE] free/total 3% 미만 (BizMaster)
+  source: "BizMaster 어댑터 로그 '[MEMORY USAGE]' 문구 의미 기준(공개 매뉴얼 없음, manuals/bizmaster.yaml)·JDK Troubleshooting Guide 'jstat·jstack·jmap -dump'"
+  stages:
+  - stage: 1
+    steps:
+    - do: free/total 추이·어댑터 JVM 버전·힙 옵션 확인 (읽기 전용)
+      cmd: |
+        grep -n "MEMORY USAGE" <adapter_path>/adt_<YYYYMMDD>.log | tail -20
+        ps -ef | grep "[e]aiAdapter" | awk '{print $2, $5}'
+        <JAVA_HOME>/bin/java -version
+        ps -o args= -p <PID> | tr ' ' '\n' | grep -E "^-Xm[sx]|MaxPermSize|MaxMetaspaceSize"
+      check: "free/total 은 현재 확보(committed) 힙 기준 — 힙이 -Xmx 까지 커지지 않은 상태면 3% 미만도 정상일 수 있음, 연속 하락·-Xmx 도달이면 압박 지속"
+      note: "적용: BizMaster 어댑터(eaiAdapter) 납품본 — 어댑터 JDK 버전은 납품본마다 다름(java -version 으로 먼저 확인) · ps 는 힙 옵션만 추림(다른 -D 인자의 비밀번호 노출 방지) · 권한: 어댑터 실행 계정"
+    - do: GC 상태·스레드 덤프 보존 (읽기 전용, 프로세스 유지)
+      cmd: |
+        jstat -gcutil <PID> 1000 5
+        jstack <PID> > <adapter_path>/td_$(date +%H%M%S).txt
+      check: "O(Old) 95% 이상에서 FGC 가 계속 늘면 힙 고갈 임박 — 2차 힙 조정 · O 가 Full GC 뒤 내려가면 일시 부하"
+      note: "적용: jstat·jstack 은 JDK 6+(jcmd 는 JDK 7+ 라 오래된 어댑터에는 없을 수 있음) · jmap -heap 은 프로세스를 멈추므로 1차 금지 · jstack 이 없으면 kill -3 <PID>(스레드 덤프, 프로세스는 유지 — 어댑터 표준출력 파일에 기록) · 권한: 어댑터 실행 계정과 같은 사용자"
+  - stage: 2
+    steps:
+    - do: 힙 덤프 채취 (stop-the-world, 업무 영향 적은 시점)
+      cmd: |
+        df -h <dump_dir>
+        jmap -dump:format=b,file=<dump_dir>/bm_heap_$(date +%Y%m%d_%H%M%S).hprof <PID>
+      check: "성공: hprof 가 힙 사용량 크기로 생성 · 실패: 디스크 부족·권한 오류면 경로 변경, 덤프 중 허브와의 sync-ack timeout 이 생기면 연계 담당에 통보"
+      note: "사전조건: 디스크 여유가 -Xmx 이상, 연계 업무가 적은 시점·연계 담당 통보 · 영향: 덤프 중 어댑터 정지(수 초~수십 초) — 허브 재전송·적체 가능, hprof 에 전문(개인정보) 포함 · 승인: 연계 담당·보안 담당 · 백업/롤백: 설정 변경 없음 — hprof 는 분석 후 보안 규정에 따라 삭제·암호화 보관 · 적용: JDK 6+ jmap"
+    - do: 어댑터 힙 상향 후 재기동
+      config:
+        file: 어댑터 기동 스크립트의 JVM 옵션(납품본 파일명)
+        snippet: |
+          -Xms<값>m -Xmx<값>m        # 서버 물리 메모리·다른 프로세스 합계 확인 후
+      cmd: |
+        cp -p <기동 스크립트> <기동 스크립트>.bak.$(date +%Y%m%d)
+        # 어댑터 중지·기동은 납품 매뉴얼 절차(어댑터 관리 화면 또는 기동/종료 스크립트)
+      check: "성공: 기동 로그 'Adapter Shell … initialized', [MEMORY USAGE] free 비율 회복·OOM 미발생 · 실패: 기동 실패(잘못된 옵션)면 백업 스크립트 원복 후 재기동, 상향 후에도 하락이 이어지면 힙 덤프 분석(누수)으로"
+      note: "사전조건: 미전송(unsent/sending) 건수 기록, 1차 스레드 덤프 보존, 서버 메모리 여유 확인 · 영향: 재기동 동안 해당 어댑터 연계 중단·허브 재전송 발생 · 승인: 연계 담당·업무 담당·변경 관리 · 백업/롤백: 기동 스크립트 .bak, 이상 시 복원 후 재기동 · 적용: BizMaster 납품 버전"
+      verify_note: "미검증 — 어댑터 기동 스크립트 이름·JVM 옵션 위치·중지/기동 명령을 납품 매뉴얼로 확인하지 못함"
+  - stage: 3
+    steps:
+    - do: 유지보수사·Tmax 의뢰 자료
+      cmd: |
+        tar czf bm_mem_$(date +%Y%m%d).tgz <adapter_path>/adt_<YYYYMMDD>.log <adapter_path>/td_*.txt
+      check: "어댑터 로그([MEMORY USAGE] 추이)·스레드 덤프·JDK 버전·힙 옵션·(분석 결과만) 힙 덤프 요약"
+      note: "민감정보 마스킹: 로그의 전문 본문(개인정보·계좌)·기관 호스트명/IP·계정을 가림, hprof 원본은 반출하지 않음 · 전달 승인: 보안 담당·연계 담당 승인 후 반출 (EOS 제품 — 유상 지원 여부 확인)"
+
+# ── MESIM (메타빌드 ESB/APIG) ──
+- id: MESIM-PROC-R6-SECURITY
+  scope: id
+  products: [mesim-apig]
+  category: security
+  match: [APIG-AUTH-FAIL, APIG-AUTHZ-DENY, APIG-APIKEY-INVALID, APIG-API-DISABLED, APIG-TOKEN-FAIL, LEG-MESIM-APIG-API-KEY-FAIL, LEG-MESIM-APIG-API-KEY-FAIL-CB1E, SW-APIG-002]
+  title: APIG 인증·인가 실패 — API Key·토큰 오류·권한 거부·API 차단
+  source: "메타빌드 MESIM APIG 운영 매뉴얼(납품본) 'API Key 관리·API 정책·API 상태'·로그 문구('API KEY ACCESS FAIL'·401/403) 기준 — 공개 매뉴얼 없음"
+  stages:
+  - stage: 1
+    steps:
+    - do: 실패 유형·API·호출처 집계 (읽기 전용)
+      cmd: |
+        grep -n -i -E "API KEY ACCESS FAIL|api.?key.*(fail|invalid|expired)|authentication fail|authorization fail|token.*(invalid|expired|fail)| 401 | 403 |disabled|blocked" <MESIM_HOME>/logs/*.log | tail -30
+        grep -h -i -E "API KEY ACCESS FAIL|authentication fail| 401 " <MESIM_HOME>/logs/*.log | grep -o -E "([0-9]{1,3}\.){3}[0-9]{1,3}" | sort | uniq -c | sort -rn | head
+      check: "401·API KEY FAIL=인증(키 미등록·만료·오입력), 403=인가(권한 정책), disabled/blocked=API 비활성(관리자 조치 또는 자동 차단) · 한 호출처 지속=그 소비자 오설정·키 만료, 다수 출처 급증=무단 호출 의심(보안 담당 즉시 통보)"
+      note: "적용: MESIM APIG 납품본(로그 경로·문구는 납품 버전 기준) · 키·토큰 값은 기록하지 않음(앞 몇 자리만) · 권한: MESIM 실행 계정(로그 읽기)"
+    - do: 관리 콘솔에서 키·API 상태·변경 이력 조회 (변경 없이)
+      cmd: |
+        # 관리 콘솔 › API Key 관리: 해당 소비자 키의 등록·만료일·활성 상태 캡처
+        # 관리 콘솔 › API 관리: 대상 API 의 활성(공개) 상태·권한 정책·마지막 변경자/시각 캡처
+      check: "만료일 경과·비활성·최근 정책 변경 시각이 실패 시작과 일치하면 원인 확정 · 관리자 작업으로 차단된 API 면 의도된 조치(담당 확인)"
+      note: "적용: MESIM APIG 관리 콘솔(납품 버전) · 조회 화면만 — 키 재발급·정책 변경·활성화 버튼 누르지 않음 · 권한: 콘솔 조회 계정"
+      verify_note: "미검증 — 관리 콘솔의 메뉴 이름(API Key 관리·API 관리)과 변경 이력 화면을 납품 매뉴얼로 확인하지 못함"
+    - do: 토큰 만료 판정 오차 확인 — 서버 시각 동기 (읽기 전용)
+      cmd: |
+        date -u ; chronyc tracking 2>/dev/null | grep -E "System time|Leap status" ; ntpq -p 2>/dev/null | head -5
+      check: "게이트웨이와 인증 서버 시각 차가 수십 초 이상이면 정상 토큰도 만료·미발효로 판정될 수 있음"
+      note: "적용: Linux(chrony 또는 ntpd 중 설치된 것만 응답) · 권한: 일반 사용자"
+  - stage: 2
+    steps:
+    - do: 키 재발급·만료 연장·권한 정책 정정·API 재활성 (관리 콘솔)
+      cmd: |
+        # 관리 콘솔 › API Key 관리 › 대상 키 만료 연장 또는 재발급(새 키는 소비자에게 보안 채널로 전달)
+        # 관리 콘솔 › API 관리 › 권한 정책 정정 / API 활성화
+      check: "성공: 해당 소비자 호출이 200 으로 돌아오고 401/403·API KEY FAIL 미발생 · 실패: 재발급 후에도 실패면 소비자 쪽 키 반영 여부 확인, 다른 소비자 호출이 거부되기 시작하면 변경 전 정책으로 원복"
+      note: "사전조건: 소비자(호출 기관) 담당과 정당한 호출인지 확인, 공격 의심 출처는 키 연장 대상에서 제외 · 영향: 정책·활성 변경은 그 API 의 모든 소비자에 즉시 적용, 키 재발급은 기존 키 무효화 · 승인: 연계 담당·보안 담당·변경 관리 · 백업/롤백: 변경 전 정책·키 상태 화면 캡처, 이상 시 이전 정책으로 되돌림(키 무효화는 되돌릴 수 없어 재발급 일정 공지 후) · 적용: MESIM APIG 납품 버전"
+      verify_note: "미검증 — 키 재발급·만료 연장·API 활성화 조작 위치와 즉시 반영 여부를 납품 매뉴얼로 확인하지 못함"
+    - do: 무단 호출 출처 차단 요청
+      cmd: |
+        # 보안 담당에 출처 IP·시각·건수 전달 → 앞단 방화벽·WAF 차단 규칙 등록 요청
+      check: "성공: 차단 후 해당 출처 실패 건수 0, 정상 소비자 호출 영향 없음 · 실패: 정상 소비자가 막히면 즉시 규칙 해제"
+      note: "사전조건: 출처가 등록된 소비자가 아님을 확인 · 영향: 같은 NAT 뒤 정상 사용자도 차단될 수 있음 · 승인: 보안 담당 · 백업/롤백: 차단 규칙 번호·등록 시각 기록, 오차단 시 규칙 해제"
+  - stage: 3
+    steps:
+    - do: 메타빌드 기술지원·보안 담당 자료
+      cmd: |
+        grep -h -i -E "API KEY ACCESS FAIL|authentication fail|authorization fail| 401 | 403 " <MESIM_HOME>/logs/*.log > apig_auth_$(date +%Y%m%d).txt
+      check: "실패 시각·API·소비자 ID·출처 집계·콘솔 캡처(키 상태·정책)"
+      note: "민감정보 마스킹: API Key·토큰·인증 헤더 값, 소비자 개인정보, 클라이언트 IP(보안 담당 원본 외)를 가림 · 전달 승인: 보안 담당·연계 기관 승인 후 반출"
+
+- id: MESIM-PROC-R6-ROUTE
+  scope: id
+  products: [mesim-apig, mesim-esb]
+  category: internal
+  match: [APIG-ROUTE-FAIL, APIG-API-NOT-PUBLISHED, ESB-ROUTING-FAIL]
+  title: API·서비스 라우팅 실패 — 경로 미등록·미공개·라우팅 키 불일치
+  source: "메타빌드 MESIM ESB/APIG 운영 매뉴얼(납품본) 'API/서비스 등록·배포(공개)·라우팅'·Apache Camel 2.x 'Routes' — 공개 매뉴얼 없음"
+  stages:
+  - stage: 1
+    steps:
+    - do: 실패 URL·서비스 ID·라우팅 키 확인 (읽기 전용)
+      cmd: |
+        grep -n -i -E "rout(e|ing).*(fail|error|not found)|No route|not published|not registered| 404 " <MESIM_HOME>/logs/*.log | tail -30
+        grep -c -i -E "rout(e|ing).*(fail|error|not found)|No route|not published| 404 " <MESIM_HOME>/logs/*.log
+      check: "한 URL·서비스에만 발생=그 API/서비스 등록·공개 상태 문제, 전체 URL 이 실패=게이트웨이 라우팅 설정 적재 실패(기동 로그 확인) · 호출 측 URL 오타(대소문자·버전 경로)도 함께 확인"
+      note: "적용: MESIM APIG/ESB 납품본(Camel 2.x 기반) · 권한: MESIM 실행 계정(로그 읽기)"
+    - do: 등록·공개 상태와 최근 배포 이력 대조 (변경 없이)
+      cmd: |
+        # 관리 콘솔 › API(서비스) 관리: 대상의 등록·공개(배포) 상태·라우팅 대상·마지막 변경 시각 캡처
+        grep -n -i -E "deploy|undeploy|publish|route.*(start|stop)" <MESIM_HOME>/logs/*.log | tail -20
+      check: "실패 시작 직전에 배포·공개 해제·라우트 정지 기록이 있으면 변경 작업이 원인 · 이력 없는데 미등록이면 등록 누락"
+      note: "적용: MESIM 관리 콘솔(납품 버전) · 조회만 — 공개·배포 버튼 누르지 않음 · 권한: 콘솔 조회 계정"
+      verify_note: "미검증 — 관리 콘솔의 공개(배포) 상태·변경 이력 화면 이름을 납품 매뉴얼로 확인하지 못함"
+  - stage: 2
+    steps:
+    - do: API/서비스 등록·공개 또는 라우팅 정정 후 배포
+      cmd: |
+        # 관리 콘솔 › API(서비스) 관리 › 라우팅 대상 정정 › 검증 › 공개(배포)
+      check: "성공: 같은 URL 호출이 404·No route 없이 처리, 다른 API 라우팅 정상 · 실패: 배포 후 다른 API 가 실패하면 이전 버전으로 재배포"
+      note: "사전조건: 라우팅 대상(백엔드 주소)·공개 범위를 연계 담당·백엔드 담당과 확인, 의도적으로 내린 API 인지 확인 · 영향: 공개 즉시 모든 소비자가 호출 가능, 라우팅 변경은 그 API 전체 트래픽에 적용 · 승인: 연계 담당·보안 담당(공개 범위)·변경 관리 · 백업/롤백: 배포 전 현재 설정 내보내기·화면 캡처, 이상 시 이전 버전 재배포 또는 공개 해제 · 적용: MESIM 납품 버전"
+      verify_note: "미검증 — 라우팅 정정·공개(배포) 조작 순서를 납품 매뉴얼로 확인하지 못함"
+  - stage: 3
+    steps:
+    - do: 메타빌드 기술지원 자료
+      cmd: |
+        tar czf mesim_route_$(date +%Y%m%d).tgz <MESIM_HOME>/logs/
+      check: "실패 URL·서비스 ID·시각·배포 이력·콘솔 캡처"
+      note: "민감정보 마스킹: 요청 URL 쿼리의 개인정보·API Key·토큰, 백엔드 내부 호스트명/IP 를 가림 · 전달 승인: 보안 담당·연계 기관 승인 후 반출"
+
+- id: MESIM-PROC-R6-CACHE
+  scope: id
+  products: [mesim-apig]
+  category: internal
+  match: [APIG-CACHE-FAIL]
+  title: APIG 캐시 처리 실패 — 캐시 저장·조회 오류·게이트웨이 힙 부족
+  source: "메타빌드 MESIM APIG 운영 매뉴얼(납품본) '응답 캐시 정책'·JDK Troubleshooting Guide 'jstat·jcmd' — 캐시 구현(내장·외부)은 공개 매뉴얼 없음"
+  stages:
+  - stage: 1
+    steps:
+    - do: 캐시 오류 유형·대상 API 확인 (읽기 전용)
+      cmd: |
+        grep -n -i -E "cache.*(fail|error|exception)" <MESIM_HOME>/logs/*.log | tail -30
+        grep -n -i -A5 -E "cache.*exception" <MESIM_HOME>/logs/*.log | grep -E "Caused by|OutOfMemory|Connection" | head -10
+      check: "OutOfMemory 동반=게이트웨이 힙 부족, Connection 동반=외부 캐시 저장소 연결 실패, 직렬화(Serializ) 예외=응답 객체 형식 문제 · 캐시 실패 자체는 대개 백엔드 직접 호출로 이어져 응답 지연·백엔드 부하로 나타남"
+      note: "적용: MESIM APIG 납품본 · 권한: MESIM 실행 계정(로그 읽기)"
+    - do: 게이트웨이 JVM 힙 여유 확인 (읽기 전용)
+      cmd: |
+        jstat -gcutil <PID> 5000 3
+        jcmd <PID> GC.heap_info
+      check: "O(Old) 95% 이상·FGC 증가면 캐시 항목이 힙을 압박 — 2차 캐시 크기·힙 조정"
+      note: "적용: jstat JDK 8+, GC.heap_info 는 JDK 9+(JDK 8 은 jstat 결과로 판단) · GC.class_histogram 은 Full GC 를 일으키므로 1차 금지 · 권한: MESIM 실행 계정"
+  - stage: 2
+    steps:
+    - do: 캐시 정책(크기·만료) 조정 또는 캐시 비우기·힙 조정
+      cmd: |
+        cp -rp <MESIM_HOME>/conf <MESIM_HOME>/conf.bak.$(date +%Y%m%d)
+        # 관리 콘솔 › API 정책 › 캐시: 대상 API 캐시 크기·만료 시간 조정 또는 캐시 비우기
+      check: "성공: 캐시 오류 미발생, 힙 Old 사용률 안정, 응답시간 정상 · 실패: 캐시 비운 뒤 백엔드 부하 급증·응답 지연이면 캐시 정책 원복, 힙 부족이 계속되면 -Xmx 조정(재기동) 검토"
+      note: "사전조건: 캐시를 비우면 모든 요청이 백엔드로 가므로 백엔드 처리 여유를 백엔드 담당과 확인 · 영향: 캐시 비우기 직후 백엔드 부하 증가·응답 지연 · 승인: 연계 담당·백엔드 담당·변경 관리 · 백업/롤백: conf 사본·정책 화면 캡처, 이상 시 이전 정책으로 복원 · 적용: MESIM APIG 납품 버전"
+      verify_note: "미검증 — APIG 캐시 정책 화면·캐시 비우기 기능의 존재와 위치를 납품 매뉴얼로 확인하지 못함"
+  - stage: 3
+    steps:
+    - do: 메타빌드 기술지원 자료
+      cmd: |
+        tar czf mesim_cache_$(date +%Y%m%d).tgz <MESIM_HOME>/logs/ ; jstat -gcutil <PID> 5000 3 > gc.txt
+      check: "캐시 오류 로그·GC 통계·캐시 정책 캡처·JDK 버전"
+      note: "민감정보 마스킹: 캐시 키·응답 본문에 들어간 개인정보·토큰, 내부 호스트명/IP 를 가림 · 전달 승인: 보안 담당 승인 후 반출"
+
+- id: MESIM-PROC-R6-XA
+  scope: id
+  products: [mesim-esb]
+  category: internal
+  match: [ESB-XA-TRANSACTION-FAIL]
+  title: ESB 분산거래(XA) 실패 — 휴리스틱 결과·미완료(in-doubt) 거래
+  source: "X/Open XA 규격 XAException 코드(XA_HEURCOM·XA_HEURRB·XA_HEURMIX·XAER_RMFAIL·XAER_NOTA)·Oracle Database Administrator's Guide 'Managing Distributed Transactions (DBA_2PC_PENDING, COMMIT FORCE / ROLLBACK FORCE)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 거래 ID(Xid)·참여 자원·XA 오류 확인 (읽기 전용)
+      cmd: |
+        grep -n -A8 -E "XAException|Heuristic|rolled back|in-doubt" <MESIM_HOME>/logs/*.log | tail -40
+        grep -o -E "XA_HEUR[A-Z]+|XAER_[A-Z]+" <MESIM_HOME>/logs/*.log | sort | uniq -c
+      check: "XA_HEURMIX·XA_HEURHAZ=참여자 일부만 반영(데이터 불일치 위험 — 즉시 2차) · XA_HEURRB/HEURCOM=참여자가 독자 결정 · XAER_RMFAIL=자원(DB·브로커) 연결 끊김 · XAER_NOTA=자원이 거래를 모름(이미 정리됨)"
+      note: "적용: MESIM ESB 납품본(JTA 트랜잭션 관리자 종류는 납품본 기준) · 권한: MESIM 실행 계정(로그 읽기)"
+    - do: 참여 DB 의 미완료 거래 조회 의뢰 (읽기 전용 — 재처리 보류)
+      cmd: |
+        # DBA 조회(Oracle): SELECT local_tran_id, global_tran_id, state, fail_time FROM dba_2pc_pending;
+        # 그 외 DB 는 해당 DB 의 XA 미완료 거래 조회 뷰로 DB 담당이 조회
+      check: "state 가 prepared 로 남은 거래가 있으면 잠금이 계속 잡혀 있을 수 있음 — 2차 판단 전 재처리·재전송 보류"
+      note: "적용: Oracle 11g~19c(다른 DB 는 DB 담당 절차) · 조회만(COMMIT/ROLLBACK FORCE 금지) · 권한: DBA"
+  - stage: 2
+    steps:
+    - do: 미완료 거래 결정(다른 참여자 결과에 맞춰) 후 업무 재처리
+      cmd: |
+        # DBA 수행(Oracle 예): COMMIT FORCE '<local_tran_id>';  또는  ROLLBACK FORCE '<local_tran_id>';
+        # 이후 연계 실패 건 재처리는 관리 콘솔의 재처리 기능(납품 매뉴얼 절차)
+      check: "성공: dba_2pc_pending 에서 해당 거래 정리, 양쪽 데이터 대사 일치, 재처리 건수 = 실패 건수 · 실패: 대사 불일치가 남으면 재처리 중단하고 업무 담당 보정 절차로"
+      note: "사전조건: 같은 Xid 의 다른 참여자(상대 DB·브로커) 결과를 확인해 같은 방향으로 결정, 재처리해도 중복되지 않는 업무인지 업무 담당 확인 · 영향: 잘못된 COMMIT/ROLLBACK FORCE 는 데이터 불일치 확정(되돌릴 수 없음), 재처리는 실제 거래 발생 · 승인: DBA·업무 담당·연계 담당·변경 관리 · 백업/롤백: 결정 전 dba_2pc_pending 조회 결과·대상 데이터 스냅샷 보관 — FORCE 는 되돌릴 수 없으므로 승인된 목록만 · 적용: Oracle(다른 DB 는 해당 제품 명령)"
+      verify_note: "미검증 — MESIM ESB 의 XA 트랜잭션 관리자 종류와 실패 거래 재처리 화면을 납품 매뉴얼로 확인하지 못함"
+  - stage: 3
+    steps:
+    - do: 메타빌드 기술지원·DB 담당 자료
+      cmd: |
+        grep -n -A20 -E "XAException|Heuristic" <MESIM_HOME>/logs/*.log > xa_$(date +%Y%m%d).txt
+      check: "Xid·발생 시각·참여 자원·XA 오류 코드·DB 미완료 거래 조회 결과"
+      note: "민감정보 마스킹: 거래 데이터의 개인정보·계좌·업무 키, DB 접속 계정·내부 호스트명/IP 를 가림 · 전달 승인: 보안 담당·DBA 승인 후 반출"
+
+- id: MESIM-PROC-R6-DATAQ
+  scope: id
+  products: [mesim-esb]
+  category: internal
+  match: [ESB-DATA-QUALITY-FAIL]
+  title: ESB 데이터 품질 검증 실패 — 규칙 위반 전문
+  source: "메타빌드 MESIM ESB 운영 매뉴얼(납품본) '데이터 품질(검증) 규칙·오류 전문 처리' — 공개 매뉴얼 없음"
+  stages:
+  - stage: 1
+    steps:
+    - do: 위반 규칙·인터페이스·건수 확인 (읽기 전용)
+      cmd: |
+        grep -n -i -E "(품질|quality).*(오류|실패|fail|error)" <MESIM_HOME>/logs/*.log | tail -30
+        grep -h -i -E "(품질|quality).*(오류|실패|fail|error)" <MESIM_HOME>/logs/*.log | grep -c "<인터페이스ID>"
+      check: "한 송신 시스템·한 규칙에 몰리면 송신 데이터 결함(송신 담당 통보), 배포 직후 전 인터페이스면 규칙 설정 변경이 원인"
+      note: "적용: MESIM ESB 납품본 · 위반 전문 원문은 열람·복사하지 않고 건수·규칙만 기록 · 권한: MESIM 실행 계정(로그 읽기)"
+    - do: 규칙 변경 이력 조회 (변경 없이)
+      cmd: |
+        # 관리 콘솔 › 데이터 품질(검증) 규칙: 대상 규칙의 조건·마지막 변경 시각 캡처
+      check: "실패 시작 시각과 규칙 변경 시각이 일치하면 규칙 설정 문제"
+      note: "적용: MESIM 관리 콘솔(납품 버전) · 조회만 · 권한: 콘솔 조회 계정"
+      verify_note: "미검증 — 데이터 품질 규칙 화면의 존재와 이름을 납품 매뉴얼로 확인하지 못함"
+  - stage: 2
+    steps:
+    - do: 송신 데이터 정정 후 재처리 또는 규칙 정정
+      cmd: |
+        # 송신 시스템 데이터 정정 → 관리 콘솔에서 실패 전문 재처리 / 또는 규칙 조건 정정 후 배포
+      check: "성공: 재처리 건수 = 위반 건수, 같은 규칙 위반 미발생 · 실패: 재처리가 다시 위반이면 중단하고 송신 담당과 데이터 재확인, 규칙 정정 후 다른 인터페이스 오류가 생기면 이전 규칙 재배포"
+      note: "사전조건: 위반 전문 목록·건수 기록, 재처리해도 중복되지 않는 업무인지 확인, 규칙 완화는 업무 담당 동의 · 영향: 재처리는 수신 시스템에 실제 데이터 반영, 규칙 완화는 불량 데이터 유입 위험 · 승인: 연계 담당·업무 담당·변경 관리 · 백업/롤백: 규칙 변경 전 설정 내보내기·화면 캡처, 이상 시 이전 규칙 재배포(재처리는 되돌릴 수 없어 승인 목록만) · 적용: MESIM ESB 납품 버전"
+      verify_note: "미검증 — 실패 전문 재처리·규칙 배포 조작을 납품 매뉴얼로 확인하지 못함"
+  - stage: 3
+    steps:
+    - do: 메타빌드 기술지원·송신 담당 자료
+      cmd: |
+        grep -h -i -E "(품질|quality).*(오류|실패|fail|error)" <MESIM_HOME>/logs/*.log > dq_$(date +%Y%m%d).txt
+      check: "위반 규칙·인터페이스·건수·시각(전문 본문 제외)"
+      note: "민감정보 마스킹: 전문 필드 값(개인정보·계좌)은 제외하고 필드 이름·규칙만 남김, 내부 호스트명/IP 가림 · 전달 승인: 보안 담당·연계 기관 승인 후 반출"
+
+- id: MESIM-PROC-R6-BROKER
+  scope: id
+  products: [mesim-esb]
+  category: internal
+  match: [ESB-BROKER-FAIL]
+  title: ESB 메시지 브로커 장애 — 프로세스 중단·저장소 공간 부족
+  source: "메타빌드 MESIM ESB 운영 매뉴얼(납품본) '메시지 브로커 기동/종료·저장소' — 브로커 제품(내장·외부)은 납품본 기준, 공개 매뉴얼 없음"
+  stages:
+  - stage: 1
+    steps:
+    - do: 장애 시작 시각·오류 확인 (읽기 전용)
+      cmd: |
+        grep -n -i -E "broker.*(down|fail|error|disconnect)|브로커" <MESIM_HOME>/logs/*.log | tail -30
+      check: "시작 시각 직전의 공간 부족(No space)·OOM·연결 끊김 문구로 원인 방향 확인"
+      note: "적용: MESIM ESB 납품본 · 권한: MESIM 실행 계정(로그 읽기)"
+    - do: 브로커 프로세스·포트·저장소 공간 확인 (읽기 전용)
+      cmd: |
+        ps -ef | grep -i "[b]roker" | awk '{print $2, $5, $8}'
+        ss -ltn | grep ":<broker_port> "
+        df -h <broker_data_path> ; df -i <broker_data_path>
+      check: "프로세스 없음=브로커 다운(2차 재기동) · 포트 미리슨=기동 실패 · 저장소 95% 이상=영속 메시지 저장 불가(공간 확보가 먼저)"
+      note: "적용: Linux · 저장소 파일은 지우지 않음(영속 메시지 유실) · 권한: MESIM 실행 계정"
+  - stage: 2
+    steps:
+    - do: 저장소 공간 확보 후 브로커 기동
+      cmd: |
+        tar czf /backup/broker_conf_$(date +%Y%m%d).tgz <broker_conf_dir>
+        # 브로커 기동: 납품 매뉴얼 절차(관리 콘솔 또는 기동 스크립트)
+      check: "성공: 브로커 포트 리슨·ESB 로그의 브로커 재연결 성공·적체 메시지 소진 · 실패: 기동 실패면 로그 원인(저장소 손상·잠금 파일) 확인 후 메타빌드 기술지원, 임의로 저장소 파일 정리 금지"
+      note: "사전조건: 저장소 공간 확보(로그·백업 파일 등 브로커 데이터 외 대상만 정리), 적체·미처리 메시지 건수 기록 · 영향: 기동 직후 적체 메시지 일괄 전달로 수신 시스템 부하, 저장소 손상 시 메시지 유실 위험 · 승인: 연계 담당·메타빌드 기술지원 또는 유지보수사·변경 관리 · 백업/롤백: 브로커 설정 tar 보관, 이상 시 설정 복원 후 재기동 · 적용: MESIM ESB 납품 버전"
+      verify_note: "미검증 — MESIM ESB 가 쓰는 브로커 제품·기동 명령·저장소 경로를 납품 매뉴얼로 확인하지 못함"
+  - stage: 3
+    steps:
+    - do: 메타빌드 기술지원 자료
+      cmd: |
+        tar czf mesim_broker_$(date +%Y%m%d).tgz <MESIM_HOME>/logs/ <broker_log_dir> ; df -h <broker_data_path> > df.txt
+      check: "브로커 로그·ESB 로그·저장소 사용량·적체 건수"
+      note: "민감정보 마스킹: 메시지 본문(개인정보)은 포함하지 않음, 로그의 내부 호스트명/IP·계정 가림 · 전달 승인: 보안 담당 승인 후 반출"
+
+- id: MESIM-PROC-R6-CONNECTION
+  scope: id
+  products: [mesim-esb, mesim-apig]
+  category: connection
+  match: [ESB-DB-CONNECT-FAIL, ESB-JMS-CONNECT-FAIL, ESB-FTP-CONNECT-FAIL, ESB-TCP-CONNECT-FAIL, APIG-BACKEND-CONNECT-FAIL]
+  title: 연계 어댑터 연결 실패 — DB·JMS·FTP·TCP·백엔드 접속 불가
+  source: "메타빌드 MESIM ESB/APIG 운영 매뉴얼(납품본) '어댑터(DB·JMS·FTP·TCP·HTTP) 설정·상태'·RFC 959(FTP 530 Not logged in) — 어댑터 설정 항목은 공개 매뉴얼 없음"
+  stages:
+  - stage: 1
+    steps:
+    - do: 실패 어댑터 종류·대상 주소·오류 문구 확인 (읽기 전용)
+      cmd: |
+        grep -n -E "SQLException|Network Adapter|JMSException|530 Login|FTP.*(connect|login)|SFTP|Connection refused|ConnectException|HttpHostConnectException" <MESIM_HOME>/logs/*.log | tail -30
+      check: "Connection refused·Network Adapter=대상 미기동·방화벽 · 530 Login·ORA-01017·Access denied=계정(비밀번호 만료·변경) · JMSException 은 브로커 주소·destination 이름 함께 기록 · 한 대상만=그 대상 장애, 전 대상=이 서버 네트워크"
+      note: "적용: MESIM ESB/APIG 납품본 · 로그·설정의 비밀번호 값은 옮겨 적지 않음 · 권한: MESIM 실행 계정(로그 읽기)"
+    - do: 이 서버에서 대상 도달·이름 해석·소켓 상태 확인 (읽기 전용)
+      cmd: |
+        getent hosts <target_host>
+        nc -zvw3 <target_host> <port>
+        ss -tan dst <target_ip> | awk '{print $1}' | sort | uniq -c
+      check: "nc 실패=대상·방화벽(대상 담당·네트워크 담당 통보) · nc 성공인데 실패 지속=계정·설정(2차) · SYN-SENT 누적=방화벽 DROP"
+      note: "적용: Linux · FTP 21·SFTP 22·DB·브로커는 각 포트 · 접속 시도만(로그인 시도 없음 — 틀린 비밀번호 반복은 계정 잠금) · 권한: 일반 사용자"
+  - stage: 2
+    steps:
+    - do: 대상 복구 확인 후 어댑터 재연결·계정/주소 정정 (관리 콘솔)
+      cmd: |
+        cp -rp <MESIM_HOME>/conf <MESIM_HOME>/conf.bak.$(date +%Y%m%d)
+        # 관리 콘솔 › 어댑터 › 대상 어댑터 접속 정보(주소·계정) 정정 — 비밀번호는 콘솔 입력란에만(명령줄·파일 평문 금지)
+        # 관리 콘솔 › 어댑터 › 재시작(재연결)
+      check: "성공: 어댑터 상태 정상, 로그에 연결 오류 미발생, 실패 전문 재처리 완료 · 실패: 재시작 후에도 실패면 대상 측 미복구 — 시도 중단하고 대상 담당 대기, 정정 후 다른 연계가 깨지면 백업 conf 복원"
+      note: "사전조건: 1차 nc 결과로 대상 정상 확인, 계정 변경은 대상 담당이 발급한 값만, 실패 전문 목록·건수 기록 · 영향: 어댑터 재시작 동안 해당 연계 중단, 재처리는 실제 거래 발생(중복 위험) · 승인: 연계 담당·대상 시스템 담당·변경 관리 · 백업/롤백: conf 사본·콘솔 설정 캡처, 이상 시 복원 후 재시작 · 적용: MESIM 납품 버전"
+      verify_note: "미검증 — 어댑터 접속 정보 편집·재시작(재연결) 화면을 납품 매뉴얼로 확인하지 못함"
+  - stage: 3
+    steps:
+    - do: 메타빌드 기술지원·대상 담당 자료
+      cmd: |
+        grep -h -E "SQLException|JMSException|530 Login|Connection refused|ConnectException" <MESIM_HOME>/logs/*.log > mesim_conn_$(date +%Y%m%d).txt
+      check: "실패 시각·어댑터 종류·대상 주소/포트·오류 문구·nc 결과"
+      note: "민감정보 마스킹: 어댑터 계정·비밀번호·JDBC URL·FTP 경로의 사용자명, 내부 호스트명/IP 를 가림 · 전달 승인: 보안 담당·연계 기관 승인 후 반출"
+
+- id: MESIM-PROC-R6-ADAPTER
+  scope: id
+  products: [mesim-esb]
+  category: upstream
+  match: [ESB-FILE-TRANSFER-FAIL, ESB-MW-CONNECT-FAIL]
+  title: 파일·미들웨어 연계 실패 — 파일 송수신 오류·MQ/Tuxedo/Tmax 연계 오류
+  source: "메타빌드 MESIM ESB 운영 매뉴얼(납품본) '파일 어댑터·미들웨어 어댑터'·IBM MQ 'Reason codes(MQRC 2009·2035·2053·2059·2538)' — www.ibm.com/docs"
+  stages:
+  - stage: 1
+    steps:
+    - do: 파일 연계 — 대상 파일·경로·로컬 공간·권한·적체 확인 (읽기 전용)
+      cmd: |
+        grep -n -i -E "file.*(transfer|send|receive).*(fail|error)|파일.*(전송|수신)" <MESIM_HOME>/logs/*.log | tail -30
+        df -h <path> ; df -i <path> ; ls -ld <path> ; ls <path> | wc -l
+      check: "공간·inode 95% 이상=로컬 저장 불가, 실행 계정 쓰기 권한 없음=권한, 송신 대기 파일 적체 증가=상대 수신 불가 · 파일은 옮기거나 지우지 않음"
+      note: "적용: MESIM ESB 납품본·Linux · 권한: MESIM 실행 계정"
+    - do: 미들웨어 연계 — 오류 코드·리스너 도달 확인 (읽기 전용)
+      cmd: |
+        grep -n -E "MQRC_|MQJE|Tuxedo|TPE|Tmax|MQ.*(connect|Connection)" <MESIM_HOME>/logs/*.log | tail -30
+        nc -zvw3 <mw_host> <mw_port>
+      check: "MQRC 2059(큐 관리자 사용 불가)·2538(호스트 불가)=리스너·큐 관리자 다운, 2009=연결 끊김, 2035=권한, 2053=큐 가득 · nc 실패면 미들웨어 서버·방화벽 — 미들웨어 담당에 큐 관리자·채널 상태 조회 요청"
+      note: "적용: IBM MQ 클라이언트 연계(Tuxedo·Tmax 는 해당 제품 오류 코드 표) · 접속 시도만 · 권한: 일반 사용자"
+  - stage: 2
+    steps:
+    - do: 공간·권한·상대 수신 복구 후 어댑터 재시작·재전송
+      cmd: |
+        cp -rp <MESIM_HOME>/conf <MESIM_HOME>/conf.bak.$(date +%Y%m%d)
+        # 관리 콘솔 › 어댑터 › 파일/미들웨어 어댑터 재시작 → 실패 건 재전송(납품 매뉴얼 절차)
+      check: "성공: 파일 적체 감소·미들웨어 연결 정상·재전송 건수 = 실패 건수 · 실패: 재전송이 다시 실패하면 중단하고 상대(미들웨어·수신 시스템) 복구 대기, 어댑터 기동 실패면 백업 conf 복원"
+      note: "사전조건: 미들웨어 담당·수신 담당이 복구 확인, 실패 파일·전문 목록 기록, 재전송해도 중복되지 않는지 확인 · 영향: 어댑터 재시작 동안 해당 연계 중단, 재전송은 실제 거래 발생 · 승인: 연계 담당·업무 담당·변경 관리 · 백업/롤백: conf 사본·실패 파일 목록 보관, 재전송은 되돌릴 수 없어 승인 목록만 · 적용: MESIM ESB 납품 버전"
+      verify_note: "미검증 — 파일·미들웨어 어댑터 재시작과 실패 건 재전송 조작을 납품 매뉴얼로 확인하지 못함"
+  - stage: 3
+    steps:
+    - do: 메타빌드 기술지원·미들웨어 담당 자료
+      cmd: |
+        grep -h -i -E "file.*(fail|error)|MQRC_|Tuxedo|Tmax" <MESIM_HOME>/logs/*.log > mesim_adapter_$(date +%Y%m%d).txt ; df -h <path> > df.txt
+      check: "실패 시각·파일명(목록)·오류 코드·공간 사용량"
+      note: "민감정보 마스킹: 파일 본문은 포함하지 않음, 파일명의 개인 식별자·큐 관리자 계정·내부 호스트명/IP 가림 · 전달 승인: 보안 담당·연계 기관 승인 후 반출"
+
+- id: MESIM-PROC-R6-FAULT
+  scope: id
+  products: [mesim-esb, mesim-apig]
+  category: upstream
+  match: [ESB-WEBSERVICE-FAIL, LEG-MESIM-APIG-HTTP-CALL-400]
+  title: 연계 대상 오류 응답 — SOAP Fault·HTTP 400(요청 형식·필수값 오류)
+  source: "W3C SOAP 1.1/1.2 'Fault (faultcode·faultstring)'·RFC 9110 '400 Bad Request'·메타빌드 MESIM 운영 매뉴얼(납품본) 'API 모니터링·매핑'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 대상 엔드포인트·오류 코드·거래 ID 확인 (읽기 전용)
+      cmd: |
+        grep -n -A8 -E "SOAPFaultException|WebServiceException|faultstring|faultcode" <MESIM_HOME>/logs/*.log | tail -40
+        grep -n "HTTP CALL ERROR" <MESIM_HOME>/logs/*.log | grep -E "RES CODE:? ?4[0-9]{2}" | tail -30
+      check: "faultcode Client(Sender)·HTTP 400=보내는 요청 형식·필수값 문제(우리 쪽 매핑·호출처) · faultcode Server(Receiver)=상대 처리 오류(상대 담당) · 특정 호출처·API 에만 몰리면 그 호출처의 요청 형식"
+      note: "적용: MESIM ESB/APIG 납품본 · 권한: MESIM 실행 계정(로그 읽기)"
+    - do: 실패 요청 내용과 상대 계약(WSDL·명세) 대조 (변경 없이)
+      cmd: |
+        curl -s -o /dev/null -w "%{http_code}\n" --max-time 10 "http://<provider_host>:<port>/<service>?wsdl"
+        # 관리 콘솔 › API 모니터링: 해당 거래 ID 의 요청 본문·헤더 조회(개인정보 가림)
+      check: "WSDL 응답 실패=상대 서비스 다운 · WSDL 정상인데 Fault=요청이 계약과 다름 — 필수 파라미터·헤더·네임스페이스·서비스 ID 누락 여부 확인 · 상대 배포·WSDL 변경 이력은 상대 담당에 확인"
+      note: "적용: SOAP 연계는 WSDL GET, REST 는 명세 문서 대조 · 업무 요청 재전송 금지(조회만) · 권한: 일반 사용자·콘솔 조회 계정"
+      verify_note: "미검증 — 관리 콘솔에서 거래 ID 로 요청 본문을 조회하는 화면 이름을 납품 매뉴얼로 확인하지 못함"
+  - stage: 2
+    steps:
+    - do: 요청 매핑(필수값·헤더·네임스페이스) 정정 후 배포 또는 호출처 수정 요청
+      cmd: |
+        # 관리 콘솔 › 인터페이스(API) › 매핑 편집 › 검증 › 배포 — 또는 호출처 담당에 요청 형식 수정 요청
+      check: "성공: 같은 요청이 200·정상 응답, Fault·400 미발생 · 실패: 배포 후 다른 요청이 Fault 로 바뀌면 이전 매핑 버전 재배포"
+      note: "사전조건: 상대 서비스 명세(WSDL·필수 파라미터)를 상대 담당과 확인, 개발 환경에서 실패 요청(개인정보 제거본)으로 검증 · 영향: 매핑 배포 즉시 해당 인터페이스 전체 요청에 적용 · 승인: 연계 담당·상대 시스템 담당·변경 관리 · 백업/롤백: 배포 전 현재 매핑 내보내기, 이상 시 이전 버전 재배포 · 적용: MESIM 납품 버전"
+  - stage: 3
+    steps:
+    - do: 상대 시스템·메타빌드 기술지원 자료
+      cmd: |
+        grep -h -A8 -E "SOAPFaultException|faultstring|HTTP CALL ERROR" <MESIM_HOME>/logs/*.log > fault_$(date +%Y%m%d).txt
+      check: "거래 ID·시각·faultcode/faultstring·응답 코드·요청 헤더(값 가림)"
+      note: "민감정보 마스킹: 요청·응답 본문의 개인정보·계좌·인증 토큰·API Key, 내부 호스트명/IP 를 가림 · 전달 승인: 보안 담당·연계 기관 승인 후 반출"
+
+- id: MESIM-PROC-R6-LB
+  scope: id
+  products: [mesim-apig, mesim-esb]
+  category: capacity
+  match: [APIG-LOADBALANCE-FAIL, ESB-LOAD-BALANCE-FAIL]
+  title: 부하분산 실패 — 분산 대상 노드 일부·전부 사용 불가
+  source: "메타빌드 MESIM ESB/APIG 운영 매뉴얼(납품본) '부하분산(대상 그룹)·노드 상태'·Apache Camel 2.x 'Load Balancer EIP (failover)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 대상 그룹·실패 시각 확인 (읽기 전용)
+      cmd: |
+        grep -n -i -E "load ?balanc|no available|부하분산|failover" <MESIM_HOME>/logs/*.log | tail -30
+      check: "'no available'=그룹의 모든 노드 사용 불가(연계 전면 실패), 일부 노드 실패=남은 노드로 처리 중이나 과부하 위험"
+      note: "적용: MESIM ESB/APIG 납품본 · 권한: MESIM 실행 계정(로그 읽기)"
+    - do: 노드별 도달 확인·정상 노드 수 집계 (읽기 전용)
+      cmd: |
+        for n in <node1> <node2> <node3>; do nc -zvw3 $n <port>; done
+        # 관리 콘솔 › 부하분산(대상 그룹): 노드별 상태·제외 여부 캡처(변경 없이)
+      check: "nc 실패 노드=그 노드 장애(노드 담당 통보) · 모두 nc 성공인데 분산 실패=그룹 설정·상태 판정(헬스 체크) 문제 · 정상 노드 수가 평시 처리량을 감당하는지 판단"
+      note: "적용: Linux · 접속 시도만 · 노드 제외·추가 버튼 누르지 않음 · 권한: 일반 사용자·콘솔 조회 계정"
+      verify_note: "미검증 — 부하분산 대상 그룹 화면 이름과 노드 상태 표시를 납품 매뉴얼로 확인하지 못함"
+  - stage: 2
+    steps:
+    - do: 장애 노드 제외·복구 노드 재편입 (관리 콘솔)
+      cmd: |
+        # 관리 콘솔 › 부하분산 › 대상 그룹 › 장애 노드 제외 / 복구 확인 후 재편입
+      check: "성공: 분산 실패 로그 미발생, 남은 노드 응답시간 정상 · 실패: 제외 후 남은 노드 과부하(지연·오류 증가)면 재편입 보류하고 노드 복구 우선, 잘못 제외했으면 즉시 재편입"
+      note: "사전조건: 1차 nc 로 장애 노드 특정, 남은 노드의 처리 여유 확인 · 영향: 제외 시 남은 노드 부하 증가, 재편입한 노드가 불완전하면 다시 오류 · 승인: 연계 담당·노드(백엔드) 담당·변경 관리 · 백업/롤백: 변경 전 그룹 구성 캡처, 이상 시 이전 구성으로 되돌림 · 적용: MESIM 납품 버전"
+      verify_note: "미검증 — 노드 제외·재편입 조작 위치를 납품 매뉴얼로 확인하지 못함"
+  - stage: 3
+    steps:
+    - do: 메타빌드 기술지원 자료
+      cmd: |
+        grep -h -i -E "load ?balanc|no available|failover" <MESIM_HOME>/logs/*.log > lb_$(date +%Y%m%d).txt
+      check: "실패 시각·대상 그룹·노드별 nc 결과·그룹 구성 캡처"
+      note: "민감정보 마스킹: 노드 내부 호스트명/IP·계정을 가림 · 전달 승인: 보안 담당 승인 후 반출"
+
+# ── Indigo ESB ──
+- id: IND-PROC-R6-SECURITY
+  scope: id
+  products: [indigo-esb]
+  category: security
+  match: [LEG-IND-009, LEG-IND-012]
+  title: GPKI 서명·암호화 처리와 인증서 LDAP 조회 — 정상 흐름 표지의 짝·지연 점검 (Indigo ESB)
+  source: "Indigo ESB 로그 문구('SingEncryptProcessor START/END'·'Request ldap.') 의미 기준 — 공개 매뉴얼 없음 · GPKI 인증서는 X.509(openssl x509 로 유효기간 확인)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 서명/암호화 START·END 짝과 LDAP 조회 건수 확인 (읽기 전용)
+      cmd: |
+        grep -c "SingEncryptProcessor START" <ESB_HOME>/logs/<log> ; grep -c "SingEncryptProcessor END" <ESB_HOME>/logs/<log>
+        grep -c "Request ldap." <ESB_HOME>/logs/<log>
+        grep -n -i -E "gpki|ldap|sign|cert" <ESB_HOME>/logs/<log> | grep -i -E "error|exception|fail|expired" | tail -20
+      check: "START·END 수가 같고 오류 줄이 없으면 정상 흐름 — 조치 불필요 · END 가 적으면 서명 처리 중단 건(같은 시각 오류 줄 확인) · 인증서 만료·검증 실패 문구가 있으면 2차"
+      note: "적용: Indigo ESB 납품본(GPKI 보안 프로세서) · 로그 문구는 원문 철자(SingEncrypt) 그대로 · 권한: ESB 실행 계정(로그 읽기)"
+    - do: GPKI 디렉터리(LDAP) 도달·서버 인증서 유효기간 확인 (읽기 전용)
+      cmd: |
+        nc -zvw3 <ldap_server> 389
+        openssl x509 -inform DER -in <gpki_cert_dir>/<서버인증서>.cer -noout -subject -dates
+      check: "LDAP 도달 실패=GPKI 디렉터리·구간 장애(상대 인증서를 못 가져와 서명 검증 지연·실패) · notAfter 가 30일 이내면 갱신 일정 수립, 지났으면 서명·암호화 실패 원인"
+      note: "적용: Linux · 인증서 공개 파일만 읽음(개인키 파일은 열지 않음) · 권한: ESB 실행 계정"
+      verify_note: "미검증 — GPKI 서버 인증서 파일 위치·이름·형식(DER)을 납품본으로 확인하지 못함"
+  - stage: 2
+    steps:
+    - do: GPKI 인증서 갱신본 교체 또는 LDAP 주소 정정 후 재기동
+      cmd: |
+        tar czf /backup/gpki_$(date +%Y%m%d).tgz <gpki_cert_dir> <ESB_HOME>/etc
+        # 갱신 인증서·키 파일 배치(발급 기관 절차) → 해당 서비스 번들 재시작(Karaf: bundle:restart <id>)
+      check: "성공: 재기동 후 SingEncryptProcessor START·END 짝 일치, 상대 기관 서명 검증 성공 · 실패: 서명 오류가 계속되면 백업 인증서·설정 복원 후 재시작, 상대 기관에 새 인증서 등록 여부 확인"
+      note: "사전조건: 발급 기관에서 받은 갱신 인증서·키(비밀번호는 보안 채널로), 상대 기관 통보 일정 · 영향: 재시작 동안 해당 연계 중단, 인증서 불일치 시 모든 서명 연계 실패 · 승인: 보안 담당·연계 담당·변경 관리 · 백업/롤백: 인증서 디렉터리·etc tar 보관, 이상 시 복원 후 재시작 · 적용: Indigo ESB 납품 버전(Karaf 3.x/4.x)"
+      verify_note: "미검증 — GPKI 인증서 교체 위치·키 비밀번호 설정 방법·재적재 방법을 납품 매뉴얼로 확인하지 못함"
+  - stage: 3
+    steps:
+    - do: 유지보수사·보안 담당 자료
+      cmd: |
+        grep -n -i -E "SingEncryptProcessor|Request ldap|gpki" <ESB_HOME>/logs/<log> | tail -500 > gpki_$(date +%Y%m%d).txt
+      check: "START/END 건수·오류 줄·LDAP 도달 결과·인증서 유효기간(subject·dates)"
+      note: "민감정보 마스킹: 인증서 subject 의 기관 코드·담당자, LDAP 주소·내부 IP 를 가리고 개인키·키 비밀번호 파일은 포함하지 않음 · 전달 승인: 보안 담당 승인 후 반출"

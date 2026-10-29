@@ -1,0 +1,34 @@
+# 아이디어 3 — DB 묶음 A(Oracle · Tibero · Altibase) 판정별 절차 적합성 확인 결과 (2026-10-16)
+# '같은 제품·유형'으로 붙던 판정 중 기존 절차의 1차 확인·2차 조치가 그 판정에 실제로 맞는 것만 '이 판정 전용'으로 잇는다.
+# 맞지 않는 판정은 r6_dba_procedures.yaml 의 전용 절차(ORA-/TBR-/ALT-PROC-R6-*)로 옮겼다. 기존 절차 파일은 고치지 않는다.
+links:
+# ── Oracle ──
+- procedure: ORA-PROC-INTERNAL
+  match: [ORA-00603, ORA-19566]
+  reviewed: "2026-10-16 판정 적합성 확인 — ORA-00603 은 ORA-600/7445 로 세션이 끝난 결과라 alert log·incident 확인(1차)·IPS(3차)가 그대로 맞고, ORA-19566 은 RMAN 이 만난 손상 블록이라 2차 'RMAN validate·v$database_block_corruption·블록 미디어 복구' 단계가 맞음(인스턴스 재기동 단계는 해당 없음)"
+- procedure: ORA-PROC-CONNECTION
+  match: [ORA-12518, TNS-12547, TNS-00511]
+  reviewed: "2026-10-16 판정 적합성 확인 — ORA-12518(TNS-12518 이미 연결)·TNS-12547(서버 프로세스 생성 실패) 은 v$resource_limit processes·listener.log 확인과 PROCESSES 상향이, TNS-00511(TNS-12541 하위) 은 lsnrctl status·리스너 기동 단계가 그대로 맞음"
+- procedure: ORA-PROC-STORAGE
+  match: [ORA-16014]
+  reviewed: "2026-10-16 판정 적합성 확인 — 아카이브 목적지 오류·FRA 가득 참이 원인이라 v$archive_dest·v$recovery_area_usage 확인과 백업 완료 아카이브 정리·FRA 상향(ORA-00257·ORA-16038 과 같은 처리)이 맞음"
+- procedure: ORA-PROC-LOCK
+  match: [ORA-04020]
+  reviewed: "2026-10-16 판정 적합성 확인 — 라이브러리 캐시 잠금 교착으로 ORA-04021 과 같은 계열, 블로킹 세션·데드락 트레이스 확인과 업무 확인 후 세션 종료 단계가 맞음"
+# ── Tibero ──
+- procedure: TBR-PROC-INTERNAL
+  match: [TBR-7607, TBR-12020, TBR-24003, LEG-TIBERO-TBR-001-D666]
+  reviewed: "2026-10-16 판정 적합성 확인 — TBR-7607(NORMAL 로 열 수 없음)·TBR-12020(현재 서버 모드에서 실행 불가)은 v$instance 상태·sys.log 확인과 단계별 기동·복구가, TBR-24003(컨트롤파일 읽기 실패)은 TBR-24001/24004 와 같은 다중화 사본 교체가, TBR-001 계열 룰은 번호 미상이라 프로세스·sys.log [E]/[F] 분류 1차가 맞음"
+- procedure: TBR-PROC-R5-LOCK
+  match: [LEG-TBR-DEADLOCK]
+  reviewed: "2026-10-16 판정 적합성 확인 — 교착은 잠금 보유·대기 관계 문제라 v$lock·v$transaction 확인과 업무 확인 후 보유 트랜잭션 정리가 맞음(교착은 자동 해소되므로 2차 정리는 반복 시에만)"
+- procedure: TBR-PROC-R5-CONNECTION
+  match: [TBR-2004]
+  reviewed: "2026-10-16 판정 적합성 확인 — tbdsn.tbr 형식 오류라 별칭 항목 확인(1차)과 백업 후 tbdsn.tbr 정정·별칭 접속 확인(2차)이 그대로 맞음"
+# ── Altibase ──
+- procedure: ALT-PROC-R5-INTERNAL
+  match: [ERR-4000F]
+  reviewed: "2026-10-16 판정 적합성 확인 — msb 적재 실패는 서버 기동 불가(FATAL)라 프로세스·altibase_boot.log 확인과 원인 조치 후 기동 단계가 맞음(원인 조치 = 같은 버전 설치본의 msg 파일 복원)"
+- procedure: ALT-PROC-R5-UPSTREAM
+  match: [ERR-31017, ERR-61012, ERR-61003]
+  reviewed: "2026-10-16 판정 적합성 확인 — 이중화 미생성(구성 불일치)·송신자 상대 접속 실패·소켓 읽기 실패는 V$REPSENDER(NET_ERROR_FLAG·PEER_IP/PORT)·V$REPGAP·altibase_rp.log 확인과 구성 정정 후 ALTER REPLICATION STOP/START 가 맞음"

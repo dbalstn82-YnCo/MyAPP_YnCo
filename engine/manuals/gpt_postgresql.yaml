@@ -1,0 +1,16 @@
+product: postgresql
+title: PostgreSQL 운영 참고 (GPT 수집 — 벤더 문서 대조 필요)
+sections:
+- heading: 로그 위치
+  body: SHOW logging_collector; SHOW log_directory; SHOW log_filename; 으로 설정을 확인하고
+    SELECT pg_current_logfile(); 로 현재 파일을 찾는다. systemd 환경이면 journalctl -u postgresql*
+    도 확인한다.
+- heading: 장애 시 수집 방법
+  body: 서버 로그와 pg_stat_activity, pg_locks, pg_stat_database, replication 상태를 같은 시각에
+    저장하고 기동 장애면 postgresql.conf, pg_hba.conf와 서비스 journal을 보존한다.
+- heading: 대표 장애 신호
+  body: SQLSTATE 53200 메모리 부족, 53300 접속 초과, 53100 디스크 부족, 40P01 교착, 55P03 잠금 실패, 57P02
+    crash shutdown, 08006 연결 실패를 우선 확인한다.
+- heading: 1차 확인 명령
+  body: pg_isready 후 psql -c "select version(),pg_is_in_recovery();" 와 psql -c "select
+    pid,state,wait_event_type,wait_event from pg_stat_activity;" 를 실행한다.

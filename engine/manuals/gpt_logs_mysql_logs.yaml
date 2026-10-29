@@ -1,0 +1,76 @@
+product: mysql
+layer: db
+title: mysql 로그 종류 카탈로그 (GPT 수집 — 벤더 문서 대조 필요)
+source: GPT 수집(벤더 문서 대조 필요)
+sources: []
+logtypes:
+- name: Error 로그
+  path: log_error; 미지정 시 플랫폼/기동방식별 상이
+  format: 텍스트 또는 JSON·ISO-8601
+  check: '[MY-xxxxx]·InnoDB crash·OOM·Aborted connection·startup/shutdown'
+  sample: timestamp thread [ERROR] [MY-xxxxx] [Server] message 형식
+- name: General Query 로그
+  path: DATADIR/<hostname>.log 또는 general_log_file
+  format: 텍스트 또는 mysql.general_log·ISO-8601
+  check: Connect·Quit·Query·클라이언트가 전송한 SQL
+  sample: timestamp thread_id Command argument 형식
+- name: Slow Query 로그
+  path: DATADIR/<hostname>-slow.log 또는 slow_query_log_file
+  format: 텍스트 또는 mysql.slow_log·ISO-8601
+  check: Query_time·Lock_time·Rows_examined·장기 SQL
+  sample: '# Query_time: <sec> Lock_time: <sec> Rows_sent: <n> Rows_examined: <n>'
+- name: Binary 로그
+  path: DATADIR/binlog.000001 계열 또는 log_bin_basename
+  format: 바이너리·event timestamp
+  check: 데이터 변경·복제·PITR·GTID·transaction event
+  sample: 'mysqlbinlog 출력형 # at <pos>·event 형식'
+- name: Binary Index
+  path: DATADIR/binlog.index 또는 log_bin_index
+  format: 텍스트·타임스탬프 없음
+  check: binlog 파일 누락·rotation·복제/PITR 파일 목록
+  sample: ./binlog.000001
+- name: Relay 로그
+  path: DATADIR/<hostname>-relay-bin.000001 계열
+  format: 바이너리·event timestamp
+  check: Replica I/O·SQL thread·relay 손상·replication lag
+  sample: mysqlbinlog로 해석 가능한 binary event 형식
+- name: DDL 내부 로그
+  path: mysql.innodb_ddl_log hidden table; 출력 시 stderr/error log
+  format: 내부 레코드/텍스트·서버 로그 타임스탬프
+  check: Atomic DDL crash recovery·DELETE SPACE·FREE·RENAME
+  sample: '[Note] ... InnoDB: DDL log insert : [DDL record: ...]'
+- name: Enterprise Audit
+  path: DATADIR/audit.log 기본, audit_log_file로 변경
+  format: JSON 또는 XML·timestamp
+  check: Connect·Disconnect·SQL·객체 접근·감사 필터
+  sample: JSON {..."class":"general",...} 또는 XML <AUDIT_RECORD>...
+- name: System Log
+  path: Unix syslog 또는 Windows Application Event Log
+  format: syslog/EventLog·시스템 타임스탬프
+  check: mysqld ERROR/WARNING·startup·shutdown·MY 코드
+  sample: source MySQL 또는 MySQL-<tag>
+sections:
+- heading: 로그 종류 카탈로그 (전수)
+  body: 'Error 로그: log_error; 미지정 시 플랫폼/기동방식별 상이 · General Query 로그: DATADIR/<hostname>.log 또는 general_log_file · Slow Query 로그: DATADIR/<hostname>-slow.log 또는 slow_query_log_file · Binary 로그: DATADIR/binlog.000001
+    계열 또는 log_bin_basename · Binary Index: DATADIR/binlog.index 또는 log_bin_index · Relay 로그: DATADIR/<hostname>-relay-bin.000001 계열 · DDL 내부 로그: mysql.innodb_ddl_log hidden table; 출력 시 stderr/error log
+    · Enterprise Audit: DATADIR/audit.log 기본, audit_log_file로 변경 · System Log: Unix syslog 또는 Windows Application Event Log'
+- heading: '로그: Error 로그'
+  body: 경로 log_error; 미지정 시 플랫폼/기동방식별 상이 / 형식 텍스트 또는 JSON·ISO-8601 / 확인 [MY-xxxxx]·InnoDB crash·OOM·Aborted connection·startup/shutdown / 샘플 timestamp thread [ERROR] [MY-xxxxx] [Server] message 형식
+- heading: '로그: General Query 로그'
+  body: 경로 DATADIR/<hostname>.log 또는 general_log_file / 형식 텍스트 또는 mysql.general_log·ISO-8601 / 확인 Connect·Quit·Query·클라이언트가 전송한 SQL / 샘플 timestamp thread_id Command argument 형식
+- heading: '로그: Slow Query 로그'
+  body: '경로 DATADIR/<hostname>-slow.log 또는 slow_query_log_file / 형식 텍스트 또는 mysql.slow_log·ISO-8601 / 확인 Query_time·Lock_time·Rows_examined·장기 SQL / 샘플 # Query_time: <sec> Lock_time: <sec> Rows_sent: <n>
+    Rows_examined: <n>'
+- heading: '로그: Binary 로그'
+  body: '경로 DATADIR/binlog.000001 계열 또는 log_bin_basename / 형식 바이너리·event timestamp / 확인 데이터 변경·복제·PITR·GTID·transaction event / 샘플 mysqlbinlog 출력형 # at <pos>·event 형식'
+- heading: '로그: Binary Index'
+  body: 경로 DATADIR/binlog.index 또는 log_bin_index / 형식 텍스트·타임스탬프 없음 / 확인 binlog 파일 누락·rotation·복제/PITR 파일 목록 / 샘플 ./binlog.000001
+- heading: '로그: Relay 로그'
+  body: 경로 DATADIR/<hostname>-relay-bin.000001 계열 / 형식 바이너리·event timestamp / 확인 Replica I/O·SQL thread·relay 손상·replication lag / 샘플 mysqlbinlog로 해석 가능한 binary event 형식
+- heading: '로그: DDL 내부 로그'
+  body: '경로 mysql.innodb_ddl_log hidden table; 출력 시 stderr/error log / 형식 내부 레코드/텍스트·서버 로그 타임스탬프 / 확인 Atomic DDL crash recovery·DELETE SPACE·FREE·RENAME / 샘플 [Note] ... InnoDB: DDL log insert : [DDL record:
+    ...]'
+- heading: '로그: Enterprise Audit'
+  body: 경로 DATADIR/audit.log 기본, audit_log_file로 변경 / 형식 JSON 또는 XML·timestamp / 확인 Connect·Disconnect·SQL·객체 접근·감사 필터 / 샘플 JSON {..."class":"general",...} 또는 XML <AUDIT_RECORD>...
+- heading: '로그: System Log'
+  body: 경로 Unix syslog 또는 Windows Application Event Log / 형식 syslog/EventLog·시스템 타임스탬프 / 확인 mysqld ERROR/WARNING·startup·shutdown·MY 코드 / 샘플 source MySQL 또는 MySQL-<tag>

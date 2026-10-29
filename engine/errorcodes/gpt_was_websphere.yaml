@@ -1,0 +1,200 @@
+product: websphere
+layer: was
+note: GPT 협업 수집분 — 벤더 공식 문서와 대조 후 확정
+codes:
+- code: WSVR0009E
+  severity: error
+  category: internal
+  title: 서버 시작 중 오류 발생
+  immediate:
+  - "`grep -n -B5 -A30 'WSVR0009E' <PROFILE_ROOT>/logs/<server>/SystemOut.log | head -60` 로 함께 기록된 예외 확인 (WAS traditional 8.5.5/9.0)"
+  - "`tail -50 <PROFILE_ROOT>/logs/<server>/SystemErr.log` 와 `ls -lt <PROFILE_ROOT>/logs/ffdc/ | head` 로 같은 시각 FFDC 확보 — 예외가 가리키는 구성요소가 원인"
+  short:
+  - 선행 예외와 구성 및 컴포넌트 초기화 실패를 분석
+  mid:
+  - 원인 구성이나 모듈을 수정하고 검증 후 재기동
+  long:
+  - 기동 전 구성검증과 FFDC 수집 및 자동 롤백을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/support/pages/wsvr0009e-error-occurred-during-startup)
+  note: 공식 Error
+  vendor_cause: 서버 시작 과정에서 예외가 발생했으며 실제 원인은 함께 기록된 예외에 있음
+  vendor_action: 함께 출력된 예외와 서버 로그를 확인해 시작 실패 원인을 판별
+  vendor_url: https://www.ibm.com/support/pages/wsvr0009e-error-occurred-during-startup
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  version_note: WSVR 메시지 ID 는 traditional 7.0~9.0 동일 — traditional 전용(Liberty 는 CWWK* 체계)
+- code: WSVR0605W
+  severity: warn
+  category: thread
+  title: 행 스레드 감지
+  immediate:
+  - "`grep -n -A20 'WSVR0605W' <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -60` 으로 hung 스레드 이름·활성 시간·스택 상단 확인 — 같은 스레드의 WSVR0606W(완료) 가 뒤따르지 않으면 지속 중"
+  - "`<PROFILE_ROOT>/bin/wsadmin.sh -lang jython -c \"AdminControl.invoke(AdminControl.completeObjectName('type=JVM,process=<server>,*'), 'dumpThreads')\"` 를 1~2분 간격 2~3회 실행해 javacore 확보(스레드 덤프, 프로세스는 유지) — 같은 스택이 반복되면 그 대기 자원(DB·외부 호출·잠금)이 원인 (8.5.5/9.0)"
+  short:
+  - DB와 웹서비스 및 JDBC 풀과 잠금 대기 여부를 분석
+  mid:
+  - 병목 코드와 타임아웃 및 스레드풀 구성을 조정
+  long:
+  - Hung thread 추세와 의존 서비스 지연을 통합 모니터링
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/support/pages/configuring-websphere-application-server-hung-thread-detector-automatically-produce-javacore-or-thread-dump-wsvr0605w-message)
+  note: 장시간 활성 스레드가 hung일 수 있음
+  vendor_cause: 스레드가 장시간 활성 상태이며 deadlock 또는 무한 루프 상태일 수 있음
+  vendor_action: 스택 추적과 관련 로그를 분석하고 지속되면 IBM Support의 메시지 ID 문제 판별 정보를 확인
+  vendor_url: https://www.ibm.com/support/pages/configuring-websphere-application-server-hung-thread-detector-automatically-produce-javacore-or-thread-dump-wsvr0605w-message
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  version_note: WSVR 메시지 ID 는 traditional 7.0~9.0 동일 — traditional 전용(Liberty 는 CWWK* 체계)
+- code: WSVR0194E
+  severity: error
+  category: internal
+  title: 구성단위 시작 실패
+  immediate:
+  - '`grep -n -A 20 "WSVR0194E" <PROFILE_ROOT>/logs/<server>/SystemOut.log | head -40` 으로 실패한 composition unit·BLA 이름과 직전 예외 확인'
+  - '`<PROFILE_ROOT>/bin/wsadmin.sh -lang jython -c "print AdminControl.queryNames(''type=Application,process=<server>,*'')"` 로 실행 중 애플리케이션 목록을 확인해 영향 범위(해당 앱만인지) 판단'
+  short:
+  - 애플리케이션 구성과 의존 모듈 및 대상 매핑을 분석
+  mid:
+  - 구성단위와 애플리케이션 배포 구성을 수정
+  long:
+  - 배포 전 구성단위 기동검증과 롤백 절차를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/docs/en/baw/25.0.0?topic=migration-errors-when-starting-application-cluster)
+  note: Composition unit failed to start
+  vendor_cause: BLA의 지정된 composition unit 시작이 실패했으며 원인은 즉시 알 수 없음
+  vendor_action: 지속되면 메시지 ID로 IBM WebSphere Application Server Support의 문제 판별 정보를 확인
+  vendor_url: https://www.ibm.com/docs/en/baw/25.0.0?topic=migration-errors-when-starting-application-cluster
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  version_note: WSVR 메시지 ID 는 traditional 7.0~9.0 동일 — traditional 전용(Liberty 는 CWWK* 체계)
+- code: WSVR0208E
+  severity: error
+  category: internal
+  title: EJB 모듈 시작 실패
+  immediate:
+  - "`grep -n -B20 -A30 'WSVR0208E' <PROFILE_ROOT>/logs/<server>/SystemOut.log | head -80` 로 실패한 EJB JAR 이름과 포함된 예외 확인 (WAS traditional 8.5.5/9.0)"
+  - "`grep -n -E 'WSVR0037I|CNTR|NMSV' <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -30` 로 선행 메시지 확인 — WSVR0037I(EJB jar 시작) 이후 첫 오류가 원인"
+  short:
+  - EJB 배포상태와 의존 리소스 및 클래스 로딩을 분석
+  mid:
+  - 패키징과 리소스 참조 및 호환성 문제를 수정
+  long:
+  - EJB 배포 회귀시험과 기동 헬스체크를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/docs/SS7K4U_8.5.5/com.ibm.websphere.messages.doc/WSVR.html)
+  note: Unable to start EJB jar
+  vendor_cause: EJB JAR 모듈이 시작에 실패함 — 직전 WSVR0037I 이후의 오류나 이 메시지에 포함된 예외(클래스 로딩·JNDI 바인딩·데이터소스 참조 실패)가 원인이다.
+  vendor_action: 선행 WSVR0037I 이후의 오류 메시지를 확인하고, 없으면 현재 메시지에 포함된 예외 설명으로 원인을 판별
+  vendor_url: https://www.ibm.com/docs/SS7K4U_8.5.5/com.ibm.websphere.messages.doc/WSVR.html
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  version_note: WSVR 메시지 ID 는 traditional 7.0~9.0 동일 — traditional 전용(Liberty 는 CWWK* 체계)
+- code: CWPKI0017E
+  severity: error
+  category: security
+  title: 키스토어 인증서 만료
+  immediate:
+  - '`grep -n "CWPKI0017E" <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -5` 로 만료 인증서 별칭·키스토어 확인'
+  - '`keytool -list -v -keystore <path>/key.p12 -storetype PKCS12 | grep -E "Alias|Valid"` 로 만료일 확인(비밀번호 프롬프트는 Enter — 무결성 미검증 조회), 그 SSL 구성을 쓰는 채널 확인'
+  short:
+  - '(2차·승인 후, 롤백: 기존 키스토어 사본) 유효 인증서로 교체·만료 인증서 제거 후 SSL 연결 확인'
+  mid:
+  - 인증서 갱신 절차와 keystore 배포를 표준화
+  long:
+  - 만료 사전 경보와 인증서 수명주기 자동화를 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/docs/en/was/8.5.5?topic=messages-cwpki)
+  note: 공식 Error
+  vendor_cause: 키스토어의 지정된 인증서 유효기간이 지나 만료되었다는 오류 — 그 인증서를 쓰는 SSL 채널·클라이언트 연결이 실패할 수 있다.
+  vendor_action: 키스토어의 모든 인증서 만료일을 확인하고 만료된 인증서를 제거
+  vendor_url: https://www.ibm.com/docs/en/was/8.5.5?topic=messages-cwpki
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  - WAS Liberty (공유 코드)
+  version_note: CWPKI(SSL/키스토어) 는 6.1 이후 — traditional 7~9 및 Liberty 공통
+- code: CWPKI0019E
+  severity: error
+  category: security
+  title: SSL 설정 파싱 실패
+  immediate:
+  - "`grep -n -A10 'CWPKI0019E' <PROFILE_ROOT>/logs/<server>/SystemOut.log | head -30` 으로 파싱 오류 내용과 대상 파일 경로 확인"
+  - "`ls -l <PROFILE_ROOT>/properties/ssl.client.props` 와 `grep -n -v -i -E '^#|password' <PROFILE_ROOT>/properties/ssl.client.props | head -40` 로 파일 존재·권한·구문 확인(비밀번호 줄은 출력하지 않음, 8.5.5/9.0)"
+  short:
+  - ConfigURL과 속성 형식 및 파일 권한을 점검
+  mid:
+  - SSL 클라이언트 설정을 수정하고 환경별 표준본을 적용
+  long:
+  - SSL 설정 정적검사와 변경 검증을 자동화
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/docs/en/was/8.5.5?topic=messages-cwpki)
+  note: ssl.client.props 파싱 또는 위치 오류
+  vendor_cause: ssl.client.props 파일 구문에 문제가 있거나 파일 위치가 유효하지 않을 수 있음
+  vendor_action: 반환된 오류를 검토하고 ssl.client.props 파일의 구문과 위치를 확인
+  vendor_url: https://www.ibm.com/docs/en/was/8.5.5?topic=messages-cwpki
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  - WAS Liberty (공유 코드)
+  version_note: CWPKI(SSL/키스토어) 는 6.1 이후 — traditional 7~9 및 Liberty 공통
+- code: CWPKI0022E
+  severity: error
+  category: security
+  title: SSL 신뢰 검증 실패
+  immediate:
+  - "`grep -n -A5 'CWPKI0022E' <PROFILE_ROOT>/logs/<server>/SystemOut.log | tail -20` 로 상대 인증서 SubjectDN 과 대상 host:port 확인"
+  - "`openssl s_client -connect <host>:<port> -showcerts </dev/null | openssl x509 -noout -subject -issuer -enddate` 로 상대 인증서 발급자·만료일 확인, `keytool -list -keystore <PROFILE_ROOT>/config/cells/<cell>/nodes/<node>/trust.p12 -storetype PKCS12` 로 signer 존재 확인 — 발급 CA 가 목록에 없으면 확정"
+  short:
+  - 누락 signer와 만료 또는 서명 불일치 및 호스트 연결을 검증
+  mid:
+  - 정상 CA 체인을 truststore에 반영하고 TLS 구성을 정비
+  long:
+  - 인증서 체인 검증과 truststore 변경관리를 자동화
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/docs/en/was-nd/9.0.5?topic=configurations-errors-configuring-ssl-encrypted-access-security)
+  note: 신뢰되지 않은 signer 등이 원인
+  vendor_cause: 대상 서버가 보낸 signer 인증서가 로컬 truststore에서 신뢰되지 않아 SSL handshake가 실패함
+  vendor_action: 대상 signer를 확인해 신뢰할 수 있으면 해당 SSL 구성의 로컬 truststore에 추가
+  vendor_url: https://www.ibm.com/docs/en/was-nd/9.0.5?topic=configurations-errors-configuring-ssl-encrypted-access-security
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  - WAS Liberty (공유 코드)
+  version_note: CWPKI(SSL/키스토어) 는 6.1 이후 — traditional 7~9 및 Liberty 공통
+- code: CWPKI0315E
+  severity: error
+  category: security
+  title: SSL 구성 속성 null
+  immediate:
+  - "`grep -n -A10 'CWPKI0315E' <PROFILE_ROOT>/logs/<server>/SystemOut.log | head -30` 으로 null 인 SSL 구성 속성 확인"
+  - "`ps -ef | grep <server> | grep -o 'com.ibm.SSL.ConfigURL=[^ ]*'` 로 실제 적용된 ConfigURL 확인, `ls -l <그 경로>` 로 파일 존재·권한 확인 — 경로가 없거나 파일이 없으면 확정"
+  short:
+  - ssl.client.props 파싱 오류와 파일 경로 및 권한을 점검
+  mid:
+  - SSL 설정 파일을 정상화하고 구성 배포 절차를 표준화
+  long:
+  - SSL 설정 무결성 검사와 기동 전 검증을 운영
+  source: GPT 수집·벤더 문서 대조 완료(https://www.ibm.com/support/pages/metadata-deploy-utility-fails-when-wasprofile-option-used)
+  note: SSL client 구성 파싱 문제 가능
+  vendor_cause: SSL 구성 특성이 없으며 com.ibm.SSL.ConfigURL 오설정 또는 SSL 클라이언트 구성 파싱 오류일 수 있음
+  vendor_action: ssl.client.props 오류를 확인하고 com.ibm.SSL.ConfigURL이 올바르게 설정됐는지 확인
+  vendor_url: https://www.ibm.com/support/pages/metadata-deploy-utility-fails-when-wasprofile-option-used
+  versions:
+  - WAS traditional 7.0
+  - WAS traditional 8.0
+  - WAS traditional 8.5/8.5.5
+  - WAS traditional 9.0
+  - WAS Liberty (공유 코드)
+  version_note: CWPKI(SSL/키스토어) 는 6.1 이후 — traditional 7~9 및 Liberty 공통

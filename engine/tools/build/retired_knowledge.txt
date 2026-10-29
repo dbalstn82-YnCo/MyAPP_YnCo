@@ -1,0 +1,12 @@
+# 일부러 고치거나 뺀 지식 — 배포 폴더에 옛 것이 남아 있어도 덮어써도 되는 항목(check_dist_knowledge.py --before 예외)
+# 2026-10-13 룰 학습 1차: 복구 문구에도 걸리던 오탐 별칭을 고쳤다(새 정규식은 엔진 _aliases.yaml)
+alias|tomcat|TOMCAT-STUCK-THREAD|StuckThreadDetectionValve|has been active for
+# 2026-10-15 룰 학습 3차(GPT 13차): 잘못 이어진 Apache 2.2 별칭 — 문구별 2.4 코드로 나눴다(AH01114·AH00957·AH01110·AH01084·AH00128)
+alias|apache|AH00898|proxy: (?:HTTP|AJP): failed to make connection to backend|proxy: .*attempt to connect to .* failed
+alias|apache|AH01084|proxy: .*File does not exist|File does not exist:
+alias|apache|AH01114|proxy: .*error reading response|proxy: pass request body failed
+# 2026-10-15 룰 학습 5차: Goldilocks 사전 키를 파서 코드 모양(ERR-<내부번호>)으로 — 숫자만 쓴 키는 판정에 닿지 못했다
+code|11141
+code|14168
+code|goldilocks:11141
+code|goldilocks:14168

@@ -1,0 +1,88 @@
+name: 사내 장애 보고서 양식 (기존 보고서 골격 자동 추출)
+source_docs: 42
+sections:
+- heading: 장애 발생 시스템 개요
+  field: summary
+  guide: 장애 유형·계층·요약 자동 기입
+  seen_in: 10
+- heading: 별지 제2호 서식] 정보시스템 장애 상황관리 종료(일일)보고서
+  field: manual
+  guide: 담당자 작성 항목
+  seen_in: 11
+- heading: 장애 개요
+  field: summary
+  guide: 장애 유형·계층·요약 자동 기입
+  seen_in: 15
+- heading: 장애내용
+  field: summary
+  guide: 장애 유형·계층·요약 자동 기입
+  seen_in: 13
+- heading: 장애원인
+  field: cause
+  guide: 장애 유형·판정 근거 자동 기입
+  seen_in: 23
+- heading: 장애 근본원인
+  field: cause
+  guide: 장애 유형·판정 근거 자동 기입
+  seen_in: 10
+- heading: 시스템명
+  field: manual
+  guide: 담당자 작성 항목
+  seen_in: 8
+- heading: 조치내용(시간대별 기재)
+  field: incident_time
+  guide: 장애 시간(자동 탐지) 자동 기입
+  seen_in: 13
+- heading: 서비스점검
+  field: manual
+  guide: 담당자 작성 항목
+  seen_in: 9
+- heading: 점검내용
+  field: summary
+  guide: 장애 유형·계층·요약 자동 기입
+  seen_in: 8
+- heading: 시스템 구성 정보
+  field: manual
+  guide: 담당자 작성 항목
+  seen_in: 10
+- heading: 점검결과
+  field: manual
+  guide: 담당자 작성 항목
+  seen_in: 8
+- heading: 구분
+  field: manual
+  guide: 담당자 작성 항목
+  seen_in: 9
+- heading: 장애 근본원인 조치 여부
+  field: cause
+  guide: 장애 유형·판정 근거 자동 기입
+  seen_in: 9
+- heading: 후속 조치
+  field: actions
+  guide: 단기·중기 조치 자동 기입
+  seen_in: 9
+- heading: 장애 사전예방 가능 여부
+  field: prevention
+  guide: 장기 조치(구조 개선) 자동 기입
+  seen_in: 8
+- heading: 정보시스템 구성도
+  field: manual
+  guide: 담당자 작성 항목
+  seen_in: 12
+- heading: 로그 분석 내용
+  field: analysis
+  guide: 판정 근거·코드 빈도·발생 패턴 자동 기입
+  seen_in: 0
+- heading: 1차 긴급 조치 (운영자)
+  field: tier1
+  guide: 즉시 조치 상세·1차 확인 명령 자동 기입
+  seen_in: 0
+- heading: 2차 조치 — 유지보수 엔지니어 확인·전달 내용·로그 캡처
+  field: tier2
+  guide: 확인 항목·전달 내용·원본 로그 캡처 자동 기입
+  seen_in: 0
+- heading: 3차 조치 — 제조사 상세 분석 의뢰 정리
+  field: tier3
+  guide: 의뢰 정리·수집 자료·중장기 과제 자동 기입
+  seen_in: 0
+note: 섹션 제목만 추출됨 — 과거 보고서의 본문·문장은 저장하지 않음

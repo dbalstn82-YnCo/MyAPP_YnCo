@@ -1,0 +1,998 @@
+# DB 계층 조치 절차 카탈로그 — Oracle 19c · Tibero 6/7 · MySQL 8.0 · SQL Server 2019 · PostgreSQL 15 · Altibase 7 · CUBRID 11 · GOLDILOCKS 공식 매뉴얼 기준 (2026-09-11)
+# 1차는 읽기 전용 조회만(DBA 계정 필요 시 2차 요청). 2차 명령은 DBA 가 변경 관리 승인 후 수행.
+# 2026-10-16 강화(GPT 45차 관문): 1차 = 읽기 전용·출력 제한·적용 버전/권한 표기, 2차 = 사전조건·영향·승인·백업/롤백 + 성공/실패 판단, 3차 = 민감정보 마스킹·전달 승인
+# 공통: 명령줄에 비밀번호(<pw>)를 쓰면 ps·셸 history 에 남는다 — 가능하면 비밀번호 인자를 빼고 프롬프트로 입력하거나 OS 인증(/ as sysdba, -E, peer)을 쓴다.
+procedures:
+# ── Oracle ──
+- id: ORA-PROC-CONNECTION
+  products: [oracle]
+  category: connection
+  match: [DB-ORA-020, DB-ORA-LSNR-001, DB-ORA-LSNR-002, DB-ORA-LSNR-003, DB-ORA-LSNR-004, LEG-ORA-12541, ORA-00020, ORA-00018, ORA-12514, ORA-12516, ORA-12519, ORA-12541, TNS-12514, TNS-12518, TNS-12520, TNS-12541, TNS-12505, ORA-12505]
+  title: 리스너·세션/프로세스 한도 (ORA-00020 · TNS-12514/12520/12541)
+  source: "Oracle 19c 'Net Services Administrator's Guide 16 Troubleshooting (lsnrctl status/services, listener.log)'·'Database Reference (PROCESSES, SESSIONS)'·'Administrator's Guide (ALTER SYSTEM SET … SCOPE=SPFILE)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 리스너 상태·서비스 등록 확인 (읽기 전용)
+      cmd: |
+        lsnrctl status ; lsnrctl services
+        tnsping <tns_alias>
+        tail -n 100 $ORACLE_BASE/diag/tnslsnr/$(hostname -s)/listener/trace/listener.log | grep -i "TNS-\|refused\|12520"
+      check: "'Instance … status READY' 가 없으면 인스턴스 미등록/다운(TNS-12514). 'establish … refused' 와 TNS-12520 은 프로세스 한도 · 정상: 대상 서비스에 READY 인스턴스 1개 이상, tnsping OK"
+      note: "적용: Oracle 11gR2~19c/21c (listener.log 경로는 ADR 기준, 리스너 이름이 LISTENER 가 아니면 경로의 listener 부분 변경) · 권한: oracle(그리드 환경은 grid) OS 계정 · grep 의 \\| 대안은 Linux 기준 — AIX·Solaris·HP-UX 는 grep -i -e \"TNS-\" -e refused -e 12520"
+    - do: 프로세스·세션 사용률 확인 (읽기 전용 계정)
+      cmd: |
+        sqlplus -s / as sysdba <<'EOF'
+        set lines 200
+        select resource_name, current_utilization, max_utilization, limit_value from v$resource_limit where resource_name in ('processes','sessions');
+        select status, count(*) from v$session group by status;
+        select machine, program, count(*) from v$session where type='USER' group by machine, program order by 3 desc fetch first 10 rows only;
+        EOF
+      check: "current_utilization 이 limit_value 의 95% 이상이면 한도 도달. 특정 machine/program(WAS 풀) 편중이면 애플리케이션 커넥션 누수 · 정상: 사용률 80% 미만"
+      note: "SYSDBA 접속은 DBA 권한 — 1차는 DBA 에게 결과 요청(또는 SELECT_CATALOG_ROLE 계정) · 적용: fetch first 는 12c+, 11gR2 는 select * from (… order by 3 desc) where rownum<=10 · 세션 한도 도달 시 일반 접속이 거부되어도 / as sysdba 는 대개 접속 가능"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 인스턴스 재등록·리스너 재시작 (TNS-12514/12541)
+      cmd: |
+        sqlplus -s / as sysdba <<'EOF'
+        alter system register;
+        show parameter local_listener
+        EOF
+        lsnrctl stop ; lsnrctl start ; lsnrctl status
+      check: "성공: lsnrctl status 에 서비스 READY, tnsping·애플리케이션 접속 성공 · 실패: lsnrctl start 오류(TNS-12542 포트 사용 중·listener.ora 문법) → listener.ora 백업본 복원 후 재기동, READY 미표시 → local_listener 값 확인"
+      note: "사전조건: alter system register 만으로 해결되는지 먼저 확인(리스너 재시작은 마지막 수단), listener.log 보존 · 영향: lsnrctl stop~start 동안 신규 접속 불가(기존 세션은 유지) · 승인: DBA·서비스 담당(변경 관리) · 백업/롤백: cp listener.ora listener.ora.$(date +%Y%m%d) 보관, 문제 시 원본 복원 후 lsnrctl start · 적용: 11gR2~19c (Grid Infrastructure 환경은 srvctl stop/start listener 사용)"
+    - do: (2차·승인 후) PROCESSES/SESSIONS 상향 (재기동 필요) — WAS 풀 합계 기준 산정
+      config:
+        file: SPFILE ($ORACLE_HOME/dbs/spfile<SID>.ora) — ALTER SYSTEM 으로 변경
+        snippet: |
+          ALTER SYSTEM SET processes=1500 SCOPE=SPFILE SID='*';
+          -- sessions 는 (1.5×processes)+22 로 자동 산정되므로 생략 가능
+          ALTER SYSTEM SET sessions=2272 SCOPE=SPFILE SID='*';
+          SHUTDOWN IMMEDIATE
+          STARTUP
+        note: "processes = 모든 WAS 풀 max 합 + 백그라운드/배치 여유 20%. 변경 전 커넥션 누수 원인(v$session 편중) 먼저 해소 · 사전조건: create pfile='/tmp/init<SID>_before.ora' from spfile; 로 백업, OS 세마포어(kernel.sem)·메모리 여유 확인 · 영향: SHUTDOWN/STARTUP 동안 DB 전체 중단 · 승인: DBA·서비스 담당(변경 관리, 정기 점검 시간) · 백업/롤백: 기동 실패 시 startup pfile='/tmp/init<SID>_before.ora' 로 기동 후 create spfile from pfile · 적용: 11gR2~19c (RAC 는 srvctl 로 인스턴스 순차 재기동)"
+      check: "성공: v$resource_limit 의 limit_value 반영, ORA-00020 미발생 · 실패: STARTUP 시 ORA-27102·세마포어 오류 → 백업 pfile 로 기동 후 OS 커널 파라미터 조정"
+    - do: (2차·승인 후) 리스너 큐·레이트 제한 조정 (접속 폭주 TNS-12520)
+      config:
+        file: $ORACLE_HOME/network/admin/listener.ora
+        snippet: |
+          LISTENER = (DESCRIPTION_LIST=(DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST=<host>)(PORT=1521)(QUEUESIZE=1024)(RATE_LIMIT=yes))))
+          CONNECTION_RATE_LISTENER=100
+          INBOUND_CONNECT_TIMEOUT_LISTENER=60
+      cmd: |
+        lsnrctl reload
+      check: "성공: lsnrctl reload 'The command completed successfully', listener.log 에 TNS-12520/12518 미발생 · 실패: reload 오류(문법) → 백업본 복원 후 reload, 정상 접속까지 거부되면 CONNECTION_RATE 값 상향 또는 제거"
+      note: "사전조건: listener.ora 백업, 정상 시간대 초당 접속 수(listener.log) 파악 후 레이트 산정 · 영향: 레이트 제한은 초과 접속을 지연·거부하므로 WAS 기동 폭주 시 접속 대기 증가, QUEUESIZE 변경은 리스너 재시작 필요할 수 있음 · 승인: DBA·서비스 담당 · 백업/롤백: cp listener.ora listener.ora.bak, 롤백은 백업본 복원 후 lsnrctl reload · 적용: 11gR2~19c (CONNECTION_RATE 는 RATE_LIMIT=yes 인 주소에만 적용)"
+  - stage: 3
+    steps:
+    - do: Oracle SR 자료 (TFA/ADRCI)
+      cmd: |
+        tfactl diagcollect -database <db> -from "$(date -d '-2 hours' '+%Y-%m-%d %H:%M:%S')" -to "$(date '+%Y-%m-%d %H:%M:%S')"   # TFA 있으면
+        adrci exec="set home diag/rdbms/<db>/<SID>; ips create package time '<start>' to '<end>'; ips generate package 1 in /tmp"
+        lsnrctl status > lsnr_$(date +%Y%m%d).txt ; cp $ORACLE_BASE/diag/tnslsnr/*/listener/trace/listener.log /tmp/
+      check: alert log·listener.log·IPS 패키지·v$resource_limit 출력·WAS 풀 설정
+      note: "민감정보 마스킹: listener.log 의 클라이언트 HOST·IP·USER(OS 계정)·PROGRAM, alert log 의 호스트명을 가린 뒤 전달 · 전달 승인: DBA 확인 후 보안 담당 승인(Oracle SR 업로드) · date -d 는 GNU(Linux) 전용, AIX·Solaris 는 시각을 직접 입력"
+
+- id: ORA-PROC-STORAGE
+  products: [oracle]
+  category: storage
+  match: [DB-ORA-012, DB-ORA-025, LEG-ORA-01652, LEG-ORA-TABLESPACE-FULL, ORA-01652, ORA-01653, ORA-01654, ORA-01691, ORA-00257, ORA-16038, ORA-19809, ORA-19815, ORA-01628, ORA-01630, ORA-30036]
+  title: 테이블스페이스 확장 실패·아카이브 영역 가득참 (ORA-01653 · ORA-00257 · ORA-19809)
+  source: "Oracle 19c 'Administrator's Guide 13 Managing Tablespaces (ALTER DATABASE DATAFILE … AUTOEXTEND / ADD DATAFILE)'·'Backup and Recovery User's Guide (Fast Recovery Area, DB_RECOVERY_FILE_DEST_SIZE, RMAN DELETE ARCHIVELOG)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 어느 테이블스페이스/영역이 찼는지 확인 (읽기 전용)
+      cmd: |
+        sqlplus -s / as sysdba <<'EOF'
+        set lines 200 pages 100
+        select tablespace_name, round(used_percent,1) used_pct, round(tablespace_size*8/1024) size_mb from dba_tablespace_usage_metrics order by 2 desc;
+        select name, space_limit/1024/1024 limit_mb, space_used/1024/1024 used_mb, number_of_files from v$recovery_file_dest;
+        select * from v$recovery_area_usage;
+        select dest_name, status, error from v$archive_dest where status<>'INACTIVE';
+        EOF
+        df -h <datafile_mount> <archive_dest>
+      check: "used_pct 95% 이상 테이블스페이스, FRA space_used ≥ space_limit 이면 아카이브 정지(ORA-00257 → DB 전체 hang) · 정상: used_pct 85% 미만(자동확장 최대치 기준), FRA 80% 미만, archive_dest error 없음"
+      note: "ORA-00257 은 DB 전체가 멈추므로 최우선 — 1차는 즉시 DBA 호출 · 적용: 11gR2~19c (size_mb 의 *8 은 블록 8KB 가정, used_percent 는 maxsize 기준) · 권한: SYSDBA 또는 SELECT_CATALOG_ROLE"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 아카이브 영역 확보 (백업 완료된 아카이브 삭제 또는 FRA 한도 상향) — DBA
+      cmd: |
+        rman target / <<'EOF'
+        crosscheck archivelog all;
+        delete noprompt archivelog all completed before 'sysdate-2' backed up 1 times to device type sbt;   # 백업 정책에 맞게
+        EOF
+        sqlplus -s / as sysdba <<'EOF'
+        alter system set db_recovery_file_dest_size=200G scope=both;
+        alter system archive log all;
+        EOF
+      check: "성공: v$recovery_area_usage 의 PERCENT_SPACE_USED 하락, alert log 에 ARCH 재개, ORA-00257 미발생 · 실패: RMAN-08137(대기 DB 미적용)·'not backed up' 으로 삭제 안 됨 → 아카이브 백업 먼저 수행, FRA 상향 실패(ORA-19804 등) → 디스크/ASM 여유 확인"
+      note: "사전조건: 아카이브 백업 완료 여부(list backup of archivelog all completed after 'sysdate-2')와 Data Guard 대기 DB 적용 여부 확인, 백업 매체가 디스크면 device type disk 로 변경 · 영향: 백업되지 않은 아카이브를 지우면 복구 불가 구간 발생, FRA 상향은 실제 디스크 여유 이내여야 함 · 승인: DBA·백업 담당 · 백업/롤백: 삭제 전 backup archivelog all 수행, FRA 값은 show parameter db_recovery_file_dest_size 로 기록 후 원복 가능 · 적용: 11gR2~19c"
+    - do: (2차·승인 후) 테이블스페이스 확장 (데이터파일 추가 또는 자동확장)
+      cmd: |
+        sqlplus -s / as sysdba <<'EOF'
+        -- ASM
+        alter tablespace <TS> add datafile '+DATA' size 4G autoextend on next 512M maxsize 32G;
+        -- 파일시스템: alter tablespace <TS> add datafile '/u02/oradata/<SID>/<TS>03.dbf' size 4G autoextend on next 512M maxsize 32G;
+        alter database datafile '/u02/oradata/<SID>/<TS>01.dbf' autoextend on next 512M maxsize 32G;
+        EOF
+      check: "성공: dba_tablespace_usage_metrics used_pct 하락, ORA-01653 미발생 · 실패: ORA-01119/ORA-27040(경로·권한)·ORA-15041(ASM 디스크그룹 여유 없음) → 다른 경로/디스크그룹 지정 또는 스토리지 증설"
+      note: "사전조건: 디스크/ASM 여유(df -h, select name, free_mb from v$asm_diskgroup) 확인, 데이터파일 이름 중복 확인, smallfile 데이터파일 최대 32GB(8KB 블록) · 영향: 온라인 수행, 생성 중 I/O 부하 · 승인: DBA(변경 관리) · 백업/롤백: 추가한 빈 데이터파일은 alter tablespace <TS> drop datafile '<file>'(10gR2+, 비어 있을 때만)로 제거 가능, 확장 후 RMAN 백업 갱신 · 적용: 11gR2~19c"
+    - do: (2차·승인 후) TEMP/UNDO 부족 시 (ORA-01652 · ORA-30036)
+      cmd: |
+        sqlplus -s / as sysdba <<'EOF'
+        alter tablespace TEMP add tempfile '+DATA' size 4G autoextend on next 512M maxsize 16G;
+        alter tablespace UNDOTBS1 add datafile '+DATA' size 4G autoextend on next 512M maxsize 32G;
+        select s.sid, s.serial#, s.username, u.sql_id, u.tablespace, u.blocks*8/1024 mb from v$tempseg_usage u join v$session s on s.saddr=u.session_addr order by u.blocks desc fetch first 5 rows only;
+        EOF
+      check: "성공: ORA-01652/30036 미발생, 대량 정렬 세션(sql_id) 식별 → 실행계획 개선 요청 · 실패: 추가 후에도 즉시 소진 → 특정 SQL 의 폭주이므로 증설 중단하고 해당 세션 처리(업무 확인)"
+      note: "사전조건: 실제 TEMP/UNDO 테이블스페이스 이름 확인(select tablespace_name, contents from dba_tablespaces), 디스크 여유 · 영향: 온라인 수행 · 승인: DBA · 백업/롤백: 추가 tempfile 은 alter tablespace TEMP drop tempfile '<file>' 로 제거 가능, UNDO 데이터파일은 사용 중이면 제거 불가 · 적용: fetch first 는 12c+(11gR2 는 rownum 서브쿼리), v$tempseg_usage 는 v$sort_usage 와 같은 뷰"
+  - stage: 3
+    steps:
+    - do: Oracle SR / 용량 계획 자료
+      cmd: |
+        sqlplus -s / as sysdba <<'EOF'
+        spool ts_growth.txt
+        select tablespace_name, round(sum(bytes)/1024/1024) mb from dba_segments group by tablespace_name order by 2 desc;
+        select * from dba_hist_tbspc_space_usage order by snap_id desc fetch first 200 rows only;
+        spool off
+        EOF
+      check: alert log·ts_growth·FRA 사용 이력·백업 정책 문서
+      note: "dba_hist_* 는 Diagnostics Pack 라이선스 필요(없으면 해당 줄 생략) · 민감정보 마스킹: 스키마·테이블스페이스 이름의 업무명, 호스트명·데이터파일 경로를 가린 뒤 전달 · 전달 승인: DBA 확인 후 보안 담당 승인"
+
+- id: ORA-PROC-LOCK
+  products: [oracle]
+  category: lock
+  match: [DB-ORA-004, LEG-ORA-LATCH, LEG-ORA-WARN-TABLELOCK, LEG-ORA-WARN-LATCH, ORA-00060, ORA-00054, ORA-04021, ORA-02049, ORA-01591, ORA-00494]
+  title: 교착상태·잠금 대기 (ORA-00060 · enq TX)
+  source: "Oracle 19c 'Database Concepts 9 Data Concurrency and Consistency (Deadlock detection)'·'Administrator's Guide (ALTER SYSTEM KILL SESSION)'·'Performance Tuning Guide (V$SESSION blocking_session, ASH)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 블로킹 세션·대기 이벤트 확인 (읽기 전용, DBA 조회 요청)
+      cmd: |
+        sqlplus -s / as sysdba <<'EOF'
+        set lines 220
+        select s.sid, s.serial#, s.username, s.program, s.blocking_session, s.event, s.seconds_in_wait, s.sql_id from v$session s where s.blocking_session is not null or s.sid in (select blocking_session from v$session) order by blocking_session nulls first;
+        select l.session_id, o.object_name, l.locked_mode from v$locked_object l join dba_objects o on o.object_id=l.object_id;
+        select * from dba_blockers; select * from dba_waiters;
+        EOF
+        grep -n "ORA-00060" $ORACLE_BASE/diag/rdbms/<db>/<SID>/trace/alert_<SID>.log | tail -5
+      check: "blocking_session 이 있는 최상위(블로커) 세션·SQL 기록. ORA-00060 은 자동 해소(희생 세션 롤백)되므로 재발 여부 확인 · 정상: 블로킹 세션 없음"
+      note: "적용: 11gR2~19c (dba_blockers/dba_waiters 는 catblock.sql 로 생성된 경우만 — 없으면 생략, 세션이 많으면 느릴 수 있어 첫 줄 결과로 충분) · 권한: SYSDBA 또는 SELECT_CATALOG_ROLE · 조회만 하며 잠금을 잡지 않음"
+    - do: 데드락 트레이스로 관련 SQL·객체 확인 (읽기 전용)
+      cmd: |
+        ls -t $ORACLE_BASE/diag/rdbms/<db>/<SID>/trace/*.trc | head -3 ; grep -l "DEADLOCK DETECTED" $ORACLE_BASE/diag/rdbms/<db>/<SID>/trace/*.trc | head -3
+        grep -A 30 "Deadlock graph" <trace_file> | head -60
+      check: "Deadlock graph 의 두 세션 SQL(현재/이전)과 Rows waited on 의 객체 → 개발팀에 트랜잭션 순서 조정 요청 · 정상: 최근 DEADLOCK DETECTED 트레이스 없음"
+      note: "적용: 11gR2~19c · 권한: oracle OS 계정 · grep -A 는 GNU grep(Linux), AIX·Solaris 는 트레이스 파일을 view/more 로 열어 확인 · 트레이스에 바인드값이 들어 있을 수 있어 공유 주의"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 장시간 블로커 세션 종료 (업무 확인 후, DBA)
+      cmd: |
+        sqlplus -s / as sysdba <<'EOF'
+        alter system kill session '<sid>,<serial#>' immediate;
+        EOF
+      check: "성공: 대기 세션들의 event 가 해소(blocking_session null), 애플리케이션 응답 회복 · 실패: 'marked for kill' 로 남음 → 롤백 진행 중이므로 v$transaction used_ublk 감소 확인, 해소 안 되면 3차"
+      note: "사전조건: 블로커 세션의 사용자·프로그램·SQL 을 업무 담당이 확인(배치·결산이면 종료 금지), 세션 정보 캡처 보관 · 영향: 해당 트랜잭션 롤백(대량이면 롤백 시간 동안 잠금 지속), 애플리케이션 오류 발생 · 승인: DBA·업무 담당 · 백업/롤백: 종료는 되돌릴 수 없음 — 롤백된 작업은 업무 담당이 재실행 · 적용: 11gR2~19c (RAC 는 '<sid>,<serial#>,@<inst_id>')"
+    - do: (2차·승인 후) 재발 방지 — 인덱스 누락(외래키)·잠금 순서·배치 시간대 조정
+      config:
+        file: 애플리케이션/스키마
+        snippet: |
+          -- 외래키 컬럼 인덱스 누락 확인(자식 테이블 전체 락 원인)
+          select c.table_name, c.constraint_name, cc.column_name from dba_constraints c join dba_cons_columns cc on c.constraint_name=cc.constraint_name
+           where c.constraint_type='R' and c.owner='<SCHEMA>' and not exists (select 1 from dba_ind_columns ic where ic.table_name=c.table_name and ic.column_name=cc.column_name);
+          -- 조회 결과 컬럼에 인덱스 생성: create index <tbl>_fk_idx on <tbl>(<col>) online;
+        note: "사전조건: 개발팀과 인덱스 대상 합의, 테이블 크기·디스크 여유 확인 · 영향: online 인덱스 생성 중 I/O·CPU 부하, DML 성능 소폭 저하 · 승인: DBA·개발팀(변경 관리) · 백업/롤백: 롤백은 drop index <tbl>_fk_idx · 적용: online 생성은 Enterprise Edition"
+      check: "성공: ORA-00060 재발 없음, enq: TX 대기 감소 · 실패: 데드락 지속 → 트레이스의 SQL 로 애플리케이션 잠금 순서 수정 요청"
+  - stage: 3
+    steps:
+    - do: Oracle SR / 분석 자료
+      cmd: |
+        cp <deadlock_trace.trc> /tmp/ ; sqlplus -s / as sysdba <<'EOF'
+        -- Diagnostics Pack 라이선스 확인 후 실행
+        select * from table(dbms_workload_repository.ash_report_text(l_dbid=>(select dbid from v$database), l_inst_num=>1, l_btime=>sysdate-1/24, l_etime=>sysdate));
+        EOF
+      check: 데드락 트레이스·ASH/AWR(라이선스 보유 시) 또는 Statspack·v$session 캡처
+      note: "민감정보 마스킹: 트레이스·ASH 의 SQL 바인드값·리터럴(개인정보), 사용자명·호스트명·IP·프로그램명을 가린 뒤 전달 · 전달 승인: DBA 확인 후 보안 담당 승인"
+
+- id: ORA-PROC-MEMORY
+  products: [oracle]
+  category: memory
+  match: [LEG-ORA-04031, LEG-ORA-04030, ORA-04031, ORA-04030, ORA-04036, ORA-27102, ORA-27101]
+  title: 공유 풀/PGA 메모리 부족 (ORA-04031 · ORA-04030 · ORA-04036)
+  source: "Oracle 19c 'Database Performance Tuning Guide 14 Tuning the Shared Pool·16 Tuning PGA (PGA_AGGREGATE_TARGET/LIMIT)'·'Administrator's Guide (Automatic Memory Management SGA_TARGET/MEMORY_TARGET)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 메모리 구성·사용량 확인 (읽기 전용)
+      cmd: |
+        sqlplus -s / as sysdba <<'EOF'
+        set lines 200
+        show parameter sga_target; show parameter pga_aggregate; show parameter memory_target
+        select component, current_size/1024/1024 mb from v$memory_dynamic_components where current_size>0;
+        select name, bytes/1024/1024 mb from v$sgastat where pool='shared pool' and name in ('free memory','SQLA','KGLH0') ;
+        select * from v$pgastat where name in ('total PGA allocated','maximum PGA allocated','total PGA inuse');
+        EOF
+        grep -n "ORA-04031\|ORA-04030\|ORA-04036" $ORACLE_BASE/diag/rdbms/<db>/<SID>/trace/alert_<SID>.log | tail -10
+        free -g ; ipcs -m | head
+      check: "shared pool free memory 가 수 MB 이하·ORA-04031 반복이면 공유 풀 부족(하드 파싱·바인드 미사용 의심). PGA allocated ≥ limit 이면 ORA-04036 · 정상: free memory 수백 MB, PGA allocated 가 limit 의 80% 미만"
+      note: "적용: 11gR2~19c (pga_aggregate_limit 은 12c+, free -g 는 Linux — AIX svmon -G, Solaris echo ::memstat 대신 vmstat) · 권한: SYSDBA 또는 SELECT_CATALOG_ROLE, alert log 는 oracle OS 계정"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) SGA/PGA 크기 조정 (DBA, 물리 메모리·다른 인스턴스 고려)
+      config:
+        file: SPFILE (ALTER SYSTEM)
+        snippet: |
+          -- sga_max_size 이내, 초과 시 재기동
+          ALTER SYSTEM SET sga_target=16G SCOPE=SPFILE;
+          -- AMM/ASMM 미사용 시
+          ALTER SYSTEM SET shared_pool_size=3G SCOPE=BOTH;
+          ALTER SYSTEM SET pga_aggregate_target=8G SCOPE=BOTH;
+          -- 12c+, 0 이면 무제한(권장하지 않음)
+          ALTER SYSTEM SET pga_aggregate_limit=16G SCOPE=BOTH;
+        note: "OS 물리 메모리·HugePages(vm.nr_hugepages)·다른 인스턴스 합계 이내. 변경 후 alert log 확인 · 사전조건: create pfile='/tmp/init<SID>_before.ora' from spfile; 로 백업, HugePages 사용 시 새 SGA 에 맞게 vm.nr_hugepages 먼저 조정 · 영향: SCOPE=SPFILE 항목은 재기동 필요(서비스 중단), SCOPE=BOTH 는 즉시 반영되며 다른 구성요소 메모리를 줄일 수 있음 · 승인: DBA·시스템 담당(메모리)·서비스 담당(재기동) · 백업/롤백: 기동 실패 시 startup pfile='/tmp/init<SID>_before.ora' 후 create spfile from pfile, BOTH 항목은 이전 값으로 ALTER SYSTEM 재실행 · 적용: 11gR2~19c"
+      check: "성공: v$sgastat free memory 증가, ORA-04031 미발생 · 실패: ORA-00823/ORA-00845(MEMORY_TARGET > /dev/shm)·ORA-27102 로 기동 실패 → 백업 pfile 로 기동"
+    - do: (2차·승인 후) 하드 파싱 원인 SQL 식별 (바인드 변수 미사용) → 개발팀
+      cmd: |
+        sqlplus -s / as sysdba <<'EOF'
+        select force_matching_signature, count(*) from v$sqlarea group by force_matching_signature having count(*)>50 order by 2 desc fetch first 10 rows only;
+        -- 임시 완화(부작용 검토 후)
+        alter system set cursor_sharing=FORCE scope=both;
+        -- 긴급 완화(성능 저하 일시)
+        alter system flush shared_pool;
+        EOF
+      check: "성공: 동일 서명 SQL 이 수천 개면 바인드 미사용 — 소스 수정 대상, 완화 후 ORA-04031 미발생 · 실패: cursor_sharing 변경 후 실행계획 악화(응답 지연) → 즉시 EXACT 로 원복"
+      note: "사전조건: show parameter cursor_sharing 으로 현재값 기록, 개발팀에 바인드 미사용 SQL 통보 · 영향: cursor_sharing=FORCE 는 전체 SQL 실행계획을 바꿀 수 있고, flush shared_pool 은 모든 커서를 무효화해 일시적으로 하드 파싱·CPU 급증 · 승인: DBA·서비스 담당 · 백업/롤백: alter system set cursor_sharing=EXACT scope=both 로 원복(flush 는 되돌릴 수 없음) · 적용: 11gR2~19c (fetch first 는 12c+)"
+  - stage: 3
+    steps:
+    - do: Oracle SR 자료
+      cmd: |
+        adrci exec="set home diag/rdbms/<db>/<SID>; show incident; ips create package incident <id>; ips generate package 1 in /tmp"
+        echo 'select * from v$sgastat order by bytes desc fetch first 30 rows only;' | sqlplus -s / as sysdba > sgastat.txt
+      check: ORA-04031 인시던트 패키지·v$sgastat·AWR(라이선스 시)·메모리 파라미터
+      note: "sqlplus 에는 -e 옵션이 없어 표준입력으로 SQL 전달 · 민감정보 마스킹: IPS 패키지의 트레이스 안 SQL 바인드값·사용자명·호스트명·IP 를 가린 뒤 전달 · 전달 승인: DBA 확인 후 보안 담당 승인"
+
+- id: ORA-PROC-INTERNAL
+  products: [oracle]
+  category: internal
+  match: [DB-ORA-001, LEG-ORA-03113, ORA-00600, ORA-07445, ORA-00700, ORA-03113, ORA-03114, ORA-01034, ORA-01033, ORA-01092, ORA-00445, ORA-01578, LEG-ORA-01578]
+  title: 내부 오류·인스턴스 다운·블록 손상 (ORA-00600 · ORA-07445 · ORA-01578)
+  source: "Oracle Support Doc 153788.1 'ORA-600/ORA-7445 Lookup Tool'·19c 'Administrator's Guide 9 Diagnosing and Resolving Problems (ADR, ADRCI IPS)'·'Backup and Recovery (RMAN VALIDATE, Block Media Recovery)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 인스턴스 상태·alert log 확인 (읽기 전용)
+      cmd: |
+        ps -ef | grep -E "[o]ra_pmon_|[o]ra_smon_" ; echo 'select instance_name, status, database_status from v$instance;' | sqlplus -s / as sysdba
+        grep -n "ORA-00600\|ORA-07445\|ORA-01578\|Instance terminated\|ORA-00445" $ORACLE_BASE/diag/rdbms/<db>/<SID>/trace/alert_<SID>.log | tail -20
+        adrci exec="set home diag/rdbms/<db>/<SID>; show incident -last 5"
+      check: "pmon 없음/status ≠ OPEN 이면 인스턴스 다운 → DBA 즉시 호출. ORA-600 인자([xxx],[…]) 와 incident ID 기록 · 정상: pmon 존재, status OPEN, 최근 ORA-600/7445 없음"
+      note: "적용: 11gR2~19c (sqlplus 에는 -e 옵션이 없어 표준입력으로 SQL 전달) · 권한: oracle OS 계정(SYSDBA) · alert log 는 지우거나 옮기지 말 것(증거)"
+  - stage: 2
+    steps:
+    - do: "(2차·승인 후, 조건부) 인스턴스가 이미 내려간 경우에만 기동 — 1차에서 pmon 없음을 확인했고 alert log 에 ORA-00600/ORA-07445/ORA-00445 등으로 인스턴스가 종료된 기록이 있을 때(기본 첫 조치 아님)"
+      cmd: |
+        # 조건: 1차 결과 pmon 없음 + alert log 'Instance terminated' 기록. 인스턴스가 OPEN 이면 이 단계를 건너뛰고 3차(IPS 패키지·SR)로
+        sqlplus -s / as sysdba <<'EOF'
+        startup;
+        select instance_name, status from v$instance;
+        EOF
+      check: "성공: status OPEN, alert log 에 'Completed: ALTER DATABASE OPEN' · 실패: MOUNT 단계에서 멈춤·ORA-01113/ORA-01157(데이터파일 복구 필요) → 기동 시도 중단하고 복구 절차·3차"
+      note: "적용 조건: 이 절차는 내부 오류 코드 전체(ORA-03113·ORA-01578 등)에 붙지만 기동은 인스턴스가 이미 내려갔을 때만 — 인스턴스가 OPEN 인 채 ORA-00600/07445 가 났다면 재기동하지 않고 ORA-600 인자·incident 로 Lookup Tool 조회와 3차 SR 을 먼저 한다(운영 중 shutdown 은 DBA·서비스 담당의 별도 승인 사안) · 사전조건: alert log·incident·트레이스 보존(IPS 패키지 먼저 생성 권장), 인스턴스가 완전히 내려갔는지(pmon 없음) 확인 · 영향: 기동 중 인스턴스 복구로 시간 소요, 원인 미해결 시 같은 ORA-600 재발 가능 · 승인: DBA·서비스 담당 · 백업/롤백: 기동 자체는 데이터 변경 없음, 실패 시 shutdown abort 후 원인 분석(복구는 RMAN 백업 기준) · 적용: 11gR2~19c (RAC/Restart 환경은 srvctl start database -d <db>)"
+    - do: (2차·승인 후) 블록 손상(ORA-01578) 검증·복구 (RMAN)
+      cmd: |
+        rman target / <<'EOF'
+        # 또는 validate datafile <n>;
+        validate database;
+        EOF
+        echo 'select * from v$database_block_corruption;' | sqlplus -s / as sysdba
+        rman target / <<'EOF'
+        # 백업·아카이브 존재 시 블록 미디어 복구
+        recover datafile <n> block <b>;
+        EOF
+      check: "성공: v$database_block_corruption 비어 있음, 재조회 시 ORA-01578 미발생 · 실패: RMAN-06026/06023(사용 가능한 백업 없음) → 복구 중단, 객체 재생성·데이터 추출(DBMS_REPAIR) 여부를 Oracle 지원과 결정"
+      note: "사전조건: 유효한 RMAN 백업과 이후 아카이브 존재 확인(list backup of datafile <n>), 손상 객체 확인(dba_extents 조회) · 영향: validate database 는 전체 데이터파일을 읽어 I/O 부하가 큼(업무 외 시간), 블록 복구는 온라인 수행 · 승인: DBA·서비스 담당 · 백업/롤백: 복구 전 현재 데이터파일 이미지 백업(backup as copy datafile <n>) — 블록 복구는 되돌릴 수 없음 · 적용: 11gR2~19c (블록 미디어 복구는 Enterprise Edition), RMAN 주석은 # 사용"
+  - stage: 3
+    steps:
+    - do: Oracle SR 자료 (IPS 패키지 필수)
+      cmd: |
+        adrci exec="set home diag/rdbms/<db>/<SID>; ips create package incident <incident_id>; ips generate package 1 in /tmp"
+        echo 'select banner_full from v$version;' | sqlplus -s / as sysdba ; $ORACLE_HOME/OPatch/opatch lspatches
+      check: IPS zip(alert·trace·incident)·버전/패치 레벨·ORA-600 Lookup Tool 결과
+      note: "banner_full 은 18c+, 11gR2/12c 는 select banner from v$version · 민감정보 마스킹: IPS 패키지의 트레이스·덤프에 있는 SQL 바인드값·데이터 블록 내용(개인정보 가능)·사용자명·호스트명·IP 를 확인하고 가림 · 전달 승인: DBA 확인 후 보안 담당 승인(데이터 블록 덤프 포함 시 보안 담당 필수)"
+
+# ── Tibero ──
+- id: TBR-PROC-STORAGE
+  products: [tibero]
+  category: storage
+  match: [LEG-TBR-TEMP, LEG-TBR-ARCHFULL, LEG-TBR-UNDO, TBR-21004, TBR-21039, TBR-24031, TBR-18004, TBR-1027, TBR-1063, TBR-1013, TBR-1014]
+  title: 테이블스페이스·아카이브·UNDO 공간 부족 (TBR-21004 · TBR-18004)
+  source: "Tibero 7 Administrator's Guide '7. 테이블스페이스 관리 (ALTER TABLESPACE ADD DATAFILE / AUTOEXTEND)'·'10. 아카이브 로그 모드 (ARCHIVE_DIR)'·'tbsql · tbrmgr'"
+  verify_note: "미검증 — tbsql 이 비밀번호를 표준입력에서 읽는지(heredoc·파이프로 SQL 을 넘기면 첫 줄이 비밀번호가 되는지), 이전 명령의 `tbsql -s`·`tbrmgr list-archive`·`tbboot -v` 옵션, Tibero V$VERSION 뷰를 공식 문서로 확인하지 못함 — 대화형 입력(tbsql <dba_user> → 프롬프트 비밀번호 → SQL> 줄)으로 바꾸고 tbrmgr·tbboot -v 는 뺐다"
+  stages:
+  - stage: 1
+    steps:
+    - do: 공간 사용률·아카이브 위치 확인 (읽기 전용)
+      cmd: |
+        tbsql <dba_user>          # 비밀번호는 접속 프롬프트에서 입력(명령줄·heredoc 에 두지 않음)
+        SQL> select tablespace_name, round((1-free_mb/total_mb)*100,1) used_pct, total_mb from (select tablespace_name, sum(bytes)/1024/1024 total_mb, (select sum(bytes)/1024/1024 from dba_free_space f where f.tablespace_name=d.tablespace_name) free_mb from dba_data_files d group by tablespace_name) order by 2 desc;
+        SQL> select name, value from v$parameters where name in ('ARCHIVE_DIR','LOG_ARCHIVE_DEST','UNDO_TABLESPACE');
+        SQL> quit
+        df -h $TB_HOME <archive_dir> ; tail -n 50 $TB_HOME/instance/$TB_SID/log/slog/sys.log | grep -i "TBR-\|full\|archive"
+      check: "used_pct 95% 이상·아카이브 디렉터리 100% 이면 쓰기 중단 위험 — 2차 DBA 즉시 · 정상: used_pct 85% 미만(자동확장 여유 포함), 아카이브 디렉터리 80% 미만"
+      note: "적용: Tibero 6/7 · 권한: sys 또는 DBA 권한 계정(1차는 DBA 에게 결과 요청) · 비밀번호는 명령줄·heredoc 에 쓰지 않는다 — `tbsql <dba_user>` 실행 후 접속 프롬프트에서 입력하고 SQL> 줄을 차례로 입력 · free_mb 가 null(여유 없음)이면 used_pct 가 비어 보임"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 테이블스페이스 확장·자동확장
+      cmd: |
+        tbsql <dba_user>          # 비밀번호는 접속 프롬프트에서 입력
+        SQL> alter tablespace <TS> add datafile '/tibero/data/<TS>02.dtf' size 4G autoextend on next 512M maxsize 32G;
+        SQL> alter database datafile '/tibero/data/<TS>01.dtf' autoextend on next 512M maxsize 32G;
+        SQL> quit
+      check: "성공: dba_free_space 증가, TBR-21004 미발생 · 실패: 파일 생성 오류(경로·권한·디스크 부족) → 경로/여유 확인 후 재시도"
+      note: "사전조건: 데이터 디렉터리 디스크 여유(df -h), 파일 이름 중복 확인, 백업 정책 확인 · 영향: 온라인 수행, 파일 생성 중 I/O 부하 · 승인: DBA(변경 관리) · 백업/롤백: 추가한 빈 데이터파일 제거 가능 여부는 버전별 매뉴얼 확인(미검증), 확장 후 백업 갱신 · 적용: Tibero 6/7"
+    - do: (2차·승인 후) 아카이브 영역 정리 (백업 완료분) 및 위치 확장
+      cmd: |
+        ls -lt <archive_dir> | head -20
+        # 백업 완료된 아카이브 이관: mv <archive_dir>/*.arc <backup_dest>/   (백업 정책 확인 후)
+        tbsql <dba_user>          # 비밀번호는 접속 프롬프트에서 입력
+        SQL> alter system set ARCHIVE_DIR='/tibero/arch2' scope=both;
+        SQL> quit
+        # $TB_HOME/config/$TB_SID.tip 의 ARCHIVE_DIR 도 반영
+      check: "성공: 아카이브 디렉터리 여유 확보, sys.log 에 아카이브 정상 기록 · 실패: 파라미터 변경 오류 → 이름(ARCHIVE_DIR/LOG_ARCHIVE_DEST)·동적 변경 가능 여부 확인 후 tip 수정·재기동 일정"
+      note: "미검증 — 아카이브 위치 파라미터 이름(ARCHIVE_DIR 와 LOG_ARCHIVE_DEST 중 버전별 사용)과 scope=both 지원을 공식 매뉴얼로 확인 못 함, 1차 조회의 v$parameters 결과로 실제 이름 확인 후 사용 · 사전조건: 이관할 아카이브가 백업 완료분인지 백업 담당 확인, 새 디렉터리 생성·소유자 설정 · 영향: 백업 안 된 아카이브를 옮기거나 잃으면 복구 불가 구간 발생 · 승인: DBA·백업 담당 · 백업/롤백: tip 파일 cp $TB_SID.tip $TB_SID.tip.bak 보관, 위치는 이전 값으로 재설정 · 아카이브 목록은 ls 로 확인(tbrmgr 의 목록 하위 명령은 미검증이라 쓰지 않음) · 적용: Tibero 6/7"
+  - stage: 3
+    steps:
+    - do: TmaxTibero 의뢰 자료
+      cmd: |
+        tar czf tibero_$(hostname)_$(date +%Y%m%d).tgz $TB_HOME/config/$TB_SID.tip $TB_HOME/instance/$TB_SID/log/
+        tbsql <dba_user>          # 비밀번호는 접속 프롬프트에서 입력 — 버전 조회 결과는 화면 출력을 그대로 보관
+        SQL> select * from v$version;
+        SQL> quit
+      check: tip 설정·sys.log·tbsvr.out·버전·공간 조회 결과
+      note: "민감정보 마스킹: 파일명의 호스트명, tip 의 IP·포트·경로, 로그의 사용자명·클라이언트 IP·SQL 바인드값을 가린 뒤 전달 · 전달 승인: DBA 확인 후 보안 담당 승인"
+
+- id: TBR-PROC-INTERNAL
+  products: [tibero]
+  category: internal
+  match: [LEG-TBR-7111, LEG-TBR-LISTENER, LEG-TBR-SHARED, TBR-1091, TBR-1034, TBR-1024, TBR-24001, TBR-24004, TBR-24006, TBR-1068]
+  title: 기동 실패·리스너·복구 필요·컨트롤파일 오류
+  source: "Tibero 7 Administrator's Guide '3. 기동과 종료 (tbboot -t NOMOUNT/MOUNT/NORMAL, tbdown)'·'11. 복구 (RECOVER DATABASE)'·'tblistener'"
+  verify_note: "미검증 — tbsql 이 비밀번호를 표준입력에서 읽는지와 이전 명령의 `tbsql -s` 옵션을 공식 문서로 확인하지 못해 대화형 입력(tbsql <user> → 프롬프트 비밀번호 → SQL> 줄)으로 바꿈, NOMOUNT→mount→open 단계 기동과 recover database 구문도 미검증(단계 note 참고)"
+  stages:
+  - stage: 1
+    steps:
+    - do: 프로세스·리스너·최근 오류 확인 (읽기 전용)
+      cmd: |
+        ps -ef | grep -E "[t]bsvr|[t]blistener"
+        tbsql <dba_user>          # tbsvr 가 있을 때만 — 비밀번호는 접속 프롬프트에서 입력
+        SQL> select status from v$instance;
+        SQL> quit
+        tail -n 100 $TB_HOME/instance/$TB_SID/log/slog/sys.log | grep -E "\[E\]|\[F\]|TBR-" | tail -20
+        ls -lt $TB_HOME/instance/$TB_SID/log/tbsvr.out.* 2>/dev/null | head -2
+      check: "tbsvr 없음이면 다운. sys.log 의 [E]/[F] 코드(COM-/TBR-)와 tbsvr.out 의 callstack 기록 · 정상: tbsvr·tblistener 존재, status NORMAL"
+      note: "적용: Tibero 6/7 · 권한: Tibero 설치 OS 계정, DB 접속은 DBA · SQL 을 파이프·heredoc 으로 tbsql 에 넘기지 않는다(비밀번호를 표준입력에서 읽으면 첫 SQL 줄이 비밀번호로 들어간다) — 대화형으로 입력"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 단계별 기동으로 실패 지점 확인·복구
+      cmd: |
+        tbboot -t NOMOUNT
+        tbsql sys                 # 비밀번호는 접속 프롬프트에서 입력
+        SQL> alter database mount;
+        SQL> recover database;     -- TBR-1034(복구 필요) 시만, 구문은 아래 note 의 미검증 참고
+        SQL> alter database open;
+        SQL> quit
+        # 또는 정상 기동: tbdown ; tbboot
+      check: "성공: v$instance status NORMAL, sys.log 에 기동 완료 · 실패: 특정 단계(NOMOUNT=tip/메모리, MOUNT=컨트롤파일, OPEN=데이터파일/복구)에서 오류 → 그 단계 오류 코드로 3차 의뢰"
+      note: "미검증 — NOMOUNT 이후 alter database mount/open 으로 단계를 올리는 방식은 공식 매뉴얼로 확인 못 함(tbboot -t MOUNT 로 바로 기동하는 방식이 확실), 복구 SQL 구문도 미검증 — 매체 복구는 TBR-PROC-R6-RECOVERY 절차와 관리자 안내서 '백업과 복구' 구문을 먼저 확인 · 사전조건: sys.log·tbsvr.out 보존, 프로세스 완전 종료 확인 · 영향: 기동 중 서비스 불가, recover 는 아카이브 적용으로 시간 소요 · 승인: DBA·서비스 담당 · 백업/롤백: 기동 전 데이터파일·컨트롤파일 백업(콜드 백업 가능 시), recover 는 되돌릴 수 없음 · 적용: Tibero 6/7"
+    - do: (2차·승인 후) 리스너 재기동
+      cmd: |
+        tbdown -t NORMAL 2>/dev/null; tblistener stop ; tblistener start ; tbboot
+      check: "성공: tbsql 원격 접속 성공 · 실패: tbboot 오류 → 위 단계별 기동으로 실패 지점 확인"
+      note: "미검증 — tblistener stop/start 명령 형식을 공식 매뉴얼로 확인 못 함(Tibero 리스너는 tbboot 시 함께 기동되므로 tbdown → tbboot 만으로 충분할 수 있음) · 사전조건: 세션 종료 공지 · 영향: tbdown 동안 DB 전체 중단 · 승인: DBA·서비스 담당(변경 관리) · 백업/롤백: 설정 변경이 없어 롤백 불요, 기동 실패 시 tbboot -t MOUNT 로 원인 확인 · 적용: Tibero 6/7"
+    - do: (2차·승인 후) 컨트롤파일 오류(TBR-24001/24004) — 다중화 사본으로 교체
+      config:
+        file: $TB_HOME/config/$TB_SID.tip
+        snippet: |
+          CONTROL_FILES="/tibero/data/c1.ctl","/tibero/data2/c2.ctl"
+        note: "정상 사본을 손상 경로로 복사 후 기동(DBA). 사본이 없으면 제조사 지원 필요 · 사전조건: DB 정지 상태, 어느 사본이 정상인지(크기·수정 시각·sys.log) 확인 · 영향: 잘못된 사본을 쓰면 기동 불가·복구 필요 · 승인: DBA · 백업/롤백: 손상 파일도 지우지 말고 이름을 바꿔 보관(c1.ctl.bad), tip 파일 백업 후 수정"
+      check: "성공: 기동 성공, sys.log 에 컨트롤파일 오류 없음 · 실패: 같은 오류 → 모든 사본 손상 가능성, 3차"
+  - stage: 3
+    steps:
+    - do: TmaxTibero 의뢰 자료
+      cmd: |
+        tar czf tibero_boot_$(date +%Y%m%d).tgz $TB_HOME/config/ $TB_HOME/instance/$TB_SID/log/
+      check: tip·sys.log·tbsvr.out(callstack)·버전·OS 자원(ulimit -a, free -g)
+      note: "민감정보 마스킹: config 의 IP·포트·비밀번호 파일(있으면 제외), 로그의 사용자명·클라이언트 IP·SQL 바인드값을 가린 뒤 전달 · 전달 승인: DBA 확인 후 보안 담당 승인"
+
+# ── MySQL ──
+- id: MY-PROC-CONNECTION
+  products: [mysql]
+  category: connection
+  match: [DB-MYS-001, MY-1040, MY-1129, MY-1042]
+  title: 접속 수 초과·호스트 차단 (1040 Too many connections · 1129)
+  source: "MySQL 8.0 Reference Manual 'B.3.2.5 Too many connections (max_connections)'·'5.1.12.1 Connection Interfaces (max_connect_errors, FLUSH HOSTS)'·'Performance Schema threads' — dev.mysql.com/doc/refman/8.0/en/too-many-connections.html"
+  stages:
+  - stage: 1
+    steps:
+    - do: 접속 현황·한도 확인 (읽기 전용)
+      cmd: |
+        mysql -uroot -p -e "SHOW GLOBAL VARIABLES LIKE 'max_connections'; SHOW GLOBAL STATUS LIKE 'Threads_connected'; SHOW GLOBAL STATUS LIKE 'Max_used_connections'; SHOW GLOBAL STATUS LIKE 'Aborted_connects';"
+        mysql -uroot -p -e "SELECT user, host, db, command, time, state FROM information_schema.processlist ORDER BY time DESC LIMIT 20;"
+        mysql -uroot -p -e "SELECT substring_index(host,':',1) h, count(*) FROM information_schema.processlist GROUP BY h ORDER BY 2 DESC;"
+      check: "Threads_connected ≈ max_connections 면 한도 도달. 특정 호스트(WAS) 편중·Sleep 장시간이면 풀 누수/wait_timeout 과다 · 정상: Threads_connected 가 max_connections 의 80% 미만"
+      note: "MySQL 은 CONNECTION_ADMIN(8.0)/SUPER 권한 계정용 1 세션을 예약(max_connections+1)하며, 8.0.14+ 는 admin_address/admin_port 관리 전용 접속 가능(extra_port 는 MariaDB·Percona 기능) · 적용: MySQL 5.7/8.0 (8.0.22+ 는 performance_schema.processlist 권장) · 권한: PROCESS 권한(다른 사용자 세션 보기) · 비밀번호는 명령줄에 쓰지 말 것 — `-p` 뒤에 값을 붙이지 않고 `-p` 만 주면 mysql 이 프롬프트로 묻는다(또는 mysql_config_editor 의 --login-path 사용)"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 한도 상향(동적) 및 유휴 세션 타임아웃 조정
+      config:
+        file: /etc/my.cnf ([mysqld])
+        snippet: |
+          max_connections = 1000
+          wait_timeout = 600
+          interactive_timeout = 600
+          max_connect_errors = 100000
+          open_files_limit = 65535      # systemd: LimitNOFILE=65535
+      cmd: |
+        mysql -uroot -p -e "SET GLOBAL max_connections=1000; SET GLOBAL wait_timeout=600;"
+        mysql -uroot -p -e "SET PERSIST max_connections=1000;"   # 8.0: 재기동 후 유지
+      check: "성공: Threads_connected 가 max_connections 아래로 안정, WAS 풀 max 합계 < max_connections · 실패: 'Too many open files'·메모리 부족(스레드당 버퍼) 발생 → 이전 값으로 원복하고 open_files_limit·메모리 산정"
+      note: "사전조건: 현재값 기록(SHOW GLOBAL VARIABLES), 연결당 메모리(sort/join/read 버퍼 × 연결 수)가 물리 메모리 이내인지 계산, my.cnf 백업 · 영향: SET GLOBAL 은 즉시 반영, wait_timeout 단축은 풀이 유휴 연결 검증을 안 하면 애플리케이션 'gone away' 오류 유발 · 승인: DBA·서비스 담당 · 백업/롤백: cp /etc/my.cnf /etc/my.cnf.bak, 롤백은 SET GLOBAL 이전 값 + RESET PERSIST max_connections(8.0) · 적용: SET PERSIST 는 8.0+, 5.7 은 my.cnf 수정만 영구"
+    - do: (2차·승인 후) 호스트 차단(1129) 해제
+      cmd: |
+        mysql -uroot -p -e "FLUSH HOSTS;"   # 8.0.23+: TRUNCATE TABLE performance_schema.host_cache;
+      check: "성공: 해당 호스트 접속 성공 · 실패: 곧 다시 차단 → 해당 호스트의 접속 오류 원인(헬스체크·네트워크 끊김) 해결, max_connect_errors 조정"
+      note: "사전조건: 차단 원인 호스트 확인(performance_schema.host_cache 의 SUM_CONNECT_ERRORS), 공격성 접속이 아닌지 보안 담당 확인 · 영향: 모든 호스트의 오류 계수·이름 캐시 초기화(일시적 DNS 조회 증가) · 승인: DBA · 백업/롤백: 캐시 초기화라 롤백 대상 없음, 차단이 필요하면 방화벽에서 처리 · 적용: FLUSH HOSTS 는 5.7/8.0(8.0.23+ 에서 사용 중단 예고)"
+  - stage: 3
+    steps:
+    - do: 의뢰·분석 자료
+      cmd: |
+        mysql -uroot -p -e "SHOW GLOBAL STATUS; SHOW GLOBAL VARIABLES; SHOW ENGINE INNODB STATUS\G" > mysql_status_$(date +%Y%m%d).txt ; cp /var/log/mysqld.log /tmp/
+      check: 에러 로그·상태/변수 덤프·processlist 캡처·WAS 풀 설정
+      note: "에러 로그 위치는 log_error 값 확인(Ubuntu 는 /var/log/mysql/error.log) · 민감정보 마스킹: 에러 로그·processlist 의 사용자명·호스트명·IP, INNODB STATUS 의 SQL 리터럴(개인정보), 변수의 경로를 가린 뒤 전달 · 전달 승인: DBA 확인 후 보안 담당 승인"
+
+- id: MY-PROC-LOCK
+  products: [mysql]
+  category: lock
+  match: [DB-MYS-002, MY-1213, MY-1205, MY-1206]
+  title: 교착상태·잠금 대기 (1213 Deadlock · 1205 Lock wait timeout)
+  source: "MySQL 8.0 Reference Manual '15.7.5 Deadlocks in InnoDB (innodb_print_all_deadlocks, SHOW ENGINE INNODB STATUS)'·'innodb_lock_wait_timeout'·'performance_schema.data_lock_waits'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 최근 데드락·잠금 대기 확인 (읽기 전용)
+      cmd: |
+        mysql -uroot -p -e "SHOW ENGINE INNODB STATUS\G" | sed -n '/LATEST DETECTED DEADLOCK/,/TRANSACTIONS/p' | head -60
+        mysql -uroot -p -e "SELECT r.trx_id waiting_trx, r.trx_mysql_thread_id waiting_thread, r.trx_query waiting_query, b.trx_id blocking_trx, b.trx_mysql_thread_id blocking_thread, b.trx_query blocking_query FROM performance_schema.data_lock_waits w JOIN information_schema.innodb_trx b ON b.trx_id=w.blocking_engine_transaction_id JOIN information_schema.innodb_trx r ON r.trx_id=w.requesting_engine_transaction_id;"
+        # 5.7: ... FROM information_schema.innodb_lock_waits w JOIN information_schema.innodb_trx b ON b.trx_id=w.blocking_trx_id JOIN information_schema.innodb_trx r ON r.trx_id=w.requesting_trx_id;
+        grep -ci "deadlock detected" /var/log/mysqld.log
+      check: "데드락 두 트랜잭션의 SQL·잠금 대상 테이블 기록. 블로킹 스레드가 장시간(Sleep 상태) 유지되면 커밋 누락 · 정상: 잠금 대기 행 없음, 최근 데드락 없음"
+      note: "적용: data_lock_waits 는 MySQL 8.0+, 5.7 은 주석의 information_schema.innodb_lock_waits 사용 · 에러 로그의 데드락 기록은 innodb_print_all_deadlocks=ON 일 때만 남음('Transactions deadlock detected') · 권한: PROCESS 권한(8.0 data_lock_waits 는 performance_schema SELECT) · 출력의 SQL 에 바인드값(개인정보)이 보일 수 있음"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 장시간 블로킹 트랜잭션 종료 (업무 확인 후)
+      cmd: |
+        mysql -uroot -p -e "KILL <blocking_thread>;"
+      check: "성공: data_lock_waits(5.7: innodb_lock_waits) 비어 있음, 대기 세션 진행 · 실패: 스레드가 'Killed' 상태로 오래 남음 → 대량 롤백 진행 중이므로 innodb_trx 의 trx_rows_modified 감소 확인 후 대기"
+      note: "사전조건: 블로킹 스레드의 사용자·호스트·SQL 을 업무 담당이 확인(배치면 종료 금지), 1차 조회 결과 보관 · 영향: 해당 트랜잭션 롤백(대량이면 시간 소요), 애플리케이션 오류 · 승인: DBA·업무 담당 · 백업/롤백: KILL 은 되돌릴 수 없음 — 롤백된 작업은 업무 담당이 재실행 · 적용: MySQL 5.7/8.0"
+    - do: (2차·승인 후) 대기 타임아웃·데드락 로그 설정 및 재발 방지
+      config:
+        file: /etc/my.cnf ([mysqld])
+        snippet: |
+          innodb_lock_wait_timeout = 30
+          innodb_print_all_deadlocks = ON
+          transaction_isolation = READ-COMMITTED    # 갭 락 감소(업무 검토 후)
+      cmd: |
+        mysql -uroot -p -e "SET GLOBAL innodb_print_all_deadlocks=ON; SET PERSIST innodb_lock_wait_timeout=30;"
+      check: "성공: 에러 로그에 데드락 상세 기록 → 개발팀에 인덱스·트랜잭션 순서 조정 요청 · 실패: 타임아웃 단축 후 1205 오류 급증 → 이전 값으로 원복"
+      note: "사전조건: 현재값 기록, my.cnf 백업, 격리 수준 변경은 복제(binlog_format=ROW 필요)·업무 정합성 검토 · 영향: 타임아웃 단축은 대기 트랜잭션을 더 빨리 실패시킴, 데드락 로그로 에러 로그 증가 · 승인: DBA·개발팀 · 백업/롤백: cp /etc/my.cnf /etc/my.cnf.bak, SET GLOBAL 이전 값 + RESET PERSIST innodb_lock_wait_timeout · 적용: SET PERSIST 는 8.0+, 5.7 은 SET GLOBAL + my.cnf, transaction_isolation 이름은 5.7.20+(이전은 tx_isolation)"
+  - stage: 3
+    steps:
+    - do: 의뢰·분석 자료
+      cmd: |
+        mysql -uroot -p -e "SHOW ENGINE INNODB STATUS\G" > innodb_status_$(date +%Y%m%d).txt ; cp /var/log/mysqld.log /tmp/
+      check: InnoDB STATUS(데드락 섹션)·에러 로그·슬로우 쿼리 로그
+      note: "민감정보 마스킹: 데드락 섹션·슬로우 쿼리 로그의 SQL 리터럴/바인드값(개인정보), 사용자명·호스트명·IP 를 가린 뒤 전달 · 전달 승인: DBA 확인 후 보안 담당 승인"
+
+- id: MY-PROC-STORAGE
+  products: [mysql]
+  category: storage
+  match: [DB-MYS-003, MY-1021, MY-1114, MY-1030, MY-1812, MY-012153, MY-013183, DB-MYS-004]
+  title: 디스크 가득참·테이블스페이스·InnoDB 손상 (1021 · 1114)
+  source: "MySQL 8.0 Reference Manual 'B.3.3.5 Where MySQL Stores Temporary Files'·'15.6.3 Tablespaces (innodb_data_file_path, autoextend)'·'15.21.3 Forcing InnoDB Recovery (innodb_force_recovery)'·'PURGE BINARY LOGS'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 디스크·데이터 디렉터리·바이너리 로그 사용량 확인 (읽기 전용)
+      cmd: |
+        df -h /var/lib/mysql /tmp ; du -sh /var/lib/mysql/* 2>/dev/null | sort -rh | head
+        mysql -uroot -p -e "SHOW BINARY LOGS; SHOW VARIABLES LIKE 'binlog_expire_logs_seconds'; SHOW VARIABLES LIKE 'innodb_data_file_path';"
+        grep -n "Disk is full\|Errcode: 28\|corruption\|Assertion failure" /var/log/mysqld.log | tail -10
+      check: "데이터 파티션 95% 이상·binlog 가 대부분이면 정리 대상. corruption/Assertion 은 하드웨어·파일 손상 → 2차 즉시 · 정상: 사용률 85% 미만, 손상 메시지 없음"
+      note: "적용: MySQL 5.7/8.0 (binlog_expire_logs_seconds 는 8.0, 5.7 은 expire_logs_days) · 권한: OS root 또는 mysql 계정(du), SHOW BINARY LOGS 는 REPLICATION CLIENT(8.0 REPLICATION CLIENT 또는 SUPER) · datadir 가 다르면 SHOW VARIABLES LIKE 'datadir' 로 확인"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 바이너리 로그 정리·보존 기간 단축 (복제 슬레이브 적용 위치 확인 후)
+      cmd: |
+        mysql -uroot -p -e "SHOW REPLICA STATUS\G" | grep -i "Relay_Source_Log_File\|Source_Log_File"   # 8.0.22+ (이전: SHOW SLAVE STATUS)
+        mysql -uroot -p -e "PURGE BINARY LOGS BEFORE NOW() - INTERVAL 3 DAY; SET PERSIST binlog_expire_logs_seconds=259200;"
+      check: "성공: df 여유 확보, SHOW BINARY LOGS 에서 3일 이전 파일 제거, 복제 지연 없음 · 실패: 복제본이 'Could not find first log file' 오류 → 복제 재구성 필요(3차·DBA)"
+      note: "사전조건: 모든 복제본(레플리카)에서 SHOW REPLICA STATUS 의 Source_Log_File 이 삭제 대상보다 새 파일인지 확인(복제본에서 실행), 시점 복구(PITR)용 binlog 백업 완료 확인 · 영향: 삭제한 binlog 는 되돌릴 수 없고 그 구간 시점 복구 불가 · 승인: DBA·백업 담당 · 백업/롤백: 삭제 전 binlog 파일을 백업 저장소로 복사, 보존 기간은 RESET PERSIST binlog_expire_logs_seconds 로 원복 · 적용: SET PERSIST·binlog_expire_logs_seconds 는 8.0+, 5.7 은 SET GLOBAL expire_logs_days=3 + my.cnf"
+    - do: (2차·승인 후) InnoDB 손상 시 강제 복구 모드로 기동해 덤프 후 재구축 (DBA)
+      config:
+        file: /etc/my.cnf ([mysqld]) — 복구 후 반드시 제거
+        snippet: |
+          innodb_force_recovery = 1     # 1→6 순서로 최소값 사용, 4 이상은 데이터 손실 가능·읽기 전용
+      cmd: |
+        systemctl restart mysqld ; mysqldump -uroot -p --all-databases --single-transaction > /backup/all_$(date +%Y%m%d).sql
+        # innodb_force_recovery 제거 → 재기동 → 복원
+      check: "성공: 덤프 성공(파일 끝 '-- Dump completed'), 정상 모드 재기동 후 CHECK TABLE 정상 · 실패: 덤프 중 크래시 → 값을 한 단계 올려 재시도(4 이상은 DBA·제조사 판단), 6 에서도 실패 → 백업 복원"
+      note: "사전조건: 데이터 디렉터리 전체를 파일 단위로 먼저 복사(서비스 중지 상태), 최신 백업 위치 확인, /backup 여유 확인 · 영향: 재기동 동안 서비스 중단, 강제 복구 모드는 쓰기 제한(4 이상 읽기 전용)·데이터 손실 가능 · 승인: DBA·서비스 담당·업무 책임자 · 백업/롤백: 사전 복사한 datadir 로 원복 가능, innodb_force_recovery 는 복구 후 반드시 제거 · 적용: MySQL 5.7/8.0 (서비스명 Ubuntu 는 mysql)"
+  - stage: 3
+    steps:
+    - do: 의뢰·분석 자료
+      cmd: |
+        cp /var/log/mysqld.log /tmp/ ; mysql -uroot -p -e "SHOW ENGINE INNODB STATUS\G" > innodb_$(date +%Y%m%d).txt ; dmesg | grep -i "I/O error\|ext4\|xfs" | tail
+      check: 에러 로그·InnoDB STATUS·OS I/O 오류·디스크 사용량
+      note: "민감정보 마스킹: 에러 로그·INNODB STATUS 의 SQL 리터럴(개인정보)·사용자명·호스트명·IP, 데이터 경로의 업무명을 가린 뒤 전달 · 전달 승인: DBA 확인 후 보안 담당 승인"
+
+# ── SQL Server ──
+- id: MS-PROC-STORAGE
+  products: [mssql]
+  category: storage
+  match: [MSSQL-9002, MSSQL-1105, MSSQL-5144, MSSQL-5145, MSSQL-9001]
+  title: 트랜잭션 로그·파일그룹 공간 부족 (9002 · 1105)
+  source: "Microsoft Learn 'Troubleshoot a full transaction log (SQL Server Error 9002)'·'sys.dm_db_log_space_usage'·'ALTER DATABASE (Transact-SQL) File and Filegroup Options' — learn.microsoft.com/sql/relational-databases/logs/troubleshoot-a-full-transaction-log-error-9002"
+  stages:
+  - stage: 1
+    steps:
+    - do: 로그 공간·재사용 대기 원인 확인 (읽기 전용)
+      cmd: |
+        sqlcmd -S localhost -E -d <db> -Q "SELECT name, log_reuse_wait_desc, recovery_model_desc FROM sys.databases; SELECT DB_NAME(database_id) db, total_log_size_in_bytes/1048576 total_mb, used_log_space_in_percent FROM sys.dm_db_log_space_usage;"
+        sqlcmd -S localhost -E -Q "DBCC SQLPERF(LOGSPACE); SELECT * FROM sys.dm_exec_requests WHERE open_transaction_count>0;"
+      check: "log_reuse_wait_desc 가 LOG_BACKUP 이면 로그 백업 누락, ACTIVE_TRANSACTION 이면 장기 트랜잭션, REPLICATION/AVAILABILITY_REPLICA 이면 복제 지연 · 정상: NOTHING/CHECKPOINT, Log Space Used 70% 미만"
+      note: "로그 파일 삭제·SHRINK 는 1차 금지 · sys.dm_db_log_space_usage 는 현재 DB 만 보여 주므로 -d <db> 로 대상 DB 지정(전체는 DBCC SQLPERF) · 적용: SQL Server 2012+ (dm_db_log_space_usage), 2016/2017/2019/2022 · 권한: VIEW SERVER STATE(DBCC SQLPERF), Windows 인증(-E) 계정"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 로그 백업 수행 후 공간 회수 (FULL 복구 모델)
+      cmd: |
+        sqlcmd -S localhost -E -Q "BACKUP LOG [<db>] TO DISK = N'D:\Backup\<db>_log_$(Get-Date -Format yyyyMMddHHmm).trn' WITH COMPRESSION;"
+        # 긴급 시에만, 이후 자동 증가 값 재설정
+        sqlcmd -S localhost -E -Q "DBCC SHRINKFILE (N'<db>_log', 4096);"
+      check: "성공: BACKUP LOG 'successfully processed', used_log_space_in_percent 하락, 9002 미발생 · 실패: 백업 경로 여유 부족·권한 오류 → 다른 경로 지정, log_reuse_wait_desc 가 LOG_BACKUP 이 아니면 원인별(장기 트랜잭션·복제) 처리 먼저"
+      note: "사전조건: 백업 대상 경로 여유·SQL Server 서비스 계정 쓰기 권한, 기존 로그 백업 체인(백업 솔루션) 담당과 협의 — 임의 로그 백업 파일도 복구 체인에 포함되므로 보관 필수 · 영향: 백업 중 I/O 부하, SHRINKFILE 은 이후 자동 증가 시 성능 저하·VLF 단편화 · 승인: DBA·백업 담당 · 백업/롤백: BACKUP LOG 자체가 백업, SHRINK 는 되돌릴 수 없으므로 ALTER DATABASE … MODIFY FILE (SIZE=…) 로 원래 크기 재확보 · 적용: PowerShell 기준(경로 안 $(Get-Date …) 가 확장됨), WITH COMPRESSION 은 Standard/Enterprise 2008 R2+"
+    - do: (2차·승인 후) 장기 트랜잭션 처리·자동 증가 설정 조정
+      cmd: |
+        sqlcmd -S localhost -E -Q "DBCC OPENTRAN('<db>');"
+        sqlcmd -S localhost -E -Q "ALTER DATABASE [<db>] MODIFY FILE (NAME=N'<db>_log', FILEGROWTH=512MB, MAXSIZE=UNLIMITED);"
+        # 1105(파일그룹 가득참) 시 데이터 파일 추가
+        sqlcmd -S localhost -E -Q "ALTER DATABASE [<db>] ADD FILE (NAME=N'<db>_data2', FILENAME=N'E:\Data\<db>_data2.ndf', SIZE=10GB, FILEGROWTH=1GB) TO FILEGROUP [PRIMARY];"
+      check: "성공: OPENTRAN 에 오래된 트랜잭션 없음, sys.database_files 에 새 설정·파일 반영, 9002/1105 미발생 · 실패: 디스크 여유 부족(오류 5149) → 다른 드라이브 지정 또는 디스크 증설"
+      note: "사전조건: 대상 드라이브 여유 확인, 현재 파일 설정 기록(SELECT name, size, growth, max_size FROM sys.database_files) · 영향: 온라인 수행, MAXSIZE=UNLIMITED 는 디스크를 가득 채울 수 있어 감시 필요 · 승인: DBA(변경 관리) · 백업/롤백: 설정은 기록한 값으로 MODIFY FILE 재실행, 추가 파일은 비어 있을 때 DBCC SHRINKFILE(EMPTYFILE) 후 ALTER DATABASE … REMOVE FILE · 적용: SQL Server 2012~2022"
+  - stage: 3
+    steps:
+    - do: Microsoft 케이스 자료
+      cmd: |
+        sqlcmd -S localhost -E -Q "EXEC sp_readerrorlog 0, 1, N'9002'; SELECT * FROM sys.dm_db_log_space_usage;" > errlog_$(Get-Date -Format yyyyMMdd).txt
+        # ERRORLOG 파일: C:\Program Files\Microsoft SQL Server\MSSQL15.MSSQLSERVER\MSSQL\Log\ERRORLOG*
+      check: ERRORLOG·로그 공간 조회·백업 이력(msdb.dbo.backupset)
+      note: "ERRORLOG 폴더의 MSSQL15 는 2019 — 2016 MSSQL13, 2017 MSSQL14, 2022 MSSQL16 · 민감정보 마스킹: ERRORLOG 의 서버·인스턴스 이름, 로그인 계정, 클라이언트 IP, 백업 경로를 가린 뒤 전달 · 전달 승인: DBA 확인 후 보안 담당 승인"
+
+- id: MS-PROC-LOCK
+  products: [mssql]
+  category: lock
+  match: [MSSQL-1205, MSSQL-1222, MSSQL-1204, MSSQL-1203, MSSQL-1206]
+  title: 교착상태·잠금 대기·LOCK 자원 부족 (1205 · 1222 · 1204)
+  source: "Microsoft Learn 'Deadlocks guide (trace flag 1222, system_health XEvent)'·'sys.dm_tran_locks / sys.dm_os_waiting_tasks'·'Configure the locks Server Configuration Option'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 블로킹·데드락 확인 (읽기 전용)
+      cmd: |
+        sqlcmd -S localhost -E -Q "SELECT session_id, blocking_session_id, wait_type, wait_time, DB_NAME(database_id) db, text FROM sys.dm_exec_requests r CROSS APPLY sys.dm_exec_sql_text(r.sql_handle) WHERE blocking_session_id<>0;"
+        sqlcmd -S localhost -E -Q "SELECT TOP 5 xed.value('@timestamp','datetime') ts, xed.query('.') FROM (SELECT CAST(target_data AS XML) x FROM sys.dm_xe_session_targets t JOIN sys.dm_xe_sessions s ON s.address=t.event_session_address WHERE s.name='system_health' AND t.target_name='ring_buffer') a CROSS APPLY x.nodes('RingBufferTarget/event[@name=\"xml_deadlock_report\"]') AS q(xed) ORDER BY ts DESC;"
+      check: "최상위 블로커 세션·SQL 기록. xml_deadlock_report 의 두 프로세스와 리소스(테이블·인덱스) 확인 · 정상: 블로킹 행 없음, 최근 데드락 보고 없음"
+      note: "적용: SQL Server 2012~2022 (system_health 세션 기본 활성) · 권한: VIEW SERVER STATE · 둘째 줄의 \\\" 이스케이프는 cmd.exe 기준 — PowerShell 에서는 SSMS 쿼리 창에서 실행 권장 · 출력의 SQL 문에 리터럴(개인정보)이 보일 수 있음"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 장기 블로커 세션 종료 (업무 확인 후, DBA)
+      cmd: |
+        sqlcmd -S localhost -E -Q "KILL <session_id>;"
+      check: "성공: 블로킹 해소(blocking_session_id 0) · 실패: KILL 후 'ROLLBACK' 상태로 오래 남음 → KILL <session_id> WITH STATUSONLY 로 진행률 확인 후 대기"
+      note: "사전조건: 블로커 세션의 로그인·호스트·프로그램·SQL 을 업무 담당이 확인(배치·시스템 세션 종료 금지), 1차 조회 결과 보관 · 영향: 트랜잭션 롤백(대량이면 장시간), 애플리케이션 오류 · 승인: DBA·업무 담당 · 백업/롤백: KILL 은 되돌릴 수 없음 — 롤백된 작업은 업무 담당이 재실행 · 적용: SQL Server 2012~2022"
+    - do: (2차·승인 후) 데드락 추적 상시화·잠금 설정 조정
+      cmd: |
+        # ERRORLOG 에 데드락 그래프 기록(시작 매개변수 -T1222 로 영구화)
+        sqlcmd -S localhost -E -Q "DBCC TRACEON(1222,-1);"
+        # 1204: 동적(0) 권장, 메모리 부족 시 max server memory 조정 — locks 는 고급 옵션이며 재시작 후 반영
+        sqlcmd -S localhost -E -Q "EXEC sp_configure 'show advanced options',1; RECONFIGURE; EXEC sp_configure 'locks', 0; RECONFIGURE;"
+        # 읽기/쓰기 충돌 완화(업무 검토 후)
+        sqlcmd -S localhost -E -Q "ALTER DATABASE [<db>] SET READ_COMMITTED_SNAPSHOT ON WITH ROLLBACK IMMEDIATE;"
+      check: "성공: DBCC TRACESTATUS(-1) 에 1222 표시, 데드락 그래프 수집 → 인덱스·쿼리 순서 조정 요청, sys.databases 의 is_read_committed_snapshot_on=1 · 실패: RCSI 전환 후 tempdb 증가·응답 지연 → OFF 로 원복"
+      note: "사전조건: 현재 설정 기록(sp_configure 'locks', is_read_committed_snapshot_on), tempdb 여유(RCSI 버전 저장소) 확인, RCSI 는 업무 정합성 검토 · 영향: WITH ROLLBACK IMMEDIATE 는 해당 DB 의 진행 중 트랜잭션을 모두 롤백, locks 변경은 서비스 재시작 필요, 1222 는 ERRORLOG 증가 · 승인: DBA·서비스 담당·개발팀(RCSI) · 백업/롤백: DBCC TRACEOFF(1222,-1), ALTER DATABASE [<db>] SET READ_COMMITTED_SNAPSHOT OFF WITH ROLLBACK IMMEDIATE, sp_configure 'locks' 이전 값 · 적용: SQL Server 2012~2022"
+  - stage: 3
+    steps:
+    - do: Microsoft 케이스 자료
+      cmd: |
+        # SSMS: 관리 › 확장 이벤트 › system_health › 데이터 보기 › xml_deadlock_report 저장 / ERRORLOG(1222) 사본
+      check: 데드락 XML·ERRORLOG·블로킹 조회 결과·쿼리 실행계획
+      note: "민감정보 마스킹: 데드락 XML 의 inputbuf(SQL 리터럴·바인드값), 로그인명·호스트명(hostname)·클라이언트 앱·IP 를 가린 뒤 전달 · 전달 승인: DBA 확인 후 보안 담당 승인"
+
+- id: MS-PROC-MEMORY
+  products: [mssql]
+  category: memory
+  match: [MSSQL-701, MSSQL-802, MSSQL-8645, MSSQL-8651, MSSQL-17300]
+  title: 메모리 부족 (701 · 802 · 8645)
+  source: "Microsoft Learn 'MSSQLSERVER_701 (Insufficient system memory)'·'Server memory configuration options (max server memory)'·'sys.dm_os_memory_clerks / DBCC MEMORYSTATUS'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 메모리 구성·클러크 사용량 확인 (읽기 전용)
+      cmd: |
+        sqlcmd -S localhost -E -Q "SELECT name, value_in_use FROM sys.configurations WHERE name IN ('max server memory (MB)','min server memory (MB)'); SELECT total_physical_memory_kb/1024 phys_mb, available_physical_memory_kb/1024 avail_mb, system_memory_state_desc FROM sys.dm_os_sys_memory;"
+        sqlcmd -S localhost -E -Q "SELECT TOP 10 type, SUM(pages_kb)/1024 mb FROM sys.dm_os_memory_clerks GROUP BY type ORDER BY 2 DESC;"
+        sqlcmd -S localhost -E -Q "SELECT physical_memory_in_use_kb/1024 inuse_mb, process_physical_memory_low, process_virtual_memory_low FROM sys.dm_os_process_memory;"
+      check: "max server memory 가 물리 메모리와 같거나(OS 여유 없음) 특정 클러크(MEMORYCLERK_SQLQERESERVATIONS·CACHESTORE_SQLCP) 과다면 원인 · 정상: OS 가용 메모리 물리의 10% 이상, process_physical_memory_low=0"
+      note: "적용: SQL Server 2012~2022 (pages_kb 열은 2012+) · 권한: VIEW SERVER STATE"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) max server memory 조정 (OS·다른 서비스 여유 확보)
+      cmd: |
+        # 물리 32GB 기준 예시
+        sqlcmd -S localhost -E -Q "EXEC sp_configure 'show advanced options',1; RECONFIGURE; EXEC sp_configure 'max server memory (MB)', 24576; RECONFIGURE;"
+        # 계획 캐시 팽창(CACHESTORE_SQLCP) 긴급 완화
+        sqlcmd -S localhost -E -Q "DBCC FREEPROCCACHE;"
+      check: "성공: value_in_use 반영, 701 미발생, system_memory_state_desc 'Available physical memory is high' · 실패: 값을 낮춘 뒤 버퍼 캐시 축소로 디스크 읽기·응답 지연 급증 → 이전 값으로 원복하고 메모리 증설 검토"
+      note: "사전조건: 현재값 기록(sp_configure 'max server memory (MB)'), 같은 서버의 다른 인스턴스·서비스 메모리 합산 · 영향: 값 축소 시 버퍼 풀이 줄어 일시 성능 저하, FREEPROCCACHE 는 전체 실행계획 재컴파일로 CPU 급증 · 승인: DBA·서비스 담당 · 백업/롤백: 기록한 이전 값으로 sp_configure 재실행 후 RECONFIGURE(FREEPROCCACHE 는 되돌릴 수 없음) · 적용: SQL Server 2012~2022 (재시작 불필요)"
+    - do: (2차·승인 후) 임시 쿼리 계획 캐시 팽창 방지
+      cmd: |
+        sqlcmd -S localhost -E -Q "EXEC sp_configure 'show advanced options',1; RECONFIGURE; EXEC sp_configure 'optimize for ad hoc workloads', 1; RECONFIGURE;"
+      check: "성공: value_in_use=1, CACHESTORE_SQLCP 증가 억제 · 실패: 변화 없음 → 바인드 미사용 SQL 을 개발팀에 수정 요청"
+      note: "사전조건: 현재값 기록 · 영향: 처음 실행되는 임시 쿼리는 계획 스텁만 캐시(두 번째 실행 시 컴파일) — 대부분 영향 미미 · 승인: DBA · 백업/롤백: sp_configure 'optimize for ad hoc workloads', 0; RECONFIGURE 로 원복 · 적용: SQL Server 2008+ (고급 옵션이라 show advanced options 필요)"
+  - stage: 3
+    steps:
+    - do: Microsoft 케이스 자료
+      cmd: |
+        sqlcmd -S localhost -E -Q "DBCC MEMORYSTATUS;" > memstatus_$(Get-Date -Format yyyyMMdd).txt
+      check: ERRORLOG(701 시점 메모리 덤프 섹션)·DBCC MEMORYSTATUS·성능 카운터(Memory Manager)
+      note: "PowerShell 기준 · 민감정보 마스킹: ERRORLOG 의 서버·인스턴스 이름, 로그인 계정, 클라이언트 IP 를 가린 뒤 전달 · 전달 승인: DBA 확인 후 보안 담당 승인"
+
+# ── PostgreSQL ──
+- id: PG-PROC-CONNECTION
+  products: [postgresql]
+  category: connection
+  match: [DB-PG-002, 53300, 57P03, 08006, 08001, PG-IDLE-IN-TXN]
+  title: 접속 슬롯 고갈 (53300 remaining connection slots are reserved)
+  source: "PostgreSQL 15 Documentation '20.3 Connections and Authentication (max_connections, superuser_reserved_connections)'·'20.11 Client Connection Defaults (idle_in_transaction_session_timeout)'·'28.2 pg_stat_activity'·PgBouncer"
+  stages:
+  - stage: 1
+    steps:
+    - do: 접속 수·상태별 분포 확인 (읽기 전용)
+      cmd: |
+        psql -U postgres -c "SHOW max_connections; SELECT count(*), state FROM pg_stat_activity GROUP BY state;"
+        psql -U postgres -c "SELECT client_addr, usename, application_name, count(*) FROM pg_stat_activity GROUP BY 1,2,3 ORDER BY 4 DESC LIMIT 10;"
+        psql -U postgres -c "SELECT pid, now()-xact_start AS tx_age, state, left(query,80) FROM pg_stat_activity WHERE state='idle in transaction' ORDER BY 2 DESC LIMIT 10;"
+      check: "총 접속 ≈ max_connections. 'idle in transaction' 장기 세션 다수면 애플리케이션 커밋 누락, 특정 client_addr 편중이면 풀 누수 · 정상: 총 접속이 max_connections 의 80% 미만, 10분 넘는 idle in transaction 없음"
+      note: "적용: PostgreSQL 9.6~16 (state 열 9.2+, idle_in_transaction 타임아웃 9.6+) · 권한: superuser 또는 pg_read_all_stats(10+) — 슬롯 고갈 시에도 superuser_reserved_connections 로 접속 가능 · query 열에 리터럴(개인정보)이 보일 수 있음"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 장기 유휴 트랜잭션 종료 및 타임아웃 설정
+      cmd: |
+        psql -U postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE state='idle in transaction' AND now()-xact_start > interval '10 min';"
+        psql -U postgres -c "ALTER SYSTEM SET idle_in_transaction_session_timeout='5min'; SELECT pg_reload_conf();"
+      check: "성공: idle in transaction 세션 감소, SHOW idle_in_transaction_session_timeout = 5min · 실패: 애플리케이션 오류 급증(정상 긴 트랜잭션이 끊김) → 타임아웃 RESET 후 애플리케이션 담당과 재협의"
+      note: "사전조건: 종료 대상 목록(1차 셋째 줄)을 업무 담당이 확인, 배치·관리 세션 제외 조건(usename/application_name) 추가 검토 · 영향: 종료된 세션의 트랜잭션 롤백·애플리케이션 연결 오류, 타임아웃은 모든 세션에 적용 · 승인: DBA·서비스 담당 · 백업/롤백: postgresql.auto.conf 사본 보관, 롤백은 ALTER SYSTEM RESET idle_in_transaction_session_timeout; SELECT pg_reload_conf(); (종료는 되돌릴 수 없음) · 적용: ALTER SYSTEM 9.4+, 타임아웃 9.6+"
+    - do: (2차·승인 후) max_connections 상향(재기동) 또는 PgBouncer 도입
+      config:
+        file: $PGDATA/postgresql.conf (또는 ALTER SYSTEM)
+        snippet: |
+          max_connections = 500                 # 재기동 필요, shared_buffers·work_mem 과 함께 산정
+          superuser_reserved_connections = 3
+          # PgBouncer(/etc/pgbouncer/pgbouncer.ini): pool_mode = transaction, default_pool_size = 50, max_client_conn = 2000
+      cmd: |
+        psql -U postgres -c "ALTER SYSTEM SET max_connections=500;" ; systemctl restart postgresql-15
+      check: "성공: SHOW max_connections = 500, 53300 미발생, WAS 풀 합계 < max_connections - reserved · 실패: 재기동 실패(공유 메모리·세마포어 부족 로그) → ALTER SYSTEM RESET 해당 값 후 재기동"
+      note: "사전조건: postgresql.conf·postgresql.auto.conf 백업, 연결당 메모리(work_mem 등)×연결 수가 물리 메모리 이내, 스트리밍 복제 대기 서버는 max_connections 를 주 서버 이상으로 먼저 올림 · 영향: 재기동 동안 DB 전체 중단 · 승인: DBA·서비스 담당(변경 관리) · 백업/롤백: 기동 실패 시 postgresql.auto.conf 를 백업본으로 되돌리고 재기동 · 적용: 서비스 이름은 PGDG 패키지 postgresql-<버전>, RHEL 기본 모듈은 postgresql"
+  - stage: 3
+    steps:
+    - do: 의뢰·분석 자료
+      cmd: |
+        psql -U postgres -c "SELECT * FROM pg_stat_activity;" > activity_$(date +%Y%m%d).txt ; cp $PGDATA/log/postgresql-*.log /tmp/ ; psql -U postgres -c "SELECT name, setting FROM pg_settings WHERE name IN ('max_connections','shared_buffers','work_mem');"
+      check: 서버 로그·pg_stat_activity·설정값·풀러 설정
+      note: "로그 디렉터리는 log_directory 확인(PG 10+ 기본 log, 9.x 는 pg_log) · 민감정보 마스킹: pg_stat_activity 의 query(SQL 리터럴·바인드값)·usename·client_addr·application_name, 로그의 사용자·DB 이름·IP 를 가린 뒤 전달 · 전달 승인: DBA 확인 후 보안 담당 승인"
+
+- id: PG-PROC-LOCK
+  products: [postgresql]
+  category: lock
+  match: [DB-PG-001, 40P01, 55P03, 40001]
+  title: 교착상태·잠금 대기 (40P01 deadlock detected · 55P03)
+  source: "PostgreSQL 15 Documentation '13.3 Explicit Locking (Deadlocks)'·'20.7 Lock Management (deadlock_timeout, log_lock_waits)'·'pg_locks · pg_blocking_pids()'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 블로킹 관계·대기 락 확인 (읽기 전용)
+      cmd: |
+        psql -U postgres -c "SELECT pid, pg_blocking_pids(pid) AS blocked_by, state, wait_event_type, now()-query_start AS age, left(query,80) FROM pg_stat_activity WHERE cardinality(pg_blocking_pids(pid))>0;"
+        psql -U postgres -c "SELECT locktype, relation::regclass, mode, granted, pid FROM pg_locks WHERE NOT granted;"
+        grep -n "deadlock detected\|still waiting for" $PGDATA/log/postgresql-$(date +%Y-%m-%d)*.log | tail -10
+      check: "로그의 'Process A waits for … Process B' 두 SQL·테이블 기록. 블로커가 idle in transaction 이면 커밋 누락 · 정상: 대기 행 없음, 최근 deadlock detected 없음"
+      note: "적용: pg_blocking_pids 는 9.6+, wait_event_type 은 9.6+ · 권한: superuser 또는 pg_read_all_stats · 'still waiting for' 는 log_lock_waits=on 일 때만 기록 · 로그 파일 이름은 log_filename 설정에 따라 다름"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 블로커 세션 취소/종료 (업무 확인 후)
+      cmd: |
+        psql -U postgres -c "SELECT pg_cancel_backend(<pid>);"     # 쿼리만 취소
+        psql -U postgres -c "SELECT pg_terminate_backend(<pid>);"  # 세션 종료
+      check: "성공: pg_locks 의 granted=false 행 소멸, 함수 반환값 t · 실패: 반환 t 인데 블로킹 지속 → 블로커가 바뀌었는지 1차 조회 재실행, idle in transaction 블로커는 cancel 로 안 풀리므로 terminate"
+      note: "사전조건: 블로커 pid 의 사용자·애플리케이션·SQL 을 업무 담당이 확인(배치·vacuum 종료는 신중), 1차 결과 보관, cancel 을 먼저 시도 · 영향: 취소/종료된 트랜잭션 롤백, 애플리케이션 오류 · 승인: DBA·업무 담당 · 백업/롤백: 종료는 되돌릴 수 없음 — 롤백된 작업은 업무 담당이 재실행 · 적용: PostgreSQL 9.6~16"
+    - do: (2차·승인 후) 락 대기 로깅·타임아웃 설정
+      cmd: |
+        psql -U postgres -c "ALTER SYSTEM SET log_lock_waits=on; ALTER SYSTEM SET deadlock_timeout='1s'; ALTER SYSTEM SET lock_timeout='30s'; SELECT pg_reload_conf();"
+      check: "성공: SHOW 로 값 반영, 로그에 락 대기 상세 기록 → 개발팀에 트랜잭션 순서·인덱스 요청 · 실패: lock_timeout 으로 배치·DDL·유지보수 작업이 55P03 로 실패 → lock_timeout 은 서버 전체 대신 해당 롤/DB 단위(ALTER ROLE … SET lock_timeout)로 적용"
+      note: "사전조건: postgresql.auto.conf 백업, 서버 전체 lock_timeout 이 배치·마이그레이션에 미칠 영향 검토 · 영향: 30초 이상 락 대기하는 모든 문이 오류로 끝남, 로그 증가 · 승인: DBA·개발팀 · 백업/롤백: ALTER SYSTEM RESET lock_timeout; ALTER SYSTEM RESET log_lock_waits; ALTER SYSTEM RESET deadlock_timeout; SELECT pg_reload_conf(); · 적용: ALTER SYSTEM 9.4+"
+  - stage: 3
+    steps:
+    - do: 의뢰·분석 자료
+      cmd: |
+        cp $PGDATA/log/postgresql-*.log /tmp/ ; psql -U postgres -c "SELECT * FROM pg_locks;" > locks_$(date +%Y%m%d).txt
+      check: 서버 로그(deadlock detail)·pg_locks·pg_stat_activity 캡처
+      note: "민감정보 마스킹: 로그의 deadlock DETAIL·STATEMENT(SQL 리터럴·바인드값), 사용자·DB 이름·클라이언트 IP 를 가린 뒤 전달 · 전달 승인: DBA 확인 후 보안 담당 승인"
+
+- id: PG-PROC-DISK
+  products: [postgresql]
+  category: disk
+  match: [DB-PG-003, DB-PG-ARCH-001, PG-WAL-FULL, PG-ARCHIVE-FAIL, 53100, PG-PANIC, 58030]
+  title: pg_wal 디스크 가득참·아카이브 실패 (No space left · archive command failed)
+  source: "PostgreSQL 15 Documentation '30.1 Reliability › WAL Configuration (max_wal_size, wal_keep_size)'·'26.3 Continuous Archiving (archive_command failure)'·'pg_replication_slots'"
+  stages:
+  - stage: 1
+    steps:
+    - do: WAL·아카이브·복제 슬롯 상태 확인 (읽기 전용)
+      cmd: |
+        df -h $PGDATA $PGDATA/pg_wal <archive_dir> ; du -sh $PGDATA/pg_wal ; ls $PGDATA/pg_wal/archive_status/ | grep -c ready
+        psql -U postgres -c "SELECT * FROM pg_stat_archiver;" ; psql -U postgres -c "SELECT slot_name, active, pg_size_pretty(pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn)) AS retained FROM pg_replication_slots;"
+        psql -U postgres -c "SELECT count(*), pg_size_pretty(sum(size)) FROM pg_ls_waldir();"
+        grep -n "archive command failed\|No space left" $PGDATA/log/postgresql-$(date +%Y-%m-%d)*.log | tail -10
+      check: ".ready 파일이 수천 개·failed_count 증가면 아카이브 실패로 WAL 누적. 비활성 슬롯이 대량 보유하면 슬롯 원인 · 정상: .ready 수십 개 이하, last_failed_time 이 오래전, 모든 슬롯 active"
+      note: "pg_wal 파일 수동 삭제 절대 금지(DB 기동 불가) · 적용: PostgreSQL 10~16 (9.x 는 pg_xlog·pg_current_xlog_location()·pg_xlog_location_diff(), pg_ls_waldir 은 10+) · 권한: superuser 또는 pg_monitor(11+), PGDATA 는 postgres OS 계정"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 아카이브 대상 공간 확보·archive_command 복구
+      cmd: |
+        # 아카이브 디렉터리 정리(백업된 것만) 또는 마운트 확장 후:
+        psql -U postgres -c "SELECT pg_reload_conf();" ; psql -U postgres -c "SELECT * FROM pg_stat_archiver;"
+      check: "성공: last_archived_wal·last_archived_time 갱신, archive_status/*.ready 감소 · 실패: failed_count 계속 증가 → 서버 로그의 archive_command 오류 메시지(권한·경로·원격 저장소)로 원인 처리"
+      note: "사전조건: 아카이브 디렉터리에서 지울 파일이 백업(베이스 백업 이후 필요 구간 제외) 완료분인지 백업 담당 확인, archive_command 수정 시 postgresql.conf 백업 · 영향: 필요한 아카이브를 지우면 시점 복구(PITR)·대기 서버 재동기화 불가 · 승인: DBA·백업 담당 · 백업/롤백: 정리 전 아카이브를 다른 저장소로 복사, 설정은 백업본으로 되돌린 뒤 pg_reload_conf() · 적용: PostgreSQL 10~16"
+    - do: (2차·승인 후) 비활성 복제 슬롯 제거·WAL 상한 조정
+      cmd: |
+        psql -U postgres -c "SELECT pg_drop_replication_slot('<slot_name>');"   # 사용하지 않는 슬롯만
+        psql -U postgres -c "ALTER SYSTEM SET max_wal_size='4GB'; ALTER SYSTEM SET wal_keep_size='1GB'; SELECT pg_reload_conf();"
+      check: "성공: 체크포인트 후 pg_wal 크기 감소, pg_replication_slots 에서 슬롯 제거 · 실패: 'replication slot is active' 오류 → 사용 중인 슬롯이므로 중단하고 해당 복제본 담당 확인"
+      note: "사전조건: 슬롯 사용처(대기 서버·논리 복제·CDC 도구) 담당이 폐기 동의, 현재 설정 기록 · 영향: 슬롯을 지우면 그 복제본·구독은 필요한 WAL 을 잃어 재구축 필요 · 승인: DBA·복제본/CDC 담당 · 백업/롤백: 슬롯은 되돌릴 수 없음(새로 만들고 복제본 재동기화), 설정은 ALTER SYSTEM RESET max_wal_size / wal_keep_size 후 reload · 적용: wal_keep_size 는 PostgreSQL 13+, 12 이하는 wal_keep_segments(16MB 단위 개수), 15+ 는 max_slot_wal_keep_size 로 슬롯 보유 상한 지정 가능"
+  - stage: 3
+    steps:
+    - do: 의뢰·분석 자료
+      cmd: |
+        cp $PGDATA/log/postgresql-*.log /tmp/ ; psql -U postgres -c "SELECT * FROM pg_stat_archiver; SELECT * FROM pg_replication_slots;" > wal_$(date +%Y%m%d).txt ; cat $PGDATA/postgresql.auto.conf
+      check: 로그·아카이브/슬롯 상태·설정·df 결과
+      note: "민감정보 마스킹: postgresql.auto.conf 의 primary_conninfo(비밀번호 포함 가능)·archive_command 의 원격 호스트·계정, 로그의 사용자·IP·SQL 리터럴을 가린 뒤 전달 · 전달 승인: DBA 확인 후 보안 담당 승인"
+
+# ── Altibase ──
+- id: ALT-PROC-CONNECTION
+  products: [altibase]
+  category: connection
+  match: [DB-ALT-002, ERR-410E3, ERR-01027, ERR-410D5, ERR-50032, ERR-51043, ERR-5104D, ERR-41059]
+  title: 세션·IPC 채널·TCP 접속 한도 (ERR-410E3 · ERR-01027)
+  source: "Altibase 7.1 Administrator's Manual '세션 관리(MAX_CLIENT, IPC_CHANNEL_COUNT)'·'altibase.properties'·'iSQL / aexport'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 세션 수·한도 확인 (읽기 전용)
+      cmd: |
+        isql -s localhost -u sys -silent          # 비밀번호는 접속 프롬프트에서 입력(-p 값·heredoc 에 두지 않음)
+        iSQL> SELECT NAME, VALUE1 FROM V$PROPERTY WHERE NAME IN ('MAX_CLIENT','IPC_CHANNEL_COUNT','NET_CONN_IP_STACK');
+        iSQL> SELECT COMM_NAME, COUNT(*) FROM V$SESSION GROUP BY COMM_NAME;
+        iSQL> SELECT ID, CLIENT_APP_INFO, LOGIN_TIME, TASK_STATE FROM V$SESSION ORDER BY LOGIN_TIME LIMIT 30;
+        iSQL> quit
+      check: "세션 수 ≈ MAX_CLIENT / IPC 세션 ≈ IPC_CHANNEL_COUNT 면 한도. 특정 클라이언트 편중이면 풀 누수 · 정상: 세션 수가 MAX_CLIENT 의 80% 미만"
+      note: "isql 을 실행해 비밀번호를 접속 프롬프트에서 입력한 뒤 iSQL> 줄을 차례로 입력 — SQL 을 heredoc 으로 넘기면 비밀번호를 표준입력에서 읽을 때 첫 SQL 줄이 비밀번호로 들어갈 수 있고, -p 뒤에 비밀번호 값을 붙이면 ps·셸 이력에 남는다 · 적용: Altibase 6.5/7.x · 권한: sys(SYSDBA) — 1차는 DBA 에게 결과 요청"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 한도 상향 (altibase.properties, 재기동 필요)
+      config:
+        file: $ALTIBASE_HOME/conf/altibase.properties
+        snippet: |
+          MAX_CLIENT = 2000
+          IPC_CHANNEL_COUNT = 64
+          NET_CONN_IP_STACK = 0
+      cmd: |
+        server stop ; server start   # 또는 isql 에서 ALTER SYSTEM SET MAX_CLIENT=2000 (동적 여부는 매뉴얼 확인)
+      check: "성공: V$PROPERTY 반영, ERR-410E3 미발생 · 실패: server start 실패(공유 메모리·세마포어 부족, trc/altibase_boot.log) → properties 백업본으로 되돌린 뒤 기동"
+      note: "사전조건: cp altibase.properties altibase.properties.$(date +%Y%m%d) 백업, IPC_CHANNEL_COUNT 증가 시 OS 세마포어·공유 메모리 한도 확인, 세션 누수 원인 먼저 해소 · 영향: server stop~start 동안 DB 전체 중단(메모리 DB 는 로딩 시간 소요) · 승인: DBA·서비스 담당(변경 관리) · 백업/롤백: 백업한 properties 로 복원 후 재기동 · 적용: Altibase 6.5/7.x"
+    - do: (2차·승인 후) 누수 세션 정리
+      cmd: |
+        isql -s localhost -u sys -silent          # 비밀번호는 접속 프롬프트에서 입력(-p 값·heredoc 에 두지 않음)
+        iSQL> ALTER DATABASE <db_name> SESSION CLOSE <session_id>;
+        iSQL> quit
+      check: "성공: V$SESSION 세션 수 감소 · 실패: 오류(DB 이름 불일치) → SELECT DB_NAME FROM V$DATABASE 로 이름 확인 후 재실행"
+      note: "사전조건: 종료 대상 세션의 CLIENT_APP_INFO·로그인 시각을 업무 담당이 확인 · 영향: 해당 세션 트랜잭션 롤백, 애플리케이션 연결 오류 · 승인: DBA·업무 담당 · 백업/롤백: 세션 종료는 되돌릴 수 없음 — 롤백된 작업은 업무 담당이 재실행 · 적용: Altibase 6.5/7.x (DB 이름 기본값 mydb, 원문의 'altibase' 를 <db_name> 자리표시자로 바꿈)"
+  - stage: 3
+    steps:
+    - do: Altibase 기술지원 자료
+      cmd: |
+        tar czf altibase_$(date +%Y%m%d).tgz $ALTIBASE_HOME/conf/altibase.properties $ALTIBASE_HOME/trc/ ; altibase -v
+      check: properties·trc 로그(altibase_boot/qp/sm)·버전·세션 조회 결과
+      note: "민감정보 마스킹: properties 의 IP·포트·경로, trc 로그의 사용자명·클라이언트 IP·SQL 바인드값을 가린 뒤 전달 · 전달 승인: DBA 확인 후 보안 담당 승인"
+
+- id: ALT-PROC-STORAGE
+  products: [altibase]
+  category: storage
+  match: [DB-ALT-003, ERR-11035, ERR-11123, ERR-110F0, ERR-110F1, ERR-11030, ERR-11183, ERR-11184, ERR-11049]
+  title: 테이블스페이스·메모리 DB 크기 한도 (ERR-11035 · MEM_MAX_DB_SIZE)
+  source: "Altibase 7.1 Administrator's Manual '테이블스페이스 관리(ALTER TABLESPACE … ADD DATAFILE / AUTOEXTEND)'·'메모리 테이블스페이스(MEM_MAX_DB_SIZE)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 공간 사용률 확인 (읽기 전용)
+      cmd: |
+        isql -s localhost -u sys -silent          # 비밀번호는 접속 프롬프트에서 입력(-p 값·heredoc 에 두지 않음)
+        iSQL> SELECT NAME, TYPE, TOTAL_PAGE_COUNT*PAGE_SIZE/1024/1024 TOTAL_MB, ALLOCATED_PAGE_COUNT*PAGE_SIZE/1024/1024 USED_MB FROM V$TABLESPACES;
+        iSQL> SELECT NAME, VALUE1 FROM V$PROPERTY WHERE NAME IN ('MEM_MAX_DB_SIZE','MEM_DB_DIR','DISK_MAX_DB_SIZE');
+        iSQL> quit
+        df -h $ALTIBASE_HOME/dbs
+      check: "USED/TOTAL 95% 이상 또는 메모리 TS 합계 ≈ MEM_MAX_DB_SIZE · 정상: 사용률 85% 미만"
+      note: "isql 실행 후 비밀번호는 접속 프롬프트에서 입력하고 iSQL> 줄을 차례로 입력(heredoc·-p 뒤 비밀번호 값은 쓰지 않음) · 적용: Altibase 6.5/7.x · 권한: sys — 1차는 DBA 에게 결과 요청"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 디스크 테이블스페이스 확장
+      cmd: |
+        isql -s localhost -u sys -silent          # 비밀번호는 접속 프롬프트에서 입력(-p 값·heredoc 에 두지 않음)
+        iSQL> ALTER TABLESPACE <TS> ADD DATAFILE '<TS>_02.dbf' SIZE 4G AUTOEXTEND ON NEXT 512M MAXSIZE 32G;
+        iSQL> quit
+      check: "성공: V$TABLESPACES TOTAL 증가, ERR-11035 미발생 · 실패: 파일 생성 오류(경로·디스크 부족) → 경로·여유 확인"
+      note: "사전조건: 데이터 디렉터리 디스크 여유(df -h), 파일 이름 중복 확인 · 영향: 온라인 수행, 파일 생성 중 I/O 부하 · 승인: DBA(변경 관리) · 백업/롤백: 추가한 빈 데이터파일 제거(ALTER TABLESPACE … DROP DATAFILE) 가능 여부는 매뉴얼 확인, 확장 후 백업 갱신 · 적용: Altibase 6.5/7.x"
+    - do: (2차·승인 후) 메모리 DB 한도 상향 (재기동)
+      config:
+        file: $ALTIBASE_HOME/conf/altibase.properties
+        snippet: |
+          MEM_MAX_DB_SIZE = 32G     # 물리 메모리·다른 프로세스 여유 이내
+      cmd: |
+        server stop ; server start
+      check: "성공: V$PROPERTY 의 MEM_MAX_DB_SIZE 반영, ERR-110F0 미발생 · 실패: 기동 실패(메모리 부족) → 백업 properties 로 복원 후 기동"
+      note: "사전조건: properties 백업, 물리 메모리·공유 메모리 한도(kernel.shmmax)·체크포인트 이미지 디스크 여유 확인 · 영향: 재기동 동안 DB 전체 중단, 메모리 DB 로딩 시간 · 승인: DBA·서비스 담당·시스템 담당(메모리) · 백업/롤백: 백업한 properties 로 복원 후 재기동 · 적용: Altibase 6.5/7.x"
+  - stage: 3
+    steps:
+    - do: Altibase 기술지원 자료
+      cmd: |
+        tar czf altibase_ts_$(date +%Y%m%d).tgz $ALTIBASE_HOME/conf/altibase.properties $ALTIBASE_HOME/trc/
+      check: properties·trc·공간 조회 결과
+      note: "민감정보 마스킹: properties 의 IP·포트·경로, trc 로그의 사용자명·클라이언트 IP·SQL 바인드값을 가린 뒤 전달 · 전달 승인: DBA 확인 후 보안 담당 승인"
+
+# ── CUBRID ──
+- id: CUB-PROC-LOCK
+  products: [cubrid]
+  category: lock
+  match: ["-1021", "-73", "-74", "-75", "-76", "-966", "-967", "-968"]
+  title: 교착상태·잠금 시간초과 (-1021 · -73)
+  source: "CUBRID 11 Manual 'Lock Management (lock_timeout, deadlock_detection_interval)'·'cubrid lockdb'·'cubrid killtran'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 잠금 상태·트랜잭션 확인 (읽기 전용)
+      cmd: |
+        cubrid lockdb <db> | head -80
+        cubrid tranlist <db> ; cubrid paramdump <db> | grep -E "lock_timeout|deadlock_detection_interval"
+        grep -n "ERROR CODE = -1021\|ERROR CODE = -73" $CUBRID/log/server/<db>_*.err | tail -10
+      check: "lockdb 의 'Blocked by' 관계와 tranlist 의 장시간 트랜잭션 기록 · 정상: 대기(blocked) 트랜잭션 없음"
+      note: "적용: CUBRID 10.x/11.x · 권한: CUBRID 설치 OS 계정, tranlist 는 DBA 비밀번호를 물을 수 있음(명령줄에 -p 로 쓰지 말 것) · lockdb 출력은 잠금 수에 비례해 커지므로 head 로 제한"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 블로킹 트랜잭션 종료 (업무 확인 후)
+      cmd: |
+        cubrid killtran -i <tran_index> <db>
+      check: "성공: lockdb 에서 대기 소멸, tranlist 에서 해당 인덱스 사라짐 · 실패: 종료 후 롤백이 길게 진행 → tranlist 로 상태 확인하며 대기"
+      note: "사전조건: tranlist 의 사용자·호스트·프로그램을 업무 담당이 확인(배치 종료 금지), lockdb 출력 보관 · 영향: 해당 트랜잭션 롤백, 애플리케이션 오류 · 승인: DBA·업무 담당 · 백업/롤백: 종료는 되돌릴 수 없음 — 롤백된 작업은 업무 담당이 재실행 · 적용: CUBRID 10.x/11.x"
+    - do: (2차·승인 후) 잠금 타임아웃·격리 수준 설정
+      config:
+        file: $CUBRID/conf/cubrid.conf
+        snippet: |
+          lock_timeout = 30s
+          deadlock_detection_interval_in_secs = 1
+          isolation_level = 4        # 4 = READ COMMITTED(10.0+ 기본값)
+      cmd: |
+        cubrid server restart <db>
+      check: "성공: cubrid paramdump <db> 에 새 값 반영, -1021 재발 감소 · 실패: 재기동 실패 또는 -73(lock timeout) 급증 → 백업 cubrid.conf 로 복원 후 재기동"
+      note: "공식 매뉴얼(CUBRID 11 Configuration) 기준 이름: lock_timeout(단위 ms·s·min·h), deadlock_detection_interval_in_secs, isolation_level(4~6 정수) — 원문의 deadlock_detection_interval·'30sec'·\"read committed\" 표기를 고침 · 사전조건: cp cubrid.conf cubrid.conf.bak, 격리 수준 변경은 업무 정합성 검토 · 영향: 재기동 동안 DB 중단, 타임아웃 단축은 대기 트랜잭션을 더 빨리 실패시킴 · 승인: DBA·서비스 담당 · 백업/롤백: 백업한 cubrid.conf 로 복원 후 cubrid server restart <db> · 적용: CUBRID 10.x/11.x (9.x 는 lock_timeout_in_secs)"
+  - stage: 3
+    steps:
+    - do: CUBRID 기술지원 자료
+      cmd: |
+        tar czf cubrid_$(date +%Y%m%d).tgz $CUBRID/conf/cubrid.conf $CUBRID/log/server/ $CUBRID/log/broker/ ; cubrid --version
+      check: cubrid.conf·서버/브로커 오류 로그·lockdb 출력
+      note: "민감정보 마스킹: 브로커 로그(SQL 로그의 바인드값·리터럴)·서버 로그의 사용자명·클라이언트 IP·호스트명을 가린 뒤 전달 · 전달 승인: DBA 확인 후 보안 담당 승인"
+
+- id: CUB-PROC-STORAGE
+  products: [cubrid]
+  category: storage
+  match: ["-13", "-14", "-96", "-97", "-78", "-79", "-81"]
+  title: 볼륨 I/O 오류·아카이브 로그 누락·복구 필요
+  source: "CUBRID 11 Manual 'Database Volume (cubrid addvoldb, cubrid spacedb)'·'Backup and Restore (cubrid backupdb/restoredb)'·'Log Management (log_max_archives)'"
+  stages:
+  - stage: 1
+    steps:
+    - do: 볼륨 공간·로그 상태 확인 (읽기 전용)
+      cmd: |
+        cubrid spacedb <db> ; cubrid spacedb -s <db>
+        ls -lt $CUBRID/databases/<db>/ | head ; df -h $CUBRID/databases
+        grep -n "ERROR CODE = -13\|ERROR CODE = -14\|ERROR CODE = -96\|ERROR CODE = -97" $CUBRID/log/server/<db>_*.err | tail -10
+      check: "볼륨 free 0 또는 I/O 오류(-13/-14)면 디스크 문제·OS dmesg 확인 · 정상: 볼륨 free 여유 15% 이상, 오류 없음"
+      note: "적용: CUBRID 10.x/11.x · 권한: CUBRID 설치 OS 계정 · 데이터 위치는 $CUBRID_DATABASES/databases.txt 로 확인(설치마다 다름)"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 볼륨 추가·자동 확장 설정
+      cmd: |
+        cubrid addvoldb -C --db-volume-size=4G -p data <db>   # 서버 기동 중(클라이언트/서버 모드). 서버 중지 상태면 -S
+      config:
+        file: $CUBRID/conf/cubrid.conf
+        snippet: |
+          db_volume_size = 4G
+          generic_vol_prealloc_size = 512M
+          log_max_archives = 100
+      check: "성공: spacedb 에 새 볼륨·free 증가 · 실패: 디스크 부족·경로 권한 오류 → 여유 확보 후 재시도, -S 로 실행해 'database is in use' 오류면 -C 로 실행"
+      note: "원문 -S(독립 모드)는 서버가 내려가 있어야 하므로 기동 중 추가는 -C(기본값)로 고침, -p data 는 10.x 부터 효과 없음(temp 만 의미) · 미검증 — generic_vol_prealloc_size 가 10.x/11.x 에 남아 있는지 확인 못 함 · 사전조건: 데이터 디렉터리 디스크 여유, cubrid.conf 백업, log_max_archives 축소 전 백업 정책 확인 · 영향: 볼륨 생성 중 I/O 부하, log_max_archives 를 줄이면 오래된 아카이브가 삭제되어 시점 복구 범위 감소 · 승인: DBA(변경 관리)·백업 담당 · 백업/롤백: 추가한 볼륨은 사실상 제거 불가 — 크기 신중히, conf 는 백업본으로 복원 · 적용: CUBRID 10.x/11.x"
+    - do: (2차·승인 후) 복구 필요(-96) 시 백업본으로 복원 (DBA)
+      cmd: |
+        cubrid restoredb -d backuptime <db>
+      check: "성공: cubrid checkdb <db> 정상, 서버 기동·업무 조회 정상 · 실패: 백업 볼륨 누락·손상 오류 → 이전 단계 백업으로 재시도하거나 3차"
+      note: "사전조건: DB 서버 중지, 현재 데이터·로그 디렉터리 전체를 다른 위치에 복사(복원 실패 대비), 백업 파일 위치·레벨 확인(restoredb --list) · 영향: 마지막 백업 이후 변경분 유실(-d backuptime 은 백업 시점까지만), 복원 동안 서비스 중단 · 승인: DBA·서비스 담당·업무 책임자(데이터 유실 범위 승인) · 백업/롤백: 사전 복사한 디렉터리로 원복 · 적용: CUBRID 10.x/11.x (특정 시점은 -d dd-mm-yyyy:hh:mi:ss)"
+  - stage: 3
+    steps:
+    - do: CUBRID 기술지원 자료
+      cmd: |
+        tar czf cubrid_vol_$(date +%Y%m%d).tgz $CUBRID/log/server/ $CUBRID/conf/ ; cubrid spacedb <db> > spacedb.txt ; dmesg | grep -i "I/O error" | tail
+      check: 로그·conf·spacedb·OS I/O 오류
+      note: "민감정보 마스킹: conf 의 IP·포트·경로, 서버 로그의 사용자명·클라이언트 IP·호스트명을 가린 뒤 전달 · 전달 승인: DBA 확인 후 보안 담당 승인"
+
+# ── GOLDILOCKS ──
+- id: GD-PROC-STORAGE
+  products: [goldilocks]
+  category: storage
+  match: [ERR-14003, ERR-14015, ERR-14002, ERR-14039, ERR-11043, ERR-13010, ERR-13011]
+  title: 테이블스페이스·메모리 영역 부족 (ERR-14003 · ERR-13011)
+  source: "SUNJESOFT GOLDILOCKS Administrator's Guide '테이블스페이스 관리(ALTER TABLESPACE ADD DATAFILE)'·'메모리 관리(SHARED_MEMORY_STATIC_SIZE, SESSION_MEMORY)' — manual.sunjesoft.co.kr"
+  stages:
+  - stage: 1
+    steps:
+    - do: 공간·메모리 사용 확인 (읽기 전용)
+      cmd: |
+        gsql sys --dsn=<dsn> <<'EOF'
+        SELECT TBS_NAME, TOTAL_EXT_COUNT, USED_DATA_EXT_COUNT, FREE_EXT_COUNT, EXTENT_SIZE, ROUND(USED_DATA_EXT_COUNT*100/TOTAL_EXT_COUNT,1) USED_PCT FROM V$TABLESPACE_STAT;
+        SELECT PROPERTY_NAME, PROPERTY_VALUE FROM V$PROPERTY WHERE PROPERTY_NAME LIKE '%STATIC%' OR PROPERTY_NAME LIKE '%MEMORY%';
+        EOF
+        grep -n "ERR-42000(14003)\|ERR-HY000(13011)\|ERR-HY000(11043)" $GOLDILOCKS_DATA/trc/system.trc | tail -10 ; df -h $GOLDILOCKS_DATA
+      check: "USED/TOTAL 95% 이상·Static 영역 부족 메시지면 확장 대상 · 정상: 사용률 85% 미만, 최근 오류 없음"
+      note: "V$TABLESPACE_STAT 열(TBS_NAME·TOTAL_EXT_COUNT·USED_DATA_EXT_COUNT·FREE_EXT_COUNT·EXTENT_SIZE)은 GOLDILOCKS 26c 매뉴얼 기준(5차 보강에서 옛 TBS_TYPE·TOTAL_SIZE·USED_SIZE 를 바로잡음 — 그 열은 없어 실행이 실패했다) · V$PROPERTY 의 PROPERTY_NAME·PROPERTY_VALUE 도 26c 매뉴얼로 확인 · 미검증 — gsql 인자 형식을 공식 매뉴얼로 확인 못 함(버전별 차이 가능, 오류 시 매뉴얼의 딕셔너리 뷰 이름 확인) · 적용: GOLDILOCKS 3.x · 권한: sys — 1차는 DBA 에게 결과 요청, <pw> 를 명령줄에 쓰지 말 것"
+  - stage: 2
+    steps:
+    - do: (2차·승인 후) 테이블스페이스 확장
+      cmd: |
+        gsql sys --dsn=<dsn> -c "ALTER TABLESPACE <TS> ADD DATAFILE '<TS>_02.dbf' SIZE 4G AUTOEXTEND ON NEXT 512M MAXSIZE 32G;"
+      check: "성공: V$TABLESPACE_STAT 반영, ERR-14003 미발생 · 실패: 파일 생성 오류(경로·디스크 부족)·문법 오류 → 경로·여유 확인, -c 옵션이 없으면 1차처럼 heredoc 으로 실행"
+      note: "미검증 — gsql 의 -c 옵션 존재와 메모리 테이블스페이스의 ADD DATAFILE 문법을 확인 못 함 · 사전조건: 데이터 디렉터리 디스크 여유, 파일 이름 중복 확인 · 영향: 온라인 수행, 파일 생성 중 I/O·메모리 부하 · 승인: DBA(변경 관리) · 백업/롤백: 추가 파일 제거 가능 여부는 매뉴얼 확인, 확장 후 백업 갱신 · 적용: GOLDILOCKS 3.x"
+    - do: (2차·승인 후) 공유 메모리 Static 영역 상향 (재기동)
+      config:
+        file: $GOLDILOCKS_DATA/conf/goldilocks.properties.conf
+        snippet: |
+          SHARED_MEMORY_STATIC_SIZE = 8G
+      cmd: |
+        gsql sys --dsn=<dsn> -c "SHUTDOWN NORMAL;" ; gsql sys --as sysdba -c "STARTUP;"
+      check: "성공: 기동 후 V$PROPERTY 에 새 값, ERR-13010/13011 미발생 · 실패: 기동 실패(공유 메모리 한도) → 백업 properties 로 복원 후 기동, OS kernel.shmmax/shmall 확인"
+      note: "미검증 — gsql -c·--as sysdba 인자 형식 확인 못 함 · 사전조건: properties 파일 백업, 물리 메모리·OS 공유 메모리 한도 확인, 세션 종료 공지 · 영향: SHUTDOWN~STARTUP 동안 DB 전체 중단 · 승인: DBA·서비스 담당·시스템 담당(메모리) · 백업/롤백: 백업한 goldilocks.properties.conf 로 복원 후 재기동 · 적용: GOLDILOCKS 3.x"
+  - stage: 3
+    steps:
+    - do: SUNJESOFT 기술지원 자료
+      cmd: |
+        tar czf goldilocks_$(date +%Y%m%d).tgz $GOLDILOCKS_DATA/conf/ $GOLDILOCKS_DATA/trc/ ; gsql --version
+      check: properties·system.trc·버전·공간 조회 결과
+      note: "민감정보 마스킹: conf 의 IP·포트·경로, trc 의 사용자명·클라이언트 IP·SQL 바인드값을 가린 뒤 전달 · 전달 승인: DBA 확인 후 보안 담당 승인"

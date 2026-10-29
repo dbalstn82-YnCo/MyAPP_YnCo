@@ -1,0 +1,15 @@
+product: altibase
+title: Altibase 운영 참고 (GPT 수집 — 벤더 문서 대조 필요)
+sections:
+- heading: 로그 위치
+  body: 기본 서버 로그 디렉터리는 $ALTIBASE_HOME/trc이다. 핵심 파일은 altibase_boot.log, altibase_error.log,
+    altibase_trc.log, 비정상 종료 시 altibase_dump.log이다.
+- heading: 장애 시 수집 방법
+  body: $ALTIBASE_HOME/trc의 boot/error/trc/dump 로그와 $ALTIBASE_HOME/conf/altibase.properties를
+    보존하고 장애 시각의 프로세스·메모리·디스크 상태와 함께 수집한다.
+- heading: 대표 장애 신호
+  body: ERR 코드, altibase_error.log의 비정상 종료와 call stack, 메모리 tablespace 한도, 디스크 tablespace
+    부족, lock timeout, 통신 실패와 task pool 포화를 우선 확인한다.
+- heading: 1차 확인 명령
+  body: server status로 Altibase 서버 상태를 확인하고 ps -ef | grep altibase와 tail -100 $ALTIBASE_HOME/trc/altibase_error.log를
+    함께 확인한다.

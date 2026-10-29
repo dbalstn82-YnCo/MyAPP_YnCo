@@ -1,0 +1,270 @@
+product: webtob
+layer: web
+note: GPT 협업 수집분 — 벤더 공식 문서와 대조 후 확정
+codes:
+- code: COM_0
+  severity: error
+  category: internal
+  title: HTTP 오류 응답 기본 코드
+  immediate:
+  - '`grep -n "COM_0" <오류로그> | tail -20` 로 HTTP 응답 코드·URI·시각 확인 (`ls -lt $WEBTOBDIR/log | head` 로 최근 오류 로그 찾기)'
+  - '`grep -n -B5 "COM_0" <오류로그> | tail -40` 로 바로 앞 줄의 선행 오류 코드(CONN_·DST_·RSC_) 확인 — 선행 코드가 실제 원인, 없으면 응답 코드별로 판단 (WebtoB 5/6)'
+  short:
+  - 요청 URI와 내부 서버 상태 및 관련 에러코드를 상관분석
+  mid:
+  - 반복되는 HTTP 오류의 원인 서비스와 설정을 개선
+  long:
+  - 응답코드별 오류율과 연관 에러코드를 통합 모니터링
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tmaxsoft.com/ko/webtob/6.1/administrator-guide/appendix-webtob-error-code-guide.html)
+  note: WebtoB 6.1 공식 에러코드 가이드로 확인(5.x 문서 미확인)
+  vendor_cause: HTTP 요청 처리 중 별도 에러 로그가 없는 오류 응답이 발생해 기본 오류 코드로 기록됨
+  vendor_action: 메시지의 HTTP 응답 코드를 확인하고 해당 응답 코드에 맞는 원인을 분석·조치
+  vendor_url: https://docs.tmaxsoft.com/ko/webtob/6.1/administrator-guide/appendix-webtob-error-code-guide.html
+  versions:
+  - WebtoB 5.x
+  - WebtoB 6.x
+  version_note: WebtoB 5 매뉴얼의 오류 코드 체계(COM_/CONN_/DST_/REQ_/RSC_·CFL-) — 4.1 에서는 문구만 기록(미확인)
+- code: CONN_0
+  severity: error
+  category: upstream
+  title: 내부 서버 연결 비정상 종료
+  immediate:
+  - '`grep -n "CONN_0" <오류로그> | tail -20` 로 대상 내부 서버(JSV 등)·URI·시각 확인 (`ls -lt $WEBTOBDIR/log | head` 로 최근 오류 로그 찾기)'
+  - '`$WEBTOBDIR/bin/wsadmin` 접속 후 `si` 로 해당 내부 서버 상태(RDY 여부) 확인, 같은 시각 내부 서버(JEUS) 로그에서 응답 전 비정상 종료·예외 대조'
+  short:
+  - 내부 서버 비정상 종료와 네트워크 단절 및 응답 중 연결 종료를 분석
+  mid:
+  - 내부 서버 안정성과 연결 재사용 및 타임아웃 정책을 개선
+  long:
+  - destination 연결 종료율과 서버 생존 상태를 상시 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tmaxsoft.com/ko/webtob/6.1/administrator-guide/appendix-webtob-error-code-guide.html)
+  note: WebtoB 6.1 공식 에러코드 가이드로 확인(5.x 문서 미확인)
+  vendor_cause: HTTP 요청 처리 중 내부 서버가 정상 응답을 완료하기 전에 연결을 종료함
+  vendor_action: 내부 서버 로그를 확인하고 정상 응답했다면 패킷 캡처로 WebtoB까지 응답 전달 여부를 확인
+  vendor_url: https://docs.tmaxsoft.com/ko/webtob/6.1/administrator-guide/appendix-webtob-error-code-guide.html
+  versions:
+  - WebtoB 4.1
+  - WebtoB 5.x
+  - WebtoB 6.x
+  version_note: 로그 문구 기반 별칭 — 4.1/5/6 공통(로그 레이아웃은 사이트 설정에 따라 다름)
+- code: CONN_1
+  severity: warn
+  category: connection
+  title: 클라이언트 연결 비정상 종료
+  immediate:
+  - '`grep -c "CONN_1" <오류로그>` 로 빈도 확인 — 평소 수준이면 클라이언트 취소·페이지 이동에 따른 정보성 (`ls -lt $WEBTOBDIR/log | head` 로 최근 오류 로그 찾기)'
+  - '급증 시 `tail -50000 <접근로그> | awk ''{print $1}'' | sort | uniq -c | sort -rn | head` 로 출처 IP 쏠림 확인, `$WEBTOBDIR/bin/wsadmin` 접속 후 `st -s` 로 큐 대기 동반 여부 확인 — 대기가 쌓였으면 응답 지연이 원인'
+  short:
+  - 클라이언트 취소와 LB 및 프록시 타임아웃 여부를 분석
+  mid:
+  - 계층별 연결 타임아웃과 응답시간을 정렬
+  long:
+  - 클라이언트 조기 종료율과 장기 요청을 추세 관리
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tmaxsoft.com/ko/webtob/6.1/administrator-guide/appendix-webtob-error-code-guide.html)
+  note: WebtoB 6.1 공식 에러코드 가이드로 확인(5.x 문서 미확인)
+  vendor_cause: HTTP 요청 처리 중 클라이언트가 응답을 받기 전에 연결을 종료함
+  vendor_action: 클라이언트 로그를 확인하고 의도치 않은 timeout이면 클라이언트·프록시·LB 연결 timeout을 조정
+  vendor_url: https://docs.tmaxsoft.com/ko/webtob/6.1/administrator-guide/appendix-webtob-error-code-guide.html
+  versions:
+  - WebtoB 4.1
+  - WebtoB 5.x
+  - WebtoB 6.x
+  version_note: 로그 문구 기반 별칭 — 4.1/5/6 공통(로그 레이아웃은 사이트 설정에 따라 다름)
+- code: CONN_2
+  severity: warn
+  category: connection
+  title: HTTP 요청 대기 시간초과
+  immediate:
+  - '`grep -n "CONN_2" <오류로그> | tail -20` 로 출처 IP·시각 확인 — 소수 IP 의 산발 발생은 요청 없이 열린 연결의 대기 만료로 정보성 (`ls -lt $WEBTOBDIR/log | head` 로 최근 오류 로그 찾기)'
+  - '`ss -tan state established "( sport = :<port> )" | wc -l` 로 현재 연결 수 확인 — 특정 IP 연결이 많은데 요청이 없으면 LB 유휴 연결·느린 요청 공격 의심, 보안·네트워크 담당 통보'
+  short:
+  - 클라이언트와 LB의 연결 타임아웃 및 지연 패턴을 분석
+  mid:
+  - 연결 타임아웃 값을 서비스 특성에 맞게 조정
+  long:
+  - 요청 대기 시간초과와 네트워크 지연을 지속 모니터링
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tmaxsoft.com/ko/webtob/6.1/administrator-guide/appendix-webtob-error-code-guide.html)
+  note: WebtoB 6.1 공식 에러코드 가이드로 확인(5.x 문서 미확인)
+  vendor_cause: WebtoB가 클라이언트의 HTTP 요청을 기다리는 동안 설정된 대기 시간이 초과됨
+  vendor_action: 요청 전송 여부를 확인하고 필요 시 패킷 캡처 및 클라이언트·중간장비의 연결 timeout을 조정
+  vendor_url: https://docs.tmaxsoft.com/ko/webtob/6.1/administrator-guide/appendix-webtob-error-code-guide.html
+  versions:
+  - WebtoB 4.1
+  - WebtoB 5.x
+  - WebtoB 6.x
+  version_note: 로그 문구 기반 별칭 — 4.1/5/6 공통(로그 레이아웃은 사이트 설정에 따라 다름)
+- code: CONN_3
+  severity: error
+  category: upstream
+  title: 내부 서버 WebSocket 연결 종료
+  immediate:
+  - '`grep -n "CONN_3" <오류로그> | tail -20` 로 대상 내부 서버·시각 확인 (`ls -lt $WEBTOBDIR/log | head` 로 최근 오류 로그 찾기)'
+  - '`$WEBTOBDIR/bin/wsadmin` 접속 후 `si` 로 WebSocket 대상 내부 서버 상태 확인, 같은 시각 해당 서버 로그의 연결 종료 원인(정상 close·예외·프로세스 교체) 대조'
+  short:
+  - 내부 서버와 클라이언트의 종료 순서 및 네트워크 단절을 분석
+  mid:
+  - WebSocket 생명주기와 타임아웃 및 재접속 로직을 개선
+  long:
+  - WebSocket 연결 유지시간과 비정상 종료율을 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tmaxsoft.com/ko/webtob/6.1/administrator-guide/appendix-webtob-error-code-guide.html)
+  note: WebtoB 6.1 공식 에러코드 가이드로 확인(5.x 문서 미확인)
+  vendor_cause: WebSocket 연결 중 내부 서버 연결이 종료됐지만 클라이언트 WebSocket 연결이 남아 있음
+  vendor_action: 내부 서버 로그와 패킷을 확인하고 정상 종료 시 클라이언트 연결도 함께 종료되도록 애플리케이션을 점검
+  vendor_url: https://docs.tmaxsoft.com/ko/webtob/6.1/administrator-guide/appendix-webtob-error-code-guide.html
+  versions:
+  - WebtoB 4.1
+  - WebtoB 5.x
+  - WebtoB 6.x
+  version_note: 로그 문구 기반 별칭 — 4.1/5/6 공통(로그 레이아웃은 사이트 설정에 따라 다름)
+- code: DST_0
+  severity: error
+  category: upstream
+  title: 대기 요청 처리 가능 연결 없음
+  immediate:
+  - '`$WEBTOBDIR/bin/wsadmin` 접속 후 `st -s` 로 서비스 큐 대기 수, `si` 로 내부 서버 상태 확인 — 큐 대기가 늘고 RDY 서버가 줄었으면 확정 (WebtoB 5/6)'
+  - '`grep -n "DST_0" <오류로그> | tail -20` 로 발생 서비스·시각 확인, 같은 시각 내부 서버(JEUS) 로그의 연결 종료 원인 대조'
+  short:
+  - 서버 종료와 연결 수 부족 및 큐 대기량을 분석
+  mid:
+  - destination 연결 수와 내부 서버 용량을 재산정
+  long:
+  - 가용 destination 수와 큐 적체 임계치를 상시 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tmaxsoft.com/ko/webtob/6.1/administrator-guide/appendix-webtob-error-code-guide.html)
+  note: WebtoB 6.1 공식 에러코드 가이드로 확인(5.x 문서 미확인)
+  vendor_cause: 내부 서버 연결 종료 중 큐에 대기하던 요청을 넘겨 처리할 다른 연결이 없음
+  vendor_action: 내부 서버 상태와 연결 종료 원인을 확인하고 연결 수가 부족하면 연결 수 설정을 조정
+  vendor_url: https://docs.tmaxsoft.com/ko/webtob/6.1/administrator-guide/appendix-webtob-error-code-guide.html
+  versions:
+  - WebtoB 5.x
+  - WebtoB 6.x
+  version_note: WebtoB 5 매뉴얼의 오류 코드 체계(COM_/CONN_/DST_/REQ_/RSC_·CFL-) — 4.1 에서는 문구만 기록(미확인)
+- code: DST_1
+  severity: critical
+  category: upstream
+  title: 요청 처리 가능 내부서버 없음
+  immediate:
+  - '`$WEBTOBDIR/bin/wsadmin` 접속 후 `si` 로 해당 서비스의 내부 서버 상태 확인 — RDY 가 하나도 없으면 확정 (WebtoB 5/6)'
+  - '`ps -ef | grep -i "[j]eus"` 로 내부 서버(JEUS) 프로세스 생존 확인, `grep -n "DST_1" <오류로그> | tail -20` 로 영향 URI·시작 시각 확인'
+  short:
+  - 내부 서버 장애와 연결 설정 및 서비스 매핑을 점검
+  mid:
+  - 내부 서버 다중화와 연결 수 및 장애전환 구성을 개선
+  long:
+  - 가용 destination 수와 전체 서비스 단절을 즉시 경보
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tmaxsoft.com/ko/webtob/6.1/administrator-guide/appendix-webtob-error-code-guide.html)
+  note: WebtoB 6.1 공식 에러코드 가이드로 확인(5.x 문서 미확인)
+  vendor_cause: 연결된 내부 서버가 모두 종료됐거나 사용 가능한 내부 서버 연결이 없는 상태에서 요청이 수신됨
+  vendor_action: 내부 서버 실행·WebtoB 연결 상태와 내부 서버 연결 설정·서비스 상태를 확인
+  vendor_url: https://docs.tmaxsoft.com/ko/webtob/6.1/administrator-guide/appendix-webtob-error-code-guide.html
+  versions:
+  - WebtoB 5.x
+  - WebtoB 6.x
+  version_note: WebtoB 5 매뉴얼의 오류 코드 체계(COM_/CONN_/DST_/REQ_/RSC_·CFL-) — 4.1 에서는 문구만 기록(미확인)
+- code: REQ_0
+  severity: warn
+  category: internal
+  title: 잘못된 HTTP Request-Line
+  immediate:
+  - '`grep -n "REQ_0" <오류로그> | tail -20` 로 출처 IP·요청 원문 확인 — 산발이면 스캐너·비HTTP 접속(TCP 헬스체크 등)으로 정보성 (`ls -lt $WEBTOBDIR/log | head` 로 최근 오류 로그 찾기)'
+  - '`grep "REQ_0" <오류로그> | grep -oE "([0-9]{1,3}\.){3}[0-9]{1,3}" | sort | uniq -c | sort -rn | head` 로 IP 상위 확인 — 한 IP 반복이면 보안 담당 통보'
+  short:
+  - 프록시와 클라이언트가 생성한 Request-Line 형식을 분석
+  mid:
+  - 정상 클라이언트 오류를 수정하고 악성 패턴은 보안정책으로 차단
+  long:
+  - 비정상 요청 빈도와 공격 IP 패턴을 상시 감시
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tmaxsoft.com/ko/webtob/6.1/administrator-guide/appendix-webtob-error-code-guide.html)
+  note: WebtoB 6.1 공식 에러코드 가이드로 확인(5.x 문서 미확인)
+  vendor_cause: 수신한 HTTP Request-Line의 메서드·URI·HTTP 버전 등이 정상 형식을 따르지 않음
+  vendor_action: 클라이언트·중간장비가 생성한 요청 형식을 점검하고 필요 시 패킷 캡처로 실제 요청을 확인
+  vendor_url: https://docs.tmaxsoft.com/ko/webtob/6.1/administrator-guide/appendix-webtob-error-code-guide.html
+  versions:
+  - WebtoB 5.x
+  - WebtoB 6.x
+  version_note: WebtoB 5 매뉴얼의 오류 코드 체계(COM_/CONN_/DST_/REQ_/RSC_·CFL-) — 4.1 에서는 문구만 기록(미확인)
+- code: REQ_1
+  severity: warn
+  category: security
+  title: URI 디렉터리 탐색 요청 차단
+  immediate:
+  - '`grep -n "REQ_1" <오류로그> | tail -20` 로 요청 URI(.. 포함)·출처 IP 확인 — WebtoB 가 이미 거부한 요청이라 단건은 정보성 (`ls -lt $WEBTOBDIR/log | head` 로 최근 오류 로그 찾기)'
+  - '`grep -F ".." <접근로그> | awk ''{print $1}'' | sort | uniq -c | sort -rn | head` 로 같은 시도를 반복한 IP 확인 — 한 IP 반복이면 보안 담당 통보, 내부 IP 면 애플리케이션 URL 생성 오류 의심'
+  short:
+  - 애플리케이션 URL 생성 오류인지 외부 공격인지 구분
+  mid:
+  - 정상 경로 생성 로직을 수정하고 WAF와 접근제어를 보강
+  long:
+  - Directory Traversal 시도를 자동 탐지하고 반복 IP를 연계 차단
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tmaxsoft.com/ko/webtob/6.1/administrator-guide/appendix-webtob-error-code-guide.html)
+  note: WebtoB 6.1 공식 에러코드 가이드로 확인(5.x 문서 미확인)
+  vendor_cause: 요청 URI에 상위 디렉터리를 의미하는 '..'가 포함되어 Directory Traversal 가능성으로 차단됨
+  vendor_action: URI 생성 로직을 수정하고 반복 시 요청 IP·접근 패턴을 분석해 필요하면 WAF·방화벽 차단 정책 적용
+  vendor_url: https://docs.tmaxsoft.com/ko/webtob/6.1/administrator-guide/appendix-webtob-error-code-guide.html
+  versions:
+  - WebtoB 5.x
+  - WebtoB 6.x
+  version_note: WebtoB 5 매뉴얼의 오류 코드 체계(COM_/CONN_/DST_/REQ_/RSC_·CFL-) — 4.1 에서는 문구만 기록(미확인)
+- code: RSC_0
+  severity: warn
+  category: storage
+  title: 요청 정적 파일 없음
+  immediate:
+  - '`grep -n "RSC_0" <오류로그> | tail -20` 로 요청 경로 확인 후 `ls -l <DocRoot>/<요청 경로>` 로 실제 파일 존재·대소문자 확인 (`ls -lt $WEBTOBDIR/log | head` 로 최근 오류 로그 찾기)'
+  - '`grep -niE "docroot|alias" $WEBTOBDIR/config/http.m` 로 해당 노드·VHost 의 문서 경로 확인 — 배포 직후 여러 경로에서 나면 배포 누락'
+  short:
+  - 배포 누락과 alias 및 경로 대소문자와 권한을 점검
+  mid:
+  - 정적 리소스 배포와 경로 구성을 표준화
+  long:
+  - 배포 후 정적 리소스 무결성과 404 급증을 자동검증
+  source: GPT 수집·벤더 문서 대조 완료(https://docs.tmaxsoft.com/ko/webtob/6.1/administrator-guide/appendix-webtob-error-code-guide.html)
+  note: WebtoB 6.1 공식 에러코드 가이드로 확인(5.x 문서 미확인)
+  vendor_cause: 클라이언트가 요청한 정적 리소스 파일이 지정된 경로에 존재하지 않음
+  vendor_action: 파일 존재 여부·요청 경로를 확인하고 doc_root 또는 alias 등 정적 리소스 경로 설정을 점검
+  vendor_url: https://docs.tmaxsoft.com/ko/webtob/6.1/administrator-guide/appendix-webtob-error-code-guide.html
+  versions:
+  - WebtoB 5.x
+  - WebtoB 6.x
+  version_note: WebtoB 5 매뉴얼의 오류 코드 체계(COM_/CONN_/DST_/REQ_/RSC_·CFL-) — 4.1 에서는 문구만 기록(미확인)
+- code: CFL-05010
+  severity: error
+  category: internal
+  title: 설정 옵션 검증 오류
+  immediate:
+  - 'wscfl 출력·로그의 오류 줄 번호로 http.m 해당 줄 확인(`sed -n "<줄>p" $WEBTOBDIR/config/http.m`)'
+  - '`ls -l $WEBTOBDIR/config/` 로 http.m 과 wsconfig 수정 시각 비교 — 운영 중 설정은 이전 컴파일본임을 확인'
+  short:
+  - '(2차·승인 후, 롤백: 백업 http.m 복원) 지원되는 옵션으로 수정 후 `wscfl -i http.m` 재컴파일 성공 확인'
+  mid:
+  - '지원 설정으로 수정하고 표준 환경 파일에 반영'
+  long:
+  - '설정 변경 전 wscfl 검증을 배포 절차에 강제'
+  vendor_cause: 'WebtoB 환경 파일 컴파일(wscfl) 단계에서 설정 옵션 검증 오류가 났다(CFL-05010). 해당 플랫폼에서 지원하지 않는 옵션이나 잘못된 옵션 지정이 흔한 원인이며 새 설정이 적용되지 않는다.'
+  verify_note: '미검증 — CFL-05010 의 정확한 공식 메시지 정의를 확인하지 못함(원 수집 note 와 같음)'
+  source: GPT 수집·공식 문서 미확인(보류)(https://docs.tmaxsoft.com/ko/webtob/5.4/release-note/chapter-5-fix3.html)
+  note: WebtoB 5에서 코드 존재만 확인, 정확한 메시지 의미 공식 정의 미확인
+  versions:
+  - WebtoB 5.x
+  - WebtoB 6.x
+  version_note: WebtoB 5 매뉴얼의 오류 코드 체계(COM_/CONN_/DST_/REQ_/RSC_·CFL-) — 4.1 에서는 문구만 기록(미확인)
+- code: CFL-05011
+  severity: error
+  category: internal
+  title: 설정 값 검증 오류
+  immediate:
+  - 'wscfl 출력·로그의 오류 위치로 http.m 해당 줄 확인(`sed -n "<줄>p" $WEBTOBDIR/config/http.m`)'
+  - '`diff <백업 http.m> $WEBTOBDIR/config/http.m` 로 최근 변경 값 확인'
+  short:
+  - '(2차·승인 후, 롤백: 백업 http.m 복원) 값 범위를 매뉴얼 기준으로 수정 후 `wscfl -i http.m` 재컴파일'
+  mid:
+  - '검증된 설정 템플릿으로 통일하고 운영 환경별 차이를 관리'
+  long:
+  - '설정 컴파일 검증과 변경 이력 관리 자동화'
+  vendor_cause: 'WebtoB 환경 파일 컴파일(wscfl) 단계에서 설정 값 검증 오류가 났다(CFL-05011). 허용 범위를 벗어난 값·형식이 틀린 값이 흔한 원인이며 새 설정이 적용되지 않는다.'
+  verify_note: '미검증 — CFL-05011 의 정확한 공식 메시지 정의를 확인하지 못함(원 수집 note 와 같음)'
+  source: GPT 수집·공식 문서 미확인(보류)(https://docs.tmaxsoft.com/ko/webtob/5.4/release-note/chapter-5-fix3.html)
+  note: WebtoB 5에서 코드 존재만 확인, 정확한 메시지 의미 공식 정의 미확인
+  versions:
+  - WebtoB 5.x
+  - WebtoB 6.x
+  version_note: WebtoB 5 매뉴얼의 오류 코드 체계(COM_/CONN_/DST_/REQ_/RSC_·CFL-) — 4.1 에서는 문구만 기록(미확인)

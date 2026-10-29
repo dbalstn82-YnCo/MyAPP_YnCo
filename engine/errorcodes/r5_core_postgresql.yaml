@@ -1,0 +1,34 @@
+# 5차 보강(2026-10-16) — GPT 핵심 코드 대조에서 빠진 PostgreSQL SQLSTATE. www.postgresql.org Appendix A·5.5 Constraints·ALTER TABLE 로 의미 확인한 것만 넣었다.
+product: postgresql
+layer: db
+codes:
+- code: '23514'
+  severity: warn
+  category: internal
+  title: CHECK 제약 위반(check_violation)
+  vendor_cause: "입력·변경하려는 행이 테이블의 CHECK 제약 조건식을 만족하지 않아 거부됐다(Class 23 무결성 제약 위반, check_violation). CHECK 는 행을 INSERT·UPDATE 할 때만 검사되고 기본값(DEFAULT)에도 적용되며, 식이 참 또는 NULL 이면 통과한다. 업무 규칙 변경 후 애플리케이션 값 검증이 맞지 않거나 배치 원천 데이터 이상이 흔한 원인."
+  vendor_action: "제약을 위반하는 값을 저장하려 하면 오류가 발생한다. 제약에 이름을 붙이면 오류 메시지가 분명해진다. 기존 행 검사를 뒤로 미루려면 ADD CONSTRAINT … NOT VALID 후 VALIDATE CONSTRAINT 를 쓴다(VALIDATE 는 SHARE UPDATE EXCLUSIVE 잠금)."
+  vendor_url: https://www.postgresql.org/docs/current/ddl-constraints.html
+  immediate:
+  - "서버 로그의 오류 줄에서 제약 이름·테이블과 다음 STATEMENT 줄의 SQL 을 기록: `grep -n -A3 \"violates check constraint\" <log_directory>/postgresql-*.log | tail -50` — DETAIL 'Failing row contains (…)' 에 개인정보가 있을 수 있어 보고서에는 가린다"
+  - "제약 정의 확인: `SELECT conrelid::regclass AS tbl, conname, pg_get_constraintdef(oid) AS def, convalidated FROM pg_constraint WHERE contype = 'c' AND conname = '<제약이름>';` (읽기 전용, 9.x+)"
+  - "같은 시각 배포·제약 추가 이력(ALTER TABLE … ADD CONSTRAINT) 여부와 위반 값을 넣은 애플리케이션·배치를 application_name 기준으로 대조"
+  short:
+  - "(2차·승인 후, 롤백: 수정 전 행을 백업 테이블로 보관) 위반 원천 데이터를 업무 담당이 확인해 값 보정 후 재처리 — 제약 삭제·완화(ALTER TABLE … DROP CONSTRAINT) 는 업무 규칙 변경 승인 시에만"
+  mid:
+  - "애플리케이션 입력 검증을 CHECK 조건식(pg_get_constraintdef 결과)과 맞추고, 제약은 이름을 붙여 정의 — 기존 데이터가 많은 테이블에 새 CHECK 를 넣을 때는 ADD CONSTRAINT … NOT VALID 후 한가한 시간에 VALIDATE CONSTRAINT"
+  long:
+  - "무결성 위반(23502·23503·23505·23514) 발생 건수를 log_min_error_statement 로그 기준으로 감시하고 연계 원천 데이터 품질 점검을 정례화"
+  versions:
+  - PostgreSQL 9.x
+  - PostgreSQL 10
+  - PostgreSQL 11
+  - PostgreSQL 12
+  - PostgreSQL 13
+  - PostgreSQL 14
+  - PostgreSQL 15
+  - PostgreSQL 16
+  - PostgreSQL 17
+  - PostgreSQL 18
+  version_note: "SQLSTATE 23514 check_violation — 부록 A(18.x 문서) Class 23 에서 확인, 다른 23xxx 와 같이 9.x~18 동일. 서버 로그에 SQLSTATE 를 남기려면 log_line_prefix 에 %e 필요(없으면 메시지 'violates check constraint' 로 판단). NOT VALID 는 CHECK·외래키(18 은 NOT NULL 도) 에 허용"
+  source: "공식 문서 대조(2026-10-16 5차 보강)"

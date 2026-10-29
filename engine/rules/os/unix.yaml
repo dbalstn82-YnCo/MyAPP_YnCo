@@ -1,0 +1,173 @@
+# OS — Solaris · AIX · HP-UX 시그니처
+rules:
+- id: OS-UNX-001
+  layer: os
+  product:
+  - solaris
+  - aix
+  - hpux
+  match:
+    regex: out of swap|no swap space|swap space below
+  severity: critical
+  category: memory
+  verdict: 스왑 공간 고갈
+  immediate:
+  - '스왑 잔여 확인(읽기 전용): Solaris `swap -s ; swap -l`, AIX `lsps -a ; lsps -s`, HP-UX `swapinfo -tam` — 남은 공간이 10% 미만이면 확정'
+  - '메모리 대량 사용 프로세스 확인(읽기 전용): Solaris `prstat -s rss -n 10 1 1`, AIX `svmon -P -t 10 | head -60`, HP-UX `UNIX95= ps -e -o pid,vsz,comm | sort -rn -k2 | head` — 급증 프로세스와 담당 서비스 기록(정리는 2차)'
+  short:
+  - '(2차·승인 후, 롤백: 종료한 서비스 재기동) 누수·급증 프로세스 정리(서비스 재시작)는 서비스 담당 합의 후 수행'
+  - 스왑 사용 추이 확인, 임시 스왑 추가
+  mid:
+  - 스왑·물리 메모리 재산정
+  long:
+  - 메모리 증설 계획
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  - HP-UX 11i v1 (11.11)
+  - HP-UX 11i v2 (11.23)
+  - HP-UX 11i v3 (11.31)
+  - Solaris 8
+  - Solaris 9
+  - Solaris 10
+  - Solaris 11.3
+  - Solaris 11.4
+  version_note: 일반 UNIX 문구 / 일반 UNIX 문구(HP-UX·Solaris 전 버전)
+- id: OS-UNX-002
+  layer: os
+  product:
+  - solaris
+  - aix
+  - hpux
+  match:
+    regex: file system full|filesystem .* full
+  severity: critical
+  category: disk
+  verdict: 파일시스템 공간 고갈
+  immediate:
+  - '가득 찬 파일시스템 확인(읽기 전용): Solaris `df -k`, AIX `df -g`, HP-UX `bdf` — 사용률 95% 이상이면 확정'
+  - '`find <mount> -xdev -type f -size +204800 -exec ls -l {} \; | sort -k5 -rn | head -20` 로 해당 마운트의 100MB 이상 파일·소유자 식별 — 지우지 않고 목록만 기록(정리는 2차)'
+  short:
+  - '(2차·승인 후, 롤백: 정리 전 tar 보관본 복원) 소유 프로세스 확인(`fuser -cu <mount>`) 뒤 불필요 파일 정리, 열려 있는 파일은 삭제 대신 비우기 또는 서비스 재시작 일정과 함께'
+  - 급증 원인 파일 추적, 상위 계층 오류 해소 확인
+  mid:
+  - 로그 정리 정책 정비, 파일시스템 확장
+  long:
+  - 스토리지 용량 계획 수립
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  - HP-UX 11i v1 (11.11)
+  - HP-UX 11i v2 (11.23)
+  - HP-UX 11i v3 (11.31)
+  - Solaris 8
+  - Solaris 9
+  - Solaris 10
+  - Solaris 11.3
+  - Solaris 11.4
+  version_note: 일반 UNIX 문구 / 일반 UNIX 문구
+- id: OS-UNX-003
+  layer: os
+  product:
+  - solaris
+  - aix
+  - hpux
+  match:
+    regex: panic\[|system panic|HALT|LVM.*failure
+  severity: critical
+  category: hardware
+  verdict: 시스템 패닉 / 디스크·LVM 오류
+  immediate:
+  - "AIX: `errpt -a | head -100` 으로 최근 PERM·H 클래스 항목, `sysdumpdev -L` 로 마지막 덤프 상태·크기 확인 — 덤프가 있으면 보존 후 인프라·벤더 즉시 에스컬레이션 (AIX 5.3~7.3)"
+  - "HP-UX: `grep -i -E 'panic|lvm' /var/adm/syslog/OLDsyslog.log /var/adm/syslog/syslog.log | tail -30`, `ls -l /var/adm/crash` 로 crash.N 덤프 존재 확인 (11i v1~v3)"
+  - "Solaris: `grep -i -E 'panic|WARNING' /var/adm/messages | tail -30`, `dumpadm` 로 덤프 장치·savecore 디렉터리 확인 후 `ls -l /var/crash/*` 로 vmcore/vmdump 확인 (Solaris 10/11)"
+  short:
+  - errpt(-a)/메시지 로그에서 하드웨어 이벤트 확인
+  mid:
+  - 장애 부품 교체, 펌웨어 점검
+  long:
+  - 노후 장비 교체·이중화 계획
+  versions:
+  - AIX 5.3
+  - AIX 6.1
+  - AIX 7.1
+  - AIX 7.2
+  - AIX 7.3
+  - HP-UX 11i v1 (11.11)
+  - HP-UX 11i v2 (11.23)
+  - HP-UX 11i v3 (11.31)
+  - Solaris 8
+  - Solaris 9
+  - Solaris 10
+  - Solaris 11.3
+  - Solaris 11.4
+  version_note: 일반 UNIX 문구 / panic[/System Panic 전 버전
+- id: OS-HPUX-001
+  layer: os
+  product:
+  - hpux
+  match:
+    regex: '\bkthread: table is full\b'
+  severity: critical
+  category: thread
+  verdict: HP-UX 커널 스레드 테이블 고갈 — 새 스레드·프로세스 생성 실패
+  immediate:
+  - 스레드를 가장 많이 쓰는 프로세스 확인(ps -efl·kctune nkthread 현재값, 읽기 전용)
+  - 같은 시각 새로 뜬 프로세스(SSH 세션 급증 등) 확인 — `ps -ef | sort -k5 | tail -30`
+  short:
+  - 누수 프로세스 재시작은 2차 승인으로, 커널 한도(nkthread) 조정은 변경 관리 후
+  mid:
+  - 알려진 스레드 누수 패치(예 일부 HP-UX Secure Shell 판) 적용 여부 점검
+  long:
+  - 스레드 사용량 상시 감시·한도 계획
+  versions:
+  - HP-UX 11i v3
+  version_note: HPE 지원 문서 — syslog.log·dmesg 의 vmunix 메시지. SSH 누수 사례가 있으나 SSH 로 단정하지 않는다
+- id: OS-SOL-001
+  layer: os
+  product:
+  - solaris
+  match:
+    regex: Thread creation failed for node \d+\.
+  severity: error
+  category: thread
+  verdict: Solaris Cluster 이벤트 데몬(cl_eventd) 스레드 생성 실패 — 클러스터 이벤트 처리 제한
+  immediate:
+  - 같은 시각 메모리·스왑 여유(vmstat·swap -s)와 프로세스 한도 확인(읽기 전용)
+  - 클러스터 상태(clnode status·cluster status) 확인
+  short:
+  - 자원 부족 원인 프로세스 정리는 2차 승인으로
+  mid:
+  - 클러스터 노드 자원 한도 검토
+  long:
+  - 클러스터 노드 용량 계획
+  versions:
+  - Oracle Solaris Cluster 4.x
+  version_note: Oracle Solaris Cluster 메시지 594396 — 클러스터 환경에만 나오는 문구
+- id: OS-SOL-002
+  layer: os
+  product:
+  - solaris
+  match:
+    regex: Unable to create server thread for immediate failfast of zone \S+ with zone ID \d+
+  severity: error
+  category: thread
+  verdict: Solaris Cluster 존 failfast 서버 스레드 생성 실패 — 메모리 부족 의심
+  immediate:
+  - 같은 시각 메모리·스왑 여유(vmstat·swap -s) 확인(읽기 전용)
+  - 대상 존 상태(zoneadm list -cv) 확인
+  short:
+  - 메모리 점유 프로세스 정리는 2차 승인으로
+  mid:
+  - 존별 자원 한도(capped-memory) 검토
+  long:
+  - 노드 메모리 용량 계획
+  versions:
+  - Oracle Solaris Cluster 3.2~4.x
+  version_note: Oracle Solaris Cluster 메시지 414431 — 클러스터 환경에만 나오는 문구

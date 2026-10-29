@@ -1,0 +1,30 @@
+# DBMS — MS-SQL 시그니처(ERRORLOG 본문만 남는 문구). 코드가 있는 문구는 errorcodes(사전)·_aliases.yaml 이 판정한다
+# 룰 학습 2차(DB) 승격 — 2026-10-15 · 벤더 문서 대조 GPT 11차(collect/rules_learn_2026-10-13/gpt_review_batch2.md)
+rules:
+- id: DB-MSS-001
+  layer: db
+  product:
+  - mssql
+  match:
+    regex: A significant part of sql server process memory has been paged out
+  severity: warn
+  category: memory
+  verdict: SQL Server 프로세스 메모리 대량 페이징 — 성능 저하 가능
+  immediate:
+  - "OS 메모리·페이징: `Get-Counter '\\Memory\\Available MBytes','\\Memory\\Pages/sec','\\Process(sqlservr)\\Working Set' -SampleInterval 5 -MaxSamples 6` — Available MBytes 가 수백 MB 이하로 떨어져 있으면 OS 메모리 압박 확정 (읽기 전용)"
+  - "SQL 측: `SELECT physical_memory_in_use_kb/1024 AS in_use_mb, locked_page_allocations_kb/1024 AS locked_mb, memory_utilization_percentage, process_physical_memory_low FROM sys.dm_os_process_memory;` — 로그 줄의 Working set·committed·memory utilization 값과 대조, locked_mb 가 0 이면 Lock Pages in Memory 미적용"
+  - "동거 프로세스: `Get-Process | Sort-Object WorkingSet64 -Descending | Select-Object -First 10 Name, Id, @{n='WS_MB';e={[int]($_.WorkingSet64/1MB)}}` — 백업·백신·파일 복사 프로세스가 상위면 원인"
+  short:
+  - "(2차·승인 후, 롤백: 이전 값 기록 후 같은 명령으로 원복) `EXEC sp_configure 'max server memory (MB)', <MB>; RECONFIGURE;` 로 OS·동거 프로세스 몫을 남기도록 상한 조정(show advanced options 필요), 대용량 파일 복사·백업 일정 분리"
+  mid:
+  - 서비스 계정 'Lock Pages in Memory' 권한 정책 검토(2차)
+  long:
+  - 서버 메모리 용량·동거 프로세스 배치 재설계
+  versions:
+  - SQL Server 2012
+  - SQL Server 2014
+  - SQL Server 2016
+  - SQL Server 2017
+  - SQL Server 2019
+  - SQL Server 2022
+  version_note: 메시지 17890 — ERRORLOG 에 'Error:' 줄 없이 본문만 남는다

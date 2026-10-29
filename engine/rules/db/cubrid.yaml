@@ -1,0 +1,47 @@
+# DBMS — CUBRID 시그니처. 코드가 있는 문구는 errorcodes(사전)가 판정한다
+# 룰 학습 5차(국산) 승격 — 2026-10-15 · 벤더 문서 대조 GPT 14차 + 원문 재확인(collect/rules_learn_2026-10-13/gpt_review_batch5.md)
+rules:
+- id: DB-CUB-001
+  layer: db
+  product:
+  - cubrid
+  match:
+    regex: \bSLOW_QUERY\b
+  severity: warn
+  category: performance
+  verdict: CUBRID 느린 질의(SLOW_QUERY) — 기준 시간(sql_trace_slow) 초과
+  immediate:
+  - "`grep -n -A20 \"SLOW_QUERY\" $CUBRID/log/server/<db>_*.event | tail -60` 으로 sql·time(ms)·wait(lock·latch)·buffer(ioread) 값 기록 — 같은 SQL 반복이면 튜닝 대상(이벤트 로그 위치는 version_note)"
+  - "`cubrid broker status -b` 의 LONG-T·LONG-Q 증가와 같은 시각 `grep -n -E \"LOCK_TIMEOUT|DEADLOCK\" $CUBRID/log/server/<db>_*.event | tail -20` 확인 — 잠금 이벤트가 겹치면 잠금 대기로 인한 지연"
+  - "`grep -n -E \"sql_trace_slow|sql_trace_ioread_pages\" $CUBRID/conf/cubrid.conf` 로 기준값 확인 (9.x~11.x)"
+  short:
+  - 해당 질의 실행 계획·인덱스 점검(2차)
+  mid:
+  - 반복 느린 질의 튜닝·배치 시간 분산
+  long:
+  - 질의 성능 기준(SLO) 정의·상시 측정
+  versions:
+  - CUBRID 9.x~11.x
+  version_note: 이벤트 로그(<db>_<yyyymmdd>_<hhmi>.event) — sql_trace_slow 설정이 있어야 기록. 로그가 없다고 느린 질의가 없다는 뜻은 아니다
+- id: DB-CUB-002
+  layer: db
+  product:
+  - cubrid
+  match:
+    regex: \bMANY_IOREADS\b
+  severity: warn
+  category: performance
+  verdict: CUBRID 디스크 읽기가 많은 질의(MANY_IOREADS) — 기준 페이지 수(sql_trace_ioread_pages) 초과
+  immediate:
+  - "`grep -n -A20 \"MANY_IOREADS\" $CUBRID/log/server/<db>_*.event | tail -60` 으로 sql·ioreads·time 값 기록 — 같은 SQL 반복이면 인덱스 점검 대상"
+  - "`iostat -x 5 3` 으로 같은 시각 디스크 %util·await 확인(Linux, sysstat) — %util 이 지속 90% 이상이면 I/O 포화"
+  - "`grep -n -E \"data_buffer_size|sql_trace_ioread_pages\" $CUBRID/conf/cubrid.conf` 로 버퍼 크기·기준 페이지 수 확인 (9.x~11.x)"
+  short:
+  - 해당 질의 인덱스 사용 여부·전체 스캔 점검(2차)
+  mid:
+  - 데이터 버퍼(data_buffer_size) 크기와 작업 세트 비교 검토
+  long:
+  - 스토리지·메모리 용량 계획
+  versions:
+  - CUBRID 9.x~11.x
+  version_note: 이벤트 로그(.event) — sql_trace_ioread_pages 설정이 있어야 기록

@@ -1,0 +1,492 @@
+# 기존 'AI 로그분석기 v2.2' 내장 룰에서 변환 반입(tools/import_legacy_rules.py) — 중복(코드·패턴) 제외
+# 심각도 CRITICAL→critical HIGH→error MEDIUM→warn LOW→info · immediate_actions→즉시 · root_actions→중기 · negative_patterns→exclude
+rules:
+- id: LEG-ORA-04031
+  layer: db
+  product:
+  - oracle
+  match:
+    regex: (?:ORA-04031)|(?:unable to allocate \d+ bytes in shared pool)|(?:shared pool.*out of memory)|(?:shared pool.*allocation.*fail)|(?:KGH.*out of memory)|(?:KGHALO.*shared pool)|(?:kgh\.c.*allocation)|(?:Heap
+      type.*shared pool)|(?:ora-04031)
+  severity: error
+  category: memory
+  verdict: SGA Shared Pool 메모리 부족 — SGA Shared Pool 메모리 고갈. SQL 하드파싱 반복
+  immediate:
+  - "공유 풀 구성: `select pool, name, round(bytes/1024/1024) mb from v$sgastat where pool='shared pool' order by bytes desc fetch first 10 rows only;` (12c+ · 11gR2 는 rownum)"
+  - "자동 SGA 구성 크기: `select component, round(current_size/1024/1024) mb from v$sga_dynamic_components where component like '%pool%';` (10g+)"
+  - "하드파싱 과다(리터럴 SQL): `select force_matching_signature, count(*) from v$sql group by force_matching_signature having count(*) > 100 order by 2 desc;`"
+  short:
+  - "(2차·승인 후, 롤백: 해당 없음 — 플러시 직후 하드파싱 급증으로 CPU 상승 가능) 임시 완화로 `alter system flush shared_pool;`"
+  - "(2차·승인 후, 롤백: 원래 값 scope=both) `alter system set shared_pool_size=<값> scope=both;`(자동 SGA 의 최소값) 또는 SGA_TARGET 상향"
+  - "영향: 신규 SQL 파싱 불가, DB 커넥션 실패."
+  mid:
+  - SHARED_POOL_SIZE 또는 SGA_TARGET 증가
+  - 바인드 변수 적용으로 Hard Parse 감소
+  - CURSOR_SHARING=FORCE 임시 적용
+  - AWR 보고서로 Parse Calls 높은 SQL 분석
+  long:
+  - "v$sgastat 의 shared pool free memory 감시와 바인드 변수 사용률 점검(리터럴 SQL 상위 정기 보고)"
+  source_note: 'legacy-analyzer-v2.2 oracle_rules.json ORA-04031 (원 출처: builtin)'
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: ORA/TNS 코드·alert log 문구 — 10gR2~26ai 공통
+- id: LEG-ORA-12541
+  layer: db
+  product:
+  - oracle
+  match:
+    regex: (?:ORA-12541)|(?:TNS-12541)|(?:TNS:no listener)|(?:no listener on host)|(?:listener.*not.*running)|(?:lsnrctl.*failed)|(?:cannot connect.*listener)
+  severity: critical
+  category: connection
+  verdict: TNS 리스너 미동작 — Oracle Listener 중단 또는 포트 불통
+  immediate:
+  - "`lsnrctl status <listener>` — 응답 없음(TNS-12541)이면 리스너 미기동"
+  - "`ps -ef | grep [t]nslsnr` 로 프로세스 확인"
+  - "`ss -ltnp | grep 1521` (구버전 `netstat -an | grep 1521`) — 포트가 다르면 listener.ora ADDRESS 기준"
+  short:
+  - "(2차·승인 후, 롤백: 해당 없음) `lsnrctl start <listener>` — 실패 시 listener.ora 문법·포트 충돌 확인"
+  - "영향: 전체 DB 접속 불가."
+  mid:
+  - 리스너 자동 재기동 스크립트 설정
+  - listener.ora 설정 검토
+  - 방화벽 1521 포트 확인
+  long:
+  - "리스너 포트 생존 감시(주기 tnsping)와 Oracle Restart/CRS 리소스 등록으로 자동 기동"
+  source_note: 'legacy-analyzer-v2.2 oracle_rules.json ORA-12541 (원 출처: builtin)'
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: ORA/TNS 코드·alert log 문구 — 10gR2~26ai 공통
+- id: LEG-ORA-01652
+  layer: db
+  product:
+  - oracle
+  match:
+    regex: (?:ORA-01652)|(?:ORA-01653)|(?:ORA-01654)|(?:unable to extend temp segment)|(?:TEMP.*tablespace.*full)|(?:sort segment.*extent)|(?:temporary tablespace.*insufficient)
+  severity: error
+  category: storage
+  verdict: Temp 테이블스페이스 공간 부족 — TEMP 테이블스페이스 공간 고갈. 대용량 정렬/Hash Join
+  immediate:
+  - "TEMP 상위 세션: `select s.sid, s.username, u.sql_id, u.blocks from v$tempseg_usage u join v$session s on s.saddr=u.session_addr order by u.blocks desc;` (10gR2+)"
+  - "TEMP 여유: `select tablespace_name, round(free_space/1024/1024) free_mb from dba_temp_free_space;` (11g+ · 10gR2 는 `v$temp_space_header`)"
+  short:
+  - "(2차·승인 후, 롤백: `alter tablespace temp drop tempfile '<path>';`) `alter tablespace temp add tempfile '<path>' size 2G autoextend on maxsize 16G;`"
+  - "영향: 대용량 쿼리, DML 실패."
+  mid:
+  - TEMP 테이블스페이스 증설
+  - AUTOEXTEND ON 설정
+  - 대용량 쿼리 최적화 (Hash Join → Sort Merge)
+  long:
+  - "TEMP 사용 상위 SQL 정기 보고와 TEMP 용량 계획"
+  source_note: 'legacy-analyzer-v2.2 oracle_rules.json ORA-01652 (원 출처: builtin)'
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: ORA/TNS 코드·alert log 문구 — 10gR2~26ai 공통
+- id: LEG-ORA-03113
+  layer: db
+  product:
+  - oracle
+  match:
+    regex: (?:ORA-03113)|(?:end-of-file on communication channel)|(?:ORA-03114)|(?:not connected to ORACLE)
+  severity: error
+  category: memory
+  verdict: 통신 채널 EOF — 서버 프로세스 비정상 종료. OOM Killer 또는 내부 오류
+  immediate:
+  - "alert log 같은 시각 오류: `tail -200 $ORACLE_BASE/diag/rdbms/<db>/<SID>/trace/alert_<SID>.log | grep -n \"ORA-\"` (11g+ ADR)"
+  - "OS 메모리 고갈 종료 기록: `dmesg -T | grep -i \"out of memory\" | tail`"
+  - "인스턴스 생존: `ps -ef | grep [o]ra_pmon_`"
+  short:
+  - "첫 서버측 오류(ORA-00600·ORA-07445·ORA-04030)로 판정을 다시 보고 해당 절차 수행, 네트워크 단절이면 방화벽 유휴 타임아웃 확인"
+  - "영향: 세션 강제 단절, 트랜잭션 롤백."
+  mid:
+  - SQLNET.EXPIRE_TIME 설정
+  - OS 메모리 증설
+  - Oracle 패치 적용
+  long:
+  - "서버측 ORA-00600/07445 인시던트 감시와 분기별 RU 적용"
+  source_note: 'legacy-analyzer-v2.2 oracle_rules.json ORA-03113 (원 출처: builtin)'
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: ORA/TNS 코드·alert log 문구 — 10gR2~26ai 공통
+- id: LEG-ORA-04030
+  layer: db
+  product:
+  - oracle
+  match:
+    regex: (?:ORA-04030)|(?:out of process memory)|(?:ORA-04030.*swap)|(?:PGA.*out of memory)
+  severity: critical
+  category: memory
+  verdict: 프로세스 PGA 메모리 부족 — OS 레벨 프로세스 메모리 고갈
+  immediate:
+  - "free -h로 OS 메모리 및 스왑 확인"
+  - "SELECT name,value FROM v$pgastat WHERE name='total PGA allocated';"
+  - "PGA 상위 세션: `select s.sid, s.sql_id, round(p.pga_alloc_mem/1024/1024) mb from v$process p join v$session s on s.paddr=p.addr order by p.pga_alloc_mem desc fetch first 10 rows only;` (12c+)"
+  short:
+  - "(2차·승인 후, 롤백: 원래 값 scope=both) `pga_aggregate_limit`(12c+)·`pga_aggregate_target` 조정, 과다 세션은 업무 확인 후 종료"
+  - "영향: DB 프로세스 종료."
+  mid:
+  - OS 메모리 증설
+  - PGA_AGGREGATE_LIMIT 설정
+  - 과다 메모리 세션 최적화
+  long:
+  - "PGA 사용량 추세 감시와 서버 메모리 증설 계획"
+  source_note: 'legacy-analyzer-v2.2 oracle_rules.json ORA-04030 (원 출처: builtin)'
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: ORA/TNS 코드·alert log 문구 — 10gR2~26ai 공통
+- id: LEG-ORA-01578
+  layer: db
+  product:
+  - oracle
+  match:
+    regex: (?:ORA-01578)|(?:data block corrupted)|(?:ORA-01110.*block)|(?:block.*corrupt)|(?:corrupt.*block)|(?:data file.*block.*error)
+  severity: critical
+  category: internal
+  verdict: 데이터 블록 손상 — 물리적 또는 논리적 데이터 블록 손상
+  immediate:
+  - "SELECT * FROM v$database_block_corruption;"
+  - "손상 세그먼트: `select owner, segment_name, segment_type from dba_extents where file_id=<file#> and <block#> between block_id and block_id+blocks-1;`"
+  - "OS I/O 오류: `dmesg -T | grep -i \"i/o error\" | tail`"
+  short:
+  - "(2차·업무 영향 적은 시간) RMAN `backup validate check logical datafile <n>;` 으로 손상 범위 확인(전체 DB 검증은 부하 큼)"
+  - "(2차·승인 후, 롤백: 복구 전 백업 가용성 확인) RMAN `recover datafile <f> block <b>;`(11g+, 10g 는 `blockrecover`)"
+  - "영향: 해당 블록 데이터 읽기/쓰기 불가, 데이터 손실 위험."
+  mid:
+  - RMAN 정기 검증 설정
+  - 스토리지 HW 점검 및 교체
+  - DB_BLOCK_CHECKSUM 파라미터 활성화
+  long:
+  - "RMAN 정기 검증(주 1회 validate)과 스토리지 오류 감시"
+  source_note: 'legacy-analyzer-v2.2 oracle_rules.json ORA-01578 (원 출처: builtin)'
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: ORA/TNS 코드·alert log 문구 — 10gR2~26ai 공통
+- id: LEG-ORA-CHECKPOINT
+  layer: db
+  product:
+  - oracle
+  match:
+    regex: (?:checkpoint not complete)|(?:Thread \d+ cannot allocate new log)|(?:checkpoint advance)|(?:cannot allocate new log.*sequence)
+  severity: warn
+  category: storage
+  verdict: Checkpoint 지연 — Redo Log 스위치가 체크포인트보다 빠름. Redo Log 크기/개수 부족
+  immediate:
+  - "SELECT l.group#,l.bytes/1048576 AS size_mb,l.status FROM v$log l;"
+  - "로그 스위치 빈도: `select to_char(first_time,'YYYY-MM-DD HH24') hr, count(*) from v$log_history where first_time > sysdate-1 group by to_char(first_time,'YYYY-MM-DD HH24') order by 1;` — 시간당 4회 이상이면 크기 부족"
+  - "대기 이벤트: `select event, total_waits, round(time_waited/100) sec from v$system_event where event like 'log file switch%' or event like 'log file sync';` (AWR 은 Diagnostics Pack 라이선스 필요)"
+  short:
+  - "(2차·승인 후, 롤백: 추가 그룹은 INACTIVE 상태에서 drop 가능) `alter database add logfile group <n> ('<path>') size 1G;` 로 큰 그룹 추가 후 작은 그룹 순차 교체"
+  - "영향: DB I/O 증가 및 응답 지연."
+  mid:
+  - Redo Log 파일 크기 증가 (최소 500MB 권장)
+  - Redo Log 그룹 추가
+  - 스토리지 I/O 성능 개선
+  long:
+  - "로그 스위치 간격(목표 15~20분)과 log file switch 대기 감시"
+  source_note: 'legacy-analyzer-v2.2 oracle_rules.json ORA-CHECKPOINT (원 출처: builtin)'
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: ORA/TNS 코드·alert log 문구 — 10gR2~26ai 공통
+- id: LEG-ORA-TABLESPACE-FULL
+  layer: db
+  product:
+  - oracle
+  match:
+    regex: (?:ORA-01654.*extent.*tablespace)|(?:ORA-01658)|(?:ORA-01691)|(?:unable to extend.*by.*in tablespace)|(?:tablespace.*full)|(?:no more space.*tablespace)|(?:tablespace.*free space.*low)
+  severity: error
+  category: storage
+  verdict: 테이블스페이스 공간 부족 — 테이블스페이스 공간 고갈
+  immediate:
+  - "사용률: `select tablespace_name, round(used_percent,1) pct from dba_tablespace_usage_metrics order by 2 desc;` (11g+)"
+  - "`SELECT tablespace_name, round(sum(bytes)/1048576) free_mb FROM dba_free_space GROUP BY tablespace_name;` — 대상 TS free_mb 가 다음 익스텐트보다 작으면 확정"
+  - "AUTOEXTEND 여지: `select file_name, autoextensible, round(maxbytes/1048576) max_mb from dba_data_files where tablespace_name='<TS>';` 와 `df -h <경로>`"
+  short:
+  - "(2차·승인 후, 롤백: 추가 파일은 축소 불가 — 용량 계획 반영) `alter database datafile '<path>' autoextend on next 512M maxsize 32G;` 또는 `alter tablespace <TS> add datafile …`"
+  - "영향: 테이블/인덱스 DML 실패."
+  mid:
+  - 데이터파일 추가 또는 크기 확장
+  - AUTOEXTEND ON 설정
+  - 불필요한 데이터 아카이브/삭제
+  long:
+  - "테이블스페이스 사용률 85%/95% 감시와 월간 증가량 기반 증설 계획"
+  source_note: 'legacy-analyzer-v2.2 oracle_rules.json ORA-TABLESPACE-FULL (원 출처: builtin)'
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: ORA/TNS 코드·alert log 문구 — 10gR2~26ai 공통
+- id: LEG-ORA-LATCH
+  layer: db
+  product:
+  - oracle
+  match:
+    regex: '(?:latch.*free.*wait)|(?:latch: cache buffers chains)|(?:latch: library cache)|(?:latch: shared pool)|(?:latch.*contention)|(?:latch.*sleeps.*high)'
+  severity: warn
+  category: connection
+  verdict: 래치 경합 — SGA 내부 래치 경합. 고동시 접속 또는 SQL 파싱 과다
+  immediate:
+  - "SELECT name,gets,misses,sleeps FROM v$latch WHERE misses>0 ORDER BY sleeps DESC;"
+  - "대기 세션·SQL: `select event, sql_id, count(*) from v$session where event like 'latch%' group by event, sql_id order by 3 desc;`"
+  short:
+  - "경합 SQL(sql_id) 개선 요청, 공유 풀 관련이면 LEG-ORA-04031 절차 참고(파라미터 변경은 2차·승인 후, 롤백: 원래 값)"
+  - "영향: DB 응답 지연, CPU 증가."
+  mid:
+  - "공유 풀 크기 조정"
+  - "바인드 변수 적용으로 파싱 감소"
+  - "_KGHDSIDX_COUNT 등 숨은 파라미터는 Oracle Support 지시가 있을 때만 조정"
+  long:
+  - "latch 대기 상위 이벤트와 하드파싱 비율 정기 점검"
+  source_note: 'legacy-analyzer-v2.2 oracle_rules.json ORA-LATCH (원 출처: builtin)'
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: ORA/TNS 코드·alert log 문구 — 10gR2~26ai 공통
+- id: LEG-ORA-01460
+  layer: db
+  product:
+  - oracle
+  match:
+    regex: (?:ORA-01460)|(?:unimplemented or unreasonable conversion)|(?:ORA-01461)|(?:ORA-01401)|(?:ORA-01406)|(?:java\.sql\.SQLException.*ORA-014\d\d)
+  severity: error
+  category: capacity
+  verdict: Oracle SQL 타입 변환 불가
+  immediate:
+  - "오류 발생 SQL의 파라미터값 길이 확인 (4000바이트 초과 여부)"
+  - "iBatis SQL 매핑에서 javaType, jdbcType 설정 확인"
+  - "DB 버전 `select banner from v$version;` 과 애플리케이션 ojdbc jar 버전(`unzip -p ojdbc*.jar META-INF/MANIFEST.MF | grep -i version`) 대조"
+  short:
+  - "매핑을 CLOB 바인딩으로 바꾸는 수정은 개발팀 배포(2차·승인 후, 롤백: 이전 매핑 파일)"
+  - "영향: 해당 SQL 쿼리 실패. iBatis/MyBatis 사용 환경에서 자주 발생."
+  mid:
+  - VARCHAR2 한계(4000바이트) 초과 시 CLOB 타입으로 변경
+  - iBatis 파라미터 매핑에 jdbcType='CLOB' 명시
+  - Oracle JDBC 드라이버(ojdbc) 최신 버전으로 업그레이드
+  - 입력 데이터 길이 검증 로직 추가
+  long:
+  - "VARCHAR2 4000바이트(12c+ MAX_STRING_SIZE=EXTENDED 시 32767) 한계를 데이터 설계 기준에 반영하고 입력 길이 검증 표준화"
+  source_note: 'legacy-analyzer-v2.2 oracle_rules.json ORA-01460 (원 출처: builtin)'
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: ORA/TNS 코드·alert log 문구 — 10gR2~26ai 공통
+- id: LEG-ORA-01460-IBATIS
+  layer: db
+  product:
+  - oracle
+  match:
+    regex: (?:ORA-01460.*iBatis)|(?:iBatis.*ORA-01460)|(?:NestedSQLException.*ORA-01460)|(?:SqlMapClient.*ORA-01460)|(?:InlineParameterMap.*ORA-01460)|(?:eai_product.*getProductListByColumn.*ORA-01460)|(?:SQL
+      state \[72000\].*error code \[1460\])|(?:error code \[1460\])
+  severity: error
+  category: internal
+  verdict: iBatis ORA-01460 파라미터 오류
+  immediate:
+  - "`grep -n -B3 \"ORA-01460\" <app_log> | tail -40` 로 statement ID·파라미터 확인 뒤 `grep -rn \"<statement id>\" <sqlmap 디렉터리> --include=*.xml` 로 매핑 위치 특정"
+  - "해당 sqlMap 의 InlineParameterMap javaType/jdbcType 확인 — 4000바이트 넘는 문자열을 VARCHAR 로 바인딩하면 확정"
+  - "DB 문자셋: `select parameter, value from nls_database_parameters where parameter in ('NLS_CHARACTERSET','NLS_NCHAR_CHARACTERSET');` — AL32UTF8 이면 한글 1자가 3바이트라 약 1,334자부터 4000바이트 초과"
+  short:
+  - "sqlMap 의 jdbcType 수정은 개발팀 배포(2차·승인 후, 롤백: 이전 sqlMap XML)"
+  - "영향: 해당 iBatis SQL ID를 사용하는 기능 전체 오류."
+  mid:
+  - 'sqlMap XML에서 #파라미터명:VARCHAR#→#파라미터명:CLOB# 변경'
+  - 파라미터값 4000바이트 제한 로직 추가
+  - Oracle JDBC 드라이버 업그레이드
+  long:
+  - "iBatis/MyBatis 매핑의 대용량 문자열 바인딩(CLOB) 기준을 코딩 표준에 포함하고 배포 전 길이 경계 시험"
+  source_note: 'legacy-analyzer-v2.2 oracle_rules.json ORA-01460-IBATIS (원 출처: builtin)'
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: ORA/TNS 코드·alert log 문구 — 10gR2~26ai 공통
+- id: LEG-ORA-01460-ALL
+  layer: db
+  product:
+  - oracle
+  match:
+    regex: '(?:ORA-01460)|(?:ORA-01461)|(?:ORA-01401)|(?:ORA-01406)|(?:ORA-01438)|(?:ORA-01489)|(?:ORA-01465)|(?:SQL state \[72000\])|(?:error code \[1460\])|(?:error code \[1461\])|(?:error code \[1401\])|(?:error
+      code \[1406\])|(?:error code \[1438\])|(?:java\.sql\.SQLException: ORA-014\d\d)|(?:java\.sql\.SQLException: ORA-014)|(?:ORA-014.*unimplemented)|(?:ORA-014.*conversion)|(?:ORA-014.*too large)|(?:ORA-014.*truncated)'
+  severity: error
+  category: capacity
+  verdict: Oracle 데이터 변환 오류 계열 (ORA-014xx)
+  immediate:
+  - 오류 발생 SQL의 파라미터값 실제 길이 확인
+  - '컬럼 정의: SELECT column_name,data_type,data_length FROM all_tab_columns WHERE ...'
+  - 'ORA-01460: setString() 대신 setClob() 사용 필요 여부 확인'
+  - 'ORA-01401: 입력 데이터 길이 vs 컬럼 정의 길이 비교'
+  short:
+  - "컬럼 타입 변경(VARCHAR2→CLOB)은 DDL 이므로 (2차·승인 후, 롤백: 변경 전 테이블 백업) 업무 외 시간에 수행"
+  - "영향: 해당 INSERT/UPDATE/SELECT 쿼리 실패. 트랜잭션 롤백."
+  mid:
+  - '4000바이트 초과: VARCHAR2→CLOB 컬럼 타입 변경'
+  - JDBC jdbcType=CLOB/NCLOB 명시
+  - 애플리케이션 레이어에서 입력값 길이 검증 추가
+  - Oracle JDBC 드라이버 최신 버전 적용
+  long:
+  - "입력 데이터 길이·형식 검증을 인터페이스 표준에 포함하고 컬럼 길이 변경 이력 관리"
+  source_note: 'legacy-analyzer-v2.2 oracle_rules.json ORA-01460-ALL (원 출처: builtin)'
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: ORA/TNS 코드·alert log 문구 — 10gR2~26ai 공통
+- id: LEG-ORA-SQL-STATE
+  layer: db
+  product:
+  - oracle
+  match:
+    regex: (?:SQL state \[72000\])|(?:SQL state \[22001\])|(?:SQL state \[22003\])|(?:SQL state \[22007\])|(?:SQL state \[22012\])|(?:SQL state \[23000\])|(?:SQL state \[23001\])|(?:SQL state \[42000\])|(?:SQL
+      state \[42S22\])|(?:SQL state \[HY000\])|(?:SQL state \[S1000\])|(?:error code \[\d{4,5}\].*ORA-)|(?:SQL state.*error code.*ORA-)
+  severity: warn
+  category: internal
+  verdict: Oracle SQL State 오류 계열
+  immediate:
+  - "SQL state와 error code로 정확한 ORA 코드 확인"
+  - "애플리케이션 로그의 `error code [nnnn]` 를 ORA-0nnnn 으로 바꿔 해당 코드 판정·절차를 다시 본다"
+  short:
+  - "ORA 코드별 절차에 따라 조치(데이터 정정·DDL 은 2차·승인 후, 롤백: 정정 전 백업)"
+  - "영향: DB 쿼리 실패. 애플리케이션 기능 오류."
+  mid:
+  - 'SQL state별 조치: 22xxx=데이터 검증, 23000=제약조건 확인'
+  long:
+  - "SQL state·ORA 코드별 발생 건수 주간 집계로 반복 오류 추적"
+  source_note: 'legacy-analyzer-v2.2 oracle_rules.json ORA-SQL-STATE (원 출처: builtin)'
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: ORA/TNS 코드·alert log 문구 — 10gR2~26ai 공통
+- id: LEG-ORA-014XX-FULL
+  layer: db
+  product:
+  - oracle
+  match:
+    regex: (?:ORA-01400)|(?:ORA-01401)|(?:ORA-01402)|(?:ORA-01403)|(?:ORA-01404)|(?:ORA-01405)|(?:ORA-01406)|(?:ORA-01407)|(?:ORA-01408)|(?:ORA-01410)|(?:ORA-01411)|(?:ORA-01422)|(?:ORA-01423)|(?:ORA-01424)|(?:ORA-01425)|(?:ORA-01426)|(?:ORA-01427)|(?:ORA-01428)|(?:ORA-01430)|(?:ORA-01438)|(?:ORA-01460)|(?:ORA-01461)|(?:ORA-01465)|(?:ORA-01466)|(?:ORA-01467)|(?:ORA-01468)|(?:ORA-01476)|(?:ORA-01480)|(?:ORA-01481)|(?:ORA-01484)|(?:ORA-01485)|(?:ORA-01486)|(?:ORA-01489)|(?:ORA-01490)|(?:SQL
+      state \[72000\])|(?:SQL state \[99999\])|(?:SQL state \[22001\])|(?:SQL state \[22002\])|(?:SQL state \[22003\])|(?:SQL state \[22005\])|(?:SQL state \[22007\])|(?:SQL state \[22008\])|(?:SQL state
+      \[22012\])|(?:SQL state \[22018\])|(?:SQL state \[22019\])|(?:SQL state \[23000\])|(?:SQL state \[23001\])|(?:SQL state \[2D000\])|(?:SQL state \[40001\])|(?:SQL state \[42000\])|(?:SQL state \[HY000\])|(?:error
+      code \[1460\])|(?:error code \[1461\])|(?:error code \[1401\])|(?:error code \[1406\])|(?:error code \[1438\])|(?:error code \[1400\])|(?:error code \[1403\])|(?:error code \[1489\])
+  severity: error
+  category: capacity
+  verdict: Oracle 파라미터/변환 오류 전체 계열 (ORA-014xx)
+  immediate:
+  - "실제 코드 분포: `grep -oE \"ORA-014[0-9]{2}\" <app_log> | sort | uniq -c | sort -rn | head` — 상위 코드별로 판정(SQL state [72000] 은 같은 줄 ORA 코드로 확인)"
+  - "문제 컬럼 정의: `select column_name, data_type, data_length, char_length, char_used, nullable from dba_tab_columns where owner='<OWNER>' and table_name='<TABLE>';` 와 실제 입력 길이 비교 — 01401·01438 이면 길이·정밀도 초과"
+  - "ORA-01460/1461: setString() → setClob() 변경 필요 여부 확인"
+  short:
+  - "코드별 수정(CLOB 바인딩·길이 검증·서브쿼리 단건화)은 개발팀 배포(2차·승인 후, 롤백: 이전 버전 배포)"
+  - "영향: 해당 SQL 실패. Spring 트랜잭션 롤백."
+  mid:
+  - 'ORA-01460/1461: CLOB 타입 사용'
+  - 'ORA-01401/1438: 입력값 길이/값 범위 검증 추가'
+  - 'ORA-01427: SQL 서브쿼리에 ROWNUM=1 또는 MAX() 적용'
+  - Oracle JDBC 드라이버 최신 버전 업그레이드
+  long:
+  - "ORA-014xx 발생 SQL 목록을 정기 점검하고 입력 검증·데이터 타입 설계 기준에 반영"
+  source_note: 'legacy-analyzer-v2.2 oracle_rules.json ORA-014xx-FULL (원 출처: builtin)'
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: ORA/TNS 코드·alert log 문구 — 10gR2~26ai 공통
+- id: LEG-ORA-00XXX-ERR
+  layer: db
+  product:
+  - oracle
+  match:
+    regex: (?:ORA-00001)|(?:unique constraint.*violated)|(?:SQL state \[23000\])|(?:DataIntegrityViolationException.*ORA-00001)|(?:error code \[1\].*unique constraint)|(?:SQL state \[23000\].*error code
+      \[1\])|(?:ORA-00028)|(?:ORA-00036)|(?:ORA-00054)|(?:ORA-00060)|(?:ORA-00100)|(?:ORA-00257)|(?:ORA-00376)|(?:ORA-00600)|(?:ORA-00942)|(?:ORA-00955)|(?:ORA-00979)|(?:ORA-00980)|(?:ORA-01000)|(?:ORA-01013)|(?:ORA-01031)|(?:ORA-01034)|(?:ORA-01041)|(?:ORA-01089)|(?:ORA-01114)|(?:ORA-01115)|(?:ORA-01116)|(?:ORA-01208)|(?:ORA-01555)|(?:ORA-01562)|(?:ORA-01578)|(?:ORA-01591)|(?:ORA-01652)|(?:ORA-01653)|(?:ORA-01654)|(?:ORA-01722)|(?:ORA-01756)|(?:ORA-01843)|(?:ORA-01861)|(?:ORA-02049)|(?:ORA-02291)|(?:ORA-02292)|(?:ORA-03113)|(?:ORA-04031)|(?:ORA-04036)|(?:ORA-04098)|(?:ORA-12519)|(?:ORA-12541)|(?:ORA-17002)|(?:ORA-17006)|(?:ORA-17008)|(?:ORA-17009)|(?:ORA-17010)|(?:ORA-17011)|(?:ORA-17068)|(?:ORA-17074)|(?:ORA-24550)|(?:ORA-30036)
+  severity: error
+  category: internal
+  verdict: Oracle 주요 오류 코드(ORA-…) 발생 — 고유 제약 위반·잠금·공간·접속 등, 코드별 의미는 코드 사전 참조
+  immediate:
+  - "코드 분포: `grep -oE \"ORA-[0-9]{5}\" <app_log> | sort | uniq -c | sort -rn | head -20` — 상위 코드를 해당 코드 판정·절차로 다시 본다(이 룰은 계열 묶음)"
+  - "ORA-00001: 메시지의 제약 이름으로 `select table_name, constraint_type from dba_constraints where constraint_name='<CONSTRAINT>';` 뒤 중복 키 확인"
+  - "ORA-00942: `select owner, object_name, object_type from dba_objects where object_name=upper('<object>');` 로 존재·소유자 확인(권한은 dba_tab_privs), ORA-17008: DB 연결 단절 — 앱 풀·`lsnrctl status <listener>` 확인"
+  short:
+  - "코드별 원인에 따른 조치를 2차에서 수행(DDL·데이터 정정은 승인 후, 롤백: 사전 백업)"
+  - "영향: SQL 실행 실패."
+  mid:
+  - 코드별 원인에 따른 조치
+  - 'ORA-17xxx: JDBC 드라이버 및 DB 연결 확인'
+  long:
+  - "ORA 코드별 발생 건수 주간 집계와 상위 코드 재발 방지 과제 관리"
+  source_note: 'legacy-analyzer-v2.2 oracle_rules.json ORA-00xxx-ERR (원 출처: builtin)'
+  versions:
+  - Oracle 10gR2
+  - Oracle 11gR1/11gR2
+  - Oracle 12cR1
+  - Oracle 12cR2/18c
+  - Oracle 19c
+  - Oracle 21c
+  - Oracle 23ai/26ai
+  version_note: ORA/TNS 코드·alert log 문구 — 10gR2~26ai 공통

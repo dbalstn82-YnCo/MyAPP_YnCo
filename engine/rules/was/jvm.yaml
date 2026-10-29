@@ -1,0 +1,87 @@
+# WAS — JVM·커넥션 풀 시그니처 (2026-10-16 G7a: 1차 읽기 전용화 — 재기동·롤백은 2차)
+rules:
+- id: WAS-JVM-001
+  layer: was
+  product:
+  - tomcat
+  - jeus
+  - weblogic
+  - jboss
+  match:
+    regex: java\.lang\.OutOfMemoryError
+  severity: critical
+  category: memory
+  verdict: JVM 힙 메모리 고갈 (OutOfMemoryError)
+  immediate:
+  - "OutOfMemoryError 뒤 문구로 종류 구분(Java heap space·Metaspace·GC overhead·unable to create new native thread) — 종류마다 원인이 다르다"
+  - "`jstat -gcutil <PID> 1000 5` 로 Old(O)·Metaspace(M) 사용률과 FGC 증가 확인, `jmap -histo <PID> | head -30` 으로 상위 객체 기록(live 옵션 없이 — Full GC 유발 안 함)(전체 힙덤프는 정지 위험 — 2차)"
+  - "`jcmd <PID> Thread.print > td_$(date +%H%M%S).txt` 로 스레드 덤프 보존(프로세스 유지), HeapDumpOnOutOfMemoryError 로 생성된 *.hprof 유무 확인"
+  short:
+  - "(2차·승인 후, 롤백: 우회 해제) LB 에서 노드 우회 → 힙 덤프 확보(디스크 여유 확인) → WAS 재기동으로 서비스 우선 복구"
+  - GC 로그에서 Full GC 반복 구간 확인
+  - "(2차·승인 후, 롤백: 직전 배포본 보관) 직전 배포·설정 변경 이력 확인, 문제 배포면 이전 배포본으로 되돌림"
+  mid:
+  - 힙 크기·GC 정책 재산정 (-Xmx, G1/ZGC)
+  - -XX:+HeapDumpOnOutOfMemoryError 표준 설정화
+  long:
+  - 메모리 누수 코드 프로파일링·개선, 부하 테스트 정례화
+  - "Old 영역 사용률 85%·Full GC 빈도 경보 등록"
+  versions:
+  - JEUS 6~9
+  - Tomcat 5.5~11
+  - WebLogic 10.3.6~14.1.2
+  - WebSphere 7~9
+  - JBoss EAP 6~8
+  version_note: java.lang.OutOfMemoryError — JVM 공통 문구, 제품·버전 무관
+- id: WAS-POOL-002
+  layer: was
+  product:
+  - '*'
+  match:
+    regex: connection is not available|Timeout waiting for idle object|Unable to acquire JDBC Connection
+  severity: critical
+  category: connection
+  verdict: DB 커넥션 풀 고갈
+  immediate:
+  - DB 계층 데드락·세션 한도 선행 여부 즉시 확인 (원인이 DB일 가능성 높음)
+  - "`jcmd <PID> Thread.print | grep -c -E 'getConnection|borrowObject|HikariPool'` 로 풀 대기 스레드 수 확인, `nc -zvw3 <db_host> <db_port>` 로 DB 도달성 확인"
+  short:
+  - "(2차·승인 후, 롤백: 우회 해제) 풀이 회복되지 않으면 노드별로 LB 우회 후 WAS 순차 재기동"
+  - 풀 설정(HikariCP maximumPoolSize·connectionTimeout / DBCP maxTotal·maxWait)과 active·idle·pending 커넥션 수, 실제 DB 세션 수 비교
+  - 장시간 미반납 커넥션(leak) 탐지 설정(leakDetectionThreshold)
+  mid:
+  - 커넥션 누수 코드 수정, 풀 크기 재산정
+  long:
+  - 커넥션 사용 표준(트랜잭션 범위·타임아웃) 수립
+  versions:
+  - 제품·버전 무관 (키워드 공통 룰)
+  version_note: JDBC 풀 고갈 문구(HikariCP·DBCP·Hibernate) — WAS·버전 무관
+- id: WAS-THR-003
+  layer: was
+  product:
+  - tomcat
+  match:
+    regex: maxThreads.*reached|all threads.*are currently busy
+  severity: error
+  category: thread
+  verdict: 요청 처리 스레드 풀 고갈
+  immediate:
+  - "`for i in 1 2; do jcmd <PID> Thread.print > $CATALINA_BASE/logs/td_$(date +%H%M%S).txt; sleep 30; done` 로 30초 간격 스레드 덤프 2회 확보(프로세스 유지)"
+  - "`curl -s -u <user> 'http://localhost:<port>/manager/status?XML=true' | grep -o '<threadInfo[^>]*>'` 로 currentThreadsBusy·maxThreads 확인(manager-status 역할, 7.0+)"
+  short:
+  - 덤프에서 블로킹 지점(외부 연동·DB 대기) 식별
+  - "(2차·승인 후, 롤백: server.xml 백업 복원) 후단 해소 후에도 부족하면 Connector maxThreads·acceptCount 조정, 재기동 일정 반영"
+  mid:
+  - maxThreads·타임아웃 재산정, 지연 API 개선
+  long:
+  - 외부 연동 비동기화·서킷브레이커 도입 검토
+  - "currentThreadsBusy/maxThreads 70% 경보 등록"
+  versions:
+  - Tomcat 5.5
+  - Tomcat 6.0
+  - Tomcat 7.0
+  - Tomcat 8.0/8.5
+  - Tomcat 9.0
+  - Tomcat 10.0/10.1
+  - Tomcat 11.0
+  version_note: '''All threads (N) are currently busy'' 문구는 5.5 이후 동일, maxThreads 문구 공통'

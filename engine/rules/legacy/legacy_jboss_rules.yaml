@@ -1,0 +1,392 @@
+# 기존 'AI 로그분석기 v2.2' 내장 룰에서 변환 반입(tools/import_legacy_rules.py) — 중복(코드·패턴) 제외
+# 심각도 CRITICAL→critical HIGH→error MEDIUM→warn LOW→info · immediate_actions→즉시 · root_actions→중기 · negative_patterns→exclude
+rules:
+- id: LEG-WFLY-ORA-IBATIS
+  layer: was
+  product:
+  - jboss
+  match:
+    regex: (?:SQL state \[23000\])|(?:DataIntegrityViolationException)|(?:unique constraint.*violated)|(?:ORA-00001)|(?:UT\d{6}:.*Exception handling request)|(?:io\.undertow\.request.*ERROR)|(?:io\.undertow\.request.*Exception)|(?:UncategorizedSQLException)|(?:SqlMapClient.*operation)|(?:NestedSQLException)|(?:InlineParameterMap)|(?:SQL
+      state \[\d+\].*error code \[14)|(?:ORA-01460)|(?:ORA-01461)|(?:ORA-01401)|(?:ORA-01406)|(?:java\.sql\.SQLException.*ORA-\d+)|(?:org\.springframework\.jdbc.*UncategorizedSQL)|(?:org\.springframework\.orm\.ibatis)|(?:SqlMapClientTemplate)|(?:Check
+      the statement \(query failed\))|(?:The error occurred while applying a parameter map)|(?:ORA-00001.*unique constraint)|(?:unique constraint.*violated.*ORA)|(?:DataIntegrityViolationException.*ORA-00001)|(?:SQL
+      state \[23000\].*error code \[1\])|(?:error code \[1\].*unique constraint)
+  severity: error
+  category: hardware
+  verdict: Oracle SQL 변환 오류 (WildFly+iBatis+Spring)
+  immediate:
+  - "WildFly server.log에서 UT005023 발생 URL과 파라미터값 확인 — `grep -n -A30 'UT005023' $JBOSS_HOME/standalone/log/server.log | grep -E 'ORA-|SQL state|statement|Caused by' | head -20`(개인정보가 담긴 파라미터 값은 기록하지 않는다)"
+  - iBatis SQL 매핑 파일(<sqlmap>.xml)에서 오류 메시지의 statement ID SQL 확인
+  - 문제 파라미터의 실제 데이터 길이 확인 (4000바이트 초과 여부)
+  - "Oracle JDBC 드라이버 버전과 DB 버전 호환성 확인 — `ls $JBOSS_HOME/modules/*/*/*/main/ojdbc*.jar <앱>/WEB-INF/lib/ojdbc*.jar 2>/dev/null`"
+  short:
+  - '영향: 해당 요청 URL(<uri>) 처리 실패.
+
+    해당 SQL 매핑(<namespace>.<statementId>)을 사용하는 모든 기능 오류.'
+  - "(2차) ORA 코드·statement ID·파라미터 길이 분석 결과를 개발 담당에 전달, 매핑·드라이버 변경 배포는 승인 후(롤백: 이전 배포본)"
+  mid:
+  - iBatis 파라미터 타입을 VARCHAR → CLOB으로 변경 (4000바이트 초과 시)
+  - Oracle JDBC 드라이버 업그레이드 (ojdbc8.jar 최신 버전 적용)
+  - SQL 매핑에서 setString() → setCharacterStream() 으로 변경
+  - 입력 파라미터 길이 제한 로직 추가 (4000바이트 초과 차단)
+  long:
+  - "DB 컬럼 길이·타입과 입력 검증 규칙을 함께 관리하는 데이터 표준, ORA 오류 코드별 건수 감시"
+  source_note: 'legacy-analyzer-v2.2 jboss_rules.json WFLY-ORA-IBATIS (원 출처: builtin)'
+  exclude: (?:WebContainer)
+  versions:
+  - JBoss EAP 6.x (AS 7)
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: Spring/iBatis/JDBC 예외 문구 — 애플리케이션 계층, EAP 버전 무관
+- id: LEG-WFLY-DEPLOY
+  layer: was
+  product:
+  - jboss
+  match:
+    regex: (?:WFLYSRV\d+)|(?:WFLYCTL\d+)|(?:DeploymentUnitProcessingException)|(?:deployment.*FAILED)|(?:WFLY.*deploy.*error)|(?:module.*not.*found.*wildfly)|(?:EAR.*failed.*deploy)|(?:WAR.*deploy.*fail.*wildfly)
+  severity: error
+  category: internal
+  verdict: WildFly 배포 실패 — 배포 유닛 처리 오류
+  immediate:
+  - server.log에서 Caused by 스택 추적 확인
+  - "`$JBOSS_HOME/bin/jboss-cli.sh -c 'deployment-info'` 로 실패 배포 확인(읽기 전용, EAP 7+ · EAP 6 은 `/deployment=*:read-attribute(name=status)`)"
+  short:
+  - '영향: 해당 애플리케이션 서비스 불가.'
+  - "(2차·승인 후, 롤백: 실패 배포본 별도 보관) 원인 수정이 늦으면 이전 버전 배포본으로 되돌려 재배포"
+  mid:
+  - standalone.xml 설정 검토
+  - module.xml 의존성 누락 확인
+  long:
+  - "배포 전 검증 환경 배포 시험·배포본 보관과 배포 실패 경보"
+  source_note: 'legacy-analyzer-v2.2 jboss_rules.json WFLY-DEPLOY (원 출처: builtin)'
+  exclude: (?:WebContainer)
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: WFLYSRV/WFLYCTL — EAP 7+ (DeploymentUnitProcessingException 클래스는 6 도 해당)
+- id: LEG-WFLY-DS
+  layer: was
+  product:
+  - jboss
+  match:
+    regex: (?:WFLYJCA\d*)|(?:IJ000453)|(?:IJ000606)|(?:Unable to get managed connection)|(?:datasource.*unavailable)|(?:Cannot get a connection.*pool)|(?:Timeout.*waiting.*connection.*pool)
+  severity: error
+  category: connection
+  verdict: WildFly DataSource 연결 실패 — DB 접속 불가 또는 커넥션 풀 고갈
+  immediate:
+  - standalone.xml datasource 설정 확인
+  - "DB 서버 접속 가능 여부 확인 — `nc -zvw3 <db_host> <db_port>`, 풀 상태는 `jboss-cli.sh -c '/subsystem=datasources/data-source=<DS>/statistics=pool:read-resource(include-runtime=true)'`(읽기 전용)"
+  short:
+  - '영향: 애플리케이션 DB 조회/저장 전체 실패.'
+  - "(2차·승인 후, 롤백: 이전 값 복원) DB 원인 해소 후 :flush-gracefully-connection-in-pool, 풀 고갈이면 누수 추적 후 max-pool-size 조정"
+  mid:
+  - connection-pool max-size 증가
+  - valid-connection-checker 설정
+  long:
+  - "풀 사용률·연결 실패 건수 감시와 DB 계정 비밀번호 만료 일정 관리"
+  source_note: 'legacy-analyzer-v2.2 jboss_rules.json WFLY-DS (원 출처: builtin)'
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: WFLYJCA — EAP 7+; IJ000453/IJ000606 은 EAP 6 도 해당
+- id: LEG-WFLY-THREAD
+  layer: was
+  product:
+  - jboss
+  match:
+    regex: (?:WFLY.*thread.*pool)|(?:executor.*full.*wildfly)|(?:RejectedExecutionException.*wildfly)|(?:no.*thread.*available.*wildfly)
+  severity: error
+  category: thread
+  verdict: WildFly 스레드 풀 고갈 — 요청 급증으로 스레드 풀 소진
+  immediate:
+  - "`for i in 1 2 3; do jstack <PID> > thread_dump_$i.txt; sleep 10; done` 로 덤프 3회(프로세스 유지)"
+  - "BLOCKED 스레드 원인 분석 — `grep -c 'java.lang.Thread.State: BLOCKED' thread_dump_*.txt` 와 같은 대기 스택 집계"
+  short:
+  - '영향: HTTP 503 응답.'
+  - "(2차·승인 후, 롤백: 이전 값 복원) 병목 후단 해소, 필요 시 io 하위시스템 worker task-max-threads 조정 후 :reload"
+  mid:
+  - thread pool 설정 증가
+  - DB/외부 API 타임아웃 설정
+  long:
+  - "작업자 스레드 사용률 감시와 후단 타임아웃 표준"
+  source_note: 'legacy-analyzer-v2.2 jboss_rules.json WFLY-THREAD (원 출처: builtin)'
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: WFLY 스레드 풀 문구 — EAP 7+ (RejectedExecutionException 은 공통)
+- id: LEG-WFLY-UNDERTOW-ERR
+  layer: was
+  product:
+  - jboss
+  match:
+    regex: (?:UT\d{6}:.*Exception handling request)|(?:io\.undertow\.request.*Exception)|(?:io\.undertow.*ERROR)|(?:UT005023)|(?:undertow.*servlet.*error)
+  severity: error
+  category: internal
+  verdict: Undertow 요청 처리 오류 — Undertow 서블릿 컨테이너에서 요청 처리 중 예외 발생
+  immediate:
+  - "`grep -n -A30 -E 'UT0[0-9]{5}|Exception handling request' $JBOSS_HOME/standalone/log/server.log | grep -E 'UT0|request to|Caused by' | tail -30` 로 발생 URL과 근본 예외 확인(EAP 7/8 standalone 기본 경로)"
+  - "`grep -c 'UT005023' $JBOSS_HOME/standalone/log/server.log` 로 건수 확인, 같은 시각 관련 WAR 애플리케이션 로그(`<앱 로그 경로>`)의 오류 대조 — 특정 URL 에 몰리면 그 기능 코드 원인"
+  short:
+  - '영향: 해당 URL 요청 처리 실패.'
+  mid:
+  - 근본 예외(Caused by) 분석 후 코드 수정
+  - 해당 기능 배포 재시도
+  long:
+  - "URI 별 500 비율 감시와 공통 예외 처리 표준"
+  source_note: 'legacy-analyzer-v2.2 jboss_rules.json WFLY-UNDERTOW-ERR (원 출처: builtin)'
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: UT* Undertow — EAP 7+
+- id: LEG-WFLY-SPRING-ERR
+  layer: was
+  product:
+  - jboss
+  match:
+    regex: (?:NestedServletException.*Request processing failed)|(?:org\.springframework\.web\.util\.NestedServletException)|(?:org\.springframework\.jdbc.*Exception)|(?:org\.springframework\.orm.*Exception)|(?:SpringSecurity.*error)|(?:FrameworkServlet.*processRequest.*failed)
+  severity: error
+  category: security
+  verdict: Spring 요청 처리 실패 — Spring MVC/Security 요청 처리 중 예외. 주로 DB 연동 오류, 권한 오류
+  immediate:
+  - "`grep -n -A40 'NestedServletException' $JBOSS_HOME/standalone/log/server.log | grep -E 'nested exception is|Caused by' | tail -20` 로 'nested exception is' 원인 확인 — 마지막 Caused by 가 근본 원인"
+  - "근본 원인이 SQLException·ORA- 면 DB 계열, AccessDeniedException 이면 권한 계열로 분류해 해당 담당에 전달"
+  short:
+  - '영향: 해당 컨트롤러/서비스 기능 오류.'
+  mid:
+  - 근본 예외 유형에 따라 DB/권한/설정 조치
+  - Spring 예외 핸들러 추가
+  long:
+  - "컨트롤러별 오류율·권한 거부 건수 감시"
+  source_note: 'legacy-analyzer-v2.2 jboss_rules.json WFLY-SPRING-ERR (원 출처: builtin)'
+  versions:
+  - JBoss EAP 6.x (AS 7)
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: Spring 예외 문구 — 버전 무관
+- id: LEG-WFLY-ORA-CONV-ALL
+  layer: was
+  product:
+  - jboss
+  match:
+    regex: (?:SQL state \[72000\])|(?:SQL state \[23000\])|(?:error code \[1460\])|(?:error code \[1438\])|(?:error code \[1401\])|(?:error code \[1\].*unique)|(?:ORA-01438)|(?:ORA-01460)|(?:ORA-00001)|(?:ORA-01461)|(?:ORA-01401)|(?:ORA-01406)|(?:ORA-01426)|(?:ORA-01427)|(?:ORA-01489)|(?:ORA-01465)|(?:ORA-01403)|(?:ORA-01422)|(?:SQL
+      state \[22001\])|(?:SQL state \[22003\])|(?:SQL state \[22007\])|(?:SQL state \[22018\])|(?:UncategorizedSQLException.*ORA-)|(?:DataIntegrityViolationException.*ORA-)|(?:BadSqlGrammarException.*ORA-)|(?:TypeMismatchDataAccessException.*ORA-)|(?:InvalidResultSetAccessException.*ORA-)|(?:NestedSQLException.*ORA-014)|(?:SqlMapClient.*ORA-014)|(?:InlineParameterMap.*ORA-)|(?:ParameterMap.*apply.*fail)|(?:UT005023:.*Exception
+      handling request)|(?:UT005023:.*ORA-)|(?:io\.undertow\.request.*ERROR.*ORA)
+  severity: error
+  category: capacity
+  verdict: Oracle 데이터 타입 변환 오류 계열 (WildFly)
+  immediate:
+  - "`grep -n -A30 'UT005023' $JBOSS_HOME/standalone/log/server.log | grep -E 'ORA-|SQL state|statement|Caused by' | head -20` 로 ORA 코드·statement ID·요청 URL 확인(개인정보가 담긴 파라미터 값은 기록하지 않는다)"
+  - "`grep -n -A15 'id=\"<statementId>\"' <mapper>.xml` 로 해당 SQL 의 파라미터 jdbcType 확인 — VARCHAR 바인딩 값이 4000바이트(MAX_STRING_SIZE=EXTENDED 면 32767바이트)를 넘으면 길이 한계"
+  - "Oracle 에러코드별 원인: ORA-01460=타입변환불가, ORA-01401=길이초과, ORA-01438=정밀도초과"
+  short:
+  - '영향: 해당 SQL을 실행하는 모든 기능 오류. Spring 트랜잭션 롤백.'
+  mid:
+  - 파라미터 jdbcType을 VARCHAR→CLOB/NCLOB으로 변경 (4000바이트 초과 시)
+  - Oracle JDBC 드라이버(ojdbc) 최신 버전으로 업그레이드
+  - iBatis resultMap에 typeHandler 명시적 설정
+  - 입력값 길이 검증 로직 추가 (서비스/컨트롤러 레이어)
+  long:
+  - "DB 컬럼 정의와 입력 검증 규칙 일치 관리, ORA 오류 코드별 건수 감시"
+  source_note: 'legacy-analyzer-v2.2 jboss_rules.json WFLY-ORA-CONV-ALL (원 출처: builtin)'
+  exclude: (?:WebContainer)
+  versions:
+  - JBoss EAP 6.x (AS 7)
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: SQL state/Oracle 오류 문구 — 버전 무관
+- id: LEG-WFLY-SPRING-JDBC
+  layer: was
+  product:
+  - jboss
+  match:
+    regex: (?:org\.springframework\.jdbc\.UncategorizedSQLException)|(?:org\.springframework\.jdbc\.BadSqlGrammarException)|(?:org\.springframework\.jdbc\.DataAccessException)|(?:org\.springframework\.dao\.DataAccessException)|(?:org\.springframework\.dao\.DataIntegrityViolationException)|(?:org\.springframework\.dao\.DeadlockLoserDataAccessException)|(?:org\.springframework\.dao\.EmptyResultDataAccessException)|(?:org\.springframework\.dao\.IncorrectResultSizeDataAccessException)|(?:org\.springframework\.transaction\.TransactionSystemException)|(?:org\.springframework\.transaction\.CannotCreateTransactionException)|(?:org\.springframework\.orm\.ibatis\.SqlMapClientTemplate)|(?:org\.springframework\.orm\.ibatis\.)|(?:AbstractFallbackSQLExceptionTranslator\.translate)|(?:SQLExceptionTranslator)|(?:org\.springframework\.web\.util\.NestedServletException)|(?:NestedServletException:.*Request
+      processing failed)
+  severity: error
+  category: internal
+  verdict: Spring JDBC 예외 계열 (WildFly)
+  immediate:
+  - "`grep -n -A40 'NestedServletException' $JBOSS_HOME/standalone/log/server.log | grep -E 'nested exception is|Caused by|ORA-' | tail -20` 로 예외 계층 끝의 근본 원인(ORA-xxxx) 확인"
+  - "Spring 예외 계층: UncategorizedSQLException→NestedSQLException→SQLException→ORA-xxxx — 가장 안쪽 ORA 코드로 DB 담당 전달"
+  short:
+  - '영향: 해당 Spring 컨트롤러/서비스의 DB 처리 기능 오류.'
+  mid:
+  - 근본 원인(ORA-xxxx)에 따른 DB/SQL 조치
+  - Spring @Transactional 설정 검토
+  - Connection Pool 설정 및 DB 서버 상태 확인
+  long:
+  - "DataAccessException 유형별 건수 감시와 SQL 품질 점검 정례화"
+  source_note: 'legacy-analyzer-v2.2 jboss_rules.json WFLY-SPRING-JDBC (원 출처: builtin)'
+  exclude: (?:WebContainer)
+  versions:
+  - JBoss EAP 6.x (AS 7)
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: Spring JDBC 예외 — 버전 무관
+- id: LEG-WFLY-IBATIS-ERR
+  layer: was
+  product:
+  - jboss
+  match:
+    regex: (?:com\.ibatis\.common\.jdbc\.exception\.NestedSQLException)|(?:com\.ibatis\.sqlmap\.engine\.)|(?:SqlMapClient.*operation)|(?:SqlMapClientTemplate)|(?:MappedStatement\.executeQuery)|(?:SqlExecutor\.executeQuery)|(?:InlineParameterMap)|(?:ParameterMap)|(?:org\.apache\.ibatis\.)|(?:MyBatisException)|(?:org\.mybatis\.)|(?:MapperMethod)|(?:DefaultResultSetHandler)|(?:Check
+      the statement \(query failed\))|(?:The error occurred while applying a parameter map)|(?:Check the.*InlineParameterMap)|(?:sqlmap.*configuration.*error)|(?:Mapped Statements collection does not contain
+      value for)
+  severity: error
+  category: internal
+  verdict: 'iBatis/MyBatis SQL 매핑 오류 — iBatis/MyBatis SQL 매핑 레이어에서 파라미터 바인딩 또는 결과 매핑 오류.
+
+    SQL 매핑 ID, 파라미터 타입, 결과 타입 불일치'
+  immediate:
+  - "`grep -n -E 'The error occurred in|The error may involve|Check the|Cause:' $JBOSS_HOME/standalone/log/server.log | tail -20` 로 SQL 매핑 ID(namespace.statementId)와 원인 확인"
+  - "`grep -rn 'id=\"<statementId>\"' <앱 경로>/WEB-INF/classes` 로 해당 statement 의 parameterClass/parameterType 과 `#파라미터명#`(iBatis)·`#{파라미터명}`(MyBatis) 일치 확인"
+  short:
+  - '영향: 해당 SQL ID를 사용하는 DAO 기능 전체 오류.'
+  mid:
+  - 파라미터 타입 매핑 수정 (javaType/jdbcType 명시)
+  - resultMap 결과 매핑 검토
+  - iBatis → MyBatis 마이그레이션 고려
+  long:
+  - "SQL 매핑 변경 시 매핑 단위 시험 의무화, statement ID 별 오류 건수 감시"
+  source_note: 'legacy-analyzer-v2.2 jboss_rules.json WFLY-IBATIS-ERR (원 출처: builtin)'
+  exclude: (?:WebContainer)
+  versions:
+  - JBoss EAP 6.x (AS 7)
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: iBatis 예외 — 버전 무관
+- id: LEG-WFLY-SERVLET-ERR
+  layer: was
+  product:
+  - jboss
+  match:
+    regex: (?:UT005023)|(?:UT005001)|(?:UT005004)|(?:UT000029)|(?:UT000090)|(?:io\.undertow\.servlet\.handlers\.ServletHandler)|(?:io\.undertow\.servlet\.handlers\.FilterHandler)|(?:io\.undertow\.server\.HttpServerExchange)|(?:io\.undertow\.servlet\.handlers\.ServletInitialHandler)|(?:io\.undertow\.server\.Connectors)|(?:org\.wildfly\.extension\.undertow\.)|(?:GlobalRequestControllerHandler)|(?:UndertowDeploymentInfoService)|(?:FrameworkServlet\.processRequest)|(?:DispatcherServlet\.doDispatch)|(?:AnnotationMethodHandlerAdapter)
+  severity: warn
+  category: internal
+  verdict: 'Undertow 서블릿/필터 처리 오류 — WildFly Undertow 서블릿 컨테이너에서 요청 처리 중 오류.
+
+    UT 코드: 서블릿/필터 실행 중 예외 또는 HTTP 처리 오류'
+  immediate:
+  - "`grep -n -A30 -E 'UT0[0-9]{5}' $JBOSS_HOME/standalone/log/server.log | grep -E 'UT0|request to|Caused by' | tail -30` 로 UT 코드·요청 URL·근본 예외 확인(EAP 7/8 standalone)"
+  - "스택에서 관련 Spring Controller/Service 클래스명을 추려 개발 담당에 전달 — 같은 클래스가 반복되면 그 코드 원인"
+  short:
+  - '영향: 해당 URL 요청 처리 실패. HTTP 500 오류 응답.'
+  mid:
+  - 근본 예외 유형에 따른 조치
+  - Spring 예외 핸들러(@ExceptionHandler) 추가
+  - "(2차·승인 후, 롤백: 이전 배포본) WildFly 애플리케이션 재배포"
+  long:
+  - "URI 별 500 비율 감시와 배포 전 스모크 시험"
+  source_note: 'legacy-analyzer-v2.2 jboss_rules.json WFLY-SERVLET-ERR (원 출처: builtin)'
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: UT005023/UT005001 … — EAP 7+
+- id: LEG-WFLY-UT-ALL
+  layer: was
+  product:
+  - jboss
+  match:
+    regex: (?:UT005023)|(?:UT005001)|(?:UT005002)|(?:UT005003)|(?:UT005004)|(?:UT005010)|(?:UT000029)|(?:UT000057)|(?:UT000060)|(?:UT000090)|(?:UT000096)|(?:UT000100)|(?:UT[0-9]{6}:.*Exception handling
+      request)|(?:UT[0-9]{6}:.*Exception)|(?:UT[0-9]{6}:.*Error)|(?:io\.undertow\.request.*UT[0-9]{6})|(?:io\.undertow\.request.*Exception)|(?:io\.undertow\.request.*ERROR)
+  severity: error
+  category: upstream
+  verdict: Undertow UT 코드 전체 계열
+  immediate:
+  - "`grep -o -E 'UT0[0-9]{5}' $JBOSS_HOME/standalone/log/server.log | sort | uniq -c | sort -rn | head` 로 UT 코드별 건수 확인"
+  - "`grep -n -A40 '<UT코드>' $JBOSS_HOME/standalone/log/server.log | grep -E 'request to|Caused by' | tail -20` 로 요청 URL과 근본 원인 확인(파라미터 값의 개인정보는 기록하지 않음)"
+  short:
+  - '영향: 해당 HTTP 요청 처리 실패. HTTP 500 응답.'
+  mid:
+  - 근본 예외 유형별 조치
+  - Spring @ExceptionHandler 추가로 오류 핸들링 개선
+  long:
+  - "UT 코드별·URI 별 오류 건수 감시"
+  source_note: 'legacy-analyzer-v2.2 jboss_rules.json WFLY-UT-ALL (원 출처: builtin)'
+  exclude: (?:WebContainer)
+  versions:
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: UT* — EAP 7+
+- id: LEG-WFLY-SPRING-ALL
+  layer: was
+  product:
+  - jboss
+  match:
+    regex: (?:org\.springframework\.web\.util\.NestedServletException)|(?:org\.springframework\.web\.HttpRequestMethodNotSupportedException)|(?:org\.springframework\.web\.HttpMediaTypeNotSupportedException)|(?:org\.springframework\.web\.bind\.MethodArgumentNotValidException)|(?:org\.springframework\.web\.bind\.MissingServletRequestParameterException)|(?:org\.springframework\.web\.servlet\.NoHandlerFoundException)|(?:org\.springframework\.jdbc\.UncategorizedSQLException)|(?:org\.springframework\.jdbc\.BadSqlGrammarException)|(?:org\.springframework\.jdbc\.DataAccessException)|(?:org\.springframework\.dao\.DataAccessException)|(?:org\.springframework\.dao\.DataIntegrityViolationException)|(?:org\.springframework\.dao\.DeadlockLoserDataAccessException)|(?:org\.springframework\.dao\.EmptyResultDataAccessException)|(?:org\.springframework\.dao\.IncorrectResultSizeDataAccessException)|(?:org\.springframework\.dao\.CannotAcquireLockException)|(?:org\.springframework\.dao\.QueryTimeoutException)|(?:org\.springframework\.transaction\.TransactionSystemException)|(?:org\.springframework\.transaction\.CannotCreateTransactionException)|(?:org\.springframework\.transaction\.TransactionTimedOutException)|(?:org\.springframework\.transaction\.UnexpectedRollbackException)|(?:org\.springframework\.orm\.ibatis\.SqlMapClientTemplate)|(?:org\.springframework\.orm\.ibatis\.)|(?:AbstractFallbackSQLExceptionTranslator\.translate)|(?:org\.springframework\.security\.access\.AccessDeniedException)|(?:org\.springframework\.security\.core\.AuthenticationException)|(?:org\.springframework\.security\.web\.FilterChainProxy)
+  severity: error
+  category: internal
+  verdict: Spring 예외 전체 계열 (WildFly)
+  immediate:
+  - "① 대상 요청 찾기 — 사용자가 아는 시각(·스레드)으로 예외 묶음의 머리 줄 번호: `awk '/^[[:space:]]*[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9][ T][0-9][0-9]:[0-9][0-9]/ {h=NR; hl=$0} /springframework/ && /Exception/ && h {print h, substr(hl,1,200)}' $JBOSS_HOME/standalone/log/server.log | uniq | grep '<HH:MM>' | tail -20` — 첫 칸 = 머리 줄 번호, (default task-N) = 스레드, 같은 초에 여러 요청이면 스레드·URL 로 하나를 고른다 · 지원 로그 형식: 각 항목이 `YYYY-MM-DD HH:MM`(또는 ISO `YYYY-MM-DDTHH:MM`) 머리로 시작한다고 가정한 추출 — 다른 패턴이면 추출을 믿지 말고 `grep -n 'springframework' $JBOSS_HOME/standalone/log/server.log | grep '<HH:MM>'` 로 찾은 줄 앞뒤를 `sed -n '<시작줄>,<끝줄>p' $JBOSS_HOME/standalone/log/server.log` 로 원문 그대로 읽는다"
+  - "② 그 묶음의 Caused by 사슬 끝까지: `awk -v s=<머리줄번호> 'NR<s {next} NR>s && /^[[:space:]]*[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9][ T][0-9][0-9]:[0-9][0-9]/ {exit} {print NR, $0}' $JBOSS_HOME/standalone/log/server.log | grep 'Caused by:'` — 다음 '날짜 시각' 줄 직전까지만 읽어 빈 줄·들여쓰기 없는 중간 예외 줄에서 끊기지 않고 다른 요청을 섞지 않는다, 마지막 줄이 보통의 사슬에서 맨 안쪽 원인(Suppressed:·함께 찍힌 다른 원인이 있을 수 있어 유일한 근본 원인이라 보장되지는 않는다 — grep -A 숫자·전체 tail 은 깊은 원인이나 대상 요청을 놓친다)"
+  - "맨 안쪽 예외 유형으로 분기 — SQLException·DataAccessException 이면 그 예외의 SQLState·벤더 코드(ORA- 등)와 같은 시각 `grep -n -E 'IJ0[0-9]{5}' $JBOSS_HOME/standalone/log/server.log | tail -10`(연결 풀) 확인, 트랜잭션 계열이면 같은 시각 ARJUNA·WFLYTX 경고, 빈 생성 실패면 기동 설정·의존성. 로그 전체의 ORA-/SQLException 건수만으로 DB 원인이라 단정하지 않는다"
+  short:
+  - '(2차) 맨 안쪽 원인 유형별 이관 — DB(SQLState·벤더 코드+같은 시각 IJ0)는 DBA·데이터소스 연결 시험, 트랜잭션은 트랜잭션 시간 초과 설정, 빈 생성·클래스 로딩은 수정본 배포(롤백: 직전 war 로 deploy --force). 영향: Spring 애플리케이션 기능 오류'
+  mid:
+  - 근본 예외 유형에 따라 DB/권한/설정 조치
+  - Spring 예외 핸들러 추가
+  long:
+  - "Spring 예외 유형별 건수 감시와 공통 예외 처리 표준"
+  source_note: 'legacy-analyzer-v2.2 jboss_rules.json WFLY-SPRING-ALL (원 출처: builtin)'
+  exclude: (?:WebContainer)
+  versions:
+  - JBoss EAP 6.x (AS 7)
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: Spring — 버전 무관
+- id: LEG-WFLY-IBATIS-ALL
+  layer: was
+  product:
+  - jboss
+  match:
+    regex: (?:com\.ibatis\.common\.jdbc\.exception\.NestedSQLException)|(?:com\.ibatis\.sqlmap\.engine\.mapping\.statement\.MappedStatement)|(?:com\.ibatis\.sqlmap\.engine\.execution\.SqlExecutor)|(?:com\.ibatis\.sqlmap\.engine\.impl\.SqlMapExecutorDelegate)|(?:com\.ibatis\.sqlmap\.engine\.impl\.SqlMapSessionImpl)|(?:com\.ibatis\.sqlmap\.engine\.impl\.SqlMapClientImpl)|(?:com\.ibatis\.common\.jdbc\.logging\.PreparedStatementLogProxy)|(?:com\.ibatis\.sqlmap\.engine\.builder)|(?:com\.ibatis\.sqlmap\.client)|(?:SqlMapClient.*operation.*uncategorized)|(?:SqlMapClient
+      operation)|(?:MappedStatement\.executeQuery)|(?:Check the statement \(query failed\))|(?:The error occurred while.*parameter map)|(?:Check the.*InlineParameterMap)|(?:InlineParameterMap)|(?:ParameterMap)|(?:org\.apache\.ibatis\.)|(?:org\.apache\.ibatis\.exceptions\.PersistenceException)|(?:org\.apache\.ibatis\.binding\.BindingException)|(?:org\.apache\.ibatis\.builder\.BuilderException)|(?:org\.apache\.ibatis\.executor\.ExecutorException)|(?:org\.apache\.ibatis\.session\.SqlSessionException)|(?:org\.mybatis\.)|(?:MyBatisSystemException)|(?:org\.mybatis\.spring\.MyBatisSystemException)|(?:SqlSessionTemplate)|(?:MapperMethod\.)|(?:DefaultResultSetHandler)|(?:DefaultParameterHandler)|(?:Mapped
+      Statements collection does not contain value for)|(?:namespace.*not found)|(?:statement.*not found.*mybatis)|(?:resultMap.*not found)
+  severity: error
+  category: internal
+  verdict: iBatis/MyBatis SQL 매핑 예외 전체 계열
+  immediate:
+  - "`grep -n -E 'The error occurred in|The error may involve|Check the|Cause:' $JBOSS_HOME/standalone/log/server.log | tail -20` 로 SQL 매핑 ID(namespace.statementId) 확인"
+  - "`grep -rn 'id=\"<statementId>\"' <앱 경로>/WEB-INF/classes` 로 매핑 파일의 파라미터 타입 확인 — 실제 전달 값의 타입·길이는 개발 담당이 개인정보를 가린 사례로 대조"
+  short:
+  - '영향: 해당 SQL 매핑 ID를 사용하는 DAO 기능 전체 오류.'
+  mid:
+  - '파라미터 jdbcType 명시 (#param:VARCHAR# → #param:CLOB#)'
+  - MyBatis로 마이그레이션 고려
+  - iBatis sqlMapConfig.xml 설정 검토
+  long:
+  - "매핑 파일 형상 관리와 statement ID 별 오류 건수 감시"
+  source_note: 'legacy-analyzer-v2.2 jboss_rules.json WFLY-IBATIS-ALL (원 출처: builtin)'
+  exclude: (?:WebContainer)
+  versions:
+  - JBoss EAP 6.x (AS 7)
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: iBatis — 버전 무관
+- id: LEG-WFLY-ORA-JDBC
+  layer: was
+  product:
+  - jboss
+  match:
+    regex: (?:oracle\.jdbc\.driver\.T4CTTIoer\.processError)|(?:oracle\.jdbc\.driver\.T4CTTIfun)|(?:oracle\.jdbc\.driver\.T4C8Oall)|(?:oracle\.jdbc\.driver\.T4CPreparedStatement)|(?:oracle\.jdbc\.driver\.OraclePreparedStatement)|(?:oracle\.jdbc\.driver\.OraclePreparedStatementWrapper)|(?:oracle\.jdbc\.driver\.OracleStatement)|(?:oracle\.jdbc\.driver\.)|(?:oracle\.jdbc\.)|(?:org\.apache\.commons\.dbcp\.DelegatingPreparedStatement)|(?:org\.apache\.commons\.dbcp\.)|(?:BasicDataSource)|(?:com\.zaxxer\.hikari\.)|(?:HikariPool)|(?:com\.mchange\.v2\.c3p0\.)|(?:com\.jolbox\.bonecp\.)|(?:java\.sql\.SQLException.*ORA-)|(?:java\.sql\.SQLException.*SQL
+      state)|(?:java\.sql\.BatchUpdateException)|(?:java\.sql\.SQLIntegrityConstraintViolationException)|(?:java\.sql\.SQLTimeoutException)
+  severity: error
+  category: connection
+  verdict: Oracle JDBC 드라이버 예외 계열
+  immediate:
+  - "`grep -o -E 'ORA-[0-9]{5}' $JBOSS_HOME/standalone/log/server.log | sort | uniq -c | sort -rn | head` 로 ORA 에러 코드별 건수 확인"
+  - "`find $JBOSS_HOME/modules -name 'ojdbc*.jar'` 와 `unzip -l <앱>.war | grep ojdbc` 로 Oracle JDBC 드라이버 판 확인"
+  - "`$JBOSS_HOME/bin/jboss-cli.sh -c '/subsystem=datasources/data-source=<DS>/statistics=pool:read-resource(include-runtime=true)'` 로 ActiveCount·AvailableCount·InUseCount 확인(읽기 전용, statistics-enabled=true 일 때만 값이 의미 있음)"
+  short:
+  - '영향: DB 쿼리 실패. 애플리케이션 기능 오류.'
+  mid:
+  - ORA 코드별 원인 조치
+  - JDBC 드라이버 최신 버전 업그레이드
+  - 커넥션 풀 설정 최적화
+  long:
+  - "DB·드라이버 판 호환표 관리와 ORA 오류 코드별 건수 감시"
+  source_note: 'legacy-analyzer-v2.2 jboss_rules.json WFLY-ORA-JDBC (원 출처: builtin)'
+  exclude: (?:WebContainer)
+  versions:
+  - JBoss EAP 6.x (AS 7)
+  - JBoss EAP 7.0~7.4 (WildFly 10~23)
+  - JBoss EAP 8.0/8.1 (WildFly 28+)
+  version_note: Oracle JDBC 드라이버 클래스 — 버전 무관
